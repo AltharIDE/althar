@@ -55,10 +55,3 @@
   align-items: center;
   gap: 6px;
 }
-/* what to do, on its own row under the facts, from the left edge, as every card's main action is */
-span.go {
-  order: 2;
-  flex: 1 0 100%;
-  margin-left: 0;
-  color: var(--signal);
-}

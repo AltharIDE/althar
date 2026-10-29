@@ -22,7 +22,6 @@ import {
   NextLine,
   NextRow,
   NextStep,
-  NextSteps,
   Outcome,
   PullChip,
   SettledRow,
@@ -283,8 +282,8 @@ const fromOf = (work: BoardTask): Pick<Card, 'from'> => (work.automation == null
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
   const card = runningCard(work, now, name)
-  // Stopped, or its lead not yet started, with a conflict not asked of it: why, and Resolve now, in place of its foot.
-  if (work.conflictUnsent != null) return { ...card, foot: unsentFoot(work, work.conflictUnsent, actions) }
+  // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
+  if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
   return card
 }
@@ -362,7 +361,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
   const card = runningCard(work, '', () => '')
   const sendBack = actions?.sendBack
-  // Carry on is the card's one violet button, unless Resolve now is: then it is the quiet one beside it.
+  // Carry on is the card's one violet step, unless Resolve now is: then it is the quiet one before it.
   const carryOn = (quiet: boolean) =>
     sendBack === undefined ? null : (
       <NextStep
@@ -383,14 +382,9 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined
       ? {}
-      : {
-          foot: (
-            <>
-              {work.conflictUnsent != null && unsentFoot(work, work.conflictUnsent, actions, carryOn(actions?.resolveNow !== undefined))}
-              {work.conflictUnsent == null && carryOn(false)}
-            </>
-          ),
-        }),
+      : work.conflictUnsent != null
+        ? unsentOf(work, work.conflictUnsent, actions, carryOn(actions?.resolveNow !== undefined))
+        : { next: carryOn(false) }),
   }
 }
 
@@ -501,13 +495,13 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...(object === null ? {} : { object }),
         // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
         ...(work.handedBack != null || work.conflictUnsent != null
-          ? { foot: unsentFoot(work, work.handedBack ?? work.conflictUnsent ?? '', actions) }
+          ? unsentOf(work, work.handedBack ?? work.conflictUnsent ?? '', actions)
           : // One merged or closed has nothing in its way, and nothing to do to it.
             change === null || change.state !== 'open'
             ? work.conflictUnchecked == null
               ? {}
               : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
-            : { foot: readyFoot(work, change, actions) }),
+            : readyOf(work, change, actions)),
       }
     }
     default:
@@ -519,33 +513,38 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
   Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending'>>
 
-/** A conflict that is the person's, handed back or not asked of its lead: why, in one line, and Resolve now, which asks the lead anyway. */
-const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined, second?: ReactNode): ReactNode => {
+/**
+ * A conflict that is the person's, handed back or not asked of its lead: why, in one line, at its foot, and Resolve now, which
+ * asks the lead anyway, in its strip; `second`, quiet, before it.
+ */
+const unsentOf = (work: BoardTask, why: string, actions: CardActions | undefined, second?: ReactNode): Pick<Card, 'foot' | 'next'> => {
   const resolveNow = actions?.resolveNow
-  return (
-    <>
+  const next =
+    resolveNow === undefined ? (
+      second
+    ) : (
+      <>
+        {second}
+        <NextStep
+          signal
+          busy={actions?.resolving?.has(work.taskId) ?? false}
+          doing={text.resolvingNow}
+          onPress={() => void resolveNow(work.taskId)}
+        >
+          {text.resolveNow}
+        </NextStep>
+      </>
+    )
+  return {
+    foot: (
       <FactLine>
         <Fact icon="branch" tone="warm">
           {why}
         </Fact>
       </FactLine>
-      {resolveNow !== undefined ? (
-        <NextSteps>
-          <NextStep
-            signal
-            busy={actions?.resolving?.has(work.taskId) ?? false}
-            doing={text.resolvingNow}
-            onPress={() => void resolveNow(work.taskId)}
-          >
-            {text.resolveNow}
-          </NextStep>
-          {second}
-        </NextSteps>
-      ) : (
-        second
-      )}
-    </>
-  )
+    ),
+    ...(next === undefined || next === null ? {} : { next }),
+  }
 }
 
 /**
@@ -568,13 +567,14 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
 /**
  * A ready pull request's foot: what stands between it and merging, as one
  * line, the most pressing first in its colour (only it with its glyph), or
- * how its checks went where nothing does; then the one next thing to do. Push
+ * how its checks went where nothing does; and its strip, the one next thing
+ * to do. Push
  * and Accept and merge are buttons that do it right there, as the task
  * does, and say so while they run; one that failed says why in the line and
  * offers to try again. Asking the lead to resolve or fix is words, a link:
  * the card opens its task, where it is told.
  */
-const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): ReactNode => {
+const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): Pick<Card, 'foot' | 'next'> => {
   const standing = standingOf(change)
   const next = standing.next
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
@@ -587,8 +587,29 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
       {one.words}
     </Fact>
   ))
-  return (
-    <>
+  // Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card.
+  const step =
+    next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
+      <NextStep>{nextWords(next)}</NextStep>
+    ) : (
+      <NextStep
+        signal
+        busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
+        doing={doingWords(here)}
+        label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+        onPress={() =>
+          void (here.kind === 'push' ? actions.push : actions.merge)(
+            work.taskId,
+            here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
+            change.url,
+          )
+        }
+      >
+        {failed === null ? nextWords(here) : standingText.nextFailed.again}
+      </NextStep>
+    )
+  return {
+    foot: (
       <FactLine>
         {failed !== null && here !== null && (
           <Fact key="failed" icon="close" tone="danger" role="alert">
@@ -602,30 +623,9 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         )}
         {facts}
       </FactLine>
-      {/* Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card. */}
-      {next !== null &&
-        !(next.kind === 'fix' && work.checksBack != null) &&
-        (here === null || actions === undefined ? (
-          <NextStep>{nextWords(next)}</NextStep>
-        ) : (
-          <NextStep
-            signal
-            busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
-            doing={doingWords(here)}
-            label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
-            onPress={() =>
-              void (here.kind === 'push' ? actions.push : actions.merge)(
-                work.taskId,
-                here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
-                change.url,
-              )
-            }
-          >
-            {failed === null ? nextWords(here) : standingText.nextFailed.again}
-          </NextStep>
-        ))}
-    </>
-  )
+    ),
+    ...(step === null ? {} : { next: step }),
+  }
 }
 
 export function BoardView({

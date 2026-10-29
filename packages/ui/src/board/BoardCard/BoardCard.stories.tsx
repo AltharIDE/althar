@@ -26,27 +26,28 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, NextStep, NextSteps, PullChip } from './Chips'
+import { Fact, FactLine, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
+import { NextStep } from '../../primitives/NextStep/NextStep'
 
 const resolveNow = fn()
 
 /**
- * The placement contract of a card's main action: at most one violet button, and, where there is layout to measure (a
- * browser, not jsdom), its row under every fact, starting where the facts do.
+ * Where a card's next steps are: at most one violet, and, where there is layout to measure (a browser, not jsdom), the
+ * strip they are in is the card's last row, its width, under every fact.
  */
 const mainActionPlace = async (canvasElement: HTMLElement) => {
-  const violet = within(canvasElement)
-    .queryAllByRole('button')
-    .filter((button) => /signal/.test(button.className))
+  const violet = canvasElement.querySelectorAll('button[class*="signal"], span[class*="signal"]')
   await expect(violet.length).toBeLessThanOrEqual(1)
-  const button = violet[0]
-  const fact = canvasElement.querySelector('[class*="fact"]')
-  if (button === undefined || fact === null || button.getBoundingClientRect().width === 0) return
-  const at = button.getBoundingClientRect()
-  const facts = canvasElement.querySelectorAll('[class*="factLinePart"], [class*="fact"]')
-  for (const one of facts) await expect(at.top).toBeGreaterThanOrEqual(one.getBoundingClientRect().bottom - 1)
-  await expect(Math.abs(at.left - fact.getBoundingClientRect().left)).toBeLessThanOrEqual(14)
+  const card = canvasElement.querySelector('article')
+  const strip = violet[0]?.closest('[class*="steps"]')
+  if (card == null || strip == null || strip.getBoundingClientRect().width === 0) return
+  const at = strip.getBoundingClientRect()
+  const edge = card.getBoundingClientRect()
+  await expect(Math.abs(edge.bottom - at.bottom)).toBeLessThanOrEqual(2)
+  await expect(at.width).toBeGreaterThanOrEqual(edge.width - 4)
+  for (const fact of canvasElement.querySelectorAll('[class*="fact"]'))
+    await expect(at.top).toBeGreaterThanOrEqual(fact.getBoundingClientRect().bottom)
 }
 
 const meta = {
@@ -94,7 +95,7 @@ export const ReadyToAccept: Story = {
 }
 /*
  * A ready change's foot, as the board says it: what blocks first, then what to do, then what is fine. Where the facts
- * don't fit on one line they are a list, a glyph column and no middots; the next step sits under them, with them.
+ * don't fit on one line they are a list, a glyph column and no middots; the next step is the strip under them.
  */
 const readyFoot = (
   width: number,
@@ -112,20 +113,20 @@ const readyFoot = (
         title="Drop any file or folder onto the composer"
         object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
         foot={
-          <>
-            <FactLine stacked={stacked}>
-              {facts.map((one) => (
-                <Fact key={one.words} {...(one.icon === undefined ? {} : { icon: one.icon })} tone={one.tone}>
-                  {one.words}
-                </Fact>
-              ))}
-            </FactLine>
-            {step !== undefined && (
-              <NextStep signal onPress={fn()} label={`${step} to #344`}>
-                {step}
-              </NextStep>
-            )}
-          </>
+          <FactLine stacked={stacked}>
+            {facts.map((one) => (
+              <Fact key={one.words} {...(one.icon === undefined ? {} : { icon: one.icon })} tone={one.tone}>
+                {one.words}
+              </Fact>
+            ))}
+          </FactLine>
+        }
+        next={
+          step !== undefined && (
+            <NextStep signal onPress={fn()} label={`${step} to #344`}>
+              {step}
+            </NextStep>
+          )
         }
       />
     </div>
@@ -182,6 +183,36 @@ export const ReadyFactsMeasuredNarrow: Story = {
     const line = canvasElement.querySelector('[class*="factLine"]')
     // jsdom has no layout to measure; a browser does.
     if (line !== null && line.scrollWidth > 0) await expect(line).toHaveAttribute('data-stacked')
+  },
+}
+/** What needs the lead is words with an arrow in the strip, not a button: the card opens its task, where the lead is told. */
+export const ReadyAskTheLead: Story = {
+  render: () => (
+    <div style={{ width: 300 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Not ready to accept"
+        kind={TaskKind.Change}
+        at="1h"
+        title="Queue refunds that hit the rate limit"
+        object={<PullChip host={GITHUB} repo="meridian-api" number={1191} add={236} del={41} />}
+        foot={
+          <FactLine>
+            <Fact icon="close" tone="danger">
+              harness / verify failed
+            </Fact>
+          </FactLine>
+        }
+        next={<NextStep>Ask the lead to fix it</NextStep>}
+        onOpen={fn()}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Ask the lead to fix it')).toBeInTheDocument()
+    // Only the card's own button: the words are its link.
+    await expect(card.getAllByRole('button')).toHaveLength(1)
   },
 }
 /** Failed checks block, so they come before what is still running. */
@@ -281,16 +312,16 @@ export const MergeConflictNotAsked: Story = {
     ...CHANGE_CONFLICT,
     why: undefined,
     foot: (
-      <>
-        <FactLine>
-          <Fact icon="branch" tone="warm">
-            You stopped it, so Althar doesn’t start its lead for a conflict.
-          </Fact>
-        </FactLine>
-        <NextStep signal onPress={resolveNow}>
-          Resolve now
-        </NextStep>
-      </>
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          You stopped it, so Althar doesn’t start its lead for a conflict.
+        </Fact>
+      </FactLine>
+    ),
+    next: (
+      <NextStep signal onPress={resolveNow}>
+        Resolve now
+      </NextStep>
     ),
   },
   play: async ({ canvasElement, args }) => {
@@ -383,24 +414,37 @@ export const WaitingOverTheNumber: Story = {
     await expect(within(canvasElement).getByText('6 of 6 agents busy on this Mac, and 1 more')).toBeInTheDocument()
   },
 }
-export const Stopped: Story = { args: CHANGE_STOPPED }
-/** The main action's one place: its own row, from the left, under the conflict line; the second action quiet beside the one violet button. */
+/** Stopped, as the board shows it: Carry on, which tells its lead to go on, the strip at its foot. */
+export const Stopped: Story = {
+  args: {
+    ...CHANGE_STOPPED,
+    next: (
+      <NextStep signal onPress={fn()}>
+        Carry on
+      </NextStep>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await mainActionPlace(canvasElement)
+  },
+}
+/** Two next steps share the strip at its foot, under the conflict line: Carry on quiet, then Resolve now, the one in violet. */
 export const StoppedWithAConflict: Story = {
   args: {
     ...CHANGE_STOPPED,
     foot: (
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          It conflicts with main, and nothing asked its lead to resolve it.
+        </Fact>
+      </FactLine>
+    ),
+    next: (
       <>
-        <FactLine>
-          <Fact icon="branch" tone="warm">
-            It conflicts with main, and nothing asked its lead to resolve it.
-          </Fact>
-        </FactLine>
-        <NextSteps>
-          <NextStep signal onPress={resolveNow}>
-            Resolve now
-          </NextStep>
-          <NextStep onPress={fn()}>Carry on</NextStep>
-        </NextSteps>
+        <NextStep onPress={fn()}>Carry on</NextStep>
+        <NextStep signal onPress={resolveNow}>
+          Resolve now
+        </NextStep>
       </>
     ),
   },
@@ -408,16 +452,20 @@ export const StoppedWithAConflict: Story = {
     const card = within(canvasElement)
     const resolve = card.getByRole('button', { name: 'Resolve now' })
     const carry = card.getByRole('button', { name: 'Carry on' })
-    await expect(resolve.compareDocumentPosition(carry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // One violet button: Resolve now; Carry on is the quiet one.
+    await expect(carry.compareDocumentPosition(resolve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // One violet step, last: Resolve now; Carry on is the quiet one.
     await expect(resolve.className).toMatch(/signal/)
     await expect(carry.className).not.toMatch(/signal/)
     await mainActionPlace(canvasElement)
   },
 }
-/** A failed check and Push: the check above, the button on its own row below, never beside it. */
+/** A failed check and Push: the check at its foot, Push the strip under it, the card's width. */
 export const ReadyChecksFailedWithPush: Story = {
   ...readyFoot(340, false, [{ words: '7 checks failed', icon: 'close', tone: 'danger' }], 'Push 1 commit'),
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Push 1 commit to #344' }).className).toMatch(/signal/)
+    await mainActionPlace(canvasElement)
+  },
 }
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {

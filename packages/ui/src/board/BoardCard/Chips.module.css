@@ -220,35 +220,3 @@
   font-weight: 600;
   color: var(--t-1);
 }
-
-/*
- * The card's main action has one place: its own row, last in the foot, from the left edge, whatever the facts above it
- * are and however wide the card. Facts never sit beside it.
- */
-.act,
-span.step {
-  order: 2;
-  flex: 1 0 100%;
-  justify-content: flex-start;
-  margin-left: 0;
-}
-.act {
-  position: relative;
-  display: inline-flex;
-}
-.act button:focus:not(:focus-visible) {
-  outline: none;
-}
-/* the main action and a quiet second one beside it, on that same row */
-.steps {
-  order: 2;
-  flex: 1 0 100%;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.steps > .act {
-  flex: none;
-  order: 0;
-}
