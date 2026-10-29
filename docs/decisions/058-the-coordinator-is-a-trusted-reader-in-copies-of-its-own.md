@@ -13,8 +13,14 @@
   only digits (`| grep -oE '[0-9]+'`, `wc -l`, `git rev-list --count`).
   Arithmetic sets nothing and reads only numbers. No variable the shells
   read for themselves may be set: none with an upper-case name, nor zsh's
-  own (`path`). It was refused a loop of `git status` across its copies
-  many times a day. A review's lead keeps the strict list.
+  own (`path`). A variable a loop sets again after a command that reads it
+  may hold anything there, on the loop's next pass. Where its sandbox
+  holds every command to its folder (Claude Code's, where it starts), a
+  command that asks may also `git fetch` a copy's `origin`, with flags
+  that only say how much, as one on a line of its own runs in the sandbox
+  already: what it writes stays in the copy. It was refused a loop of
+  `git fetch` and `git status` across its copies many times a day. A
+  review's lead keeps the strict list.
 - **Owner:** Repository maintainers
 - **Context:** The coordinator talks with the person about the project and
   reads the project's repositories in throwaway copies (ADR-004), under the

@@ -3440,8 +3440,38 @@ const GIT_LIST_FLAGS = new Set([
   'show',
 ])
 
+/**
+ * How far a reader is trusted: not at all, as a review's lead; `true`, as the
+ * coordinator in its own copies (ADR-058); `'contained'`, as the coordinator
+ * whose every command runs in a sandbox held to its folder and no network,
+ * where what writes its copies writes only what is thrown away.
+ */
+type Trust = boolean | 'contained'
+
+/** `git fetch`'s flags a contained reader may use: none that names a program, a file to write or a remote of its own. */
+const GIT_FETCH_FLAGS =
+  /^(-q|--quiet|-v|--verbose|--all|-p|--prune|-P|--prune-tags|-t|--tags|-n|--no-tags|--dry-run|--progress|--no-progress)$/
+
+/**
+ * Why a contained reader's `git fetch` would do more than bring its copy's
+ * only remote, the mirror Althar fetched before the turn (ADR-058): a flag
+ * beyond those, a remote or URL but `origin`, or a refspec that names where
+ * it writes.
+ */
+const gitFetchReason = (args: ReadonlyArray<string>): string | undefined => {
+  const flag = args.find((arg) => arg.startsWith('-') && !GIT_FETCH_FLAGS.test(arg))
+  if (flag !== undefined) return `\`git fetch ${flag}\` goes beyond bringing a copy's remote, and this role only reads.`
+  const [remote, ...refs] = args.filter((arg) => !arg.startsWith('-'))
+  if (remote !== undefined && remote !== 'origin')
+    return "`git fetch` here brings only a copy's own remote, `origin`; name no other, as this role only reads."
+  const ref = refs.find((each) => !/^[\w./-]+$/.test(each))
+  return ref === undefined
+    ? undefined
+    : `\`git fetch\` with \`${ref}\` names where it writes; fetch the branch by its name alone, as this role only reads.`
+}
+
 /** Why a git command a reader wants to run would change something or run a program, or nothing when it only looks. */
-const gitReason = (words: ReadonlyArray<string>, trusted: boolean): string | undefined => {
+const gitReason = (words: ReadonlyArray<string>, trusted: Trust): string | undefined => {
   const call = gitCall(words, '.')
   if (call === undefined) return undefined
   const before = words.slice(1, words.indexOf(call.subcommand, 1))
@@ -3455,6 +3485,8 @@ const gitReason = (words: ReadonlyArray<string>, trusted: boolean): string | und
   if (GIT_LOOKS.has(call.subcommand)) return undefined
   if (GIT_LISTS.has(call.subcommand) && call.args.every((arg) => GIT_LIST_FLAGS.has(arg))) return undefined
   if (trusted && call.subcommand === 'tag') return gitTagReason(call.args)
+  // Its sandbox keeps a fetch in its copy, from the mirror, whatever runs it: so it may fetch in a loop, as it may on a line of its own.
+  if (trusted === 'contained' && call.subcommand === 'fetch') return gitFetchReason(call.args)
   // A stash or the reflog only looks when listed or shown: `git stash` alone stashes the lead's work.
   if ((call.subcommand === 'stash' || call.subcommand === 'reflog') && ['list', 'show'].includes(call.args[0] ?? '')) return undefined
   return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
@@ -3846,10 +3878,37 @@ const MOST_VARIANTS = 64
 const variantsOf = (line: string, arithmetic: ReadonlyArray<string>): ReadonlyArray<string> | string => {
   const text = withoutQuotedHeredocs(line)
   const { commands, ends, operators, starts } = splitCommandLine(text)
+  const bare = commands.map((written, at) => withoutAnyRedirects(written, operators[at] ?? new Set()))
+  /** Each loop's first and last command, `for`, `while` or `until` to its `done`: what it runs again. */
+  const loops: Array<readonly [number, number]> = []
+  const blocks: Array<number | undefined> = []
+  for (const [at, words] of bare.entries())
+    for (const word of words) {
+      if (word === 'for') {
+        blocks.push(at)
+        break
+      }
+      if (['fi', 'done', '}'].includes(word)) {
+        const start = blocks.pop()
+        if (start !== undefined) loops.push([start, at])
+      } else if (['while', 'until'].includes(word)) blocks.push(at)
+      else if (['if', '{'].includes(word)) blocks.push(undefined)
+      else if (!SHELL_KEYWORDS.includes(word)) break
+    }
+  const setBy = bare.map((words) => {
+    const sets = setsOf(words)
+    if (sets === undefined || sets._tag === 'keywords') return []
+    return sets._tag === 'for' ? [sets.name] : sets._tag === 'read' ? sets.names : sets.pairs.map(([name]) => name)
+  })
+  /** Whether a loop that runs command `at` again sets the variable at or after it, so `at` may see that on the loop's next pass. */
+  const carried = (name: string, at: number) =>
+    loops.some(([start, end]) => start <= at && at <= end && setBy.some((names, by) => by >= at && by <= end && names.includes(name)))
   const bindings: Array<Binding> = []
   /** What a variable may hold where command `at` reads it: undefined where nothing before it set it, so the environment's is. */
   const valuesAt = (name: string, at: number): ReadonlyArray<string> | undefined => {
     const seen = bindings.filter((binding) => binding.name === name && binding.at < at)
+    // Set again later in a loop, it may hold anything on the next pass: what it holds there is read as what a command printed.
+    if (carried(name, at)) return [...new Set([...seen.flatMap((binding) => binding.values), OUTPUT])]
     if (seen.length === 0) return undefined
     const values = [...new Set(seen.flatMap((binding) => binding.values))]
     const sure = seen.some(({ sure: range }) => range !== undefined && at > range[0] && at <= range[1])
@@ -3872,16 +3931,15 @@ const variantsOf = (line: string, arithmetic: ReadonlyArray<string>): ReadonlyAr
   }
   /** The `for`s, `while`s, `if`s and groups open at each command, each with the variables it set for its body. */
   const open: Array<{ readonly word: string; readonly bound: Array<Binding> }> = []
-  for (const [at, written] of commands.entries()) {
-    const bare = withoutAnyRedirects(written, operators[at] ?? new Set())
-    for (const word of bare) {
+  for (const [at, words] of bare.entries()) {
+    for (const word of words) {
       if (word === 'for') break
       if (['fi', 'done', '}'].includes(word)) {
         for (const binding of open.pop()?.bound ?? []) if (binding.sure !== undefined) binding.sure = [binding.sure[0], at]
       } else if (['if', 'while', 'until', '{'].includes(word)) open.push({ word, bound: [] })
       else if (!SHELL_KEYWORDS.includes(word)) break
     }
-    const sets = setsOf(bare)
+    const sets = setsOf(words)
     if (sets === undefined || sets._tag === 'keywords') continue
     // Set where it surely runs, for every command after: not in a block, after `&&` or `||`, or on a side of a pipe or in the background.
     const plain = open.length === 0 && ['', ';', '\n'].includes(ends[at - 1] ?? '') && !['|', '&'].includes(ends[at] ?? '')
@@ -3904,7 +3962,7 @@ const variantsOf = (line: string, arithmetic: ReadonlyArray<string>): ReadonlyAr
     } else if (sets._tag === 'read') {
       // What `while read` reads is surely set in the loop's body.
       const loop = open.at(-1)
-      const inLoop = loop?.word === 'while' && bare[0] === 'while'
+      const inLoop = loop?.word === 'while' && words[0] === 'while'
       for (const name of sets.names) {
         const binding: Binding = { name, at, values: [OUTPUT], sure: inLoop ? [at, Number.POSITIVE_INFINITY] : after }
         bindings.push(binding)
@@ -3956,7 +4014,7 @@ const SED_OUTPUT =
   "`sed` would run what a command printed as its script, which could be any `sed` command, `w` among them, which writes. Keep only its digits as you set it (`n=$(… | grep -oE '[0-9]+')`), as this role only reads."
 
 /** Why one command would change something or run another program, or nothing when it only looks. */
-const readerWordsReason = (words: ReadonlyArray<string>, trusted = false): string | undefined => {
+const readerWordsReason = (words: ReadonlyArray<string>, trusted: Trust = false): string | undefined => {
   const named = words[0] ?? ''
   const program = named.split('/').at(-1) ?? ''
   const written = writes(words).filter((target) => target !== '/dev/null')
@@ -4043,7 +4101,7 @@ const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined =>
  * expansion (`${PATH:=.}`, `$[PATH=1]`), and no file name the shell expands
  * into a flag (`rg x *` where a file is named `--pre=./run.sh`).
  */
-const readerCommandReason = (text: string, trusted = false): string | undefined => {
+const readerCommandReason = (text: string, trusted: Trust = false): string | undefined => {
   if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
   const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
@@ -4118,6 +4176,13 @@ export interface ReaderOptions {
   readonly offline?: boolean
   readonly cwd?: string
   readonly trusted?: boolean
+  /**
+   * A trusted reader whose agent runs every command in a sandbox held to its
+   * folder, never outside it, and reaching no network (ADR-058): what a
+   * command writes stays in its copies, so it may `git fetch` there wherever
+   * the command asks, as in a loop.
+   */
+  readonly contained?: boolean
   /**
    * Where a trusted reader's own tools may read (ADR-058): none of `denied`
    * but what `allowed` gives back, real paths, as its sandbox holds its
@@ -4251,7 +4316,7 @@ const plainReaderLineReason = (command: string, options: ReaderOptions): string 
       .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((found) => found !== undefined) ??
     secretCommandReason(command, options.cwd) ??
-    readerCommandReason(command, options.trusted === true)
+    readerCommandReason(command, options.trusted === true ? (options.contained === true ? 'contained' : true) : false)
   )
 }
 

