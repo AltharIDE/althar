@@ -1723,13 +1723,16 @@ const WILDCARD = /[*?[]/
 const EXPANDED = /[{}()<>|^#\\]|.~|^=/
 
 /**
- * What a shell's wildcard in a name matches, as a pattern: `*` any run of
- * characters, `?` one, `[…]` one listed or in a range, `[!…]` or `[^…]` one
- * not. None where it can't read it as the shell would, such as a class
- * (`[[:digit:]]`), an equivalence (`[[=a=]]`) or an unclosed `[`. In any
- * case: matching more than the shell would only reads more as there.
+ * What a shell's wildcard in a name matches, as a test of a name: `*` any
+ * run of characters, `?` one, `[…]` one listed or in a range, `[!…]` or
+ * `[^…]` one not. None where it can't read it as the shell would, such as a
+ * class (`[[:digit:]]`), an equivalence (`[[=a=]]`), an unclosed `[` or one
+ * that starts `[]`. A name matches where it does as written or with case
+ * ignored, as a shell may (`nocaseglob`): ignoring case alone narrows a
+ * class left out, `[!A-Z]` then missing `l`. Matching more than the shell
+ * would only reads more as there.
  */
-const wildcardPattern = (name: string): RegExp | undefined => {
+const wildcardPattern = (name: string): ((each: string) => boolean) | undefined => {
   let pattern = '^'
   for (let at = 0; at < name.length; at++) {
     const char = name.charAt(at)
@@ -1740,14 +1743,16 @@ const wildcardPattern = (name: string): RegExp | undefined => {
       const from = at + (negated ? 2 : 1)
       const end = name.indexOf(']', from)
       const listed = end === -1 ? '' : name.slice(from, end)
-      // `[]a]` and `[!]a]` list `]` itself; with `[` or `\` in it, it is a class, an equivalence or an escape.
+      // `[]a]` and `[!]a]` list `]` itself, not read; with `[` or `\` in it, it is a class, an equivalence or an escape.
       if (listed === '' || /[[\\]/.test(listed)) return undefined
       pattern += `[${negated ? '^' : ''}${listed.replace(/\^/g, '\\^')}]`
       at = end
     } else pattern += char.replace(/[.+^${}()|\]\\]/g, '\\$&')
   }
   try {
-    return new RegExp(`${pattern}$`, 'i')
+    const exact = new RegExp(`${pattern}$`)
+    const caseless = new RegExp(`${pattern}$`, 'i')
+    return (each) => exact.test(each) || caseless.test(each)
   } catch {
     // A range out of order, `[z-a]`.
     return undefined
@@ -1784,8 +1789,8 @@ const missing = (where: Places, word: string, path: string, guessed: boolean) =>
     )
   }
   if (!where.exists(folder)) return relative
-  const pattern = wildcardPattern(paths.basename(path))
-  return pattern !== undefined && where.folder(folder) && !where.names(folder).some((each) => pattern.test(each))
+  const matches = wildcardPattern(paths.basename(path))
+  return matches !== undefined && where.folder(folder) && !where.names(folder).some(matches)
 }
 
 const changesCheckout = (path: string) =>

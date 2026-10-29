@@ -2375,7 +2375,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
       'cd ../.. && rm packages/ui/src/a.tsx-E',
       'cd ../../.althar/scratch/runs && rm -rf shots',
       'cd ../.. && git checkout HEAD -- packages/ui/src',
-      'rm -f ../../.evidence/[8-9]-log.txt ../../.evidence/*.png',
+      'rm -f ../../.evidence/[8-9]-log.txt ../../.evidence/*.png ../../.evidence/[!1-9]-log.txt',
     ])
       assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
     // A wildcard the rules can't read as the shell does, or braces, reads as naming what is there.
@@ -2384,6 +2384,8 @@ describe('allowing everything trusts the agent with what the rules can’t read 
       'rm -f ../../.evidence/[0-9]-log.txt',
       'rm -f ../../.evidence/[!a]-log.txt',
       'rm -f ../../.evidence/?-LOG.txt',
+      'rm -f ../../.evidence/[17]-[!A-Z]*.txt',
+      'rm -f ../../.evidence/[1]-[^A-K]og.txt',
       'rm -f ../../.evidence/{1,2}-log.txt',
       'rm -f ../../.evidence/<1-9>-log.txt',
     ])

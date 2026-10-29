@@ -148,8 +148,9 @@ export const definition = (
 
 /**
  * Agents for tests: the fake agent, in this process, under any id. The id
- * `process` runs it as a real process with Bun; `missing` names a command
- * that doesn't exist.
+ * `process` runs it as a real process with Bun, and `process-temp` too, with
+ * a temp folder of its own as Antigravity's launch asks (`privateTemp`);
+ * `missing` names a command that doesn't exist.
  */
 export const fakeAgents = (
   options: FakeAgentOptions = {},
@@ -166,10 +167,15 @@ export const fakeAgents = (
       launches.push({ agentId, cwd, env, options: session })
       // As a real process, it carries whose work it is, as every agent does (machine.ts).
       const work = env[WORK]
-      return agentId === 'process'
+      return agentId === 'process' || agentId === 'process-temp'
         ? {
             _tag: 'Process',
-            spec: { command: 'bun', args: [fakeAgentMain], ...(work === undefined ? {} : { env: { [WORK]: work } }) },
+            spec: {
+              command: 'bun',
+              args: [fakeAgentMain],
+              ...(work === undefined ? {} : { env: { [WORK]: work } }),
+              ...(agentId === 'process-temp' ? { privateTemp: true as const } : {}),
+            },
             cwd,
           }
         : agentId === 'missing'

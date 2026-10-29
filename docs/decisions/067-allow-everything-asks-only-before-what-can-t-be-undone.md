@@ -104,8 +104,9 @@
   folder that is there but in no checkout fails, and deleting what isn't
   there deletes nothing: a file that isn't, in a folder that is; a
   wildcard nothing in its folder matches, where the rules read it as the
-  shell does (`*`, `?`, `[a-z]`, `[!a]`; a class such as `[[:digit:]]`,
-  braces or zsh's patterns read as naming what is there); and a relative path, read from
+  shell does (`*`, `?`, `[a-z]`, `[!a]`, a name matching as written or
+  with case ignored; a class such as `[[:digit:]]`, braces or zsh's
+  patterns read as naming what is there); and a relative path, read from
   where the rules guess the shell is, that names nothing there, not even
   its folder. An agent's shell keeps the folder it moved to from one
   command to the next, and no request says where it is, so the rules
