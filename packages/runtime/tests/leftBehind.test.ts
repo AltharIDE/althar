@@ -119,6 +119,17 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
     return { project, task, marked }
   })
 
+/**
+ * Waits until none of `pids` runs. One that was stopped loses its mark at once,
+ * but answers to its pid until its parent has reaped it.
+ */
+const stopped = (pids: ReadonlyArray<number>) =>
+  until(
+    Effect.sync(() => pids.filter(alive)),
+    (left) => left.length === 0,
+    Duration.seconds(5),
+  )
+
 /** Waits until nothing on this computer carries the task's mark, and says how long that took. */
 const nothingLeft = (taskId: string, within = Duration.seconds(15)) =>
   Effect.gen(function* () {
@@ -196,7 +207,7 @@ describe.skipIf(windows)('a command an agent left running', () => {
         yield* sessions.stopBackground(task.threadId, left?.id ?? '')
         // Its lead runs on, and only its lead.
         yield* until(markedFor(task.taskId), (pids) => pids.length === 1 && pids[0] === lead, Duration.seconds(5))
-        assert.isTrue(server.every((pid) => !alive(pid)))
+        yield* stopped(server)
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     60_000,
   )
@@ -209,7 +220,7 @@ describe.skipIf(windows)('a command an agent left running', () => {
         const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
         yield* sessions.stop(task.threadId)
         yield* nothingLeft(task.taskId, Duration.seconds(5))
-        assert.isTrue(marked.every((pid) => !alive(pid)))
+        yield* stopped(marked)
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     60_000,
   )
@@ -236,7 +247,7 @@ describe.skipIf(windows)('a task that settles', () => {
         yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`, (rows) => rows[0]?.state === 'done')
         const took = yield* nothingLeft(task.taskId)
         assert.isBelow(took, 10_000)
-        assert.isTrue(marked.every((pid) => !alive(pid)))
+        yield* stopped(marked)
         assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
         assert.deepStrictEqual(
           yield* (yield* Launches).ofProject(
@@ -264,7 +275,7 @@ describe.skipIf(windows)('a task that settles', () => {
         const { task, marked } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
         assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
         yield* nothingLeft(task.taskId)
-        assert.isTrue(marked.every((pid) => !alive(pid)))
+        yield* stopped(marked)
         assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     60_000,
@@ -277,7 +288,7 @@ describe.skipIf(windows)('a task that settles', () => {
         const { task, marked } = yield* started('Try the cache [lead:serve-apart] [lead:finish]', { quick: true })
         yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
         yield* nothingLeft(task.taskId)
-        assert.isTrue(marked.every((pid) => !alive(pid)))
+        yield* stopped(marked)
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     60_000,
   )
@@ -358,10 +369,7 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           open.push(run)
           yield* nothingLeft(task.taskId, Duration.seconds(20))
           // Its mark disappears as it exits, just before Linux has finished reaping the process.
-          yield* until(
-            Effect.sync(() => outlived.filter(alive)),
-            (pids) => pids.length === 0,
-          )
+          yield* stopped(outlived)
           yield* until(
             Effect.sync(() => (alive(run) ? [] : [run])),
             (gone) => gone.length === 1,

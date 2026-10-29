@@ -2,9 +2,7 @@ diff --git a/dist/acp-agent.js b/dist/acp-agent.js
 index 5e55d82e90e0a6caded3c7276949c9662751580d..755c3071f521752499ce1087d0839798dfb48887 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
-@@ -6183,21 +6183,20 @@
-                             await sendUpdate({ sessionId: params.sessionId, update: beat });
-                         }
+@@ -6185,17 +6185,16 @@ export class ClaudeAcpAgent {
                          break;
                      }
                      case "rate_limit_event": {
