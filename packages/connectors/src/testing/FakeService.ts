@@ -60,6 +60,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
+  /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
+  readonly checksOn?: (sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** Whether it lists changes: true unless said, as every host Althar knows does. */
   readonly lists?: boolean
   /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
@@ -479,6 +481,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
+        const elsewhere = change === undefined ? options.checksOn?.(sha) : undefined
+        if (elsewhere !== undefined)
+          return Effect.succeed(
+            elsewhere.map((check, index): Check => {
+              const id = `check-${sha}-${index}`
+              logs.set(id, check.log ?? null)
+              return { id, name: check.name, state: check.state, url: check.url ?? null, summary: null }
+            }),
+          )
         if (change === undefined || ran === undefined)
           return Effect.succeed(
             change === undefined

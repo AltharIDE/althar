@@ -590,7 +590,7 @@ const playStall = async (
  * says again what the task built, `[lead:fix-more]` commits other work after it,
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
- * `[lead:push]` commits what it has and asks the person to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself. Asked to bring its branch up to date, `[lead:resolve]`
+ * `[lead:push]` commits what it has and asks the person to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -955,6 +955,22 @@ const playRole = async (
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
       // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
+      // Out of tries, it says what it tried, and changes nothing more.
+      if (session.markers.has('[lead:fix-push]') && /That was the last of your \d+ tries/.test(text))
+        return await call('hand_checks_to_person', {
+          why: 'Tried three fixes to the retry limit; the test still fails.',
+          fix: 'The test expects a limit the brief doesn’t give.',
+        })
+      // A failure that fails on main too: it reads main's checks, and brings it to the person, changing nothing.
+      if (session.markers.has('[lead:checks-main]') && /(^|\n\n)Checks failed on /.test(text)) {
+        const main = await call('read_default_branch_checks', {})
+        const failing = /^- (\S+): failed/m.exec(main)?.[1]
+        if (failing === undefined) return 'Main is fine.'
+        return await call('hand_checks_to_person', {
+          why: `Fails on main too: \`${failing}\` fails in limit.test.ts`,
+          fix: 'Fixing it on main brings this one green.',
+        })
+      }
       if (session.markers.has('[lead:fix-push]') && /(^|\n\n)Checks failed on /.test(text)) {
         commitIn(session.cwd, `fixed-${Date.now()}.txt`, 'Fix the failing check')
         await call('push_to_pull_request', {})
@@ -1247,8 +1263,16 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     return session
   }
 
+  // Each connection by what its requests' contexts share, the SDK's own (it makes a context for each): so an agent can go on its
+  // own, as one that crashes does.
+  const connections = new WeakMap<object, acp.AgentConnection>()
+  const shared = (client: acp.AgentContext): object => (client as unknown as { readonly cx: object }).cx
+
   return acp
     .agent({ name: 'fake-agent' })
+    .onConnect((connection) => {
+      connections.set(shared(connection.client), connection)
+    })
     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
       await options.beforeInitialize?.()
       options.initialized?.(params.clientCapabilities ?? undefined)
@@ -1643,6 +1667,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
+      // Told its checks failed, or to see them through after its agent went, `[lead:fix-gone]` goes before it does anything.
+      if (
+        (session.markers.has('[lead:fix-gone]') || text.includes('[lead:fix-gone]')) &&
+        /(^|\n\n)(Checks failed on |Your agent stopped)/.test(text)
+      ) {
+        connections.get(shared(client))?.close()
+        return ended()
+      }
       // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
       // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
       const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)

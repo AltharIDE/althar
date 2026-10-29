@@ -190,8 +190,8 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
-  // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
-  const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
+  // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
+  const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
   const status =

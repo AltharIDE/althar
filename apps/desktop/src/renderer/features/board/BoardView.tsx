@@ -591,7 +591,9 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         )}
         {facts}
       </FactLine>
+      {/* Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card. */}
       {next !== null &&
+        !(next.kind === 'fix' && work.checksBack != null) &&
         (here === null || actions === undefined ? (
           <NextStep>{nextWords(next)}</NextStep>
         ) : (

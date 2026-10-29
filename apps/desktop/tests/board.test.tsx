@@ -677,6 +677,14 @@ describe('the board’s lanes', () => {
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
   })
+
+  it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
+    const why = 'Fails on main too: test times out in limit.test.ts.'
+    const lanes = lanesOf(
+      board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
+    )
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+  })
 })
 
 describe('the board', () => {
@@ -2038,6 +2046,22 @@ describe('a ready card’s next step, done from the card', () => {
     expect(card.getByText(why)).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
     expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+  })
+
+  it('shows only what fails where its lead brought its failing checks to the person', async () => {
+    const why = 'Fails on main too: test times out in limit.test.ts. Fixing it on main brings this one green.'
+    tasks = [{ ...ready('s13', 'Broken on main', { checks: change().checks }), checksBack: why }]
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
+    const card = await cardOf('Broken on main')
+    // One fact, with its glyph: the lead's line is in its task, not on the card.
+    expect(card.queryByText(why)).toBeNull()
+    const failed = card.getByText(/ failed$/)
+    expect(failed.closest('[class*="factLine"]')?.textContent).toBe(failed.textContent)
+    expect(failed.querySelector('svg')).not.toBeNull()
+    // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
+    expect(card.queryByText('Ask the lead to fix it')).toBeNull()
+    expect(card.queryByText('Merge conflict')).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
   })
 
   it('says where Althar couldn’t look for a conflict, and keeps its next step', async () => {
