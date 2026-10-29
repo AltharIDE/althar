@@ -1779,6 +1779,7 @@ export class Queries extends Context.Service<
             startsAt: string | null
             runState: string | null
             runAt: string | null
+            attemptAt: string | null
             step: string | null
             waiting: number
             review: string | null
@@ -1797,6 +1798,8 @@ export class Queries extends Context.Service<
             SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
+              -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
+              (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
@@ -2023,7 +2026,7 @@ export class Queries extends Context.Service<
             leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
             leadEffort,
             branch: task.branch,
-            startedAt: task.runAt ?? task.firstSession,
+            startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).

@@ -26,7 +26,7 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, NextStep, PullChip } from './Chips'
+import { BranchChip, Fact, FactLine, NextStep, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
 
 const resolveNow = fn()
@@ -266,7 +266,7 @@ export const MergeConflictNotAsked: Story = {
       <>
         <FactLine>
           <Fact icon="branch" tone="warm">
-            You stopped it, so Althar doesn’t start its lead for a conflict.
+            It has no lead yet to ask.
           </Fact>
         </FactLine>
         <NextStep signal onPress={resolveNow}>
@@ -366,6 +366,44 @@ export const WaitingOverTheNumber: Story = {
   },
 }
 export const Stopped: Story = { args: CHANGE_STOPPED }
+const carryOn = fn()
+/**
+ * Stopped, with a conflict its lead wasn't asked about: what stopped it and when lead, the conflict is one quiet line under them,
+ * and Carry on, which tells the lead to merge the default branch in on its way, is the one thing to press.
+ */
+export const StoppedInConflict: Story = {
+  args: {
+    status: TaskStatus.Stopped,
+    word: 'Stopped',
+    kind: TaskKind.Change,
+    at: 'Oct 27',
+    title: 'Nightly dependency check, 27 Oct',
+    why: 'Stopped when you declined a command',
+    from: 'Nightly dependency check',
+    object: <BranchChip name="althar/nightly-dependency-check-27-oct" add={287} del={375} />,
+    foot: (
+      <>
+        <FactLine>
+          <Fact icon="branch" tone="warm">
+            Conflicts with the default branch
+          </Fact>
+        </FactLine>
+        <NextStep signal onPress={carryOn}>
+          Carry on
+        </NextStep>
+      </>
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Stopped when you declined a command')).toBeInTheDocument()
+    await expect(card.getByText('Conflicts with the default branch')).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await expect(carryOn).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
+  },
+}
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {
   args: {

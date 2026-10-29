@@ -2012,27 +2012,66 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).toHaveBeenCalledWith('th-s4')
   })
 
-  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
-    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
-    // Stopped, it is among what waits on the person, not ready: its card says it there.
+  it('shows a stopped task in conflict as stopped: what stopped it and when, the conflict a line under it, and Carry on settles both', async () => {
+    // As an automation's run its lead stopped two days ago over a declined command: on its branch, no pull request, and a conflict
+    // Althar didn't ask its lead about, as it is stopped.
     tasks = [
-      {
-        ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),
-        phase: 'stopped' as const,
-        startedAt: '2026-10-01T07:30:00.000Z',
-        conflictUnsent: why,
-      },
+      task({
+        taskId: 's9',
+        threadId: 'th-s9',
+        title: 'Nightly dependency check, 27 Oct',
+        kind: 'change',
+        phase: 'stopped',
+        step: null,
+        branch: 'althar/nightly-dependency-check-27-oct',
+        changed: { files: 3, add: 287, del: 375 },
+        startedAt: '2026-09-29T08:00:00.000Z',
+        stopped: { by: 'declined', at: '2026-09-29T09:00:00.000Z' },
+        conflictUnsent: 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
+        automation: { id: 'au1', name: 'Nightly dependency check' },
+      }),
     ]
-    const onOpen = vi.fn()
+    const send = vi.fn(async () => {})
+    const resumeTask = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
-    const card = await cardOf('Stopped in conflict')
-    // Still stopped, with why its lead wasn't asked in one line, in place of its foot.
+    const base = snapshot()
+    // Its run suspended, the task's own screen would resume it.
+    const getThread = vi.fn(async () =>
+      snapshot({
+        session: null,
+        task: { ...base.task, actions: ['resume', 'abandon'], lead: { agentId: 'claude-code', model: null, account: null } },
+      }),
+    )
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ send, resumeTask, startSession, getThread, resolveConflictsNow, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Nightly dependency check, 27 Oct')
+    // In Needs you, stopped, with what stopped it and when; never under way, with a step and a running clock.
+    const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+    expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
-    expect(card.getByText(why)).toBeTruthy()
-    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(card.getByText('Stopped when you declined a command')).toBeTruthy()
+    expect(card.getByText('Sep 29')).toBeTruthy()
+    expect(card.queryByText(/^\d+d \d+h$/)).toBeNull()
+    // The conflict is one quiet line, not why it waits, and not that the person stopped it.
+    expect(card.getByText('Conflicts with the default branch')).toBeTruthy()
+    expect(card.queryByText(/stopped, so Althar/)).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    // One action covers both: the lead is told to merge the default branch in, then go on, and its run carries on.
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        threadId: 'th-s9',
+        body: 'Carry on. Your branch conflicts with the default branch: merge it in and settle the conflict first.',
+        disposition: 'after_current',
+      }),
+    )
+    await waitFor(() => expect(resumeTask).toHaveBeenCalledWith({ taskId: 's9' }))
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
