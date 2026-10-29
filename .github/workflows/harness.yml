@@ -35,7 +35,14 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          [packages/connectors, packages/contracts, packages/domain, packages/persistence-sqlite, packages/provider-adapters, apps/cli]
+          [
+            packages/connectors,
+            packages/contracts,
+            packages/domain,
+            packages/persistence-sqlite,
+            packages/provider-adapters,
+            apps/cli,
+          ]
     defaults:
       run:
         working-directory: ${{ matrix.package }}
