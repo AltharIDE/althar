@@ -18,7 +18,13 @@ import { withServices } from './render'
 
 const show = (
   thread: ReadonlyArray<ThreadItem>,
-  props: { project?: string; openFile?: (path: string) => void; onTryAgain?: () => void } = {},
+  props: {
+    project?: string
+    openFile?: (path: string) => void
+    onTryAgain?: () => void
+    onSignIn?: (agentId: string) => void
+    onCompact?: () => void
+  } = {},
 ) => {
   const { client } = fakeClient()
   const blocks = blocksOf({ items: thread, turnRunning: false, worktree: '/w/meridian' }, new Map(), () => 'just now')
@@ -165,6 +171,49 @@ describe('a turn’s work', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: /Open/ }))
     expect(openFile).toHaveBeenCalledWith('/w/meridian/report.csv')
+  })
+})
+
+describe('a coordinator that is signed out', () => {
+  const signedOut = items.notice({
+    severity: 'error',
+    title: 'Claude Code is signed out.',
+    description: 'Authentication required',
+    failure: 'auth_required',
+  })
+
+  it('says so plainly, and offers Sign in again for its agent first, then Try again', async () => {
+    const onSignIn = vi.fn()
+    const onTryAgain = vi.fn()
+    show([items.you('What is left on the checkout?'), signedOut], { onSignIn, onTryAgain })
+    expect(screen.getByText('Claude Code is signed out.')).toBeTruthy()
+    // The agent's own words stand under it, not as its headline.
+    expect(screen.getByText('Authentication required')).toBeTruthy()
+    const ways = screen.getAllByRole('button').filter((button) => ['Sign in again', 'Try again'].includes(button.textContent ?? ''))
+    expect(ways.map((button) => button.textContent)).toEqual(['Sign in again', 'Try again'])
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('offers no Sign in again for a turn that failed for another reason', () => {
+    show([items.you('Hi'), items.notice({ severity: 'error', title: "Claude Code couldn't answer.", failure: 'unknown' })], {
+      onSignIn: vi.fn(),
+      onTryAgain: vi.fn(),
+    })
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('offers Compact for a context that is full', async () => {
+    const onCompact = vi.fn()
+    show([items.you('Hi'), items.notice({ severity: 'error', title: "Claude Code couldn't answer.", failure: 'context_full' })], {
+      onCompact,
+      onTryAgain: vi.fn(),
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Compact' }))
+    expect(onCompact).toHaveBeenCalledOnce()
   })
 })
 

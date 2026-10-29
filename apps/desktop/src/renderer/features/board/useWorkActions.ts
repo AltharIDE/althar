@@ -1,8 +1,9 @@
-import { type Dispatch, type SetStateAction, useCallback, useState } from 'react'
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react'
 
 import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
 import { headsOf } from '../../shared/mergeHere'
 
@@ -24,7 +25,7 @@ export interface WorkActions {
   readonly error: string | null
   /** What last failed for each task, which action it was, and why, for its own card to say; a task's is cleared when it is tried again, and no other's. */
   readonly failed: Readonly<Record<string, ActionFailure>>
-  /** The tasks whose pull requests are being merged. */
+  /** The tasks being merged: their pull requests, wherever in the window Merge was pressed, or their branches here. */
   readonly merging: ReadonlySet<string>
   /** The tasks a note is on its way back to. */
   readonly sending: ReadonlySet<string>
@@ -60,11 +61,26 @@ export interface WorkActions {
   readonly dismissError: () => void
 }
 
-export const useWorkActions = (): WorkActions => {
+/** What the actions act on: the tasks shown, by which a merge that went through shows as merging until it reads so. */
+export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): WorkActions => {
   const { client } = useServices()
   const [error, setError] = useState<string | null>(null)
   const [failed, setFailed] = useState<WorkActions['failed']>({})
-  const [merging, setMerging] = useState<ReadonlySet<string>>(new Set())
+  // Merging here is this screen's; a pull request's merge is the window's, wherever it was pressed.
+  const [mergingHere, setMerging] = useState<ReadonlySet<string>>(new Set())
+  const merge = useMerge()
+  const merges = useMerging(tasks)
+  const merging = useMemo(
+    () => (mergingHere.size === 0 ? merges.merging : new Set([...merges.merging, ...mergingHere])),
+    [merges.merging, mergingHere],
+  )
+  const failures = useMemo(
+    () => ({
+      ...Object.fromEntries(Object.entries(merges.failed).map(([taskId, message]) => [taskId, { action: 'merge', message } as const])),
+      ...failed,
+    }),
+    [merges.failed, failed],
+  )
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
   const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
   const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
@@ -106,7 +122,7 @@ export const useWorkActions = (): WorkActions => {
 
   return {
     error,
-    failed,
+    failed: failures,
     merging,
     sending,
     opening,
@@ -121,7 +137,21 @@ export const useWorkActions = (): WorkActions => {
       [busy, client],
     ),
     push: useCallback((taskId, head, url) => busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), [busy, client]),
-    merge: useCallback((taskId, head, url) => busy(setMerging, taskId, () => client.merge(taskId, head, url), 'merge'), [busy, client]),
+    // Its card says why it didn't merge (`failures`), as the window keeps it.
+    merge: useCallback(
+      async (taskId, head, url) => {
+        setError(null)
+        setFailed(({ [taskId]: _, ...rest }) => rest)
+        try {
+          await merge({ taskId, head, url })
+          return true
+        } catch (failure) {
+          fail(failure)
+          return false
+        }
+      },
+      [merge, fail],
+    ),
     sendBack: useCallback(
       (task, note) =>
         busy(setSending, task.taskId, async () => {

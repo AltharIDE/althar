@@ -897,10 +897,18 @@ describe('every direction, however odd the text', () => {
     }),
     'an ordinary document': adfOf(ordinary),
   }
+  /**
+   * How long it takes at best: timed again while over the limit, up to three times, as one pause of a shared machine (a
+   * Windows runner's took 500 ms) isn't the converter's; one that searches again from each opener is over every time.
+   */
   const took = (convert: () => unknown) => {
-    const started = performance.now()
-    convert()
-    return performance.now() - started
+    let best = Number.POSITIVE_INFINITY
+    for (let tries = 0; tries < 3 && best >= LIMIT; tries += 1) {
+      const started = performance.now()
+      convert()
+      best = Math.min(best, performance.now() - started)
+    }
+    return best
   }
 
   it('takes time in proportion to its length', () => {

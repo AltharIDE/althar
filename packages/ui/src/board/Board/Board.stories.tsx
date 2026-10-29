@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type CSSProperties, useState } from 'react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CALLS, NEXT, READY, RUNNING, SETTLED } from '../../fixtures/board'
 import {
@@ -13,27 +13,41 @@ import {
   REVIEW_DRAFTED,
   REVIEW_RUNNING,
 } from '../../fixtures/kinds'
-import { BoardLane, Outcome, Wait } from '../../foundations/vocabulary'
+import { BoardLane, Outcome, TaskStatus, Wait } from '../../foundations/vocabulary'
+import { Button } from '../../primitives/Button/Button'
 import { States, statesOn } from '../../storybook/States'
 import { AcceptCard } from '../AcceptCard/AcceptCard'
 import { BoardCard } from '../BoardCard/BoardCard'
 import { CallCard } from '../CallCard/CallCard'
 import { KeptRow } from '../KeptRow/KeptRow'
+import { NextLine } from '../NextLine/NextLine'
 import { NextRow } from '../NextRow/NextRow'
 import { SettledRow } from '../SettledRow/SettledRow'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { WorkCard } from '../WorkCard/WorkCard'
-import { Board, BoardColumn, type BoardFolds, BoardList, boardText } from './Board'
+import { Board, BoardColumn, BoardDivider, type BoardFolds, BoardList, boardText } from './Board'
 
 /* Meridian's board, with the one you open ringed, as it is while the dock shows it; with lanes collapsed where the person did. */
-function Meridian({ empty = false, defaultFolds }: { empty?: boolean; defaultFolds?: BoardFolds }) {
+function Meridian({
+  empty = false,
+  defaultFolds,
+  onPointerLane,
+}: {
+  empty?: boolean
+  defaultFolds?: BoardFolds
+  onPointerLane?: (lane: BoardLane | null) => void
+}) {
   const [open, setOpen] = useState<string | null>(null)
   const next = empty ? [] : NEXT
   const running = empty ? [] : RUNNING
   const calls = empty ? [] : CALLS
   const settled = empty ? [] : SETTLED
   return (
-    <Board label="Meridian’s work" {...(defaultFolds === undefined ? {} : { defaultFolds })}>
+    <Board
+      label="Meridian’s work"
+      {...(defaultFolds === undefined ? {} : { defaultFolds })}
+      {...(onPointerLane === undefined ? {} : { onPointerLane })}
+    >
       <BoardColumn lane={BoardLane.Next} count={next.length}>
         <BoardList>
           {next.map((x, i) => (
@@ -65,6 +79,118 @@ function Meridian({ empty = false, defaultFolds }: { empty?: boolean; defaultFol
 
 /* A row names its task by its title alone, as the desktop's board does. */
 const UNNAMED = { task: () => '' }
+
+const BUSY = '6 of 6 agents busy on this Mac'
+
+/* The line on a busy machine: new work, in the person's order. */
+const LINE = [
+  { id: 'l1', title: 'Shorten long commands in running pills' },
+  { id: 'l2', title: 'Review ninemate’s pull request #88', kind: 'Review' },
+]
+
+const inLine = (place: number) => (place === 3 ? '3rd in line' : `${place}th in line`)
+
+/*
+ * Up next on a busy machine, in the order its work goes on: first what is
+ * under way and continues, which isn't dragged; then the line, the person's
+ * to order; then what is paused, and a plan on its countdown. Running holds
+ * only what an agent works on now.
+ */
+function BusyUpNext() {
+  const [line, setLine] = useState(LINE)
+  const continuing = 2
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={continuing + line.length + 2}>
+        <BoardList>
+          <NextRow
+            place={1}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Follow-up"
+            title="Plan usage: every agent, steer work, and prototypes"
+            wait={Wait.Workers}
+            reason={BUSY}
+            onOpen={() => undefined}
+          />
+          <NextRow
+            place={2}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Implement"
+            title="Fix the failing CI"
+            wait={Wait.Workers}
+            reason={BUSY}
+            onOpen={() => undefined}
+          />
+        </BoardList>
+        <BoardDivider end={<button type="button">Back to oldest first</button>}>Starts when an agent is free</BoardDivider>
+        <NextLine
+          rows={line}
+          render={(id, place) => {
+            const row = line.find((one) => one.id === id)
+            return (
+              <NextRow
+                place={continuing + place}
+                task=""
+                text={UNNAMED}
+                {...(row?.kind === undefined ? {} : { kind: row.kind })}
+                title={row?.title ?? ''}
+                wait={Wait.Workers}
+                reason={inLine(continuing + place)}
+                onOpen={() => undefined}
+              />
+            )
+          }}
+          onMove={(id, to) =>
+            setLine((now) => {
+              const it = now.find((one) => one.id === id)
+              if (it === undefined) return now
+              const others = now.filter((one) => one !== it)
+              return [...others.slice(0, to), it, ...others.slice(to)]
+            })
+          }
+        />
+        <BoardDivider>Paused</BoardDivider>
+        <BoardList>
+          <NextRow
+            place={5}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Review"
+            title="Stop the page jumping after answering a question"
+            wait={Wait.Workers}
+            reason="Codex is out of usage until 13:40"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+        <BoardDivider>Planned</BoardDivider>
+        <BoardList>
+          <NextRow
+            place={6}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            title="Add a retry"
+            wait={Wait.Workers}
+            reason="Starts in 20s"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Running} count={2}>
+        {[CHANGE_RUNNING, CHANGE_RUNNING_PR].map((card) => (
+          <BoardCard key={card.title} {...card} onOpen={() => undefined} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={0} />
+      <BoardColumn lane={BoardLane.Settled} count={0} />
+    </Board>
+  )
+}
 
 /* The same board, every card one button with nothing to press, by its task's kind: an afternoon's mix. */
 function Kinds() {
@@ -208,6 +334,118 @@ function Finishing() {
   )
 }
 
+/* What moves on the board, a press each: a task starting, finishing and merged, one more up next, the line put in another order. */
+interface Moved {
+  readonly id: string
+  readonly title: string
+  readonly lane: BoardLane
+}
+
+const MOVING: ReadonlyArray<Moved> = [
+  { id: 'm1', title: 'Shorten long commands in running pills', lane: BoardLane.Next },
+  { id: 'm2', title: 'Keep the composer’s draft across restarts', lane: BoardLane.Next },
+  { id: 'm3', title: 'Let a long dictation finish while you work', lane: BoardLane.Next },
+  { id: 'm4', title: 'Find why the dock flickers on resize', lane: BoardLane.Running },
+  { id: 'm5', title: 'Name the branch after the task', lane: BoardLane.Running },
+  { id: 'm6', title: 'Fix the failing CI', lane: BoardLane.Yours },
+  { id: 'm7', title: 'Plan usage: every agent, steer work, and prototypes', lane: BoardLane.Settled },
+]
+
+function MovingBoard() {
+  const [tasks, setTasks] = useState(MOVING)
+  const [made, setMade] = useState(0)
+  const of = (lane: BoardLane) => tasks.filter((one) => one.lane === lane)
+  // Into its new lane: at the foot, but Settled, where the latest is at the head.
+  const send = (from: BoardLane, lane: BoardLane) =>
+    setTasks((all) => {
+      const task = all.find((one) => one.lane === from)
+      if (task === undefined) return all
+      const rest = all.filter((one) => one !== task)
+      return lane === BoardLane.Settled ? [{ ...task, lane }, ...rest] : [...rest, { ...task, lane }]
+    })
+  const ways = [
+    { label: 'Start the next', act: () => send(BoardLane.Next, BoardLane.Running) },
+    { label: 'Finish one', act: () => send(BoardLane.Running, BoardLane.Yours) },
+    { label: 'Merge one', act: () => send(BoardLane.Yours, BoardLane.Settled) },
+    {
+      label: 'Add one up next',
+      act: () => {
+        setMade(made + 1)
+        setTasks((all) => [...all, { id: `new${made}`, title: `A new task, ${made + 1}`, lane: BoardLane.Next }])
+      },
+    },
+    {
+      label: 'Put the last up next first',
+      act: () =>
+        setTasks((all) => {
+          const last = all.findLast((one) => one.lane === BoardLane.Next)
+          return last === undefined ? all : [last, ...all.filter((one) => one !== last)]
+        }),
+    },
+    {
+      label: 'Clear one settled',
+      act: () => setTasks((all) => all.filter((one) => one !== all.find((it) => it.lane === BoardLane.Settled))),
+    },
+  ]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12 }}>
+        {ways.map((way) => (
+          <Button key={way.label} size="small" onClick={way.act}>
+            {way.label}
+          </Button>
+        ))}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Board label="Meridian’s work">
+          <BoardColumn lane={BoardLane.Next} count={of(BoardLane.Next).length}>
+            {/* Its grip's menu, or ⌥⇧↑ and ⌥⇧↓ on it, moves a row in the line. */}
+            <NextLine
+              rows={of(BoardLane.Next)}
+              render={(id, place) => (
+                <NextRow
+                  data-move={id}
+                  place={place}
+                  task=""
+                  text={UNNAMED}
+                  title={tasks.find((one) => one.id === id)?.title ?? ''}
+                  wait={Wait.Workers}
+                  reason="Starts when an agent is free"
+                />
+              )}
+              onMove={(id, to) =>
+                setTasks((all) => {
+                  const task = all.find((one) => one.id === id)!
+                  const line = of(BoardLane.Next).filter((one) => one !== task)
+                  const rest = all.filter((one) => one.lane !== BoardLane.Next)
+                  return [...line.slice(0, to), task, ...line.slice(to), ...rest]
+                })
+              }
+            />
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Running} count={of(BoardLane.Running).length}>
+            {of(BoardLane.Running).map((one) => (
+              <BoardCard key={one.id} data-move={one.id} status={TaskStatus.Running} word="Implement" title={one.title} />
+            ))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Yours} count={of(BoardLane.Yours).length}>
+            {of(BoardLane.Yours).map((one) => (
+              <BoardCard key={one.id} data-move={one.id} status={TaskStatus.Yours} word="Ready to accept" title={one.title} />
+            ))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Settled} count={of(BoardLane.Settled).length}>
+            <BoardList>
+              {of(BoardLane.Settled).map((one) => (
+                <SettledRow key={one.id} data-move={one.id} outcome={Outcome.Merged} task="" text={UNNAMED} title={one.title} at="now" />
+              ))}
+            </BoardList>
+          </BoardColumn>
+        </Board>
+      </div>
+    </div>
+  )
+}
+
 const meta = {
   title: 'Board/Board',
   component: Meridian,
@@ -229,6 +467,36 @@ export const ByKind: Story = {
     // Each card is one button, its title: nothing else on the board's cards is pressed.
     for (const article of c.getAllByRole('article')) await expect(within(article).getAllByRole('button')).toHaveLength(1)
     await expect(c.getByText('Ready to accept')).toBeInTheDocument()
+  },
+}
+
+/**
+ * Up next on a busy machine: what continues first, its rows with no grip,
+ * then the line, which the person drags, then what is paused, and a plan.
+ */
+export const UpNextOnABusyMachine: Story = {
+  render: () => <BusyUpNext />,
+  play: async ({ canvasElement }) => {
+    const next = within(within(canvasElement).getByRole('region', { name: 'Up next' }))
+    await expect(next.getByText('Continues · Follow-up')).toBeInTheDocument()
+    await expect(next.getByText('Continues · Implement')).toBeInTheDocument()
+    await expect(next.getByText('Continues · Review')).toBeInTheDocument()
+    // Only the line's rows have a grip: what continues keeps its order.
+    await expect(next.getAllByRole('button', { name: /^Move .* in the line$/ })).toHaveLength(2)
+    await expect(next.queryByRole('button', { name: /^Move Fix the failing CI/ })).not.toBeInTheDocument()
+    await expect(next.getByText('3rd in line')).toBeInTheDocument()
+  },
+}
+
+/** The board says which lane the pointer is in, so a consumer can keep a card from moving under it. */
+export const PointingAtALane: Story = {
+  args: { onPointerLane: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.hover(within(c.getByRole('region', { name: 'Up next' })).getByRole('heading'))
+    await expect(args.onPointerLane).toHaveBeenLastCalledWith(BoardLane.Next)
+    await userEvent.hover(within(c.getByRole('region', { name: 'Running' })).getByRole('heading'))
+    await expect(args.onPointerLane).toHaveBeenLastCalledWith(BoardLane.Running)
   },
 }
 
@@ -321,4 +589,30 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/**
+ * What moves, a press each: a card slides to its new place, travels to another
+ * lane above the board, comes in and fades out (ListMotion); up next, a row's
+ * grip moves it in the line. Nothing is pressed for you here, so each can be
+ * watched.
+ */
+export const Moving: Story = { render: () => <MovingBoard /> }
+
+/** Merged, a card ends in Settled; one more up next, and it is in the line; moved by key, a row takes its new place. */
+export const MovingByAPress: Story = {
+  render: () => <MovingBoard />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Merge one' }))
+    const settled = canvasElement.querySelector<HTMLElement>(`[data-lane="${BoardLane.Settled}"]`)!
+    await expect(within(settled).getByText('Fix the failing CI')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add one up next' }))
+    await expect(c.getByText('A new task, 1')).toBeInTheDocument()
+    // Moved by key on its grip, a row takes its new place in the line.
+    c.getByRole('button', { name: 'Move Shorten long commands in running pills in the line' }).focus()
+    await userEvent.keyboard('{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}')
+    const next = canvasElement.querySelector<HTMLElement>(`[data-lane="${BoardLane.Next}"]`)!
+    await expect([...next.querySelectorAll<HTMLElement>('[data-row]')].map((one) => one.dataset.row)).toEqual(['m2', 'm1', 'm3', 'new0'])
+  },
 }

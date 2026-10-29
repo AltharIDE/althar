@@ -5,6 +5,7 @@ import {
   Arrived,
   CodeBlock,
   FailedLogs,
+  Gallery,
   Issue,
   IssueRef,
   LinkButton,
@@ -25,11 +26,13 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { WayOut } from './WayOut'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -67,8 +70,6 @@ const LONG_COMMAND = 72
 
 export const text = {
   thought: 'Thought',
-  /** Under a last turn that failed, as on the connection: what the person said in it goes again. */
-  tryAgain: 'Try again',
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -212,7 +213,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
-      return <p className={s[part.tone]}>{part.text}</p>
+      return (
+        <>
+          <p className={s[part.tone]}>{part.text}</p>
+          {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
+        </>
+      )
+    case 'pictures':
+      return <Gallery shots={shotsOf(part.id, part.pictures)} />
   }
 }
 
@@ -402,6 +410,8 @@ export function ThreadBlocks({
   automation,
   queued,
   onTryAgain,
+  onSignIn,
+  onCompact,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -442,6 +452,10 @@ export function ThreadBlocks({
   queued?: string
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
   onTryAgain?: () => void
+  /** Opens Settings at an agent's sign-in, where the last turn failed for it being signed out: Sign in again. Without it, none. */
+  onSignIn?: (agentId: string) => void
+  /** Has the thread's agent compact its context, where the last turn failed for it being full: Compact. Without it, none. */
+  onCompact?: () => void
 }) {
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
@@ -456,6 +470,11 @@ export function ThreadBlocks({
   const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
   const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
   const failed = ending?.kind === 'notice' && ending.tone === 'error' ? last?.id : undefined
+  // Signing in again the agent whose turn it was: the thread's own, where the turn doesn't say.
+  const signInAs = (agentId: string | null) => {
+    const who = agentId ?? session?.agentId ?? null
+    return onSignIn === undefined || who === null ? undefined : () => onSignIn(who)
+  }
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':
@@ -534,7 +553,9 @@ export function ThreadBlocks({
             {block.said.map((part) => (
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
-            {block.id === failed && onTryAgain !== undefined && <LinkButton onClick={onTryAgain}>{text.tryAgain}</LinkButton>}
+            {block.id === failed && ending?.kind === 'notice' && (
+              <WayOut failure={ending.failure} onTryAgain={onTryAgain} onSignIn={signInAs(block.agentId)} onCompact={onCompact} />
+            )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )

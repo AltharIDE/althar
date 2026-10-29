@@ -12,7 +12,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { repository, runtime, until } from './support'
+import { outUntilSoon, repository, runtime, until } from './support'
 
 /*
  * Steps that waited for a place among the agents at work (Busy.ts), as they
@@ -124,7 +124,7 @@ const readyIs = (projectId: string, taskId: string) =>
 
 describe('a step an earlier Althar kept waiting for a place as the person resumed it', () => {
   it.live('starts a review at once on the reviewer it was resumed on, though every place is taken', () => {
-    const back = Date.now() + 5_000
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
@@ -146,7 +146,7 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
       assert.notStrictEqual((yield* attempts(other.taskId)).at(-1)?.state, 'succeeded')
       const [reviewed] = (yield* attempts(task.taskId)).filter((row) => row.step === 'review')
       assert.strictEqual(reviewed?.state, 'succeeded')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
   })
 
   it.live("carries a lead's step on at once on the lead it was resumed on, or as answered", () =>
@@ -183,7 +183,7 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
 
 describe('a step whose usage limit resets while every place is taken', () => {
   it.live('waits for a place, then carries on, on the agent it was held for', () => {
-    const back = Date.now() + 3_000
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const policies = yield* Policies
@@ -204,7 +204,7 @@ describe('a step whose usage limit resets while every place is taken', () => {
       const ran = yield* sql<{ agentId: string }>`
         SELECT agent_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at, rowid`
       assert.deepStrictEqual([...new Set(ran.map((row) => row.agentId))], ['claude-code'])
-    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: back } } })))
   })
 })
 
@@ -212,9 +212,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
   it.live(
     'goes by the project’s rule, as a review starting at once would: held until the reset, where it waits',
     () => {
-      // Long enough that the hold is seen and the other task takes the place before Codex is back on a slow runner,
-      // short enough that it still holds it then, as its lead works five seconds.
-      const back = Date.now() + 5_000
+      const back = outUntilSoon()
       return Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const sessions = yield* Sessions
@@ -256,7 +254,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
           notices.map((row) => row.title),
           `Fake codex has 3% of its five-hour limit left, so the review waits until ${whenWords(resetsAt)}. To carry on now, pick another model on the task.`,
         )
-      }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+      }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
     },
     40_000,
   )

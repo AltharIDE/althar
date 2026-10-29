@@ -17,8 +17,8 @@ import { type RouterContext, rootRoute } from './root'
  * screen opens whole, never empty and filling in. Only a read slower than a
  * glance shows the place's outline meanwhile, and then long enough not to
  * flash. A place the window holds shows at once, what changed since read
- * behind it; a project's or task's screen the person was on is kept as they
- * left it (`KeptScreens`).
+ * behind it; the home's screen, and a project's or task's the person was on,
+ * is kept as they left it (`KeptScreens`).
  */
 
 export const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute])

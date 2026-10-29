@@ -11,21 +11,27 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);
-  animation: pop var(--fast) var(--ease);
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop var(--enter) var(--ease-out);
 }
 .menu:focus-visible {
   outline: none;
 }
-.menu[data-side='top'] {
-  --from: 3px;
-}
-.menu[data-side='bottom'] {
-  --from: -3px;
+/* it grows from what opened it, and goes back into it quicker than it came */
+.menu[data-state='closed'] {
+  animation: shut var(--exit) var(--ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(var(--from, 0));
+    transform: scale(var(--scale-pop));
+  }
+}
+@keyframes shut {
+  to {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
   }
 }
 

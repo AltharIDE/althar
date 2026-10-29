@@ -20,13 +20,14 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { items, repository, runtime, until } from './support'
+import { items, outUntilSoon, repository, runtime, until } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
  * busy.test.ts and placesKept.test.ts don't go: a turn Althar's word to an
  * idle lead waits for, as the person switches that lead to another agent,
- * two such that wait together, and one that waited as Althar stopped; the
+ * two such that wait together, and one that waited as Althar stopped; a task
+ * under way whose turn waits, up next ahead of new work (ADR-065); the
  * line where two tasks waited since the same moment; an answer kept for a place whose lead has gone since; and a review that
  * waits for a place of its own, skipped.
  */
@@ -214,6 +215,61 @@ describe('a turn Althar’s word waited for when it stopped', () => {
   )
 })
 
+describe('a task under way whose next turn waits for a place', () => {
+  it.live('continues up next ahead of new work, and leaves it once its turn starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const tasks = yield* Tasks
+      const queries = yield* Queries
+      const instance = yield* Instance
+      const projectId = yield* opened
+      /** The cards waiting for a place, by title, in the order the board's Up next lists them, and whether each continues. */
+      const upNext = Effect.gen(function* () {
+        const board = yield* Effect.orDie(queries.board(projectId))
+        return board.tasks
+          .filter((task) => task.phase === 'running' && task.place !== undefined)
+          .toSorted((a, b) => (a.place ?? 0) - (b.place ?? 0))
+          .map((task) => [task.title, task.place, task.continues === true ? 'continues' : task.inLine === true ? 'line' : '?'])
+      })
+      const first = yield* started(projectId, 'Under way', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      const holder = yield* started(projectId, 'Holding the place', 'Work on it. [lead:wait]')
+      yield* until(attempts(holder.taskId), (rows) => rows[0]?.state === 'running')
+      const fresh = yield* started(projectId, 'New work', 'Work on it. [lead:wait]')
+      yield* until(attempts(fresh.taskId), (rows) => rows[0]?.holdReason === 'machine_busy')
+      // Althar tells the first's lead its checks failed: its next turn waits, though it waited after the new work began to.
+      const envelope = yield* Runtime.envelope('thread.send', {}, undefined, instance.systemId)
+      yield* sessions.send({
+        envelope,
+        threadId: first.threadId,
+        body: 'The checks failed. [answers-after:3s]',
+        disposition: 'after_current',
+        quiet: true,
+      })
+      yield* until(
+        Effect.map(waitsOn(first.threadId), (since) => (since === null ? [] : [since])),
+        (rows) => rows.length === 1,
+      )
+      // It continues first, as work under way (ADR-037), then the line: the holder, at work, is in neither.
+      assert.deepStrictEqual(yield* until(upNext, (rows) => rows.length === 2), [
+        ['Under way', 1, 'continues'],
+        ['New work', 2, 'line'],
+      ])
+      const card = (taskId: string) =>
+        Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.find((task) => task.taskId === taskId))
+      assert.strictEqual((yield* card(first.taskId))?.phase, 'running')
+      assert.isUndefined((yield* card(holder.taskId))?.continues)
+      // The place frees: its turn has it before the new work, and it leaves Up next, which the new work leads.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      assert.deepStrictEqual(yield* until(upNext, (rows) => rows.length === 1), [['New work', 1, 'line']])
+      const going = yield* card(first.taskId)
+      assert.strictEqual(going?.phase, 'running')
+      assert.isUndefined(going?.continues)
+      assert.isUndefined(going?.place)
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
+})
+
 describe('the line, where two tasks waited since the same moment', () => {
   it.live('keeps them apart when the person puts another first, each after the one before it', () =>
     Effect.gen(function* () {
@@ -310,7 +366,7 @@ describe('an answer kept for a place, as answers once were', () => {
 
 describe('a review that waits for a place of its own', () => {
   it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
-    const back = Date.now() + 5_000
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
@@ -345,6 +401,6 @@ describe('a review that waits for a place of its own', () => {
       )
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* reviewers, before)
-    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: back } } })))
   })
 })

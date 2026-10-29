@@ -41,7 +41,7 @@
   gap: 5px;
   min-width: 0;
   overflow: hidden;
-  animation: in var(--slow) var(--ease) both;
+  animation: in var(--enter) var(--ease-out) both;
 }
 @keyframes in {
   from {
@@ -212,4 +212,15 @@ span.url {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+}
+/* the branch a run is a copy of, as git names it */
+.branch {
+  max-width: 40ch;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+.branchGlyph {
+  margin-right: 3px;
+  vertical-align: -1px;
 }

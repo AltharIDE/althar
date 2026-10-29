@@ -134,7 +134,7 @@ describe('a task of several repositories, through the API', () => {
           yield* client.OpenInEditor({ commandId: commandId(), taskId: both.id, editor: 'zed', path: 'web/README.md', line: 1 }),
         )
         const [opened] = opens
-        assert.strictEqual(opened?.[1], dirname(opened?.[2] ?? '').replace(/\/web$/, ''))
+        assert.strictEqual(opened?.[1], dirname(dirname(opened?.[2] ?? '')))
         assert.strictEqual(opened?.[2], join(opened?.[1] ?? '', 'web', 'README.md'))
         // A task started at once in one of them, by the person.
         const one = yield* client.StartTask({

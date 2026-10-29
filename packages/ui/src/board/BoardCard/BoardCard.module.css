@@ -34,6 +34,7 @@
   line-height: 1.45;
   color: var(--t-2);
   text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 .track {
   margin: 2px 0;

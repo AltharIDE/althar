@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -124,6 +124,23 @@ describe('the home', () => {
     withServices(<Home />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t5', '', 'https://github.com/meridian/api/pull/12'))
+  })
+
+  it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {
+    const ready = task({ taskId: 't5', threadId: 'th5', title: 'Name it better', change: change({ draft: false, checks: null }) })
+    let refuse = (_: unknown) => undefined as void
+    const merge = vi.fn(() => new Promise<void>((_, reject) => (refuse = reject)))
+    const { client } = fakeClient({ merge, getHome: vi.fn(async () => home({ tasks: [ready] })) })
+    withServices(<Home />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
+    // Merging, it waits on nobody, until it settles.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Accept and merge/ })).toBeNull())
+    expect(screen.queryByRole('article', { name: 'Name it better' })).toBeNull()
+    await act(async () => refuse(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: Pull Request is not mergeable' })))
+    // On its line, with a way to merge it again.
+    const line = await screen.findByRole('article', { name: 'Name it better' })
+    expect(within(line).getByText(/Pull Request is not mergeable/)).toBeTruthy()
+    expect(within(line).getByRole('button', { name: /again/i })).toBeTruthy()
   })
 
   it('lists nothing the loop did in a project it doesn’t know, and opens nothing for permissions answered', async () => {
