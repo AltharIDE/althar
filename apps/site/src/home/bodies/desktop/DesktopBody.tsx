@@ -74,12 +74,12 @@ export function DesktopBody() {
         id="coordinator"
         title={
           <>
-            Say it once.
+            Every project
             <br />
-            <b>It plans the rest.</b>
+            <b>has a manager.</b>
           </>
         }
-        lead="Every project has a coordinator that already knows its repositories and your rules, so you never explain the project twice. Ask it in a sentence: it plans the work, with its time and cost up front, and drafts issues for what it finds on the way."
+        lead="It’s called the coordinator. It keeps a running picture of the project, its repositories, your rules and every task so far, and runs a team of agents for it. Ask in a sentence: it plans the work, puts a lead and reviewers on each part, and drafts issues for what it finds. Like a real team, made only of agents."
       >
         <AskOnce />
       </Scene>
@@ -88,7 +88,9 @@ export function DesktopBody() {
         id="flow"
         title={
           <>
-            Designed to keep you <b>in flow.</b>
+            Fall in love
+            <br />
+            <b>with building again.</b>
           </>
         }
         lead="What breaks your stride when you work with agents, taken out of the way."
