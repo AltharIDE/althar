@@ -4,6 +4,8 @@ name: desktop
 # test, since nothing else runs the app there. The coverage gate, the end-to-end run and the packages run after merge,
 # in post-merge.yml.
 on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
   pull_request:
     paths:
       [
