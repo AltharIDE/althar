@@ -28,7 +28,7 @@
   border-left: 0;
 }
 
-/* its settings, in the views' place: their page scrolls under the front page */
+/* its settings, in the views' place: their page scrolls under the header */
 .settings {
   flex: 1;
   min-height: 0;
