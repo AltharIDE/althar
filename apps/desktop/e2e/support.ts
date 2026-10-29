@@ -105,7 +105,7 @@ export const startTask = async (page: Page, title: string, lead = '[lead:finish]
   await page.getByRole('button', { name: 'Start now' }).last().click()
 }
 
-/** A section of the project's settings: Settings, the last of its views in the window's bar, then the section down the side. */
+/** A section of the project's settings: Settings, the last of its views in its header, then the section down the side. */
 export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Rules' | 'Running' | 'Notes') => {
   await page
     .getByRole('radiogroup', { name: 'View' })

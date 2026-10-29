@@ -150,7 +150,7 @@ export function ProjectHeader({
       }
     >
       <span className={s.crumb}>
-        <ProjectMark seed={seed} ink={ink} size={18} className={s.mark} />
+        <ProjectMark seed={seed} ink={ink} size={18} className={s.mark} data-ink={ink} />
         <Heading level={headingLevel} className={s.name} title={name}>
           {name}
         </Heading>
