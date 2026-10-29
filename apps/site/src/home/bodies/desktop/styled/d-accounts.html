@@ -1,0 +1,926 @@
+<style>
+.s-beam {
+  --ink: #efebe4;
+  --ink2: #9d978d;
+  --ink3: #6c665e;
+  --warm: #d8933f;
+  --line: rgba(255, 242, 228, 0.09);
+  --fs-name: max(9.5px, 1.95cqw);
+  --fs-plan: max(8px, 1.5cqw);
+  --fs-st: max(7.5px, 1.38cqw);
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0e0b09;
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+.s-beam * { box-sizing: border-box; }
+.s-beam .s-beam__ground {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 20%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #1b1612 0%, #14100d 48%, #0d0a08 100%);
+}
+.s-beam .s-beam__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 238, 220, 0.16) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  opacity: 0.75;
+}
+.s-beam .s-beam__under {
+  position: absolute;
+  top: 51cqw;
+  width: 34cqw;
+  height: 15cqw;
+  margin: -7.5cqw 0 0 -17cqw;
+  background: radial-gradient(closest-side, rgba(66, 80, 255, 0.34), rgba(108, 64, 240, 0.14) 52%, rgba(108, 64, 240, 0) 100%);
+  opacity: 0;
+  z-index: 1;
+  will-change: opacity;
+}
+.s-beam .s-beam__under--1 { left: 15.95cqw; }
+.s-beam .s-beam__under--2 { left: 38.65cqw; }
+.s-beam .s-beam__under--3 { left: 61.35cqw; }
+.s-beam .s-beam__under--4 { left: 84.05cqw; }
+
+.s-beam .s-beam__card {
+  position: absolute;
+  top: 34cqw;
+  width: 20.5cqw;
+  height: 19.5cqw;
+  padding: 1.55cqw 1.6cqw 1.5cqw;
+  border-radius: 1.5cqw;
+  background: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8),
+    0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+  will-change: transform;
+}
+.s-beam .s-beam__card--1 { left: 5.7cqw; }
+.s-beam .s-beam__card--2 { left: 28.4cqw; }
+.s-beam .s-beam__card--3 { left: 51.1cqw; }
+.s-beam .s-beam__card--4 { left: 73.8cqw; }
+.s-beam .s-beam__card::before,
+.s-beam .s-beam__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-beam .s-beam__card::before {
+  background: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+}
+.s-beam .s-beam__card::after {
+  background: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  opacity: 0;
+  transition: opacity 0.8s var(--ease);
+}
+.s-beam .s-beam__card[data-st="use"]::after { opacity: 1; }
+.s-beam .s-beam__card[data-st="limit"]::after { opacity: 0.45; }
+.s-beam .s-beam__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%),
+    linear-gradient(180deg, rgba(255, 250, 244, 0.025), rgba(255, 250, 244, 0) 40%);
+  opacity: 0;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-beam .s-beam__card[data-st="use"] .s-beam__lit { opacity: 1; }
+.s-beam .s-beam__card[data-st="limit"] .s-beam__lit { opacity: 0.35; }
+
+.s-beam .s-beam__row,
+.s-beam .s-beam__name,
+.s-beam .s-beam__plan { position: relative; transition: opacity 0.7s var(--ease); }
+.s-beam .s-beam__card[data-st="back"] .s-beam__row,
+.s-beam .s-beam__card[data-st="back"] .s-beam__name,
+.s-beam .s-beam__card[data-st="back"] .s-beam__plan { opacity: 0.46; }
+.s-beam .s-beam__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: max(10px, 2.1cqw);
+}
+.s-beam .s-beam__mk { display: block; fill: currentColor; }
+.s-beam .s-beam__card .s-beam__mk {
+  width: max(10px, 2.05cqw);
+  height: max(10px, 2.05cqw);
+  color: rgba(240, 236, 229, 0.86);
+}
+.s-beam .s-beam__idx {
+  font: 500 max(7px, 1.18cqw)/1 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.s-beam .s-beam__name {
+  margin-top: 1.55cqw;
+  font-size: var(--fs-name);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.s-beam .s-beam__plan {
+  margin-top: 0.3cqw;
+  font-size: var(--fs-plan);
+  line-height: 1.25;
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-beam .s-beam__who {
+  margin-top: 1.05cqw;
+  font: 400 max(7px, 1.12cqw)/1.2 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--ink3);
+  transition: opacity 0.7s var(--ease);
+}
+.s-beam .s-beam__card[data-st="back"] .s-beam__who { opacity: 0.6; }
+.s-beam .s-beam__meter {
+  position: relative;
+  margin-top: auto;
+  height: max(1px, 0.24cqw);
+  background: rgba(255, 244, 232, 0.085);
+}
+.s-beam .s-beam__fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0.05);
+  background: rgba(240, 236, 229, 0.34);
+  will-change: transform;
+}
+.s-beam .s-beam__fill::before,
+.s-beam .s-beam__fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s var(--ease);
+}
+.s-beam .s-beam__fill::before { background: linear-gradient(90deg, #3442ff, #6a6dff 60%, #9a7cff); }
+.s-beam .s-beam__fill::after { background: linear-gradient(90deg, #9a6630, var(--warm)); }
+.s-beam .s-beam__card[data-st="use"] .s-beam__fill::before { opacity: 1; }
+.s-beam .s-beam__card[data-st="limit"] .s-beam__fill::after { opacity: 1; }
+.s-beam .s-beam__card[data-st="back"] .s-beam__fill::after { opacity: 0.55; }
+.s-beam .s-beam__tip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  margin: -0.55cqw 0 0 -0.55cqw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(236, 238, 255, 1) 0 14%, rgba(120, 130, 255, 0.5) 34%, rgba(120, 130, 255, 0) 70%);
+  opacity: 0;
+  transition: opacity 0.5s var(--ease);
+  will-change: transform;
+}
+.s-beam .s-beam__card[data-st="use"] .s-beam__tip { opacity: 1; }
+.s-beam .s-beam__status {
+  position: relative;
+  margin-top: 1.05cqw;
+  height: max(10px, 1.8cqw);
+  font-size: var(--fs-st);
+  line-height: max(10px, 1.8cqw);
+  letter-spacing: 0.002em;
+}
+.s-beam .s-beam__st {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+  color: var(--ink2);
+  opacity: 0;
+  transform: translateY(0.35em);
+  transition: opacity 0.45s ease, transform 0.7s var(--ease);
+}
+.s-beam .s-beam__st--use { color: #c3c8ff; }
+.s-beam .s-beam__st--use i {
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: #8a93ff;
+  box-shadow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
+}
+.s-beam .s-beam__st--limit,
+.s-beam .s-beam__st--back { color: var(--warm); }
+.s-beam .s-beam__st--ready { color: var(--ink3); }
+.s-beam .s-beam__card[data-st="use"] .s-beam__st--use,
+.s-beam .s-beam__card[data-st="limit"] .s-beam__st--limit,
+.s-beam .s-beam__card[data-st="back"] .s-beam__st--back,
+.s-beam .s-beam__card[data-st="next"] .s-beam__st--next,
+.s-beam .s-beam__card[data-st="ready"] .s-beam__st--ready { opacity: 1; transform: none; }
+.s-beam .s-beam__pct {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  color: var(--ink);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.s-beam .s-beam__card[data-st="use"] .s-beam__pct { opacity: 1; }
+
+.s-beam .s-beam__ring {
+  position: absolute;
+  left: 50cqw;
+  top: 15cqw;
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.5) 55%, transparent 80%);
+  mask: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.5) 55%, transparent 80%);
+}
+.s-beam .s-beam__ring--a {
+  width: 11cqw;
+  height: 11cqw;
+  margin: -5.5cqw 0 0 -5.5cqw;
+  border: 1px solid rgba(255, 242, 228, 0.075);
+}
+.s-beam .s-beam__ring--b {
+  width: 17cqw;
+  height: 17cqw;
+  margin: -8.5cqw 0 0 -8.5cqw;
+  border: 1px dashed rgba(255, 242, 228, 0.06);
+}
+.s-beam .s-beam__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+.s-beam .s-beam__node {
+  position: absolute;
+  left: 50cqw;
+  top: 15cqw;
+  width: 6.8cqw;
+  height: 6.8cqw;
+  margin: -3.4cqw 0 0 -3.4cqw;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 22%, #2c2620 0%, #1a1612 52%, #110e0b 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1cqw 2cqw -0.4cqw rgba(0, 0, 0, 0.8);
+  display: grid;
+  place-items: center;
+  z-index: 4;
+}
+.s-beam .s-beam__node::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(255, 244, 232, 0.3), rgba(160, 168, 255, 0.16) 55%, rgba(122, 84, 246, 0.3));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.s-beam .s-beam__node::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 1px;
+  height: 30%;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  background: linear-gradient(180deg, rgba(255, 248, 238, 0.09), rgba(255, 248, 238, 0));
+}
+.s-beam .s-beam__node .s-beam__mk {
+  width: 2.9cqw;
+  height: 2.9cqw;
+  color: #f3efe8;
+  position: relative;
+}
+.s-beam .s-beam__label {
+  position: absolute;
+  left: 55.2cqw;
+  top: 15cqw;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35cqw;
+  z-index: 4;
+}
+.s-beam .s-beam__agent {
+  font-size: max(9.5px, 1.75cqw);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.s-beam .s-beam__caps {
+  position: relative;
+  width: 30cqw;
+  height: max(10px, 1.8cqw);
+  font-size: max(8px, 1.4cqw);
+  line-height: max(10px, 1.8cqw);
+  color: var(--ink2);
+}
+.s-beam .s-beam__cap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(0.4em);
+  transition: opacity 0.5s ease, transform 0.8s var(--ease);
+}
+.s-beam .s-beam__cap b { font-weight: 500; color: #d9dcff; }
+.s-beam .s-beam__cap.is-on { opacity: 1; transform: none; }
+.s-beam .s-beam__grain {
+  position: absolute;
+  inset: 0;
+  background-size: 64px 64px;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  z-index: 5;
+  pointer-events: none;
+}
+.s-beam .s-beam__vig {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(6, 5, 4, 0) 58%, rgba(6, 5, 4, 0.5) 100%);
+  z-index: 6;
+  pointer-events: none;
+}
+@container (max-width: 520px) {
+  .s-beam .s-beam__who { display: none; }
+  .s-beam .s-beam__card { padding: 1.5cqw 1.45cqw 1.4cqw; }
+  .s-beam .s-beam__name { margin-top: 1.25cqw; }
+  .s-beam .s-beam__status { margin-top: 0.9cqw; }
+}
+</style>
+<div class="s-beam" aria-hidden="true">
+  <div class="s-beam__ground"></div>
+  <div class="s-beam__dots"></div>
+  <div class="s-beam__under s-beam__under--1"></div>
+  <div class="s-beam__under s-beam__under--2"></div>
+  <div class="s-beam__under s-beam__under--3"></div>
+  <div class="s-beam__under s-beam__under--4"></div>
+  <div class="s-beam__card s-beam__card--1" data-st="use">
+    <div class="s-beam__lit"></div>
+    <div class="s-beam__row"><svg class="s-beam__mk" viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg><span class="s-beam__idx">01</span></div>
+    <div class="s-beam__name">Personal</div>
+    <div class="s-beam__plan">ChatGPT Pro</div>
+    <div class="s-beam__who">you@tally.dev</div>
+    <div class="s-beam__meter"><i class="s-beam__fill"></i><i class="s-beam__tip"></i></div>
+    <div class="s-beam__status"><span class="s-beam__st s-beam__st--use"><i></i>In use</span><span class="s-beam__st s-beam__st--limit">Limit reached</span><span class="s-beam__st s-beam__st--back">Back at 14:00</span><span class="s-beam__st s-beam__st--next">Next</span><span class="s-beam__st s-beam__st--ready">Ready</span><span class="s-beam__pct">5%</span></div>
+  </div>
+  <div class="s-beam__card s-beam__card--2" data-st="next">
+    <div class="s-beam__lit"></div>
+    <div class="s-beam__row"><svg class="s-beam__mk" viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg><span class="s-beam__idx">02</span></div>
+    <div class="s-beam__name">Northwind</div>
+    <div class="s-beam__plan">ChatGPT Team</div>
+    <div class="s-beam__who">dana@northwind.io</div>
+    <div class="s-beam__meter"><i class="s-beam__fill"></i><i class="s-beam__tip"></i></div>
+    <div class="s-beam__status"><span class="s-beam__st s-beam__st--use"><i></i>In use</span><span class="s-beam__st s-beam__st--limit">Limit reached</span><span class="s-beam__st s-beam__st--back">Back at 14:00</span><span class="s-beam__st s-beam__st--next">Next</span><span class="s-beam__st s-beam__st--ready">Ready</span><span class="s-beam__pct">5%</span></div>
+  </div>
+  <div class="s-beam__card s-beam__card--3" data-st="ready">
+    <div class="s-beam__lit"></div>
+    <div class="s-beam__row"><svg class="s-beam__mk" viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg><span class="s-beam__idx">03</span></div>
+    <div class="s-beam__name">Client</div>
+    <div class="s-beam__plan">ChatGPT Plus</div>
+    <div class="s-beam__who">~/.codex-client</div>
+    <div class="s-beam__meter"><i class="s-beam__fill"></i><i class="s-beam__tip"></i></div>
+    <div class="s-beam__status"><span class="s-beam__st s-beam__st--use"><i></i>In use</span><span class="s-beam__st s-beam__st--limit">Limit reached</span><span class="s-beam__st s-beam__st--back">Back at 14:00</span><span class="s-beam__st s-beam__st--next">Next</span><span class="s-beam__st s-beam__st--ready">Ready</span><span class="s-beam__pct">5%</span></div>
+  </div>
+  <div class="s-beam__card s-beam__card--4" data-st="back">
+    <div class="s-beam__lit"></div>
+    <div class="s-beam__row"><svg class="s-beam__mk" viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg><span class="s-beam__idx">04</span></div>
+    <div class="s-beam__name">API key</div>
+    <div class="s-beam__plan">Billed per use</div>
+    <div class="s-beam__who">OpenAI ····4f2a</div>
+    <div class="s-beam__meter"><i class="s-beam__fill"></i><i class="s-beam__tip"></i></div>
+    <div class="s-beam__status"><span class="s-beam__st s-beam__st--use"><i></i>In use</span><span class="s-beam__st s-beam__st--limit">Limit reached</span><span class="s-beam__st s-beam__st--back">Back at 14:00</span><span class="s-beam__st s-beam__st--next">Next</span><span class="s-beam__st s-beam__st--ready">Ready</span><span class="s-beam__pct">5%</span></div>
+  </div>
+  <div class="s-beam__ring s-beam__ring--a"></div>
+  <div class="s-beam__ring s-beam__ring--b"></div>
+  <canvas class="s-beam__fx"></canvas>
+  <div class="s-beam__node"><svg class="s-beam__mk" viewBox="0 0 24 24"><path fill-rule="evenodd"/></svg></div>
+  <div class="s-beam__label">
+    <span class="s-beam__agent">Codex</span>
+    <span class="s-beam__caps"><span class="s-beam__cap is-on">Going on with <b>Personal</b></span><span class="s-beam__cap">Going on with <b>Northwind</b></span><span class="s-beam__cap">Going on with <b>Client</b></span><span class="s-beam__cap">Going on with <b>API key</b></span></span>
+  </div>
+  <div class="s-beam__grain"></div>
+  <div class="s-beam__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-beam')) return
+  const MARK = 'M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z'
+  root.querySelectorAll('.s-beam__mk path').forEach((p) => p.setAttribute('d', MARK))
+
+  const cards = Array.from(root.querySelectorAll('.s-beam__card'))
+  const unders = Array.from(root.querySelectorAll('.s-beam__under'))
+  const fills = cards.map((c) => c.querySelector('.s-beam__fill'))
+  const tips = cards.map((c) => c.querySelector('.s-beam__tip'))
+  const meters = cards.map((c) => c.querySelector('.s-beam__meter'))
+  const pcts = cards.map((c) => c.querySelector('.s-beam__pct'))
+  const caps = Array.from(root.querySelectorAll('.s-beam__cap'))
+  const nodeEl = root.querySelector('.s-beam__node')
+  const cv = root.querySelector('.s-beam__fx')
+  const ctx = cv.getContext('2d')
+
+  // Film grain, generated once (no external images).
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    root.querySelector('.s-beam__grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  // Soft light sprites, rendered once.
+  function sprite(r, g, b, core) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(70, 86, 255, 0.18)
+  const SP_VIO = sprite(124, 72, 242, 0.16)
+  const SP_HOT = sprite(236, 238, 255, 0.12)
+  const SP_WARM = sprite(255, 236, 214, 0.1)
+
+  // Beam colour ramp, tail (violet) to head (pale cobalt).
+  const NB = 30
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    let r, g, b
+    if (t < 0.62) {
+      const f = t / 0.62
+      r = 128 + (78 - 128) * f; g = 76 + (96 - 76) * f; b = 244 + (255 - 244) * f
+    } else {
+      const f = (t - 0.62) / 0.38
+      r = 78 + (226 - 78) * f; g = 96 + (230 - 96) * f; b = 255
+    }
+    BEAM_COL.push(`rgb(${r | 0},${g | 0},${b | 0})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const out = (t) => 1 - Math.pow(1 - t, 3)
+
+  // Timeline (seconds within one account's turn).
+  const P = 4.4
+  const HO = 0.9
+  const R0 = 0.95
+  const R1 = 3.6
+  const RESET = 1.6
+  const usage = (ph) => {
+    const x = clamp((ph - R0) / (R1 - R0))
+    return 0.05 + 0.95 * (0.3 * x + 0.7 * x * x * (3 - 2 * x))
+  }
+  function statusOf(j, k, ph) {
+    const rel = (j - k + 4) % 4
+    if (rel === 0) return ph < HO - 0.06 ? 'next' : ph < R1 ? 'use' : 'limit'
+    if (rel === 3) return ph < 0.14 ? 'limit' : 'back'
+    if (rel === 1) return ph < HO - 0.06 ? 'ready' : 'next'
+    return ph < RESET ? 'back' : 'ready'
+  }
+
+  // Geometry, measured on resize.
+  let W = 0, H = 0, U = 1, dpr = 1
+  const rects = cards.map(() => ({ x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 }))
+  const lift = new Float32Array(4)
+  const liftShown = new Float32Array(4).fill(-1)
+  const node = { x: 0, y: 0, r: 0 }
+  const M = 90
+  const routes = cards.map(() => ({ xs: new Float32Array(M), ys: new Float32Array(M), len: 0, grad: null, ang: 0, y0: 0, span: 1, dy: 0 }))
+  let meterW = 0
+
+  function measure() {
+    const rb = root.getBoundingClientRect()
+    W = rb.width; H = rb.height; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    const br = parseFloat(getComputedStyle(cards[0]).borderTopLeftRadius) || 10
+    cards.forEach((c, j) => {
+      const b = c.getBoundingClientRect()
+      const lp = liftShown[j] > 0 ? liftShown[j] * U * 0.55 : 0
+      const R = rects[j]
+      R.x = b.left - rb.left + 0.5
+      R.y = b.top - rb.top + lp + 0.5
+      R.w = b.width - 1
+      R.h = b.height - 1
+      R.r = Math.max(1, br - 0.5)
+      R.per = 2 * (R.w - 2 * R.r) + 2 * (R.h - 2 * R.r) + 2 * Math.PI * R.r
+    })
+    const nb = nodeEl.getBoundingClientRect()
+    node.x = nb.left - rb.left + nb.width / 2
+    node.y = nb.top - rb.top + nb.height / 2
+    node.r = nb.width / 2
+    meterW = meters[0].getBoundingClientRect().width
+    const tmpX = new Float32Array(65), tmpY = new Float32Array(65), tmpL = new Float32Array(65)
+    routes.forEach((rt, j) => {
+      const ang = Math.PI / 2 + (1.5 - j) * 0.24
+      rt.ang = ang
+      const x0 = node.x + Math.cos(ang) * (node.r + 0.5)
+      const y0 = node.y + Math.sin(ang) * (node.r + 0.5)
+      const R = rects[j]
+      const x3 = R.x + R.w / 2
+      const y3 = R.y - 0.5
+      const dy = y3 - y0
+      const x1 = x0 + Math.cos(ang) * dy * 0.2, y1 = y0 + dy * 0.55
+      const x2 = x3, y2 = y3 - dy * 0.55
+      let L = 0
+      for (let i = 0; i <= 64; i++) {
+        const t = i / 64, m = 1 - t
+        const a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t
+        tmpX[i] = a * x0 + b * x1 + c * x2 + d * x3
+        tmpY[i] = a * y0 + b * y1 + c * y2 + d * y3
+        if (i) L += Math.hypot(tmpX[i] - tmpX[i - 1], tmpY[i] - tmpY[i - 1])
+        tmpL[i] = L
+      }
+      rt.len = L
+      let s = 0
+      for (let i = 0; i < M; i++) {
+        const want = (i / (M - 1)) * L
+        while (s < 63 && tmpL[s + 1] < want) s++
+        const span = tmpL[s + 1] - tmpL[s] || 1
+        const f = Math.min(1, Math.max(0, (want - tmpL[s]) / span))
+        rt.xs[i] = tmpX[s] + (tmpX[s + 1] - tmpX[s]) * f
+        rt.ys[i] = tmpY[s] + (tmpY[s + 1] - tmpY[s]) * f
+      }
+      const gr = ctx.createLinearGradient(x0, y0, x3, y3)
+      gr.addColorStop(0, 'rgb(176,184,255)')
+      gr.addColorStop(0.5, 'rgb(112,122,255)')
+      gr.addColorStop(1, 'rgb(128,96,250)')
+      rt.grad = gr
+      rt.y0 = y0
+      rt.span = y3 - y0 || 1
+    })
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  function rrPoint(R, s) {
+    const { x, y, w, h, r } = R
+    s %= R.per
+    if (s < 0) s += R.per
+    const q = (Math.PI * r) / 2
+    let L = w / 2 - r
+    if (s < L) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= L
+    if (s < q) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= L
+    if (s < q) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = w - 2 * r
+    if (s < L) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= L
+    if (s < q) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= L
+    if (s < q) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q
+    PT[0] = x + r + s; PT[1] = y
+  }
+  // Route y with the card's lift spread along its length, so the line always meets the card.
+  const ry = (rt, y) => y + (rt.dy * (y - rt.y0)) / rt.span
+  function routePoint(rt, u) {
+    const f = clamp(u) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = rt.xs[i] + (rt.xs[i + 1] - rt.xs[i]) * t
+    PT[1] = ry(rt, rt.ys[i] + (rt.ys[i + 1] - rt.ys[i]) * t)
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+
+  // A comet of light along the card border; head at perimeter distance s.
+  function beam(R, s, len, a) {
+    if (a <= 0.004 || len < 1) return
+    const seg = len / NB
+    ctx.lineWidth = 1.5
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const s0 = s - len + i * seg
+      rrPoint(R, s0)
+      const ax = PT[0], ay = PT[1]
+      rrPoint(R, s0 + seg + 0.35)
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = 'lighter'
+    for (let i = 0; i < 12; i++) {
+      const t = 0.2 + (i / 11) * 0.8
+      rrPoint(R, s - len * (1 - t))
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 2, a * 0.2 * t * t)
+    }
+    rrPoint(R, s)
+    glow(SP_VIO, PT[0], PT[1], U * 6, a * 0.16)
+    glow(SP_COB, PT[0], PT[1], U * 3.2, a * 0.42)
+    glow(SP_HOT, PT[0], PT[1], U * 0.9, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  // Lit part of a route between u0 (node side) and u1.
+  function litRoute(rt, u0, u1, a) {
+    if (a <= 0.004 || u1 - u0 < 0.002) return
+    const i0 = Math.ceil(u0 * (M - 1)), i1 = Math.floor(u1 * (M - 1))
+    ctx.beginPath()
+    routePoint(rt, u0)
+    ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], ry(rt, rt.ys[i]))
+    routePoint(rt, u1)
+    ctx.lineTo(PT[0], PT[1])
+    ctx.strokeStyle = rt.grad
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.globalAlpha = a * 0.13
+    ctx.lineWidth = Math.max(3, U * 0.6)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * 0.92
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+
+  function pulse(rt, q, a) {
+    if (a <= 0.004) return
+    const tail = 0.09
+    ctx.lineWidth = 1.6
+    for (let i = 0; i < 10; i++) {
+      const ua = q + tail * (1 - i / 10), ub = q + tail * (1 - (i + 1) / 10)
+      routePoint(rt, ua)
+      const ax = PT[0], ay = PT[1]
+      routePoint(rt, ub)
+      ctx.globalAlpha = a * ((i + 1) / 10) * ((i + 1) / 10)
+      ctx.strokeStyle = '#dfe2ff'
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = 'lighter'
+    routePoint(rt, q)
+    glow(SP_COB, PT[0], PT[1], U * 2.4, a * 0.4)
+    glow(SP_HOT, PT[0], PT[1], U * 0.7, a * 0.9)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  const PULSES = new Float32Array(6)
+  let shownK = -1
+  const shownSt = ['', '', '', '']
+  const shownFill = new Float32Array(4).fill(-1)
+  const shownTip = new Float32Array(4).fill(-1)
+  const shownPct = [-1, -1, -1, -1]
+  const shownUnder = new Float32Array(4).fill(-1)
+
+  function render(T) {
+    if (!W) return
+    const k = Math.floor(T / P) % 4
+    const ph = T - Math.floor(T / P) * P
+    const prev = (k + 3) % 4
+    const limitAmt = io(clamp((ph - R1) / 0.4))
+
+    // DOM state
+    for (let j = 0; j < 4; j++) {
+      const st = statusOf(j, k, ph)
+      if (st !== shownSt[j]) { cards[j].dataset.st = st; shownSt[j] = st }
+      const rel = (j - k + 4) % 4
+      let v
+      if (rel === 0) v = usage(ph)
+      else if (rel === 3) v = 1
+      else if (rel === 2) v = ph < RESET ? 1 : 1 - 0.95 * io(clamp((ph - RESET) / 0.8))
+      else v = 0.05
+      if (Math.abs(v - shownFill[j]) > 0.0004) { fills[j].style.transform = `scaleX(${v.toFixed(4)})`; shownFill[j] = v }
+      if (rel === 0 && Math.abs(v - shownTip[j]) > 0.0004) { tips[j].style.transform = `translate3d(${(v * meterW).toFixed(2)}px,0,0)`; shownTip[j] = v }
+      if (rel === 0) {
+        const p = Math.round(v * 100)
+        if (p !== shownPct[j]) { pcts[j].textContent = p + '%'; shownPct[j] = p }
+      }
+      let lf = 0, ug = 0
+      if (rel === 0) { lf = out(clamp((ph - HO + 0.2) / 0.8)); ug = io(clamp((ph - HO + 0.1) / 0.9)) * (1 - 0.6 * limitAmt) }
+      else if (rel === 3) { const d = 1 - io(clamp(ph / 0.7)); lf = d; ug = 0.4 * d }
+      lift[j] = lf
+      if (Math.abs(lf - liftShown[j]) > 0.002) {
+        cards[j].style.transform = lf > 0.002 ? `translate3d(0,${(-lf * U * 0.55).toFixed(2)}px,0)` : ''
+        liftShown[j] = lf
+      }
+      if (Math.abs(ug - shownUnder[j]) > 0.004) { unders[j].style.opacity = ug.toFixed(3); shownUnder[j] = ug }
+    }
+    const capK = ph < HO * 0.48 ? prev : k
+    if (capK !== shownK) { caps.forEach((c, i) => c.classList.toggle('is-on', i === capK)); shownK = capK }
+
+    // Light
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+
+    // Dormant routes and their ports.
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255,242,228,0.075)'
+    for (let j = 0; j < 4; j++) {
+      const rt = routes[j]
+      rt.dy = -lift[j] * U * 0.55
+      ctx.beginPath()
+      ctx.moveTo(rt.xs[0], rt.ys[0])
+      for (let i = 1; i < M; i++) ctx.lineTo(rt.xs[i], ry(rt, rt.ys[i]))
+      ctx.stroke()
+    }
+    ctx.fillStyle = 'rgba(255,242,228,0.22)'
+    for (let j = 0; j < 4; j++) {
+      const rt = routes[j]
+      ctx.beginPath()
+      ctx.arc(rt.xs[M - 1], ry(rt, rt.ys[M - 1]), Math.max(1.2, U * 0.22), 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // Handover: one packet of light runs up the old line, round the node's rim, and down the new line.
+    const rtK = routes[k], rtP = routes[prev]
+    const L1 = rtP.len, L2 = node.r * Math.abs(rtK.ang - rtP.ang) + 0.01, L3 = rtK.len
+    const sPk = (ph < HO ? iosine(ph / HO) : 1) * (L1 + L2 + L3)
+    const routeA = 1 - 0.45 * limitAmt
+    const atRim = Math.exp(-Math.pow((sPk - L1 - L2 / 2) / ((L1 + L2 + L3) * 0.16), 2)) * (ph < HO ? 1 : 0)
+
+    // Node halo, which brightens as pulses and the packet arrive.
+    let bump = 0
+    const pEnv = clamp((ph - HO - 0.15) / 0.5) * (1 - clamp((ph - (R1 - 0.15)) / 0.3))
+    const NP = 3
+    const pulses = PULSES
+    for (let i = 0; i < NP; i++) {
+      const loc = ((((ph - HO) * 0.82 + i / NP) % 1) + 1) % 1
+      pulses[i * 2] = 1 - iosine(loc)
+      pulses[i * 2 + 1] = pEnv * Math.pow(Math.sin(Math.PI * loc), 0.6)
+      bump += pEnv * Math.exp(-(1 - loc) * 9)
+    }
+    const haloA = 0.2 + 0.08 * (1 - limitAmt) + 0.22 * bump + 0.3 * atRim
+    ctx.globalCompositeOperation = 'lighter'
+    glow(SP_VIO, node.x, node.y, U * 13, haloA * 0.45)
+    glow(SP_COB, node.x, node.y, U * 7.5, haloA * 0.9)
+    ctx.globalCompositeOperation = 'source-over'
+
+    if (ph < HO + 0.3) {
+      const total = L1 + L2 + L3
+      // Old line, draining upward behind the packet.
+      if (sPk < L1) litRoute(rtP, 0, 1 - sPk / L1, 0.55)
+      // Rim arc, lit behind the packet, fading once it has left.
+      if (sPk > L1) {
+        const a0 = rtP.ang, a1 = rtK.ang
+        const ae = a0 + (a1 - a0) * clamp((sPk - L1) / L2)
+        const fade = 1 - clamp((sPk - L1 - L2) / (L3 * 0.35))
+        if (fade > 0.01) {
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, node.r + 0.5, Math.min(a0, ae), Math.max(a0, ae))
+          ctx.strokeStyle = '#c9ceff'
+          ctx.lineWidth = 1.4
+          ctx.globalAlpha = 0.9 * fade
+          ctx.stroke()
+        }
+      }
+      // New line, lit down to the packet.
+      if (sPk > L1 + L2) litRoute(rtK, 0, Math.min(1, (sPk - L1 - L2) / L3), routeA)
+      // The packet itself.
+      if (ph < HO) {
+        if (sPk < L1) routePoint(rtP, 1 - sPk / L1)
+        else if (sPk < L1 + L2) {
+          const a = rtP.ang + (rtK.ang - rtP.ang) * ((sPk - L1) / L2)
+          PT[0] = node.x + Math.cos(a) * (node.r + 0.5)
+          PT[1] = node.y + Math.sin(a) * (node.r + 0.5)
+        } else routePoint(rtK, (sPk - L1 - L2) / L3)
+        const env = clamp(ph / 0.12) * (0.75 + 0.25 * Math.sin(Math.PI * (sPk / total)))
+        ctx.globalCompositeOperation = 'lighter'
+        glow(SP_VIO, PT[0], PT[1], U * 6, 0.2 * env)
+        glow(SP_COB, PT[0], PT[1], U * 3.8, 0.55 * env)
+        glow(SP_HOT, PT[0], PT[1], U * 1.05, env)
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    } else litRoute(rtK, 0, 1, routeA)
+
+    // Contact flash where the line meets the card, then a steady glow while in use.
+    const flash = ph > HO - 0.15 ? Math.exp(-Math.pow((ph - HO) / 0.14, 2)) : 0
+    ctx.globalCompositeOperation = 'lighter'
+    const cx = rtK.xs[M - 1], cy = ry(rtK, rtK.ys[M - 1])
+    if (flash > 0.01) {
+      glow(SP_COB, cx, cy, U * 5, flash * 0.5)
+      glow(SP_HOT, cx, cy, U * 1.3, flash)
+    }
+    if (ph >= HO - 0.05) glow(SP_COB, cx, cy, U * 1.6, 0.35 * routeA * clamp((ph - HO + 0.05) / 0.2))
+    ctx.globalCompositeOperation = 'source-over'
+
+    for (let i = 0; i < NP; i++) pulse(rtK, pulses[i * 2], pulses[i * 2 + 1])
+
+    // Border beams. The beam makes one lap per turn: it leaves the top port when the line arrives,
+    // and at the handover it drains back into that port, becoming the packet that runs up to the node.
+    const tauK = ph - HO
+    if (tauK > 0) {
+      const R = rects[k]
+      const v = R.per / (P - HO)
+      const lenFull = Math.min(R.per * 0.3, U * 21)
+      const sHead = v * tauK
+      const len = Math.min(lenFull, sHead * 0.9)
+      const a = clamp(tauK / 0.15) * (1 - 0.4 * limitAmt)
+      const ly = -lift[k] * U * 0.55
+      R.y += ly
+      beam(R, sHead, len, a)
+      R.y -= ly
+    }
+    if (ph < 0.6) {
+      const R = rects[prev]
+      const v = R.per / (P - HO)
+      const lenFull = Math.min(R.per * 0.3, U * 21)
+      const len = lenFull - v * ph * 1.6
+      const ly = -lift[prev] * U * 0.55
+      if (len > 1) {
+        R.y += ly
+        beam(R, R.per, len, 0.6 * (len / lenFull) + 0.0)
+        R.y -= ly
+      }
+    }
+    ctx.globalAlpha = 1
+  }
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let T = 1.3
+  let raf = 0, last = 0, onScreen = false, ready = false
+  function stillT() {
+    let lo = R0, hi = R1
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (usage(m) < 0.62) lo = m; else hi = m }
+    return P + (lo + hi) / 2
+  }
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    T = (T + dt) % (P * 4)
+    render(T)
+    raf = requestAnimationFrame(frame)
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) render(stillT())
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) render(mq.matches ? stillT() : T)
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>

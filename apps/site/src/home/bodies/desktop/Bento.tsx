@@ -7,7 +7,10 @@ import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
 import s from './Bento.module.css'
-import { Accounts, Automations, Conflicts, type Skin, Workspaces, Worktrees } from './Drawn'
+import { Automations, Conflicts, Workspaces, Worktrees } from './Drawn'
+import { Fragment } from './Fragment'
+import darkAccounts from './styled/d-accounts.html?raw'
+import glossyAccounts from './styled/g-accounts.html?raw'
 
 /*
  * What keeps you in flow: eight tiles on a six-column grid. Three hold a
@@ -79,9 +82,11 @@ interface Tile {
   lead: string
   /** How many of the six columns it takes. */
   span: 2 | 3 | 4
-  piece: (finish: Skin) => ReactNode
+  piece: (style: Style) => ReactNode
   /** Drawn, not a piece of the app: it stands whole in the middle of its tile. */
   drawn?: boolean
+  /** Drawn in the style being compared: its tile takes that style's ground. */
+  styled?: boolean
   /** A small piece: whole in the middle of its tile, not running off its foot. */
   small?: boolean
 }
@@ -91,13 +96,14 @@ const TILES: Tile[] = [
     id: 'accounts',
     span: 4,
     drawn: true,
+    styled: true,
     title: (
       <>
         Every plan you have. <b>One agent.</b>
       </>
     ),
     lead: 'Sign Codex or Claude Code in once for each plan you pay for: yours, work’s, a client’s, a key. When one runs out, the work goes on with the next.',
-    piece: (finish) => <Accounts skin={finish} />,
+    piece: (style) => <Fragment key={style} source={style === 'dark' ? darkAccounts : glossyAccounts} className={s.stage} />,
   },
   {
     id: 'away',
@@ -134,7 +140,7 @@ const TILES: Tile[] = [
       </>
     ),
     lead: 'Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.',
-    piece: (finish) => <Automations skin={finish} />,
+    piece: () => <Automations skin="ink" />,
   },
   {
     id: 'home',
@@ -180,7 +186,7 @@ const TILES: Tile[] = [
       </>
     ),
     lead: 'When a task’s change and the default branch disagree, Althar asks its lead to settle it. Only one it can’t settle comes to you.',
-    piece: (finish) => <Conflicts skin={finish} />,
+    piece: () => <Conflicts skin="ink" />,
   },
   {
     id: 'change',
@@ -214,7 +220,7 @@ const TILES: Tile[] = [
       </>
     ),
     lead: 'Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.',
-    piece: (finish) => <Worktrees skin={finish} />,
+    piece: () => <Worktrees skin="ink" />,
   },
   {
     id: 'workspaces',
@@ -226,27 +232,32 @@ const TILES: Tile[] = [
       </>
     ),
     lead: 'Connect each Linear workspace you work in, one per company or client, and bind each project to its own. Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.',
-    piece: (finish) => <Workspaces skin={finish} />,
+    piece: () => <Workspaces skin="ink" />,
   },
 ]
 
 const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4 } as const
 
-// While the two finishes are compared: engraved, or glass with ?finish=glass. Engraved when prerendered.
-const finishAsked = (): Skin => (new URLSearchParams(window.location.search).get('finish') === 'glass' ? 'glass' : 'ink')
+/** The two drawing styles being compared: a glossy object, or a dark interface with ?style=dark. Glossy when prerendered. */
+type Style = 'glossy' | 'dark'
+const styleAsked = (): Style => (new URLSearchParams(window.location.search).get('style') === 'dark' ? 'dark' : 'glossy')
 const unchanging = () => none
 
 export function Bento() {
-  const finish = useSyncExternalStore(unchanging, finishAsked, (): Skin => 'ink')
+  const style = useSyncExternalStore(unchanging, styleAsked, (): Style => 'glossy')
   return (
     <ul className={s.bento}>
       {TILES.map((tile) => (
-        <li key={tile.id} className={cx(s.tile, SPAN[tile.span], tile.drawn && s.drawn, tile.small && s.small)}>
+        <li
+          key={tile.id}
+          className={cx(s.tile, SPAN[tile.span], tile.drawn && s.drawn, tile.small && s.small)}
+          data-style={(tile.styled && style) || undefined}
+        >
           <div className={s.head}>
             <h3 className={s.title}>{tile.title}</h3>
             <p className={s.lead}>{tile.lead}</p>
           </div>
-          <div className={s.pic}>{tile.piece(finish)}</div>
+          <div className={s.pic}>{tile.piece(style)}</div>
         </li>
       ))}
     </ul>
