@@ -3,9 +3,8 @@ import { testing } from '@althar/testing/vitest'
 
 export default defineConfig({
   test: {
-    ...testing,
+    ...testing('medium'),
     include: ['tests/**/*.test.ts'],
     environment: 'node',
-    testTimeout: 30_000,
   },
 })

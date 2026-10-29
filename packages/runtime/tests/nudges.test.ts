@@ -77,7 +77,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 1,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(nudged(events), [['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.']])
       // A step that never reports needs the person.
@@ -85,7 +84,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 2,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(nudged(events)[1], ['Quietly', 'Needs you: Implement is stuck'])
       // Each by what it is about, so the app tells only what the person asked to be told.
@@ -106,7 +104,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 1,
-        Duration.seconds(10),
       )
       assert.strictEqual(counts(events)[0], 0)
       assert.isNotEmpty(ready.threadId)
@@ -122,7 +119,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 1,
-        Duration.seconds(20),
       )
       yield* until(
         Effect.sync(() => counts(events)),
@@ -135,14 +131,12 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 0,
-        Duration.seconds(20),
       )
       // Then a change that is ready: said, and counted alone.
       yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 2,
-        Duration.seconds(20),
       )
       yield* until(
         Effect.sync(() => counts(events)),
@@ -160,7 +154,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 1,
-        Duration.seconds(20),
       )
       const sessions = yield* Sessions
       const body = 'And log each retry. [lead:wait]'
@@ -174,12 +167,10 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 0,
-        Duration.seconds(10),
       )
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 2,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.'])
       yield* stop
@@ -193,7 +184,6 @@ describe('nudges', () => {
         until(
           Effect.sync(() => busy(events)),
           (seen) => seen.at(-1) === want,
-          Duration.seconds(20),
         )
       // Nothing runs before the first task.
       yield* last(false)
@@ -208,7 +198,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.some(([title]) => title === 'Quietly'),
-        Duration.seconds(20),
       )
       yield* last(false)
       // Abandoned, still nothing.
@@ -227,7 +216,6 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => kinds(events)),
         (said) => said.includes('ready'),
-        Duration.seconds(20),
       )
       yield* last(false)
       const body = 'And log each retry. [lead:wait]'
@@ -271,13 +259,11 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => busy(events)),
         (seen) => seen.at(-1) === true,
-        Duration.seconds(10),
       )
       yield* plans.hold(planId, instance.personId)
       yield* until(
         Effect.sync(() => busy(events)),
         (seen) => seen.at(-1) === false,
-        Duration.seconds(10),
       )
       yield* stop
     }).pipe(Effect.provide(withNudges())),
@@ -292,7 +278,6 @@ describe('nudges', () => {
         yield* until(
           Effect.sync(() => nudged(events)),
           (said) => said.length === 1,
-          Duration.seconds(20),
         )
         yield* stop
       }).pipe(Effect.provide(withNudges(database)))
@@ -301,7 +286,6 @@ describe('nudges', () => {
         yield* until(
           Effect.sync(() => counts(events)),
           (seen) => seen.includes(1),
-          Duration.seconds(10),
         )
         yield* Effect.sleep(Duration.millis(500))
         assert.deepStrictEqual(nudged(events), [])

@@ -3,7 +3,7 @@ import { testing } from '@althar/testing/vitest'
 
 export default defineConfig({
   test: {
-    ...testing,
+    ...testing('small'),
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     coverage: {

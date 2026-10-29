@@ -11,6 +11,7 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
@@ -52,16 +53,6 @@ const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly ed
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     return { client, grant }
-  })
-
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) => thread.session !== null && !thread.session.turnRunning
@@ -198,9 +189,9 @@ describe('the coordinator’s question, through the API', () => {
         const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
         // Its first turn reads its brief; the next asks.
         yield* client.Send({ commandId: commandId(), threadId, body: 'Hello.', disposition: 'after_current' })
-        yield* eventually(client.GetCoordinator({ projectId: project.id }), idle)
+        yield* until(client.GetCoordinator({ projectId: project.id }), idle)
         yield* client.Send({ commandId: commandId(), threadId, body: scenarios.questions, disposition: 'after_current' })
-        const asking = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const asking = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'open'),
         )
         const question = asking.items.find((item) => item.kind === 'question')
@@ -210,7 +201,7 @@ describe('the coordinator’s question, through the API', () => {
           attentionId: question?.kind === 'question' ? question.content.attentionId : '',
           answers: Object.fromEntries(fields.map((field) => [field.id, { values: [field.options[0]?.value ?? ''] }])),
         })
-        const answered = yield* eventually(
+        const answered = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => idle(snapshot) && snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'answered'),
         )

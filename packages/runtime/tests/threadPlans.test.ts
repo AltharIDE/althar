@@ -101,82 +101,78 @@ const scansOf = (text: string, params: ReadonlyArray<unknown>, times: number) =>
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
 describe('opening a thread', () => {
-  it.live(
-    'finds every row it reads by an index, in a task with a run and a long thread, and in the coordinator',
-    () => {
-      const { working, bare } = hosted()
-      const github = makeFakeService({ pushUrl: () => bare })
-      github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
-      return Effect.gen(function* () {
-        const instance = yield* Instance
-        const projects = yield* Projects
-        const queries = yield* Queries
-        const sql = yield* SqlClient.SqlClient
-        yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
-        // A task the coordinator plans and runs to its pull request, so its thread has a graph of steps.
-        const coordinator = yield* Coordinator
-        const coordinatorThread = yield* coordinator.thread(project.projectId)
-        const body = 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]'
-        yield* coordinator.say({
-          envelope: yield* Runtime.envelope('thread.send', { body }),
-          threadId: coordinatorThread,
-          body,
-          disposition: 'after_current',
-        })
-        const cards = Effect.map(Effect.orDie(queries.coordinator(project.projectId)), (snapshot) =>
-          snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
-        )
-        const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(30))
-        const threadId = (ready ?? assert.fail('no card')).threadId
-        // A second card, so the coordinator reads a card more than once.
-        yield* projects.createTask({
-          envelope: yield* Runtime.envelope('task.create', {}),
-          projectId: project.projectId,
-          title: 'Answer the review',
-        })
-        // More items than a page holds, after the round's start, so the page reaches back to it.
-        yield* sql`
+  it.live('finds every row it reads by an index, in a task with a run and a long thread, and in the coordinator', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const projects = yield* Projects
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      // A task the coordinator plans and runs to its pull request, so its thread has a graph of steps.
+      const coordinator = yield* Coordinator
+      const coordinatorThread = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]'
+      yield* coordinator.say({
+        envelope: yield* Runtime.envelope('thread.send', { body }),
+        threadId: coordinatorThread,
+        body,
+        disposition: 'after_current',
+      })
+      const cards = Effect.map(Effect.orDie(queries.coordinator(project.projectId)), (snapshot) =>
+        snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
+      )
+      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null)
+      const threadId = (ready ?? assert.fail('no card')).threadId
+      // A second card, so the coordinator reads a card more than once.
+      yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Answer the review',
+      })
+      // More items than a page holds, after the round's start, so the page reaches back to it.
+      yield* sql`
           WITH RECURSIVE n(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM n WHERE k < 150)
           INSERT INTO thread_items (id, project_id, thread_id, sequence, kind, content, created_at)
           SELECT 'item_' || lower(hex(randomblob(16))), project_id, thread_id, sequence + k, 'agent_message', '{"text":"More."}', created_at
           FROM n, (SELECT * FROM thread_items WHERE thread_id = ${threadId} ORDER BY sequence DESC LIMIT 1)`
 
-        const reads = new Map<string, { readonly params: ReadonlyArray<unknown>; times: number }>()
-        const opens: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
-          queries.thread(threadId, { limit: 0 }),
-          queries.thread(threadId, {}),
-          queries.coordinator(project.projectId),
-        ]
-        for (const read of opens)
-          for (const [text, run] of yield* statementsOf(read)) {
-            const known = reads.get(text)
-            if (known === undefined) reads.set(text, run)
-            else known.times = Math.max(known.times, run.times)
-          }
-        // The parts of the read that only a task with a run, and a page with earlier items, reach.
-        const texts = [...reads.keys()].join('\n')
-        assert.include(texts, 'turn_deliveries')
-        assert.include(texts, 'execution_graph_revisions')
-        assert.match(texts, /i\.sequence <= \?/)
-        assert.isTrue([...reads.values()].some((run) => run.times > 1))
-
-        const scans = []
-        for (const [text, { params, times }] of reads) {
-          const found = yield* scansOf(text, params, times)
-          if (found.length > 0) scans.push({ scans: found, times, query: text.replace(/\s+/g, ' ').slice(0, 300) })
+      const reads = new Map<string, { readonly params: ReadonlyArray<unknown>; times: number }>()
+      const opens: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+        queries.thread(threadId, { limit: 0 }),
+        queries.thread(threadId, {}),
+        queries.coordinator(project.projectId),
+      ]
+      for (const read of opens)
+        for (const [text, run] of yield* statementsOf(read)) {
+          const known = reads.get(text)
+          if (known === undefined) reads.set(text, run)
+          else known.times = Math.max(known.times, run.times)
         }
-        assert.deepStrictEqual(scans, [])
-      }).pipe(
-        Effect.provide(
-          Queries.layer.pipe(
-            Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
-          ),
+      // The parts of the read that only a task with a run, and a page with earlier items, reach.
+      const texts = [...reads.keys()].join('\n')
+      assert.include(texts, 'turn_deliveries')
+      assert.include(texts, 'execution_graph_revisions')
+      assert.match(texts, /i\.sequence <= \?/)
+      assert.isTrue([...reads.values()].some((run) => run.times > 1))
+
+      const scans = []
+      for (const [text, { params, times }] of reads) {
+        const found = yield* scansOf(text, params, times)
+        if (found.length > 0) scans.push({ scans: found, times, query: text.replace(/\s+/g, ' ').slice(0, 300) })
+      }
+      assert.deepStrictEqual(scans, [])
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
         ),
-      )
-    },
-    60_000,
-  )
+      ),
+    )
+  })
 })

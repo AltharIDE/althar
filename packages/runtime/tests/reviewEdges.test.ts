@@ -58,7 +58,6 @@ const reviewerOf = (taskId: string) =>
         SELECT t.id AS thread_id, s.id AS session_id FROM threads t JOIN provider_sessions s ON s.thread_id = t.id
         WHERE t.task_id = ${taskId} AND t.kind = 'step' AND t.node_key = 'review' AND s.state = 'active'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     return found ?? { threadId: '', sessionId: '' }
   })
@@ -71,7 +70,6 @@ const stuckCall = (taskId: string) =>
       sql<{ id: string; payload: string }>`
         SELECT id, payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     return {
       id: call?.id ?? '',
@@ -94,7 +92,6 @@ describe('a reviewer whose turn does nothing', () => {
       yield* until(
         Effect.map(phaseOf(task.projectId, task.taskId), (phase) => (phase === 'ready' ? [phase] : [])),
         (rows) => rows.length === 1,
-        Duration.seconds(20),
       )
       assert.include(
         (yield* notices(reviewer.threadId)).map((notice) => notice.title),

@@ -14,10 +14,11 @@ export default defineConfig(({ mode }) => ({
   },
   server: { port: 5310, strictPort: true },
   test: {
-    ...testing,
+    ...testing('small'),
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
-    setupFiles: ['tests/setup.ts'],
+    // The shared setup (@althar/testing), then this package's own.
+    setupFiles: ['@althar/testing/setup', 'tests/setup.ts'],
     css: { modules: { classNameStrategy: 'non-scoped' } },
     coverage: {
       // Stories and the workbench are examples, exercised by rendering every story; the components carry the gate.

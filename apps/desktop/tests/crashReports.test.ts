@@ -159,7 +159,7 @@ describe('the switch', () => {
     await broken.stop()
     // Unmasked, it never goes.
     expect(fetch).not.toHaveBeenCalled()
-  }, 10_000)
+  })
 })
 
 describe('what a report carries', () => {

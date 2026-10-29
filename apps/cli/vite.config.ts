@@ -15,7 +15,7 @@ export default defineConfig({
   },
   ssr: { noExternal: true, target: 'node' },
   test: {
-    ...testing,
+    ...testing('medium'),
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     coverage: {

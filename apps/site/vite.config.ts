@@ -54,7 +54,7 @@ export default defineConfig(({ mode }) => ({
   /* The manifest tells the prerender which stylesheets a lazy page needs up front. */
   build: { target: 'baseline-widely-available', manifest: true },
   test: {
-    ...testing,
+    ...testing('small'),
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'node',
   },

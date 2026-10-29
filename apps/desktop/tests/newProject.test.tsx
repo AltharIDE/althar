@@ -84,70 +84,59 @@ const opened = (overrides: Parameters<typeof fakeClient>[0] = {}, host: Paramete
 
 const folders = () => screen.getByRole('list', { name: 'Its folders' })
 
-/** A flow of many presses and reads: more than the usual five seconds where the machine is busy. */
-const LONG_FLOW = 15_000
-
 describe('a new project', () => {
-  it(
-    'is named first, which offers what this Mac has named like it, each added in one press as it is read',
-    async () => {
-      const { host } = opened()
-      const name = screen.getByRole('textbox', { name: 'Name' })
-      await waitFor(() => expect(document.activeElement).toBe(name))
-      // Unnamed, no mark yet, and what was found is offered as it is.
-      expect(await screen.findByRole('heading', { name: 'On this Mac' })).toBeTruthy()
-      await userEvent.type(name, 'Northwind')
-      expect(screen.getByRole('heading', { name: 'On this Mac, named like Northwind' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: /Create Northwind/ })).toBeTruthy()
+  it('is named first, which offers what this Mac has named like it, each added in one press as it is read', async () => {
+    const { host } = opened()
+    const name = screen.getByRole('textbox', { name: 'Name' })
+    await waitFor(() => expect(document.activeElement).toBe(name))
+    // Unnamed, no mark yet, and what was found is offered as it is.
+    expect(await screen.findByRole('heading', { name: 'On this Mac' })).toBeTruthy()
+    await userEvent.type(name, 'Northwind')
+    expect(screen.getByRole('heading', { name: 'On this Mac, named like Northwind' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Create Northwind/ })).toBeTruthy()
 
-      await userEvent.click(screen.getByRole('button', { name: 'Add app' }))
-      expect(host.grantFound).toHaveBeenCalledWith('f-app')
-      await waitFor(() => expect(within(folders()).getByText('GitHub ·')).toBeTruthy())
-      expect(within(folders()).getByText('northwind-co/app')).toBeTruthy()
-      expect(within(folders()).getByText('~/code/northwind/app')).toBeTruthy()
-      // Added, it isn't offered again; it is what the project is made of.
-      expect(screen.queryByRole('button', { name: 'Add app' })).toBeNull()
-      expect(screen.getByText('Made of')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Add app' }))
+    expect(host.grantFound).toHaveBeenCalledWith('f-app')
+    await waitFor(() => expect(within(folders()).getByText('GitHub ·')).toBeTruthy())
+    expect(within(folders()).getByText('northwind-co/app')).toBeTruthy()
+    expect(within(folders()).getByText('~/code/northwind/app')).toBeTruthy()
+    // Added, it isn't offered again; it is what the project is made of.
+    expect(screen.queryByRole('button', { name: 'Add app' })).toBeNull()
+    expect(screen.getByText('Made of')).toBeTruthy()
 
-      // The rest, behind a link: one in another project says so in place of Add.
-      await userEvent.click(screen.getByRole('button', { name: '2 more on this Mac' }))
-      expect(screen.getByText('in meridian')).toBeTruthy()
-      expect(screen.queryByRole('button', { name: 'Add meridian-api' })).toBeNull()
-      expect(screen.getByRole('button', { name: 'Add dotfiles' })).toBeTruthy()
-    },
-    LONG_FLOW,
-  )
+    // The rest, behind a link: one in another project says so in place of Add.
+    await userEvent.click(screen.getByRole('button', { name: '2 more on this Mac' }))
+    expect(screen.getByText('in meridian')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add meridian-api' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add dotfiles' })).toBeTruthy()
+  })
 
-  it(
-    'says where the code is hosted: connected as whom, or not, with the way to connect',
-    async () => {
-      const { host } = opened(
-        { listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) },
-        { pickFolders: vi.fn(async () => ['grant_northwind']) },
-      )
-      await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
-      expect(host.pickFolders).toHaveBeenCalled()
-      // A folder of several repositories adds each.
-      await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(2))
-      const read = screen.getByRole('region', { name: 'What Althar read' })
-      expect(read.textContent).toContain('Code on GitHub, northwind-co. Connected as you.')
-      expect(read.textContent).toContain(
-        'northwind/ops is on GitLab, which isn’t connected. Its tasks push their branch; connected, they open merge requests.',
-      )
-      // GitLab's own walk in, over the page.
-      await userEvent.click(within(read).getByRole('button', { name: 'Connect GitLab' }))
-      const dialog = await screen.findByRole('dialog', { name: 'GitLab' })
-      expect(await within(dialog).findByRole('heading', { name: 'Connect GitLab' })).toBeTruthy()
-      // Escape closes what is open over the page, not the page.
-      await userEvent.keyboard('{Escape}')
-      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-      expect(dialog).toBeTruthy()
-      // Leaving one out takes what it said with it.
-      await userEvent.click(within(folders()).getByRole('button', { name: 'Leave out ops' }))
-      await waitFor(() => expect(screen.queryByText(/GitLab/)).toBeNull())
-    },
-    LONG_FLOW,
-  )
+  it('says where the code is hosted: connected as whom, or not, with the way to connect', async () => {
+    const { host } = opened(
+      { listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) },
+      { pickFolders: vi.fn(async () => ['grant_northwind']) },
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    expect(host.pickFolders).toHaveBeenCalled()
+    // A folder of several repositories adds each.
+    await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(2))
+    const read = screen.getByRole('region', { name: 'What Althar read' })
+    expect(read.textContent).toContain('Code on GitHub, northwind-co. Connected as you.')
+    expect(read.textContent).toContain(
+      'northwind/ops is on GitLab, which isn’t connected. Its tasks push their branch; connected, they open merge requests.',
+    )
+    // GitLab's own walk in, over the page.
+    await userEvent.click(within(read).getByRole('button', { name: 'Connect GitLab' }))
+    const dialog = await screen.findByRole('dialog', { name: 'GitLab' })
+    expect(await within(dialog).findByRole('heading', { name: 'Connect GitLab' })).toBeTruthy()
+    // Escape closes what is open over the page, not the page.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(dialog).toBeTruthy()
+    // Leaving one out takes what it said with it.
+    await userEvent.click(within(folders()).getByRole('button', { name: 'Leave out ops' }))
+    await waitFor(() => expect(screen.queryByText(/GitLab/)).toBeNull())
+  })
 
   it('says a folder is in another project too', async () => {
     opened({}, { pickFolders: vi.fn(async () => ['grant_halyard']) })
@@ -157,83 +146,75 @@ describe('a new project', () => {
     expect(within(folders()).getByText('no remote')).toBeTruthy()
   })
 
-  it(
-    'is made under the id its mark was drawn from, in the ink shown, of each folder added, by Create or ⌘↵',
-    async () => {
-      const { client, draft, drafts, onCreated } = opened(
-        { openProject: vi.fn(async () => ({ ...project, id: draft.id })) },
-        { pickFolders: vi.fn(async () => ['grant_northwind', 'grant_ops']) },
-      )
-      const name = screen.getByRole('textbox', { name: 'Name' })
-      await userEvent.type(name, '  Northwind ')
-      await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
-      // Ops comes from both folders, and is added once.
-      await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(2))
-      expect(screen.getByText('Made of')).toBeTruthy()
-      // The swatch shown is the runtime's pick, beside meridian's teal, until another is chosen.
-      expect(screen.getByRole('radio', { name: 'Teal, meridian’s' })).toBeTruthy()
-      const pick = inkFor(draft.id, ['teal'])
-      expect(screen.getByRole('radio', { checked: true }).getAttribute('aria-label')).toMatch(new RegExp(pick, 'i'))
-      await userEvent.click(screen.getByRole('radio', { name: 'Umber' }))
-      await userEvent.type(name, '{Meta>}{Enter}{/Meta}')
-      await waitFor(() => expect(onCreated).toHaveBeenCalledWith(draft.id))
-      expect(client.openProject).toHaveBeenCalledWith('grant_northwind', {
-        name: 'Northwind',
-        projectId: draft.id,
-        ink: 'umber',
-        repositories: [
-          { grant: 'grant_northwind', path: APP.path },
-          { grant: 'grant_northwind', path: OPS.path },
-        ],
-      })
-      expect(drafts.get()?.creating).toBe(true)
-    },
-    LONG_FLOW,
-  )
+  it('is made under the id its mark was drawn from, in the ink shown, of each folder added, by Create or ⌘↵', async () => {
+    const { client, draft, drafts, onCreated } = opened(
+      { openProject: vi.fn(async () => ({ ...project, id: draft.id })) },
+      { pickFolders: vi.fn(async () => ['grant_northwind', 'grant_ops']) },
+    )
+    const name = screen.getByRole('textbox', { name: 'Name' })
+    await userEvent.type(name, '  Northwind ')
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    // Ops comes from both folders, and is added once.
+    await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(2))
+    expect(screen.getByText('Made of')).toBeTruthy()
+    // The swatch shown is the runtime's pick, beside meridian's teal, until another is chosen.
+    expect(screen.getByRole('radio', { name: 'Teal, meridian’s' })).toBeTruthy()
+    const pick = inkFor(draft.id, ['teal'])
+    expect(screen.getByRole('radio', { checked: true }).getAttribute('aria-label')).toMatch(new RegExp(pick, 'i'))
+    await userEvent.click(screen.getByRole('radio', { name: 'Umber' }))
+    await userEvent.type(name, '{Meta>}{Enter}{/Meta}')
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(draft.id))
+    expect(client.openProject).toHaveBeenCalledWith('grant_northwind', {
+      name: 'Northwind',
+      projectId: draft.id,
+      ink: 'umber',
+      repositories: [
+        { grant: 'grant_northwind', path: APP.path },
+        { grant: 'grant_northwind', path: OPS.path },
+      ],
+    })
+    expect(drafts.get()?.creating).toBe(true)
+  })
 
-  it(
-    'says what went wrong: a folder inside a repository, one with none, one gone, a drop that isn’t a folder, and the project not made',
-    async () => {
-      const pickFolders = vi
-        .fn<() => Promise<ReadonlyArray<string>>>()
-        .mockResolvedValueOnce(['grant_inside'])
-        .mockResolvedValueOnce(['grant_empty'])
-        .mockResolvedValueOnce(['grant_gone'])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce(['grant_ops'])
-      const readFolder = vi.fn(async (grant: string) => {
-        if (grant === 'grant_gone') throw new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' })
-        return readings[grant] ?? readings.grant_ops!
-      })
-      const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
-      const { host, view, onCreated } = opened({ readFolder, openProject }, { pickFolders, grantDropped: vi.fn(async () => null) })
-      const choose = screen.getByRole('button', { name: 'Choose a folder…' })
-      await userEvent.click(choose)
-      expect(await screen.findByText('That’s a folder inside mono. Add mono itself.')).toBeTruthy()
-      await userEvent.click(choose)
-      expect(await screen.findByText('There’s no git repository in notes.')).toBeTruthy()
-      await userEvent.click(choose)
-      expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
-      // Nothing chosen adds nothing.
-      await userEvent.click(choose)
-      expect(screen.queryByRole('list', { name: 'Its folders' })).toBeNull()
+  it('says what went wrong: a folder inside a repository, one with none, one gone, a drop that isn’t a folder, and the project not made', async () => {
+    const pickFolders = vi
+      .fn<() => Promise<ReadonlyArray<string>>>()
+      .mockResolvedValueOnce(['grant_inside'])
+      .mockResolvedValueOnce(['grant_empty'])
+      .mockResolvedValueOnce(['grant_gone'])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['grant_ops'])
+    const readFolder = vi.fn(async (grant: string) => {
+      if (grant === 'grant_gone') throw new ApiError({ reason: 'NotFound', message: 'That folder isn’t there any more.' })
+      return readings[grant] ?? readings.grant_ops!
+    })
+    const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
+    const { host, view, onCreated } = opened({ readFolder, openProject }, { pickFolders, grantDropped: vi.fn(async () => null) })
+    const choose = screen.getByRole('button', { name: 'Choose a folder…' })
+    await userEvent.click(choose)
+    expect(await screen.findByText('That’s a folder inside mono. Add mono itself.')).toBeTruthy()
+    await userEvent.click(choose)
+    expect(await screen.findByText('There’s no git repository in notes.')).toBeTruthy()
+    await userEvent.click(choose)
+    expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
+    // Nothing chosen adds nothing.
+    await userEvent.click(choose)
+    expect(screen.queryByRole('list', { name: 'Its folders' })).toBeNull()
 
-      const page = view.container.querySelector('section') as Element
-      fireEvent.drop(page, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
-      expect(await screen.findByText('notes.txt isn’t a folder on this computer.')).toBeTruthy()
-      expect(host.grantDropped).toHaveBeenCalled()
+    const page = view.container.querySelector('section') as Element
+    fireEvent.drop(page, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
+    expect(await screen.findByText('notes.txt isn’t a folder on this computer.')).toBeTruthy()
+    expect(host.grantDropped).toHaveBeenCalled()
 
-      // Named and with a folder, the runtime says no: the foot says why, and the tab stays.
-      await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Northwind')
-      await userEvent.click(choose)
-      await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(1))
-      await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
-      expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()
-      expect(onCreated).not.toHaveBeenCalled()
-      expect(screen.getByRole('button', { name: /Create Northwind/ }).getAttribute('aria-busy')).toBeNull()
-    },
-    LONG_FLOW,
-  )
+    // Named and with a folder, the runtime says no: the foot says why, and the tab stays.
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Northwind')
+    await userEvent.click(choose)
+    await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(1))
+    await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
+    expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Create Northwind/ }).getAttribute('aria-busy')).toBeNull()
+  })
 
   it('adds folders dropped on the page', async () => {
     const { host, view } = opened({}, { grantDropped: vi.fn(async () => 'grant_ops') })

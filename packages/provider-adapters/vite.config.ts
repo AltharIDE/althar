@@ -4,7 +4,7 @@ import { testing } from '@althar/testing/vitest'
 /* The default suite: the fake agent only, so it runs in CI. The real agents run with `bun run test:agents`. */
 export default defineConfig({
   test: {
-    ...testing,
+    ...testing('medium'),
     include: ['tests/*.test.ts'],
     environment: 'node',
     coverage: {

@@ -3,11 +3,10 @@ import { testing } from '@althar/testing/vitest'
 
 export default defineConfig({
   test: {
-    ...testing,
+    ...testing('medium'),
     // The fake agents only, so it runs in CI; the real ones run with `bun run test:agents`.
     include: ['tests/*.test.ts'],
     environment: 'node',
-    testTimeout: 20_000,
     // What the runtime logs as agents start and turns run is read only for a test that failed.
     silent: 'passed-only',
     coverage: {

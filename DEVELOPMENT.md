@@ -84,6 +84,14 @@ uses it. The desktop app is MVVM in feature folders
 
 Each app and package has its own `ARCHITECTURE.md` for what is specific to it. Before naming anything on screen, check [the glossary](docs/glossary.md).
 
+### Tests that hold
+
+A test passes or fails for what the code does, not for how fast the machine it runs on is. `@althar/testing` holds what makes that so ([the plan](docs/plans/tests-that-hold.md) says why).
+
+- **A test takes its size's time, never a time of its own.** A package's Vitest config takes `testing('small')` (no processes, files or network) or `testing('medium')` (real git, processes, files, localhost); a test that needs more takes `budget.large` by name. The budgets are scaled for the machine: four times on GitHub's Windows runners, and `ALTHAR_TEST_SCALE=3 bun run test` on a busy Mac. A test that passes is done as soon as it can be, so the budget only bounds how long one that hangs takes to fail.
+- **Wait with `until` (Effect) or `waitFor` (promises), never a loop of your own.** Each reads again every 20 ms until its check passes, and gives up only near its test's own time, saying what it last read. A wait takes no time of its own either.
+- **`tests/limits.test.ts` in `@althar/testing` fails on any test, hook or wait given a time of its own,** or a loop that gives up after so many tries. The tests of real agents and real accounts, with their own configs, and a benchmark run by hand are the exceptions it names.
+
 ## The architecture
 
 Start from [the overview](docs/architecture/README.md), then:
