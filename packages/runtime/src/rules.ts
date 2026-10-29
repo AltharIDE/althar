@@ -4101,7 +4101,12 @@ const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined =>
  * expansion (`${PATH:=.}`, `$[PATH=1]`), and no file name the shell expands
  * into a flag (`rg x *` where a file is named `--pre=./run.sh`).
  */
-const readerCommandReason = (text: string, trusted: Trust = false): string | undefined => {
+const readerCommandReason = (
+  text: string,
+  trusted: Trust = false,
+  // How a shell's script is read: a trusted reader's as a line of its own, its variables and loops with it.
+  scriptReason: (text: string) => string | undefined = (inner) => readerCommandReason(inner, trusted),
+): string | undefined => {
   if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
   const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
@@ -4134,7 +4139,7 @@ const readerCommandReason = (text: string, trusted: Trust = false): string | und
       if (option !== undefined) return `\`${program} ${option}\` has the shell read or run more than its script, and this role only reads.`
       const written = writes(inner).filter((target) => target !== '/dev/null')
       if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
-      const reason = readerCommandReason(args[script + 1] ?? '', trusted)
+      const reason = scriptReason(args[script + 1] ?? '')
       if (reason !== undefined) return reason
       continue
     }
@@ -4316,7 +4321,9 @@ const plainReaderLineReason = (command: string, options: ReaderOptions): string 
       .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((found) => found !== undefined) ??
     secretCommandReason(command, options.cwd) ??
-    readerCommandReason(command, options.trusted === true ? (options.contained === true ? 'contained' : true) : false)
+    readerCommandReason(command, options.trusted === true ? (options.contained === true ? 'contained' : true) : false, (script) =>
+      readerLineReason(script, options),
+    )
   )
 }
 

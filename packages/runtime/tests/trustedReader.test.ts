@@ -134,6 +134,23 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     assert.strictEqual(coordinator('x=cat; for r in a b; do $x "$r"; done'), 'allowed')
   })
 
+  it("reads a shell's script as a line of its own, its loops and variables with it", () => {
+    for (const [command, reason] of [
+      [`bash -c 'x=--oneline; for r in a b; do git log "$x"; x=--output=out.txt; done'`, 'could start with a dash'],
+      [`bash -c 'x=--output=out.txt; git log "$x"'`, '`git log --output=out.txt` writes'],
+      [`sh -c 'x=rm; $x -rf src'`, 'It would write to src'],
+      [`bash -lc 'for f in a.txt b.txt; do rm "$f"; done'`, 'It would write to a.txt'],
+      [`timeout 5 bash -c 'x=--output=out.txt; git log "$x"'`, '`git log --output=out.txt` writes'],
+      [`bash -c "bash -c 'x=--output=out.txt; git log \\"\\$x\\"'"`, '`git log --output=out.txt` writes'],
+      [`x=--output=out.txt; bash -c "git log $x"`, '`git log --output=out.txt` writes'],
+      [`bash -c 'echo $((n=5))'`, 'sets a variable'],
+    ] as const)
+      assert.include(coordinator(command), reason, command)
+    assert.include(containedCoordinator(`bash -c 'x=--output=out.txt; git log "$x"'`), '`git log --output=out.txt` writes')
+    for (const command of [`bash -c 'for r in api web; do git -C "$r" status -sb; done'`, `bash -c 'f=a.md; cat "$f"'`])
+      assert.strictEqual(coordinator(command), 'allowed', command)
+  })
+
   it('fetches its copies in a loop where its sandbox holds every command to them', () => {
     for (const command of [
       // What it ran when the person asked it to sync all the repositories.
