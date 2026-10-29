@@ -1995,6 +1995,19 @@ export class Sessions extends Context.Service<
             externalSkillsRuntime && definition.skills?.externalMinimumVersion !== undefined
               ? yield* agentVersion(definition).pipe(
                   Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(null))),
+                  Effect.onInterrupt(() =>
+                    Effect.andThen(
+                      Scope.close(scope, Exit.void),
+                      sql.withTransaction(
+                        Effect.gen(function* () {
+                          const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+                          yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', {
+                            reason: 'Session startup was interrupted before the agent connected.',
+                          })
+                        }),
+                      ),
+                    ),
+                  ),
                 )
               : null
           const capabilities = skillsCapabilities(definition, externalSkillVersion, externalSkillsRuntime)

@@ -237,9 +237,13 @@ describe('skills for a task’s lead', () => {
             assert.isTrue(existsSync(marker), 'the host Codex version probe started')
             yield* Fiber.interrupt(starting)
             const interrupted = yield* Fiber.await(starting)
-            if (Exit.isFailure(interrupted)) assert.isTrue(Cause.hasInterruptsOnly(interrupted.cause))
+            if (Exit.isFailure(interrupted)) assert.isTrue(Cause.hasInterruptsOnly(interrupted.cause), Cause.pretty(interrupted.cause))
             else assert.fail('the interrupted session startup must fail')
             assert.strictEqual(launches.length, launchedBefore, 'cancelled startup never connects the agent')
+            const sql = yield* SqlClient.SqlClient
+            const [session] = yield* sql<{ state: string }>`
+              SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC LIMIT 1`
+            assert.strictEqual(session?.state, 'failed', 'cancelled startup terminalizes its persisted session')
           }),
           runtime(':memory:', {}, { agentVersions: { codex: slowVersion } }),
         ),
