@@ -68,23 +68,22 @@
 - **Date:** 2026-10-29
 - **Context:** the person's project allows everything, and their tasks
   still landed in Needs you, asking "Why do all my tasks keep asking me
-  for permissions". Of the 57 Permission cards in the week to 2026-10-29,
-  47 would still ask under the rules as they stood. Nearly all were what
+  for permissions". Of the 65 Permission cards in the week to 2026-10-29,
+  54 would still ask under the rules as they stood. Nearly all were what
   the rules couldn't read, not what they read as irreversible:
 
   | Why it asked, read again by the rules as they stood | Cards | Still asking after |
   | --- | --- | --- |
-  | A `python3 - <<'EOF'` script editing files: its body has backticks and the word `push`, read as a command that could push | 14 | 0 |
+  | A `python3 - <<'EOF'` script editing files: its body has backticks and the word `push`, read as a command that could push | 19 | 0 |
   | A shell line with `$(…)` and the word `push` elsewhere (`git stash push`, `grep "push"`, a scratch repository's push) | 6 | 1 |
-  | A variable the line sets itself (`d=$TMPDIR/x && rm -rf $d`) or a loop's (`for f in …; do mv "$f" …`) | 11 | 0 |
-  | A relative path read from the worktree's top while the agent's shell was in a folder in it (`cd ../.. && rm -f sb.log`), or git in a folder that is no checkout | 16 | 1 |
+  | A variable the line sets itself (`d=$TMPDIR/x && rm -rf $d`) or a loop's (`for f in …; do mv "$f" …`) | 13 | 0 |
+  | A relative path read from the worktree's top while the agent's shell was in a folder in it (`cd ../.. && rm -f sb.log`), or git in a folder that is no checkout | 16 | 0 |
 
-  The other 10 were the stash, which the decision above already lets
-  through. Of the 47, the one left in the second row is a push to main in
-  a scratch repository under `$TMPDIR`, which the rules can't tell from
-  the project's main; the one in the last deletes a file only if the
-  command before it in its line fails. Every one was the lead's own
-  work: editing the task's files, scratch folders, its own logs.
+  The other 11 were the stash, which the decision above already lets
+  through. The one left is a push to main in a scratch repository under
+  `$TMPDIR`, which the rules can't tell from the project's main. Every
+  one was the lead's own work: editing the task's files, scratch
+  folders, its own logs.
 - **Decision:** with everything allowed, only what the rules **read** as
   one of the irreversible kinds above asks: a plain `git push origin
   main`, `git push --force`, `rm -rf` of the person's checkout, and the
@@ -99,27 +98,38 @@
   - the body of a quoted heredoc read by an interpreter of another
     language (`python3 - <<'EOF'`, `node`, `ruby`, `perl`), which is not
     the shell's commands; a shell's (`bash <<'EOF'`, `cat <<'EOF' | sh`)
-    is still read;
-  - a relative path that leaves the worktree only from its top: an
-    agent's shell keeps the folder it moved to from one command to the
-    next, so the line is read again from a folder that far inside the
-    worktree, and asks only where it leaves from there too.
+    is still read.
+
   In every mode, the rules no longer read as lost what can't be: git in a
-  folder that is there but in no checkout fails, and deleting a file that
-  isn't there, in a folder that is, deletes nothing. Both are still
-  writing outside the worktree.
+  folder that is there but in no checkout fails, and deleting what isn't
+  there deletes nothing: a file that isn't, in a folder that is; a
+  wildcard nothing in its folder matches; and a relative path, read from
+  where the rules guess the shell is, that names nothing there, not even
+  its folder. An agent's shell keeps the folder it moved to from one
+  command to the next, and no request says where it is, so the rules
+  read a line from the worktree's top: `cd ../.. && rm -f sb.log` from
+  `packages/ui` reads as deleting a log two folders above the worktree.
+  Where that names nothing, either the shell is elsewhere or nothing goes;
+  where it names what is there, it asks, from wherever it could be. Both
+  are still writing outside the worktree. `$TMPDIR`, `$TMP`, `$TEMP` and
+  `$PWD` at a path's start are read as the folders they name, the temp
+  folder and where the command runs, as `~` and `$HOME` were: `cp
+  $TMPDIR/x ./y` reads as `cp /…/x ./y`, and `rm -f $TMPDIR/../notes.md`
+  as what it reaches.
 - **What holds as before:** while Never lists anything, a command the
   rules can't read is still refused, with how to spell it out. No one
   reads keys and sign-ins. In every other mode what the rules can't read
-  asks as it did, and the coordinator still never judges it. The lead's
-  brief doesn't change: agents use the tools they use.
+  asks as it did, and the coordinator still never judges it, so ADR-019
+  doesn't change. The lead's brief doesn't change either: different
+  models use different tools, and Althar doesn't tell leads how to write
+  their commands.
 - **Trade-off:** a script or line the rules can't read could, in
   principle, push to main, force push or delete the person's checkout,
   and with everything allowed it now runs without asking. The person
   accepts that on the presumption that today's agents are competent; what
-  a lead does in plain words still asks. `$TMPDIR` and the like are not
-  expanded: a path starting with them is already read, and none of the
-  week's cards came from one.
+  a lead does in plain words still asks. The person chose this over
+  having the coordinator judge such a script and over telling leads to
+  avoid scripts and heredocs.
 - **Revisit when:** an agent does something that can't be undone through
   a command the rules couldn't read, or cards with everything allowed
   climb again.

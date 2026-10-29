@@ -1598,9 +1598,13 @@ interface Places {
   readonly exists: (path: string) => boolean
   /** Whether a path is a folder that's there. */
   readonly folder: (path: string) => boolean
+  /** The names in a folder that's there; none where it isn't. */
+  readonly names: (path: string) => ReadonlyArray<string>
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
+  /** The temp folder `$TMPDIR` names, where the rules know it: the first scratch folder. */
+  readonly temp: string | undefined
 }
 
 const places = (context: RuleContext): Places => {
@@ -1622,17 +1626,18 @@ const places = (context: RuleContext): Places => {
       return false
     }
   }
-  return {
-    system,
-    exists,
-    folder,
-    real,
-    worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
-    scratch: [
-      ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
-    ].map(real),
+  const names = (path: string) => {
+    try {
+      return readdirSync(follow(path))
+    } catch {
+      return []
+    }
   }
+  // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
+  const scratch = [
+    ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
+  ].map(real)
+  return { system, exists, folder, names, real, worktrees: (context.worktrees ?? [context.worktree]).map(real), scratch, temp: scratch[0] }
 }
 
 const within = ({ paths }: System, root: string, path: string) => {
@@ -1640,9 +1645,28 @@ const within = ({ paths }: System, root: string, path: string) => {
   return inner === '' || (!inner.startsWith(`..${paths.sep}`) && inner !== '..' && !paths.isAbsolute(inner))
 }
 
-/** Where a path a command names really is, from the folder the command runs in. */
-const locate = (where: Places, cwd: string, path: string) =>
-  where.real(where.system.paths.resolve(cwd, path.replace(HOME_WORD, where.system.home)))
+/** The temp folder, as a command may name it at the start of a path. */
+const TEMP_WORD = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%)(?=$|[/\\])/i
+
+/** The folder a command runs in, as it may name it at the start of a path. */
+const HERE_WORD = /^(\$PWD|\$\{PWD\})(?=$|[/\\])/
+
+/**
+ * Where a path a command names really is, from the folder the command runs
+ * in: with the home folder, the temp folder and `$PWD` written out, so
+ * `cp $TMPDIR/x ./y` reads as `cp /…/x ./y`. An agent's own temp folder is
+ * in the temp folder Althar's is in; while the rules don't know it, `$TMPDIR`
+ * stays a folder of its name.
+ */
+const locate = (where: Places, cwd: string, path: string) => {
+  const { paths, home } = where.system
+  const temp = where.temp
+  const written = path
+    .replace(HOME_WORD, home)
+    .replace(HERE_WORD, cwd)
+    .replace(TEMP_WORD, (word) => temp ?? word)
+  return where.real(paths.resolve(cwd, written))
+}
 
 const outside = (where: Places, path: string) =>
   !where.worktrees.some((root) => within(where.system, root, path)) && !where.scratch.some((root) => within(where.system, root, path))
@@ -1662,9 +1686,56 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
   }
 }
 
-/** Whether a path is surely not there now: its folder is, and it isn't, nor does it name others with a wildcard. */
-const missing = (where: Places, path: string) =>
-  !/[*?[]/.test(path) && where.exists(where.system.paths.dirname(path)) && !where.exists(path)
+/** A wildcard's characters in a path's name: `*.log`, `b-?.png`, `[ab].txt`. */
+const WILDCARD = /[*?[]/
+
+/** What a shell's wildcard in a name matches, as a pattern: `*` any run of characters, `?` one, `[…]` one of them. None it can't read. */
+const wildcardPattern = (name: string, caseless: boolean): RegExp | undefined => {
+  try {
+    return new RegExp(
+      `^${name
+        .replace(/[.+^${}()|]/g, '\\$&')
+        .replaceAll('*', '.*')
+        .replaceAll('?', '.')
+        .replace(/\[!/g, '[^')}$`,
+      caseless ? 'i' : '',
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether what a command names is surely not there now: it isn't, while its
+ * folder is; or, named relatively from a folder the rules guess the shell is
+ * in (`guessed`), nor is its folder, as where the shell is elsewhere (its
+ * folder holds from one command to the next) or a `cd` they followed leads
+ * nowhere. With a wildcard in its name, nothing in its folder matches it;
+ * with one before, the folder before it is named from there and isn't there.
+ */
+const missing = (where: Places, word: string, path: string, guessed: boolean) => {
+  const { paths, caseless } = where.system
+  const relative = guessed && !paths.isAbsolute(word.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+  const folder = paths.dirname(path)
+  if (!WILDCARD.test(path)) return !where.exists(path) && (relative || where.exists(folder))
+  if (WILDCARD.test(folder)) {
+    const parts = path.split(/[/\\]/)
+    return (
+      relative &&
+      !where.exists(
+        parts
+          .slice(
+            0,
+            parts.findIndex((part) => WILDCARD.test(part)),
+          )
+          .join(paths.sep) || paths.sep,
+      )
+    )
+  }
+  if (!where.exists(folder)) return relative
+  const pattern = wildcardPattern(paths.basename(path), caseless)
+  return pattern !== undefined && where.folder(folder) && !where.names(folder).some((each) => pattern.test(each))
+}
 
 const changesCheckout = (path: string) =>
   kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', 'irreversible')
@@ -2302,9 +2373,9 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
       const unseenKinds: Array<Kept> = []
-      for (const { at = context.worktree, blind: unseen } of folders)
+      for (const { at = context.worktree, blind: unseen, guessed } of folders)
         for (const words of readings(written)) {
-          const found = kindsOf(words, at, where, context)
+          const found = kindsOf(words, at, where, context, guessed === true)
           // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
           const anywhere = unseen ? kindsOf(words, context.worktree, where, context).kinds.map((one) => JSON.stringify(one)) : []
           const read = unseen
@@ -2337,6 +2408,11 @@ interface Folder {
   /** None where the folder the line started in isn't known. */
   readonly at: string | undefined
   readonly blind: boolean
+  /**
+   * Reached from where the line starts by relative `cd`s alone, or none: a
+   * folder the rules read from the worktree's top, where the shell may not be.
+   */
+  readonly guessed?: boolean
 }
 
 /** How to follow a line's `cd`s. */
@@ -2351,7 +2427,7 @@ interface Following {
 }
 
 const distinct = (folders: ReadonlyArray<Folder>): Array<Folder> => [
-  ...new Map(folders.map((one) => [`${one.blind}\0${one.at}`, one])).values(),
+  ...new Map(folders.map((one) => [`${one.blind}\0${one.guessed === true}\0${one.at}`, one])).values(),
 ]
 
 /**
@@ -2370,7 +2446,7 @@ const walkFolders = (
 ): ReadonlyArray<Folder> => {
   const unknown: Folder = { at: following.unknown, blind: true }
   // Where the command before succeeded and where it failed, which `&&` and `||` pick between.
-  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false }]
+  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false, guessed: true }]
   let failed: ReadonlyArray<Folder> = []
   // Every folder the line has been in, where `cd -` and `popd` go back to.
   let seen: ReadonlyArray<Folder> = ok
@@ -2405,8 +2481,12 @@ const walkFolders = (
             return [unknown]
           }
           const path = target ?? '~'
-          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/'))
-          const went = folders.map(({ at, blind }) => ({ at: following.resolve(at, path), blind: blind && relative }))
+          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+          const went = folders.map(({ at, blind, guessed }) => ({
+            at: following.resolve(at, path),
+            blind: blind && relative,
+            guessed: guessed === true && relative,
+          }))
           if (!went.every(({ at }) => at !== undefined && following.folder(at))) certain = false
           // A loop or a function may take a relative `cd` many times: `cd ..` again and again.
           return [...went, ...(scope.repeats === true && relative ? [unknown] : [])]
@@ -2438,6 +2518,8 @@ const kindsOf = (
   cwd: string,
   where: Places,
   context: RuleContext,
+  /** Whether `cwd` is where the rules guess the shell is: `Folder`'s `guessed`. */
+  guessed = false,
 ): { readonly kinds: ReadonlyArray<Kept>; readonly redirected: ReadonlyArray<Kept>; readonly cwd?: string } => {
   const follow = context.realPath ?? realpathSync
   // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
@@ -2513,7 +2595,7 @@ const kindsOf = (
     .flatMap(removes)
     .filter((path) => outside(where, locate(where, cwd, path)))
   // What isn't there when it asks loses no one anything: the line made it itself, or it runs from a folder the shell never reaches.
-  const gone = removed.find((path) => !missing(where, locate(where, cwd, path)))
+  const gone = removed.find((path) => !missing(where, path, locate(where, cwd, path), guessed))
   const absent = removed[0]
   const target = writes(words)
     .filter((path) => !redirects(words).includes(path))
@@ -2736,60 +2818,18 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
 const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
 
-/** How many folders a line climbs out of at most by a relative path: 2 for `cd ../.. && rm x.log`. */
-const climbs = (text: string): number =>
-  Math.max(
-    0,
-    ...[...text.matchAll(/(?<![^\s=;&|()'"<>])(?:\.\.(?:[/\\]|(?=$|[\s;&|()'"<>])))+/g)].map((match) => match[0].split('..').length - 1),
-  )
-
-/**
- * A real folder up to `depth` folders into a worktree, the deepest there is
- * along the first folders by name: where an agent's shell could be when a
- * command starts, as its folder holds from one command to the next. None
- * where the worktree has no folder in it, or can't be read.
- */
-const folderInside = (worktree: string, depth: number, system: System): string | undefined => {
-  let at = worktree
-  for (let level = 0; level < depth; level += 1) {
-    let next: string | undefined
-    try {
-      next = readdirSync(at, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules')
-        .map((entry) => entry.name)
-        .sort()[0]
-    } catch {
-      return undefined
-    }
-    if (next === undefined) break
-    at = system.paths.join(at, next)
-  }
-  return at === worktree ? undefined : at
-}
-
 /**
  * What can't be undone in a request with everything allowed (ADR-067's
  * amendment): only what the rules read as that. Not what they can't tell
  * (`Kept`'s `unclear`, or what is only the worst a folder it can't tell
- * could be, `blind`); not the words of a script in a language other than
- * the shell's (`python3 - <<'EOF'`); and not a relative path that leaves the
- * worktree only from its top: an agent's shell keeps the folder it moved to
- * from one command to the next, so `cd ../..` may as well go back up to it.
- * Such a path counts where it leaves the worktree from a folder inside it too.
+ * could be, `blind`), nor the words of a script in a language other than
+ * the shell's (`python3 - <<'EOF'`).
  */
 const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
   const lasting = (kinds: ReadonlyArray<Kept>) =>
     kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
   if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
-  const text = withoutQuotedHeredocs(commandOf(request), takesScript)
-  const found = lasting(commandKinds(text, context))
-  const depth = climbs(text)
-  if (found === undefined || depth === 0) return found
-  const inside = folderInside(context.worktree, depth, systemOf(context))
-  if (inside === undefined) return found
-  return lasting(commandKinds(text, { ...context, worktree: inside, worktrees: context.worktrees ?? [context.worktree] })) === undefined
-    ? undefined
-    : found
+  return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
 }
 
 /** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */

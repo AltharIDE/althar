@@ -2333,6 +2333,9 @@ describe('allowing everything trusts the agent with what the rules can’t read 
       assert.strictEqual(decide(runs(script.replace('python3 -', reader)), rules(allow)).verdict, 'allow', reader)
     for (const mode of ['rules', 'coordinator', 'ask'] as const)
       assert.deepInclude(decide(runs(script), rules({ mode })), { verdict: 'ask', held: false }, mode)
+    // The trade-off the person took: what such a script does in its own language isn't read, a push to main included.
+    const pushes = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push', 'origin', 'main'])\nEOF"
+    assert.strictEqual(decide(runs(pushes), rules(allow)).verdict, 'allow')
   })
 
   it('still asks before what it reads as what can’t be undone, beside such a script or in a shell’s', () => {
@@ -2357,20 +2360,41 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     assert.strictEqual(decide(runs("python3 - <<'EOF'\nEOF\ncat ~/.ssh/id_rsa"), rules(allow)).verdict, 'deny')
   })
 
-  it('reads a relative path from wherever in the worktree the agent’s shell may be, and asks only where it leaves from there too', () => {
+  it('reads a relative path that leaves the worktree as losing nothing where it names nothing there, as where the shell is elsewhere', () => {
     const root = mkdtempSync(join(tmpdir(), 'althar-shell-'))
-    const tree = join(root, 'tree')
+    const tree = join(root, 'tasks', 'tree')
     mkdirSync(join(tree, 'packages', 'ui'), { recursive: true })
     writeFileSync(join(root, 'notes.md'), 'mine')
     const here = rules(allow, { worktree: tree, scratch: [] })
-    // The shell kept `packages/ui` from the command before: `cd ../..` is the worktree again.
-    for (const command of ['cd ../.. && rm -f sb.log', 'rm -f ../../sb.log', 'cd ../.. && git checkout HEAD -- packages/ui/src'])
+    // The shell kept `packages/ui` from the command before: read from the worktree's top, these name nothing that is there.
+    for (const command of [
+      'cd ../.. && rm -f sb.log',
+      'rm -f ../../sb.log ../../*.log',
+      'cd ../.. && rm packages/ui/src/a.tsx-E',
+      'cd ../../.althar/scratch/runs && rm -rf shots',
+      'cd ../.. && git checkout HEAD -- packages/ui/src',
+    ])
       assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
-    // What leaves the worktree from any folder in it, or is named outright, still asks.
-    for (const command of ['rm -rf ../../../..', `rm -f ${join(root, 'notes.md')}`, 'cd ../.. && git push origin main'])
+    // What it reaches that is there still asks, from the top as from anywhere, and so does what is named outright.
+    for (const command of ['rm -f ../../notes.md', 'cd ../.. && rm -f *.md', 'rm -rf ../../../..', `rm -rf ${join(root, 'gone')}/x`])
       assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
-    // Every other mode reads it from the worktree's top, as before.
-    assert.strictEqual(decide(runs('cd ../.. && rm -f sb.log'), rules({ mode: 'rules' }, { worktree: tree, scratch: [] })).verdict, 'ask')
+    assert.deepInclude(decide(runs('cd ../.. && git push origin main'), here), { verdict: 'ask', held: false })
+  })
+
+  it('reads `$TMPDIR`, `$TEMP` and `$PWD` at a path’s start as the folders they name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-temp-'))
+    const temp = join(root, 'temp')
+    const tree = join(root, 'tree')
+    mkdirSync(temp)
+    mkdirSync(tree)
+    writeFileSync(join(root, 'notes.md'), 'mine')
+    const here = (mode: 'allow' | 'rules') => rules({ mode }, { worktree: tree, scratch: [temp] })
+    // Into or out of the temp folder, or the worktree by `$PWD`, is the task's own, as the same paths written out are.
+    for (const command of ['cp $TMPDIR/keep.ts ./a.ts', 'rm -rf $TMPDIR/sw', 'mv ${TMPDIR}/a.log $PWD/a.log', `rm -rf ${temp}/sw`])
+      assert.strictEqual(decide(runs(command), here('rules')).verdict, 'allow', command)
+    // Out of it, it is what it reaches.
+    for (const command of ['rm -f $TMPDIR/../notes.md', `rm -f ${join(root, 'notes.md')}`, 'rm -f $PWD/../notes.md'])
+      assert.deepInclude(decide(runs(command), here('allow')), { verdict: 'ask', held: false }, command)
   })
 
   it('reads deleting what isn’t there, or git where there is no checkout, as losing nothing', () => {
