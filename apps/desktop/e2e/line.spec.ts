@@ -11,8 +11,8 @@ import { connectGitHub, launch, openFirstProject, say, startTask } from './suppo
 /*
  * The line up next, in a real window with the fake agent and the fake
  * GitHub: with one agent at a time, held by a server a finished task left
- * running, three reviews of someone else's pull requests and a quick task
- * wait in Up next, not Running, though none has a plan's first step. The
+ * running, three reviews of someone else's pull requests, each started from
+ * its plan, and a quick task with none, wait in Up next, not Running. The
  * person drags the quick task to the front, to the back, and to the front
  * again let go outside the lane, starts a drag they cancel with Escape, and
  * moves the review last in line to the front from its own view; when the server stops, the line starts
@@ -66,6 +66,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
     for (const [index] of PULLS.entries()) {
       await say(page, `Review https://github.test/meridian/api/pull/${index + 1} [coordinator:review]`)
+      // A review starts from a plan of its lead alone: started at once, not after its countdown.
+      await page.getByRole('button', { name: 'Start now' }).last().click({ timeout: 20_000 })
       await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1, { timeout: 20_000 })
     }
     // The quick task's lead keeps at it once it starts, so it keeps the place.
