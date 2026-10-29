@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask } from './support'
+import { launch, openFirstProject, shown, startTask } from './support'
 
 /*
  * An agent's question (DEV-13), as the person meets it: a task's lead asks
@@ -71,7 +71,7 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await page.keyboard.press('2')
     await expect(page.getByRole('radio', { name: 'SQLite' })).toBeChecked()
     await page.keyboard.press('Enter')
-    await expect(page.getByText('Ready for you', { exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('Needs your answer')).toHaveCount(0)
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question-answered.png') })
     // What the lead was told is with the work that led to its report.

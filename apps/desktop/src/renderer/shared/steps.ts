@@ -25,6 +25,13 @@ export const stepText = {
     // Its pull request, as the person pressed Merge, until its host says it merged (data/merges).
     merging: 'Merging',
   } as Readonly<Record<string, string>>,
+  /** Stopped, no agent on it, as its card and its header say it: by what stopped its lead, where something says. */
+  stopped: 'Stopped',
+  stoppedBy: {
+    declined: 'Stopped when you declined a command',
+    interrupted: 'Stopped when you interrupted it',
+    althar: 'Stopped by Althar',
+  } satisfies Record<'declined' | 'interrupted' | 'althar', string>,
 }
 
 /** Whether a step comes after the plan's steps: a conflict round's, the checks of a change Althar sees through, or its merge. */

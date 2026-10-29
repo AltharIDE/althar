@@ -361,13 +361,35 @@ describe('a task that ends on its branch', () => {
         title: 'Not started',
       })
       assert.strictEqual(((yield* Effect.flip(runs.publish(fresh.taskId))) as NoChangeToOpen).why, 'working')
-      // Work that stopped short has none; a settled task keeps its branch as it is.
+      // A settled task keeps its branch as it is.
       const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = ${task.taskId}`
-      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'stopped')
       yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${task.taskId}`
       assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'settled')
       assert.instanceOf(yield* Effect.flip(runs.publish('task_none')), NotFound)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
+  it.live('opens a stopped task’s draft pull request, with what it has so far', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
+      const { task, said } = yield* onItsBranch(working)
+      yield* connect('github')
+      // Stopped, as the person stops a task: its run waits to be carried on, and what it committed can go up as a draft meanwhile.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${task.taskId}`
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual(
+        github.changes.map((change) => change.draft),
+        [true],
+      )
+      assert.include(
+        (yield* said).map((item) => (item.kind === 'step_result' ? item.content.summary : '')),
+        'Opened draft pull request #1.',
+      )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 

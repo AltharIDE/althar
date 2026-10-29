@@ -18,11 +18,14 @@ import s from './ChangeSet.module.css'
 /*
  * What a task changed, beside what it is, for deciding on it: each thing
  * said once. Its pull requests, each the one link to its host; work with
- * none says where its branch is. Its checks in a line, what failed named,
- * opening to the list; its review in a line, by whom. Then what can be done
- * now, which the page gives: one button, or two where it is a choice. Under
- * it, how big it is with the one way into the diff, and its files by folder,
- * the most first, each opening to its files.
+ * none, its branch by name, and what of it isn't pushed, if anything. Its
+ * checks in a line, what failed named, opening to the list; its review in a
+ * line, by whom. Then what can be done now, which the page gives: one
+ * button, or two where it is a choice, beside the facts where the card is
+ * wide and under them where it is narrow. Under it all, how big it is with
+ * the one way into the diff, and its files: each listed with its lines,
+ * under its folder where folders hold several; past twenty, by folder, the
+ * most first, each opening to its files.
  */
 
 export interface PullRequest {
@@ -46,17 +49,16 @@ export interface ChangeReview {
 export interface ChangeSetText {
   /** What the card is, read out. */
   label: string
-  /** Said beside its pull request where it isn't open for accepting; on its branch with no remote, in its place. */
+  /** Said beside its pull request where it isn't open for accepting; with no pull request and no branch named, in its place. */
   state: Record<ChangeState, string>
   /** A pull request by its number, alone: PR #258. */
   pr: (n: number) => string
   /** One of several, by its repository: meridian-api #1187. */
   named: (repo: string, n: number) => string
   onHostLabel: (repo: string, n: number, host: string) => string
-  /** Work on its branch, as its remote has it: not there yet, behind by some commits, or there. */
-  notOn: (remote: string) => string
-  behindOn: (n: number, remote: string) => string
-  on: (remote: string) => string
+  /** Work on its branch: its commits the remote doesn't have, and its files with changes no commit has, which no push takes. */
+  unpushed: (n: number) => string
+  uncommitted: (n: number) => string
   /** The host's page for a new pull request from the branch, pushed without a connection. */
   newPullRequest: (host: string | undefined) => string
   checksPassed: (n: number) => string
@@ -71,8 +73,6 @@ export interface ChangeSetText {
   files: (n: number) => string
   diff: string
   openFile: (path: string) => string
-  /** The folder for files at the top of the repository. */
-  root: string
   more: (n: number) => string
   fewer: string
 }
@@ -88,9 +88,8 @@ export const changeSetText: ChangeSetText = {
   pr: (n) => `PR #${n}`,
   named: (repo, n) => `${repo.slice(repo.lastIndexOf('/') + 1)} #${n}`,
   onHostLabel: (repo, n, host) => `Open ${repo} #${n} on ${host}`,
-  notOn: (remote) => `Not on ${remote} yet`,
-  behindOn: (n, remote) => (n === 1 ? `1 commit not on ${remote} yet` : `${n} commits not on ${remote} yet`),
-  on: (remote) => `On ${remote}`,
+  unpushed: (n) => (n === 1 ? '1 commit not pushed' : `${n.toLocaleString('en-US')} commits not pushed`),
+  uncommitted: (n) => (n === 1 ? 'Uncommitted changes in 1 file' : `Uncommitted changes in ${n.toLocaleString('en-US')} files`),
   newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
   checksPassed: (n) => (n === 1 ? '1 check passed' : `${n} checks passed`),
   checksFailed: (names) => (names.length === 1 ? `${names[0] ?? ''} failed` : `${names.length} checks failed: ${names.join(', ')}`),
@@ -102,7 +101,6 @@ export const changeSetText: ChangeSetText = {
   files: (n) => (n === 1 ? '1 file' : `${n.toLocaleString('en-US')} files`),
   diff: 'Review the diff',
   openFile: (path) => `Open the diff of ${path}`,
-  root: 'Top level',
   more: (n) => `${n} more folders`,
   fewer: 'Fewer folders',
 }
@@ -112,14 +110,20 @@ export interface ChangeSetProps {
   /** Where its pull requests live; none for work on its branch. */
   host?: CodeHost
   prs: readonly PullRequest[]
+  /** Work on its branch, with no pull request: the branch, by name, which heads the card. */
+  branch?: string
   /** Work on its branch, as its remote has it: the remote's name, whether it has the branch, and how many commits it doesn't have. */
   remote?: { readonly name: string; readonly pushed: boolean; readonly ahead: number }
+  /** Work on its branch: how many of its files have changes not committed yet, which no push takes. */
+  uncommitted?: number
+  /** What pushes the commits its remote doesn't have, beside them: a quiet button. */
+  push?: ReactNode
   /** A line under where it stands, where there is more to it: merged here, and whether its remote has it. */
   note?: ReactNode
-  /** Its host's checks; without them, no line for them, and with none yet, a line saying so. */
+  /** Its host's checks; without them, no line for them, and with none yet, a line saying so, unless it merged: none will run now. */
   checks?: readonly ChangeCheck[]
   review?: ChangeReview
-  /** What can be done with it now: one button, or two where it's a choice. The first is as wide as the card. */
+  /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
   /** Why the last action did not go through. */
   error?: ReactNode
@@ -129,7 +133,7 @@ export interface ChangeSetProps {
   diffKey?: string
   /** Open one file's diff. Without it, files are not links. */
   onOpenFile?: (path: string) => void
-  /** How many folders show before the rest are a press away. */
+  /** Past twenty files, how many folders show before the rest are a press away. */
   folders?: number
   className?: string
   text?: Partial<ChangeSetText>
@@ -139,7 +143,10 @@ export function ChangeSet({
   state,
   host,
   prs,
+  branch,
   remote,
+  uncommitted = 0,
+  push,
   note,
   checks,
   review,
@@ -159,20 +166,25 @@ export function ChangeSet({
     reviewed: { ...changeSetText.reviewed, ...text?.reviewed },
   }
   const files = prs.flatMap((pr) => pr.files)
+  const acting = actions !== undefined && actions !== null && actions !== false
+  // Merged with no checks, none will run: nothing to say of them.
+  const checked = checks !== undefined && (checks.length > 0 || state !== ChangeState.Merged)
+  // The files at the top of the repository are under its name; in a task of several, each path starts with its own.
+  const root = nameOf(prs[0]?.repo ?? '')
   return (
     <article className={cx(s.change, className)} aria-label={t.label}>
-      <div className={s.decide}>
+      <div className={cx(s.decide, acting && s.acting)}>
         <div className={s.facts}>
-          <Head state={state} host={host} prs={prs} remote={remote} t={t} />
+          <Head state={state} host={host} prs={prs} branch={branch} remote={remote} uncommitted={uncommitted} push={push} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}
-          {(checks !== undefined || review !== undefined) && (
+          {(checked || review !== undefined) && (
             <div className={s.lines}>
-              {checks !== undefined && <ChecksLine checks={checks} t={t} />}
+              {checked && <ChecksLine checks={checks ?? []} t={t} />}
               {review !== undefined && <ReviewLine review={review} t={t} />}
             </div>
           )}
         </div>
-        {actions !== undefined && actions !== null && actions !== false && <div className={s.actions}>{actions}</div>}
+        {acting && <div className={s.actions}>{actions}</div>}
         {error && (
           <p className={s.error} role="alert">
             {error}
@@ -190,15 +202,34 @@ export function ChangeSet({
               </Button>
             )}
           </div>
-          <Folders files={files} shown={folders} onOpenFile={onOpenFile} t={t} />
+          {files.length > LISTED ? (
+            <Folders files={files} root={root} shown={folders} onOpenFile={onOpenFile} t={t} />
+          ) : (
+            <Listed files={files} root={root} onOpenFile={onOpenFile} t={t} />
+          )}
         </div>
       )}
     </article>
   )
 }
 
-/** Its pull requests, each the one link to its host, with where it stands where it isn't open; work with none, where its branch is. */
-function Head({ state, host, prs, remote, t }: Pick<ChangeSetProps, 'state' | 'host' | 'prs' | 'remote'> & { t: ChangeSetText }) {
+/** A repository by its name alone: `meridian-api` for `stripe-internal/meridian-api`. */
+const nameOf = (repo: string) => repo.slice(repo.lastIndexOf('/') + 1)
+
+/**
+ * Its pull requests, each the one link to its host, with where it stands where it isn't open. Work with none: its branch, what of
+ * it isn't pushed, and, where Althar can't open its pull request, the host's page for one.
+ */
+function Head({
+  state,
+  host,
+  prs,
+  branch,
+  remote,
+  uncommitted,
+  push,
+  t,
+}: Pick<ChangeSetProps, 'state' | 'host' | 'prs' | 'branch' | 'remote' | 'push'> & { uncommitted: number; t: ChangeSetText }) {
   const several = prs.length > 1
   const numbered = prs.filter((pr) => pr.number !== undefined)
   const said = state === ChangeState.Draft || state === ChangeState.Merged ? t.state[state] : null
@@ -229,35 +260,55 @@ function Head({ state, host, prs, remote, t }: Pick<ChangeSetProps, 'state' | 'h
         })}
       </div>
     )
-  // On its branch: where its remote has it, else where it stands; each repository, where there are several, with its page for a pull request.
-  const where =
-    state !== ChangeState.Branch || remote === undefined
-      ? t.state[state]
-      : !remote.pushed
-        ? t.notOn(remote.name)
-        : remote.ahead > 0
-          ? t.behindOn(remote.ahead, remote.name)
-          : t.on(remote.name)
+  // On its branch: what its remote doesn't have, if anything; all of it pushed and committed, nothing to say.
+  const ahead = state === ChangeState.Branch ? (remote?.ahead ?? 0) : 0
+  const pages = prs.flatMap((pr) => {
+    const url = pr.newPullRequest === undefined ? undefined : safeHref(pr.newPullRequest.url)
+    return url === undefined ? [] : [{ repo: pr.repo, url, host: pr.newPullRequest?.host }]
+  })
+  const [page] = pages
   return (
     <div className={s.head}>
       <p className={s.pr}>
-        <span className={s.prName}>{where}</span>
+        {branch === undefined || state !== ChangeState.Branch ? (
+          <span className={s.prName}>{t.state[state]}</span>
+        ) : (
+          <span className={s.branch} title={branch}>
+            <Icon name="branch" size={13} />
+            <span className={s.branchName}>{branch}</span>
+          </span>
+        )}
       </p>
-      {prs.map((pr) => {
-        const page = pr.newPullRequest === undefined ? undefined : safeHref(pr.newPullRequest.url)
-        if (!several && page === undefined) return null
-        return (
-          <p key={pr.repo} className={s.repo}>
-            {several && <span className={s.repoName}>{pr.repo}</span>}
-            {page !== undefined && (
-              <a className={s.page} href={page} target="_blank" rel="noreferrer">
-                {t.newPullRequest(pr.newPullRequest?.host)}
-                <Icon name="external" size={10} />
-              </a>
-            )}
-          </p>
-        )
-      })}
+      {ahead > 0 && (
+        <p className={s.standing}>
+          <span>{t.unpushed(ahead)}</span>
+          {push}
+        </p>
+      )}
+      {state === ChangeState.Branch && uncommitted > 0 && <p className={s.standing}>{t.uncommitted(uncommitted)}</p>}
+      {!several && page !== undefined && (
+        <p className={s.standing}>
+          <a className={s.page} href={page.url} target="_blank" rel="noreferrer">
+            {t.newPullRequest(page.host)}
+            <Icon name="external" size={10} />
+          </a>
+        </p>
+      )}
+      {several &&
+        prs.map((pr) => {
+          const its = pages.find((one) => one.repo === pr.repo)
+          return (
+            <p key={pr.repo} className={s.repo}>
+              <span className={s.repoName}>{pr.repo}</span>
+              {its !== undefined && (
+                <a className={s.page} href={its.url} target="_blank" rel="noreferrer">
+                  {t.newPullRequest(its.host)}
+                  <Icon name="external" size={10} />
+                </a>
+              )}
+            </p>
+          )
+        })}
     </div>
   )
 }
@@ -325,6 +376,27 @@ export interface Folder {
 
 const parentOf = (path: string, depth: number) => path.split('/').slice(0, depth).join('/')
 
+/** The folder a file is in, empty at the top of the repository. */
+const dirOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')))
+
+/** By where they are: the top of the repository first, then by folder, then by name. */
+const byPlace = (a: ChangedFile, b: ChangedFile) => {
+  const [here, there] = [dirOf(a.path), dirOf(b.path)]
+  if (here === there) return a.path.localeCompare(b.path)
+  return here === '' ? -1 : there === '' ? 1 : here.localeCompare(there)
+}
+
+/**
+ * Its files under the folder each is in, the top of the repository first;
+ * or none where most folders hold one file, as a dependency update's
+ * manifests do: there a heading would only say again what its one path says.
+ */
+export const groupsOf = (files: readonly ChangedFile[]): Folder[] | null => {
+  const groups = new Map<string, ChangedFile[]>()
+  for (const file of [...files].sort(byPlace)) groups.set(dirOf(file.path), [...(groups.get(dirOf(file.path)) ?? []), file])
+  return groups.size > files.length / 2 ? null : [...groups].map(([path, list]) => ({ path, files: list }))
+}
+
 /** The folders every one of the files is in, from the top. */
 const commonOf = (files: readonly ChangedFile[]) =>
   files.reduce<string[] | null>((common, file) => {
@@ -335,11 +407,11 @@ const commonOf = (files: readonly ChangedFile[]) =>
   }, null) ?? []
 
 /**
- * Its files by folder, the most first. By their top folder; a folder that
- * holds only folders (apps/, packages/), or one that holds most of the
- * change, gives its own folders in its place. Each is named by where its
- * files are, two folders deep at most: apps/desktop rather than apps, so the
- * list says where the work is.
+ * Its files by folder, the most first, for a change too big to list. By
+ * their top folder; a folder that holds only folders (apps/, packages/), or
+ * one that holds most of the change, gives its own folders in its place.
+ * Each is named by where its files are, two folders deep at most:
+ * apps/desktop rather than apps, so the list says where the work is.
  */
 export const foldersOf = (files: readonly ChangedFile[]): Folder[] => {
   const groups = new Map<string, ChangedFile[]>()
@@ -369,50 +441,94 @@ export const foldersOf = (files: readonly ChangedFile[]): Folder[] => {
     .sort((a, b) => b.files.length - a.files.length || a.path.localeCompare(b.path))
 }
 
-/** As many files as show without opening their folders. */
-const FEW = 8
+/** As many files as are listed themselves; past it, their folders, each opening to its files. */
+const LISTED = 20
 
+/** A folder's files, each by its path in it, opening its diff by its whole path; all on one scale. */
+function FilesIn({
+  folder,
+  most,
+  onOpenFile,
+  t,
+}: {
+  folder: Folder
+  most: number
+  onOpenFile: ((path: string) => void) | undefined
+  t: ChangeSetText
+}) {
+  const whole = (path: string) => (folder.path === '' ? path : `${folder.path}/${path}`)
+  return (
+    <FileChanges
+      files={folder.files.map((file) => ({ ...file, path: folder.path === '' ? file.path : file.path.slice(folder.path.length + 1) }))}
+      most={most}
+      {...(onOpenFile === undefined ? {} : { onOpen: (path: string) => onOpenFile(whole(path)) })}
+      text={{ open: (path) => t.openFile(whole(path)) }}
+    />
+  )
+}
+
+/** A change of a few files: each of them, by path, under its folder where folders hold several. */
+function Listed({
+  files,
+  root,
+  onOpenFile,
+  t,
+}: {
+  files: readonly ChangedFile[]
+  root: string
+  onOpenFile: ((path: string) => void) | undefined
+  t: ChangeSetText
+}) {
+  const most = Math.max(1, ...files.map((file) => file.add + file.del))
+  const groups = groupsOf(files)
+  if (groups === null) return <FilesIn folder={{ path: '', files: [...files].sort(byPlace) }} most={most} onOpenFile={onOpenFile} t={t} />
+  return (
+    <div className={s.groups}>
+      {groups.map((folder) => (
+        <div key={folder.path} className={s.group}>
+          <p className={s.heading}>{folder.path === '' ? root : folder.path}</p>
+          <FilesIn folder={folder} most={most} onOpenFile={onOpenFile} t={t} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A change of many files: its folders, each with how much changed in it, opening to its files; past a few, the rest a press away. */
 function Folders({
   files,
+  root,
   shown,
   onOpenFile,
   t,
 }: {
   files: readonly ChangedFile[]
+  root: string
   shown: number
   onOpenFile: ((path: string) => void) | undefined
   t: ChangeSetText
 }) {
   const [all, setAll] = useState(false)
   const folders = foldersOf(files)
+  const most = Math.max(1, ...files.map((file) => file.add + file.del))
   // Folding away one or two folders saves nothing: they show.
   const cut = folders.length - shown <= 2 ? folders.length : shown
   const left = folders.length - cut
-  // A change of a few files shows them: a press each to open its folder would hide them for nothing.
-  const few = files.length <= FEW
   return (
     <div className={s.folders}>
       {(all ? folders : folders.slice(0, cut)).map((folder) => (
-        <Disclosure key={folder.path} defaultOpen={few}>
+        <Disclosure key={folder.path}>
           <DisclosureTrigger>
             <button type="button" className={s.folder}>
               <Caret />
-              <span className={s.path}>{folder.path === '' ? t.root : folder.path}</span>
-              <span className={s.n}>{folder.files.length}</span>
+              <span className={s.path}>{folder.path === '' ? root : folder.path}</span>
+              <Delta add={folder.files.reduce((n, f) => n + f.add, 0)} del={folder.files.reduce((n, f) => n + f.del, 0)} />
+              <span className={s.n}>{t.files(folder.files.length)}</span>
             </button>
           </DisclosureTrigger>
           <Fold bleed={false}>
             <div className={s.in}>
-              <FileChanges
-                files={folder.files.map((file) => ({
-                  ...file,
-                  path: folder.path === '' ? file.path : file.path.slice(folder.path.length + 1),
-                }))}
-                {...(onOpenFile === undefined
-                  ? {}
-                  : { onOpen: (path: string) => onOpenFile(folder.path === '' ? path : `${folder.path}/${path}`) })}
-                text={{ open: (path) => t.openFile(folder.path === '' ? path : `${folder.path}/${path}`) }}
-              />
+              <FilesIn folder={folder} most={most} onOpenFile={onOpenFile} t={t} />
             </div>
           </Fold>
         </Disclosure>

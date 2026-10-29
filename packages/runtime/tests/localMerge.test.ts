@@ -219,6 +219,31 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('counts as not pushed only the branch’s own commits, not what bringing its default branch in brought', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'add', 'origin', remote)
+      git(root, 'push', '-q', '-u', 'origin', 'main')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+      const queries = yield* Queries
+      const remoteOf = Effect.map(queries.thread(task.threadId, { fresh: true }), (snapshot) => snapshot.task.here[0]?.remote)
+      // Its own commit, pushed; then main moves on, on origin too, and the lead brings it in.
+      commit(worktree, 'retry.ts', 'retry\n')
+      git(worktree, 'push', '-q', 'origin', branch)
+      commit(root, 'theirs.ts', 'theirs\n')
+      git(root, 'push', '-q', 'origin', 'main')
+      git(worktree, 'merge', '-q', '--no-edit', 'main')
+      // Only the merge is new to origin: main's commit, which it brought, origin has.
+      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 1 })
+      git(worktree, 'push', '-q', 'origin', branch)
+      assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('pushes to origin where the default branch follows a branch here rather than a remote', () =>
     Effect.gen(function* () {
       const root = repository()

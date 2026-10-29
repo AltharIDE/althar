@@ -1,6 +1,8 @@
 import type { ChangeSummary } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
+import { kindWords } from './calls'
+
 /*
  * What stands between a ready change's open pull request and merging it,
  * read from the change as Althar last saw it, most pressing first: commits
@@ -216,4 +218,37 @@ export const nextWords = (next: Next): string => {
     case 'fix':
       return t.fix
   }
+}
+
+/** A ready change's word, where it isn't plainly ready to accept. */
+export const readyText = {
+  /** A conflict its lead couldn't resolve, or that wasn't asked of it, or the checks on the merge it couldn't fix: the person's now. */
+  mergeConflict: 'Merge conflict',
+  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
+  blocked: 'Not ready to accept',
+  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
+  readyOnPush: 'Ready once pushed',
+}
+
+/**
+ * A ready change in a word, as its board card and its header say it: a
+ * conflict that is the person's first; commits after its last pull request,
+ * for a new one; its pull request open with something in its way, or with
+ * what a push puts right; else ready to accept. `change` is its latest pull
+ * request, the open one where there is one.
+ */
+export const readyWordOf = (
+  task: {
+    readonly handedBack?: string | null | undefined
+    readonly conflictUnsent?: string | null | undefined
+    readonly unshipped?: unknown
+  },
+  latest: ChangeSummary | null,
+): string => {
+  const change = task.unshipped == null || latest?.state === 'open' ? latest : null
+  if (task.handedBack != null || task.conflictUnsent != null) return readyText.mergeConflict
+  if (change === null && task.unshipped != null) return kindWords.unshipped
+  if (change?.state === 'open' && isBlocked(standingOf(change))) return readyText.blocked
+  if (change?.state === 'open' && pushResolves(standingOf(change))) return readyText.readyOnPush
+  return kindWords.ready
 }

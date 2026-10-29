@@ -957,9 +957,9 @@ export class Runs extends Context.Service<
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
             JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
             WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-            if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
+            // Work under way opens its pull request as it ends; work that stopped short, stopped or failed, opens it now, as a draft.
+            if (last === undefined || !['succeeded', 'suspended', 'failed', 'cancelled'].includes(last.state))
               return yield* new NoChangeToOpen({ taskId, why: 'working' })
-            if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
             if (opened.length > 0 && after.length === 0)
               return yield* new NoChangeToOpen({ taskId, why: opened.some((change) => change.state === 'open') ? 'opened' : 'nothing' })
             // Its new work going out, a merged task is open again, until that merges too: before it goes, so a try that opens

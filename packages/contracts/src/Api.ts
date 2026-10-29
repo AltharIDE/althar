@@ -2363,6 +2363,10 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
+    stopped: Schema.optional(
+      Schema.NullOr(Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.String })),
+    ),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */

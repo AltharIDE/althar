@@ -63,7 +63,7 @@ import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -1121,22 +1121,36 @@ export class Queries extends Context.Service<
       /**
        * Where a task's branch stands on its repository's remote, for pushing
        * it without a connection: the remote it goes to, whether that has the
-       * branch, how many commits of it it doesn't have, and the host's page
-       * for a new pull request from it. None without a remote.
+       * branch, as git or Althar's own push noted it, how many commits of it
+       * it doesn't have, and the host's page for a new pull request from it.
+       * None without a remote.
        */
       const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
         Effect.gen(function* () {
           const remote = yield* remoteOf(root, base)
           if (remote === null) return null
-          const [there = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`])
-          const from = there ?? baseCommit
-          const ahead = from === null || from === head ? 0 : yield* commitsAhead(worktree, from, head).pipe(Effect.orElseSucceed(() => 0))
+          const [there = null, pushed = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`, `${PUSHED}${branch}`])
+          // Its own commits, since it started, on nothing the remote is known here to have: what a default branch merged in
+          // brought, the remote has already, and the branch where it pushed it, Althar noted.
+          const ahead =
+            head === there || head === pushed
+              ? 0
+              : yield* gitOutcome(
+                  worktree,
+                  'rev-list',
+                  '--count',
+                  head,
+                  '--not',
+                  ...(baseCommit === null ? [] : [baseCommit]),
+                  `--remotes=${remote}`,
+                  ...(pushed === null ? [] : [pushed]),
+                ).pipe(Effect.map(({ code, stdout }) => (code === 0 ? Number(stdout) || 0 : 0)))
           // Where the branch goes: the remote's push URL, which can be a fork of the one it fetches from.
           const url = (yield* namedRemotes(root, 'push').pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
           return {
             name: remote,
             branch,
-            pushed: there !== null,
+            pushed: there !== null || pushed !== null,
             ahead,
             newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
           }
@@ -2654,6 +2668,7 @@ export class Queries extends Context.Service<
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              ...(card?.stopped == null ? {} : { stopped: card.stopped }),
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
               checksBack: card?.checksBack ?? null,

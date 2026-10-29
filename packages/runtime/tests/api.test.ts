@@ -2492,12 +2492,8 @@ describe('words', () => {
       'The pull request changed since you looked at it. Have another look before you accept it.',
     )
     assert.deepStrictEqual(
-      (['working', 'stopped', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
-      [
-        "The task's work isn't done yet. Its pull request opens when it is.",
-        'The task’s work stopped before it was done, so it has no pull request to open.',
-        'The task is settled, so its branch stays as it is.',
-      ],
+      (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
+      ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
     )
     assert.deepStrictEqual(
       (
