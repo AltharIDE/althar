@@ -1,0 +1,897 @@
+<style>
+.s-d-workspaces {
+  --bg: #0e0b09;
+  --ink: #efebe4;
+  --ink2: #9d978d;
+  --ink3: #6c665e;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 50% 20%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #1b1612 0%, #14100d 48%, #0d0a08 100%);
+  --dot: rgba(255, 238, 220, 0.16);
+  --dot-op: 0.75;
+  --under: radial-gradient(closest-side, rgba(66, 80, 255, 0.34), rgba(108, 64, 240, 0.14) 52%, rgba(108, 64, 240, 0) 100%);
+  --card: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-sh:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8),
+    0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  --edge: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+  --edge-lit: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  --lit:
+    radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%),
+    linear-gradient(180deg, rgba(255, 250, 244, 0.025), rgba(255, 250, 244, 0) 40%);
+  --mk: rgba(240, 236, 229, 0.62);
+  --mk-strong: rgba(240, 236, 229, 0.86);
+  --work: #c3c8ff;
+  --work-hi: #dfe2ff;
+  --work-dot: #8a93ff;
+  --work-glow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
+  --idle-dot: #7a746b;
+  --idle-glow: 0 0 0 0.2em rgba(255, 244, 232, 0.05);
+  --hair: rgba(255, 244, 232, 0.07);
+  --row-hl: linear-gradient(90deg, rgba(86, 98, 255, 0.2), rgba(118, 84, 246, 0.08) 70%, rgba(118, 84, 246, 0));
+  --issue-ring: rgba(240, 236, 229, 0.3);
+  --issue-ring-new: rgba(195, 200, 255, 0.75);
+  --bar: rgba(255, 244, 232, 0.075);
+  --chip: linear-gradient(180deg, #2a2640, #1b1828);
+  --chip-ink: #e4e6ff;
+  --chip-sh:
+    0 0 0 1px rgba(160, 168, 255, 0.42),
+    0 0.5cqw 1.4cqw rgba(0, 0, 0, 0.6),
+    0 0 2cqw rgba(86, 98, 255, 0.35);
+  --grain-op: 0.07;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(6, 5, 4, 0) 58%, rgba(6, 5, 4, 0.5) 100%);
+  --fs-name: max(9px, 1.95cqw);
+  --fs-plan: max(8px, 1.5cqw);
+  --fs-st: max(7.5px, 1.38cqw);
+  --fs-mono: max(7px, 1.18cqw);
+  --rh: max(11px, 2.45cqw);
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+[data-tone='light'] .s-d-workspaces {
+  --bg: #f6f4ef;
+  --ink: #141417;
+  --ink2: #45454c;
+  --ink3: #6f6f77;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 50% 16%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #fcfbf8 0%, #f8f6f1 50%, #f1eee7 100%);
+  --dot: rgba(20, 20, 28, 0.17);
+  --dot-op: 0.62;
+  --under: radial-gradient(closest-side, rgba(43, 59, 255, 0.13), rgba(122, 63, 240, 0.055) 52%, rgba(122, 63, 240, 0) 100%);
+  --card: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(255, 255, 255, 0.95) 100%);
+  --card-sh:
+    0 0.1cqw 0.25cqw rgba(64, 44, 20, 0.06),
+    0 0.6cqw 1.2cqw -0.4cqw rgba(64, 44, 20, 0.08),
+    0 2cqw 3.8cqw -1.4cqw rgba(64, 44, 20, 0.16);
+  --edge: linear-gradient(180deg, rgba(20, 20, 28, 0.05), rgba(20, 20, 28, 0.1) 30%, rgba(20, 20, 28, 0.12));
+  --edge-lit: linear-gradient(180deg, rgba(43, 59, 255, 0.5), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.06));
+  --lit: radial-gradient(90% 60% at 50% 0%, rgba(43, 59, 255, 0.055), rgba(43, 59, 255, 0) 70%);
+  --mk: rgba(20, 20, 28, 0.48);
+  --mk-strong: #141417;
+  --work: #2b3bff;
+  --work-hi: #2b3bff;
+  --work-dot: #2b3bff;
+  --work-glow: 0 0 0 0.2em rgba(43, 59, 255, 0.12), 0 0 0.6em rgba(43, 59, 255, 0.3);
+  --idle-dot: #a3a1a6;
+  --idle-glow: 0 0 0 0.2em rgba(20, 20, 28, 0.04);
+  --hair: rgba(20, 20, 28, 0.08);
+  --row-hl: linear-gradient(90deg, rgba(43, 59, 255, 0.09), rgba(122, 63, 240, 0.04) 70%, rgba(122, 63, 240, 0));
+  --issue-ring: rgba(20, 20, 28, 0.28);
+  --issue-ring-new: rgba(43, 59, 255, 0.8);
+  --bar: rgba(20, 20, 28, 0.07);
+  --chip: linear-gradient(180deg, #ffffff, #f6f5ff);
+  --chip-ink: #2b3bff;
+  --chip-sh:
+    0 0 0 1px rgba(43, 59, 255, 0.32),
+    0 0.4cqw 1.2cqw -0.2cqw rgba(64, 44, 20, 0.18),
+    0 0 1.8cqw rgba(43, 59, 255, 0.16);
+  --grain-op: 0.025;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(120, 96, 60, 0) 62%, rgba(120, 96, 60, 0.07) 100%);
+}
+.s-d-workspaces * { box-sizing: border-box; }
+.s-d-workspaces .s-d-workspaces__ground {
+  position: absolute;
+  inset: 0;
+  background: var(--ground);
+}
+.s-d-workspaces .s-d-workspaces__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--dot) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  opacity: var(--dot-op);
+}
+.s-d-workspaces .s-d-workspaces__under {
+  position: absolute;
+  width: 46cqw;
+  height: 17cqw;
+  margin: -8.5cqw 0 0 -23cqw;
+  background: var(--under);
+  opacity: 0;
+  z-index: 1;
+  will-change: opacity;
+}
+.s-d-workspaces .s-d-workspaces__under--pt { left: 28.25cqw; top: 51.5cqw; }
+.s-d-workspaces .s-d-workspaces__under--ph { left: 71.75cqw; top: 51.5cqw; }
+.s-d-workspaces .s-d-workspaces__under--wa,
+.s-d-workspaces .s-d-workspaces__under--wc { top: 18.4cqw; width: 30cqw; height: 11cqw; margin: -5.5cqw 0 0 -15cqw; }
+.s-d-workspaces .s-d-workspaces__under--wa { left: 20.5cqw; }
+.s-d-workspaces .s-d-workspaces__under--wc { left: 79.5cqw; }
+
+.s-d-workspaces .s-d-workspaces__card {
+  position: absolute;
+  padding: 1.45cqw 1.6cqw 1.4cqw;
+  border-radius: 1.5cqw;
+  background: var(--card);
+  box-shadow: var(--card-sh);
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+}
+.s-d-workspaces .s-d-workspaces__ws { top: 6cqw; width: 26cqw; height: 13.6cqw; }
+.s-d-workspaces .s-d-workspaces__ws--a { left: 7.5cqw; }
+.s-d-workspaces .s-d-workspaces__ws--p { left: 37cqw; }
+.s-d-workspaces .s-d-workspaces__ws--c { left: 66.5cqw; }
+.s-d-workspaces .s-d-workspaces__pj { top: 33cqw; width: 41.5cqw; height: 20.2cqw; }
+.s-d-workspaces .s-d-workspaces__pj--t { left: 7.5cqw; }
+.s-d-workspaces .s-d-workspaces__pj--h { left: 51cqw; }
+.s-d-workspaces .s-d-workspaces__card::before,
+.s-d-workspaces .s-d-workspaces__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-d-workspaces .s-d-workspaces__card::before {
+  background: var(--edge);
+}
+.s-d-workspaces .s-d-workspaces__card::after {
+  background: var(--edge-lit);
+  opacity: 0;
+  transition: opacity 0.8s var(--ease);
+}
+.s-d-workspaces .s-d-workspaces__card[data-st="live"]::after { opacity: 1; }
+.s-d-workspaces .s-d-workspaces__card[data-st="bound"]::after { opacity: 0.32; }
+.s-d-workspaces .s-d-workspaces__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--lit);
+  opacity: 0;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-d-workspaces .s-d-workspaces__card[data-st="live"] .s-d-workspaces__lit { opacity: 1; }
+.s-d-workspaces .s-d-workspaces__card[data-st="bound"] .s-d-workspaces__lit { opacity: 0.3; }
+
+.s-d-workspaces .s-d-workspaces__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6cqw;
+  height: max(10px, 2.1cqw);
+}
+.s-d-workspaces .s-d-workspaces__mk {
+  display: block;
+  flex: none;
+  width: max(10px, 1.9cqw);
+  height: max(10px, 1.9cqw);
+  color: var(--mk-strong);
+}
+.s-d-workspaces .s-d-workspaces__pj .s-d-workspaces__mk { color: var(--mk); }
+.s-d-workspaces .s-d-workspaces__src {
+  font: 500 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink2);
+  letter-spacing: 0.02em;
+}
+.s-d-workspaces .s-d-workspaces__idx {
+  margin-left: auto;
+  font: 500 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.s-d-workspaces .s-d-workspaces__name {
+  position: relative;
+  margin-top: 1.1cqw;
+  font-size: var(--fs-name);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.014em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.s-d-workspaces .s-d-workspaces__plan {
+  position: relative;
+  margin-top: 0.3cqw;
+  font-size: var(--fs-plan);
+  line-height: 1.25;
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-d-workspaces .s-d-workspaces__status {
+  position: relative;
+  margin-top: auto;
+  height: max(10px, 1.8cqw);
+  font-size: var(--fs-st);
+  line-height: max(10px, 1.8cqw);
+  letter-spacing: 0.002em;
+}
+.s-d-workspaces .s-d-workspaces__st {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+  color: var(--ink3);
+  opacity: 0;
+  transform: translateY(0.35em);
+  transition: opacity 0.45s ease, transform 0.7s var(--ease);
+}
+.s-d-workspaces .s-d-workspaces__st i {
+  flex: none;
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: var(--idle-dot);
+  box-shadow: var(--idle-glow);
+}
+.s-d-workspaces .s-d-workspaces__st--new { color: var(--work); }
+.s-d-workspaces .s-d-workspaces__st--new b { font: 500 0.9em/1 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.01em; color: var(--work-hi); }
+.s-d-workspaces .s-d-workspaces__st--new i {
+  background: var(--work-dot);
+  box-shadow: var(--work-glow);
+}
+.s-d-workspaces .s-d-workspaces__ws[data-st="live"] .s-d-workspaces__st--new,
+.s-d-workspaces .s-d-workspaces__ws:not([data-st="live"]) .s-d-workspaces__st--on { opacity: 1; transform: none; }
+
+.s-d-workspaces .s-d-workspaces__list {
+  position: relative;
+  margin-top: auto;
+  height: calc(var(--rh) * 3);
+  overflow: hidden;
+  -webkit-mask: linear-gradient(180deg, #000 72%, transparent);
+  mask: linear-gradient(180deg, #000 72%, transparent);
+}
+.s-d-workspaces .s-d-workspaces__list::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--hair);
+}
+.s-d-workspaces .s-d-workspaces__issue {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--rh);
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: var(--fs-st);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.s-d-workspaces .s-d-workspaces__issue::before {
+  content: '';
+  position: absolute;
+  inset: 12% -0.7cqw;
+  border-radius: 0.5cqw;
+  background: var(--row-hl);
+  opacity: var(--rowa, 0);
+}
+.s-d-workspaces .s-d-workspaces__ring {
+  position: relative;
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  border-radius: 50%;
+  border: max(1px, 0.13cqw) solid var(--issue-ring);
+}
+.s-d-workspaces .s-d-workspaces__key {
+  position: relative;
+  flex: none;
+  width: 4.6em;
+  font: 500 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.01em;
+  color: var(--ink3);
+}
+.s-d-workspaces .s-d-workspaces__title {
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.006em;
+  color: var(--ink);
+}
+.s-d-workspaces .s-d-workspaces__issue--new .s-d-workspaces__key { color: var(--work); }
+.s-d-workspaces .s-d-workspaces__issue--new .s-d-workspaces__ring { border-color: var(--issue-ring-new); }
+.s-d-workspaces .s-d-workspaces__bar {
+  position: relative;
+  height: 0.42em;
+  border-radius: 0.21em;
+  background: var(--bar);
+}
+.s-d-workspaces .s-d-workspaces__chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  padding: 0.42cqw 0.75cqw;
+  border-radius: 0.6cqw;
+  font: 500 var(--fs-mono)/1.15 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--chip-ink);
+  background: var(--chip);
+  box-shadow: var(--chip-sh);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.s-d-workspaces .s-d-workspaces__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+.s-d-workspaces .s-d-workspaces__grain {
+  position: absolute;
+  inset: 0;
+  background-size: 64px 64px;
+  opacity: var(--grain-op);
+  mix-blend-mode: overlay;
+  z-index: 5;
+  pointer-events: none;
+}
+.s-d-workspaces .s-d-workspaces__vig {
+  position: absolute;
+  inset: 0;
+  background: var(--vig);
+  z-index: 6;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .s-d-workspaces *,
+  .s-d-workspaces *::before,
+  .s-d-workspaces *::after { transition: none !important; }
+}
+@container (max-width: 520px) {
+  .s-d-workspaces .s-d-workspaces__plan { display: none; }
+  .s-d-workspaces .s-d-workspaces__card { padding: 1.4cqw 1.45cqw 1.3cqw; }
+  .s-d-workspaces .s-d-workspaces__name { margin-top: 1cqw; }
+  .s-d-workspaces .s-d-workspaces__issue { gap: 0.45em; }
+  .s-d-workspaces .s-d-workspaces__ring { display: none; }
+  .s-d-workspaces .s-d-workspaces__key { width: 3.9em; }
+  .s-d-workspaces .s-d-workspaces__ws { width: 27.5cqw; }
+  .s-d-workspaces .s-d-workspaces__ws--a { left: 5.5cqw; }
+  .s-d-workspaces .s-d-workspaces__ws--p { left: 36.25cqw; }
+  .s-d-workspaces .s-d-workspaces__ws--c { left: 67cqw; }
+  .s-d-workspaces .s-d-workspaces__pj { width: 43.5cqw; }
+  .s-d-workspaces .s-d-workspaces__pj--t { left: 5.5cqw; }
+  .s-d-workspaces .s-d-workspaces__pj--h { left: 51cqw; }
+  .s-d-workspaces .s-d-workspaces__title { letter-spacing: -0.012em; }
+}
+@container (max-width: 360px) {
+  .s-d-workspaces .s-d-workspaces__pj { padding-left: 1.3cqw; padding-right: 1.3cqw; }
+  .s-d-workspaces .s-d-workspaces__key { width: 3.7em; }
+  .s-d-workspaces .s-d-workspaces__issue { gap: 0.4em; }
+}
+</style>
+<div class="s-d-workspaces" aria-hidden="true">
+  <div class="s-d-workspaces__ground"></div>
+  <div class="s-d-workspaces__dots"></div>
+  <div class="s-d-workspaces__under s-d-workspaces__under--wa"></div>
+  <div class="s-d-workspaces__under s-d-workspaces__under--wc"></div>
+  <div class="s-d-workspaces__under s-d-workspaces__under--pt"></div>
+  <div class="s-d-workspaces__under s-d-workspaces__under--ph"></div>
+
+  <div class="s-d-workspaces__card s-d-workspaces__ws s-d-workspaces__ws--a">
+    <div class="s-d-workspaces__lit"></div>
+    <div class="s-d-workspaces__row"><svg class="s-d-workspaces__mk s-d-workspaces__mk--linear" viewBox="0 0 24 24"></svg><span class="s-d-workspaces__src">Linear</span><span class="s-d-workspaces__idx">ENG</span></div>
+    <div class="s-d-workspaces__name">Work</div>
+    <div class="s-d-workspaces__plan">Bound to Tally</div>
+    <div class="s-d-workspaces__status"><span class="s-d-workspaces__st s-d-workspaces__st--on"><i></i>Connected</span><span class="s-d-workspaces__st s-d-workspaces__st--new"><i></i>New issue <b>ENG-14</b></span></div>
+  </div>
+  <div class="s-d-workspaces__card s-d-workspaces__ws s-d-workspaces__ws--p">
+    <div class="s-d-workspaces__lit"></div>
+    <div class="s-d-workspaces__row"><svg class="s-d-workspaces__mk s-d-workspaces__mk--linear" viewBox="0 0 24 24"></svg><span class="s-d-workspaces__src">Linear</span><span class="s-d-workspaces__idx">PER</span></div>
+    <div class="s-d-workspaces__name">Personal</div>
+    <div class="s-d-workspaces__plan">No project bound</div>
+    <div class="s-d-workspaces__status"><span class="s-d-workspaces__st s-d-workspaces__st--on"><i></i>Connected</span></div>
+  </div>
+  <div class="s-d-workspaces__card s-d-workspaces__ws s-d-workspaces__ws--c">
+    <div class="s-d-workspaces__lit"></div>
+    <div class="s-d-workspaces__row"><svg class="s-d-workspaces__mk s-d-workspaces__mk--linear" viewBox="0 0 24 24"></svg><span class="s-d-workspaces__src">Linear</span><span class="s-d-workspaces__idx">WEB</span></div>
+    <div class="s-d-workspaces__name">Client</div>
+    <div class="s-d-workspaces__plan">Bound to Halyard</div>
+    <div class="s-d-workspaces__status"><span class="s-d-workspaces__st s-d-workspaces__st--on"><i></i>Connected</span><span class="s-d-workspaces__st s-d-workspaces__st--new"><i></i>New issue <b>WEB-23</b></span></div>
+  </div>
+
+  <div class="s-d-workspaces__card s-d-workspaces__pj s-d-workspaces__pj--t" data-st="bound">
+    <div class="s-d-workspaces__lit"></div>
+    <div class="s-d-workspaces__row"><svg class="s-d-workspaces__mk s-d-workspaces__mk--project" viewBox="0 0 24 24"></svg><span class="s-d-workspaces__src">Project</span><span class="s-d-workspaces__idx">tally-api</span></div>
+    <div class="s-d-workspaces__name">Tally</div>
+    <div class="s-d-workspaces__plan">Issues from Work</div>
+    <div class="s-d-workspaces__list">
+      <div class="s-d-workspaces__issue s-d-workspaces__issue--new"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">ENG-14</span><span class="s-d-workspaces__title">Refund webhooks retry too fast</span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">ENG-12</span><span class="s-d-workspaces__bar" style="width: 54%"></span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">ENG-9</span><span class="s-d-workspaces__bar" style="width: 38%"></span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">ENG-7</span><span class="s-d-workspaces__bar" style="width: 46%"></span></div>
+    </div>
+  </div>
+  <div class="s-d-workspaces__card s-d-workspaces__pj s-d-workspaces__pj--h" data-st="bound">
+    <div class="s-d-workspaces__lit"></div>
+    <div class="s-d-workspaces__row"><svg class="s-d-workspaces__mk s-d-workspaces__mk--project" viewBox="0 0 24 24"></svg><span class="s-d-workspaces__src">Project</span><span class="s-d-workspaces__idx">halyard-api</span></div>
+    <div class="s-d-workspaces__name">Halyard</div>
+    <div class="s-d-workspaces__plan">Issues from Client</div>
+    <div class="s-d-workspaces__list">
+      <div class="s-d-workspaces__issue s-d-workspaces__issue--new"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">WEB-23</span><span class="s-d-workspaces__title">Sign-in links expire too soon</span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">WEB-21</span><span class="s-d-workspaces__bar" style="width: 42%"></span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">WEB-18</span><span class="s-d-workspaces__bar" style="width: 58%"></span></div>
+      <div class="s-d-workspaces__issue"><i class="s-d-workspaces__ring"></i><span class="s-d-workspaces__key">WEB-16</span><span class="s-d-workspaces__bar" style="width: 34%"></span></div>
+    </div>
+  </div>
+
+  <canvas class="s-d-workspaces__fx"></canvas>
+  <div class="s-d-workspaces__chip">ENG-14</div>
+  <div class="s-d-workspaces__grain"></div>
+  <div class="s-d-workspaces__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-d-workspaces')) return
+  const C = 's-d-workspaces__'
+  const q1 = (el, s) => el.querySelector('.' + C + s)
+  const qa = (el, s) => Array.from(el.querySelectorAll('.' + C + s))
+
+  // Linear's mark, in one ink; and a plain project glyph.
+  const LINEAR = '<path fill="currentColor" d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.020 12.020 0 0 1-9.824-9.824Z"/>'
+  const PROJECT = '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.8 20.2 7.4v9.2L12 21.2l-8.2-4.6V7.4z"/><path d="M3.8 7.4 12 12l8.2-4.6M12 12v9.2" opacity=".6"/></g>'
+  qa(root, 'mk--linear').forEach((s) => (s.innerHTML = LINEAR))
+  qa(root, 'mk--project').forEach((s) => (s.innerHTML = PROJECT))
+
+  const [wsA, wsP, wsC] = qa(root, 'ws')
+  const [pjT, pjH] = qa(root, 'pj')
+  const chip = q1(root, 'chip')
+  const cv = q1(root, 'fx')
+  const ctx = cv.getContext('2d')
+  // The two bindings: Work to Tally, Client to Halyard. Personal is connected, with nothing bound.
+  const BIND = [
+    { key: 'ENG-14', ws: wsA, pj: pjT, ugW: q1(root, 'under--wa'), ugP: q1(root, 'under--pt'), rows: qa(pjT, 'issue') },
+    { key: 'WEB-23', ws: wsC, pj: pjH, ugW: q1(root, 'under--wc'), ugP: q1(root, 'under--ph'), rows: qa(pjH, 'issue') },
+  ]
+
+  // Film grain, generated once (no external images).
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    q1(root, 'grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  // The light's colours for each tone, read once. On paper the light is a little deeper and its glow softer.
+  const LIGHT = (root.closest('[data-tone]') || root).dataset.tone === 'light'
+  const P = LIGHT
+    ? {
+        add: 'source-over', gk: 0.55,
+        cob: [43, 59, 255], vio: [122, 63, 240], hot: [52, 66, 255],
+        tail: [122, 63, 240], mid: [43, 59, 255], head: [64, 78, 255],
+        line: ['rgb(43,59,255)', 'rgb(64,60,250)', 'rgb(122,63,240)'],
+        rest: 'rgba(20,20,28,0.11)', port: 'rgba(20,20,28,0.3)', quiet: 'rgba(20,20,28,0.2)',
+        pulse: '#2b3bff', ring: 'rgba(43,59,255,1)', ringHi: 'rgba(43,59,255,1)', wideK: 0.55, thin: 0.85,
+      }
+    : {
+        add: 'lighter', gk: 1,
+        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255],
+        tail: [128, 76, 244], mid: [78, 96, 255], head: [226, 230, 255],
+        line: ['rgb(176,184,255)', 'rgb(112,122,255)', 'rgb(128,96,250)'],
+        rest: 'rgba(255,242,228,0.075)', port: 'rgba(255,242,228,0.22)', quiet: 'rgba(255,242,228,0.14)',
+        pulse: '#dfe2ff', ring: 'rgba(120,132,255,1)', ringHi: 'rgba(200,206,255,1)', wideK: 1, thin: 0.92,
+      }
+
+  // Soft light sprites, rendered once.
+  function sprite(r, g, b, core) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(...P.cob, 0.18)
+  const SP_VIO = sprite(...P.vio, 0.16)
+  const SP_HOT = sprite(...P.hot, 0.12)
+
+  // Beam colour ramp, tail (violet) to head.
+  const NB = 26
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    let r, g, b
+    const [A, B] = t < 0.62 ? [P.tail, P.mid] : [P.mid, P.head]
+    const f = t < 0.62 ? t / 0.62 : (t - 0.62) / 0.38
+    r = A[0] + (B[0] - A[0]) * f; g = A[1] + (B[1] - A[1]) * f; b = A[2] + (B[2] - A[2]) * f
+    BEAM_COL.push(`rgb(${r | 0},${g | 0},${b | 0})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const out = (t) => 1 - Math.pow(1 - t, 3)
+
+  // Timeline. Each issue arrives in its workspace, light gathers round the card to its port,
+  // runs down the binding to its project, and lands there as a row.
+  const L = 10.6
+  const START = [0.4, 4.4]
+  const GATHER = 0.95
+  const RUN = 1.2
+  const ARR = GATHER + RUN
+  const INS = 0.65
+  const R0 = 9.55, R1 = 10.25 // rows leave and the lines rest, to start again
+
+  // Geometry, measured on resize.
+  let W = 0, H = 0, U = 1, dpr = 1
+  const rect = (el) => ({ el, x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 })
+  const RP = rect(wsP)
+  BIND.forEach((b) => { b.A = rect(b.ws); b.B = rect(b.pj) })
+  const M = 60
+  BIND.forEach((b) => { b.xs = new Float32Array(M); b.ys = new Float32Array(M); b.grad = null })
+  let rowH = 12, chipW = 40, chipH = 14, shownChipKey = ''
+
+  function measureRect(R) {
+    const el = R.el
+    R.x = el.offsetLeft + 0.5
+    R.y = el.offsetTop + 0.5
+    R.w = el.offsetWidth - 1
+    R.h = el.offsetHeight - 1
+    R.r = Math.max(1, (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 10) - 0.5)
+    R.per = 2 * (R.w - 2 * R.r) + 2 * (R.h - 2 * R.r) + 2 * Math.PI * R.r
+  }
+  function measure() {
+    W = root.clientWidth; H = root.clientHeight; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    measureRect(RP)
+    rowH = BIND[0].rows[0].offsetHeight || 12
+    const tmpX = new Float32Array(49), tmpY = new Float32Array(49), tmpL = new Float32Array(49)
+    BIND.forEach((bd) => {
+      measureRect(bd.A); measureRect(bd.B)
+      const A = bd.A, B = bd.B
+      const x0 = A.x + A.w / 2, y0 = A.y + A.h + 0.5
+      const x3 = B.x + B.w / 2, y3 = B.y - 0.5
+      const dy = y3 - y0
+      const x1 = x0, y1 = y0 + dy * 0.6
+      const x2 = x3, y2 = y3 - dy * 0.6
+      let Lr = 0
+      for (let i = 0; i <= 48; i++) {
+        const t = i / 48, m = 1 - t
+        const a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t
+        tmpX[i] = a * x0 + b * x1 + c * x2 + d * x3
+        tmpY[i] = a * y0 + b * y1 + c * y2 + d * y3
+        if (i) Lr += Math.hypot(tmpX[i] - tmpX[i - 1], tmpY[i] - tmpY[i - 1])
+        tmpL[i] = Lr
+      }
+      let s = 0
+      for (let i = 0; i < M; i++) {
+        const want = (i / (M - 1)) * Lr
+        while (s < 47 && tmpL[s + 1] < want) s++
+        const span = tmpL[s + 1] - tmpL[s] || 1
+        const f = Math.min(1, Math.max(0, (want - tmpL[s]) / span))
+        bd.xs[i] = tmpX[s] + (tmpX[s + 1] - tmpX[s]) * f
+        bd.ys[i] = tmpY[s] + (tmpY[s + 1] - tmpY[s]) * f
+      }
+      const gr = ctx.createLinearGradient(x0, y0, x3, y3)
+      gr.addColorStop(0, P.line[0])
+      gr.addColorStop(0.5, P.line[1])
+      gr.addColorStop(1, P.line[2])
+      bd.grad = gr
+    })
+    shownChipKey = ''
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  // A point on a card's border, s along it clockwise from the top centre.
+  function rrPoint(R, s) {
+    const { x, y, w, h, r } = R
+    s %= R.per
+    if (s < 0) s += R.per
+    const qq = (Math.PI * r) / 2
+    let Ls = w / 2 - r
+    if (s < Ls) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= Ls
+    if (s < qq) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= qq; Ls = h - 2 * r
+    if (s < Ls) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= Ls
+    if (s < qq) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= qq; Ls = w - 2 * r
+    if (s < Ls) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= Ls
+    if (s < qq) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= qq; Ls = h - 2 * r
+    if (s < Ls) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= Ls
+    if (s < qq) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= qq
+    PT[0] = x + r + s; PT[1] = y
+  }
+  function linePoint(bd, u) {
+    const f = clamp(u) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = bd.xs[i] + (bd.xs[i + 1] - bd.xs[i]) * t
+    PT[1] = bd.ys[i] + (bd.ys[i + 1] - bd.ys[i]) * t
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    a *= P.gk
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+
+  // A comet along a card's border, head at s, running clockwise (dir 1) or anticlockwise (dir -1).
+  function beam(R, s, len, a, dir) {
+    if (a <= 0.004 || len < 1) return
+    const seg = len / NB
+    ctx.lineWidth = 1.4
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const s0 = s - dir * (len - i * seg)
+      rrPoint(R, s0)
+      const ax = PT[0], ay = PT[1]
+      rrPoint(R, s0 + dir * (seg + 0.35))
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = P.add
+    for (let i = 0; i < 8; i++) {
+      const t = 0.3 + (i / 7) * 0.7
+      rrPoint(R, s - dir * len * (1 - t))
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 1.8, a * 0.18 * t * t)
+    }
+    rrPoint(R, s)
+    glow(SP_VIO, PT[0], PT[1], U * 5, a * 0.14)
+    glow(SP_COB, PT[0], PT[1], U * 2.8, a * 0.4)
+    glow(SP_HOT, PT[0], PT[1], U * 0.85, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  // Lit part of a binding between u0 (workspace side) and u1.
+  function litLine(bd, u0, u1, a) {
+    if (a <= 0.004 || u1 - u0 < 0.002) return
+    const i0 = Math.ceil(u0 * (M - 1)), i1 = Math.floor(u1 * (M - 1))
+    ctx.beginPath()
+    linePoint(bd, u0)
+    ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(bd.xs[i], bd.ys[i])
+    linePoint(bd, u1)
+    ctx.lineTo(PT[0], PT[1])
+    ctx.strokeStyle = bd.grad
+    ctx.globalCompositeOperation = P.add
+    ctx.globalAlpha = a * 0.13 * P.wideK
+    ctx.lineWidth = Math.max(3, U * 0.6)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * P.thin
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+
+  // What the DOM shows, so each frame writes only what changed.
+  BIND.forEach((bd) => {
+    bd.memo = { ws: '', pj: '', ugW: -1, ugP: -1, rows: bd.rows.map(() => ({ y: -1e9, a: -1, h: -1 })) }
+  })
+  let shownChipTf = '', shownChipA = -1
+
+  // Rows in a project's list: the new one slides in at the top as the others make room.
+  function layRows(bd, k, hl) {
+    const rows = bd.rows, memo = bd.memo.rows
+    for (let i = 0; i < rows.length; i++) {
+      let y, a, h = 0
+      if (i === 0) { y = (k - 1) * rowH * 0.3; a = clamp((k - 0.25) / 0.75); h = hl }
+      else { y = (i - 1 + k) * rowH; a = i === rows.length - 1 ? 1 - k : 1 }
+      const m = memo[i]
+      if (Math.abs(y - m.y) > 0.02 || Math.abs(a - m.a) > 0.002) {
+        rows[i].style.transform = `translate3d(0,${y.toFixed(2)}px,0)`
+        rows[i].style.opacity = a < 0.999 ? a.toFixed(3) : ''
+        m.y = y; m.a = a
+      }
+      if (i === 0 && Math.abs(h - m.h) > 0.004) { rows[i].style.setProperty('--rowa', h.toFixed(3)); m.h = h }
+    }
+  }
+  function setOp(el, memo, k, v) {
+    if (Math.abs(memo[k] - v) > 0.004) { el.style.opacity = v.toFixed(3); memo[k] = v }
+  }
+
+  function render(T) {
+    if (!W) return
+    const t = ((T % L) + L) % L
+    const rest = t >= R0 ? io(clamp((t - R0) / (R1 - R0))) : 0
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+
+    // The bindings, resting, and their ports. Personal has a port and nothing bound to it.
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1
+    ctx.strokeStyle = P.rest
+    for (const bd of BIND) {
+      ctx.beginPath()
+      ctx.moveTo(bd.xs[0], bd.ys[0])
+      for (let i = 1; i < M; i++) ctx.lineTo(bd.xs[i], bd.ys[i])
+      ctx.stroke()
+    }
+    const pr = Math.max(1.2, U * 0.22)
+    ctx.fillStyle = P.port
+    for (const bd of BIND) {
+      ctx.beginPath(); ctx.arc(bd.xs[0], bd.ys[0], pr, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.arc(bd.xs[M - 1], bd.ys[M - 1], pr, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.fillStyle = P.quiet
+    ctx.beginPath(); ctx.arc(RP.x + RP.w / 2, RP.y + RP.h + 0.5, pr, 0, Math.PI * 2); ctx.fill()
+
+    let chipOn = -1, chipX = 0, chipY = 0, chipA = 0, chipS = 1
+    for (let k = 0; k < 2; k++) {
+      const bd = BIND[k], A = bd.A, B = bd.B, mm = bd.memo
+      const x = t - START[k] // time into this issue
+
+      // States: the workspace lights while the issue is in it; the project as it lands.
+      const ws = x >= 0 && x < ARR + 1.0 && t < R0 ? 'live' : ''
+      if (ws !== mm.ws) { bd.ws.dataset.st = ws; mm.ws = ws }
+      const pj = x >= ARR && x < ARR + 2.4 && t < R0 ? 'live' : 'bound'
+      if (pj !== mm.pj) { bd.pj.dataset.st = pj; mm.pj = pj }
+      setOp(bd.ugW, mm, 'ugW', x >= 0 && t < R0 ? 0.7 * clamp(x / 0.3) * (1 - clamp((x - ARR + 0.2) / 0.6)) : 0)
+      setOp(bd.ugP, mm, 'ugP', x >= ARR ? (x - ARR < 0.3 ? io((x - ARR) / 0.3) : 0.42 + 0.58 * Math.exp(-(x - ARR - 0.3) / 1.1)) * (1 - rest) : 0)
+
+      // The binding: lit behind the packet, then resting a little brighter than before.
+      if (x > GATHER && x < ARR) {
+        const u = iosine((x - GATHER) / RUN)
+        litLine(bd, 0, u, 1)
+        linePoint(bd, u)
+        chipOn = k; chipX = PT[0]; chipY = PT[1]
+        chipA = clamp((x - GATHER) / 0.18); chipS = 0.8 + 0.2 * out(clamp((x - GATHER) / 0.25))
+        const env = clamp((x - GATHER) / 0.1)
+        ctx.globalCompositeOperation = P.add
+        glow(SP_VIO, PT[0], PT[1], U * 7, 0.24 * env)
+        glow(SP_COB, PT[0], PT[1], U * 4.2, 0.5 * env)
+        ctx.globalCompositeOperation = 'source-over'
+      } else if (x >= ARR) {
+        litLine(bd, 0, 1, (0.42 + 0.53 * Math.exp(-(x - ARR) / 1.2)) * (1 - rest))
+        // The packet sinks into the project's port.
+        if (x < ARR + 0.22) {
+          linePoint(bd, 1)
+          chipOn = k; chipX = PT[0]; chipY = PT[1]
+          const f = (x - ARR) / 0.22
+          chipA = 1 - io(f); chipS = 1 - 0.35 * f
+        }
+      }
+
+      // Light gathers round the workspace card, both ways, to the port at its foot.
+      if (x >= 0 && x < GATHER + 0.15) {
+        const f = iosine(clamp(x / GATHER))
+        const half = A.per / 2
+        const len = Math.min(half * 0.55, U * 12) * Math.min(1, f * 3)
+        const a = clamp(x / 0.12) * (1 - clamp((x - GATHER) / 0.15))
+        beam(A, f * half, len, a * 0.9, 1)
+        beam(A, A.per - f * half, len, a * 0.9, -1)
+        // Where the issue comes in, at the top of the card.
+        const inF = Math.exp(-Math.pow(x / 0.16, 2))
+        ctx.globalCompositeOperation = P.add
+        glow(SP_COB, A.x + A.w / 2, A.y, U * 4, inF * 0.45)
+        glow(SP_HOT, A.x + A.w / 2, A.y, U * 1.1, inF * 0.8)
+        ctx.globalCompositeOperation = 'source-over'
+      }
+      // Leaving the workspace's port, arriving at the project's, and a steady point where it is bound.
+      ctx.globalCompositeOperation = P.add
+      const fl0 = Math.exp(-Math.pow((x - GATHER) / 0.14, 2))
+      if (fl0 > 0.01) { glow(SP_COB, bd.xs[0], bd.ys[0], U * 4, fl0 * 0.5); glow(SP_HOT, bd.xs[0], bd.ys[0], U * 1.1, fl0) }
+      const fl1 = Math.exp(-Math.pow((x - ARR) / 0.16, 2))
+      if (fl1 > 0.01) { glow(SP_COB, bd.xs[M - 1], bd.ys[M - 1], U * 5.5, fl1 * 0.55); glow(SP_HOT, bd.xs[M - 1], bd.ys[M - 1], U * 1.3, fl1) }
+      if (x >= ARR) glow(SP_COB, bd.xs[M - 1], bd.ys[M - 1], U * 1.6, 0.3 * (1 - rest))
+      ctx.globalCompositeOperation = 'source-over'
+
+      // It lands: light spreads from the port round the project card and fades.
+      if (x >= ARR && x < ARR + 1.1) {
+        const f = out(clamp((x - ARR) / 1.0))
+        const half = B.per / 2
+        const len = Math.min(half * 0.4, U * 13) * (0.4 + 0.6 * Math.min(1, f * 2.5))
+        const a = (1 - clamp((x - ARR - 0.55) / 0.5)) * 0.85
+        beam(B, f * half * 0.82, len, a, 1)
+        beam(B, B.per - f * half * 0.82, len, a, -1)
+      }
+
+      // The row.
+      const ins = x >= ARR + 0.05 ? io(clamp((x - ARR - 0.05) / INS)) : 0
+      const hl = x >= ARR ? (0.35 + 0.65 * Math.exp(-(x - ARR - INS) / 1.6)) * ins * (1 - rest) : 0
+      layRows(bd, ins * (1 - rest), hl)
+    }
+
+    // The issue's chip rides on the light.
+    if (chipOn >= 0) {
+      const key = BIND[chipOn].key
+      if (key !== shownChipKey) { chip.textContent = key; chipW = chip.offsetWidth; chipH = chip.offsetHeight; shownChipKey = key }
+      const tf = `translate3d(${(chipX - chipW / 2).toFixed(2)}px,${(chipY - chipH / 2).toFixed(2)}px,0) scale(${chipS.toFixed(3)})`
+      if (tf !== shownChipTf) { chip.style.transform = tf; shownChipTf = tf }
+    } else chipA = 0
+    if (Math.abs(chipA - shownChipA) > 0.002) { chip.style.opacity = chipA.toFixed(3); shownChipA = chipA }
+    ctx.globalAlpha = 1
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let T = 0.6
+  let raf = 0, last = 0, onScreen = false, ready = false
+  const STILL = START[0] + ARR + 0.95 // ENG-14 arriving in Tally
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    T = (T + dt) % L
+    render(T)
+    raf = requestAnimationFrame(frame)
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) render(STILL)
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) render(mq.matches ? STILL : T)
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>

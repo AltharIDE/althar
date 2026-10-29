@@ -1,0 +1,1116 @@
+<style>
+.s-d-worktrees {
+  --bg: #0e0b09;
+  --ink: #efebe4;
+  --ink2: #9d978d;
+  --ink3: #6c665e;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 50% 20%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #1b1612 0%, #14100d 48%, #0d0a08 100%);
+  --dot: rgba(255, 238, 220, 0.16);
+  --dot-op: 0.75;
+  --under: radial-gradient(closest-side, rgba(66, 80, 255, 0.34), rgba(108, 64, 240, 0.14) 52%, rgba(108, 64, 240, 0) 100%);
+  --card: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-sh:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8),
+    0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  --edge: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+  --edge-lit: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  --lit:
+    radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%),
+    linear-gradient(180deg, rgba(255, 250, 244, 0.025), rgba(255, 250, 244, 0) 40%);
+  --mk: rgba(240, 236, 229, 0.62);
+  --track: rgba(255, 244, 232, 0.085);
+  --fill: linear-gradient(90deg, #3442ff, #6a6dff 60%, #9a7cff);
+  --tip: radial-gradient(circle, rgba(236, 238, 255, 1) 0 14%, rgba(120, 130, 255, 0.5) 34%, rgba(120, 130, 255, 0) 70%);
+  --work: #c3c8ff;
+  --work-dot: #8a93ff;
+  --work-glow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
+  --done: #63bd7b;
+  --done-fill: linear-gradient(90deg, #2f7d45, #63bd7b);
+  --done-glow: 0 0 0 0.2em rgba(99, 189, 123, 0.16), 0 0 0.7em rgba(99, 189, 123, 0.7);
+  --ring-a: rgba(255, 242, 228, 0.075);
+  --ring-b: rgba(255, 242, 228, 0.06);
+  --node: radial-gradient(circle at 50% 22%, #2c2620 0%, #1a1612 52%, #110e0b 100%);
+  --node-sh: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1cqw 2cqw -0.4cqw rgba(0, 0, 0, 0.8);
+  --node-edge: linear-gradient(180deg, rgba(255, 244, 232, 0.3), rgba(160, 168, 255, 0.16) 55%, rgba(122, 84, 246, 0.3));
+  --node-hi: linear-gradient(180deg, rgba(255, 248, 238, 0.09), rgba(255, 248, 238, 0));
+  --node-mk: #f3efe8;
+  --hl: #d9dcff;
+  --grain-op: 0.07;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(6, 5, 4, 0) 58%, rgba(6, 5, 4, 0.5) 100%);
+  --fs-name: max(9px, 1.95cqw);
+  --fs-plan: max(8px, 1.5cqw);
+  --fs-st: max(7.5px, 1.38cqw);
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+[data-tone='light'] .s-d-worktrees {
+  --bg: #f6f4ef;
+  --ink: #141417;
+  --ink2: #45454c;
+  --ink3: #6f6f77;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 50% 16%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #fcfbf8 0%, #f8f6f1 50%, #f1eee7 100%);
+  --dot: rgba(20, 20, 28, 0.17);
+  --dot-op: 0.62;
+  --under: radial-gradient(closest-side, rgba(43, 59, 255, 0.13), rgba(122, 63, 240, 0.055) 52%, rgba(122, 63, 240, 0) 100%);
+  --card: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(255, 255, 255, 0.95) 100%);
+  --card-sh:
+    0 0.1cqw 0.25cqw rgba(64, 44, 20, 0.06),
+    0 0.6cqw 1.2cqw -0.4cqw rgba(64, 44, 20, 0.08),
+    0 2cqw 3.8cqw -1.4cqw rgba(64, 44, 20, 0.16);
+  --edge: linear-gradient(180deg, rgba(20, 20, 28, 0.05), rgba(20, 20, 28, 0.1) 30%, rgba(20, 20, 28, 0.12));
+  --edge-lit: linear-gradient(180deg, rgba(43, 59, 255, 0.5), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.06));
+  --lit: radial-gradient(90% 60% at 50% 0%, rgba(43, 59, 255, 0.055), rgba(43, 59, 255, 0) 70%);
+  --mk: rgba(20, 20, 28, 0.48);
+  --track: rgba(20, 20, 28, 0.08);
+  --fill: linear-gradient(90deg, #2b3bff, #4f42f6 60%, #7a3ff0);
+  --tip: radial-gradient(circle, #ffffff 0 15%, rgba(43, 59, 255, 0.5) 30%, rgba(43, 59, 255, 0) 70%);
+  --work: #2b3bff;
+  --work-dot: #2b3bff;
+  --work-glow: 0 0 0 0.2em rgba(43, 59, 255, 0.12), 0 0 0.6em rgba(43, 59, 255, 0.3);
+  --done: #2e8c46;
+  --done-fill: linear-gradient(90deg, #2e8c46, #3ca257);
+  --done-glow: 0 0 0 0.2em rgba(46, 140, 70, 0.13);
+  --ring-a: rgba(20, 20, 28, 0.08);
+  --ring-b: rgba(20, 20, 28, 0.075);
+  --node: radial-gradient(circle at 50% 24%, #ffffff 0%, #fbfaf7 55%, #f0ede6 100%);
+  --node-sh: 0 0.1cqw 0.25cqw rgba(64, 44, 20, 0.08), 0 1.1cqw 2.4cqw -0.6cqw rgba(64, 44, 20, 0.2);
+  --node-edge: linear-gradient(180deg, rgba(20, 20, 28, 0.06), rgba(43, 59, 255, 0.22) 60%, rgba(122, 63, 240, 0.42));
+  --node-hi: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+  --node-mk: #141417;
+  --hl: #2b3bff;
+  --grain-op: 0.025;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(120, 96, 60, 0) 62%, rgba(120, 96, 60, 0.07) 100%);
+}
+.s-d-worktrees * { box-sizing: border-box; }
+.s-d-worktrees .s-d-worktrees__ground {
+  position: absolute;
+  inset: 0;
+  background: var(--ground);
+}
+.s-d-worktrees .s-d-worktrees__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--dot) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  mask-image: radial-gradient(ellipse 62% 70% at 50% 40%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  opacity: var(--dot-op);
+}
+.s-d-worktrees .s-d-worktrees__under {
+  position: absolute;
+  top: 51cqw;
+  width: 34cqw;
+  height: 15cqw;
+  margin: -7.5cqw 0 0 -17cqw;
+  background: var(--under);
+  opacity: 0;
+  z-index: 1;
+  will-change: opacity;
+}
+.s-d-worktrees .s-d-worktrees__under--1 { left: 15.95cqw; }
+.s-d-worktrees .s-d-worktrees__under--2 { left: 38.65cqw; }
+.s-d-worktrees .s-d-worktrees__under--3 { left: 61.35cqw; }
+.s-d-worktrees .s-d-worktrees__under--4 { left: 84.05cqw; }
+
+.s-d-worktrees .s-d-worktrees__card {
+  position: absolute;
+  top: 34cqw;
+  width: 20.5cqw;
+  height: 19.5cqw;
+  padding: 1.55cqw 1.6cqw 1.5cqw;
+  border-radius: 1.5cqw;
+  background: var(--card);
+  box-shadow: var(--card-sh);
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+  will-change: transform, opacity;
+}
+.s-d-worktrees .s-d-worktrees__card--1 { left: 5.7cqw; }
+.s-d-worktrees .s-d-worktrees__card--2 { left: 28.4cqw; }
+.s-d-worktrees .s-d-worktrees__card--3 { left: 51.1cqw; }
+.s-d-worktrees .s-d-worktrees__card--4 { left: 73.8cqw; }
+.s-d-worktrees .s-d-worktrees__card::before,
+.s-d-worktrees .s-d-worktrees__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-d-worktrees .s-d-worktrees__card::before {
+  background: var(--edge);
+}
+.s-d-worktrees .s-d-worktrees__card::after {
+  background: var(--edge-lit);
+  opacity: 0.3;
+  transition: opacity 0.8s var(--ease);
+}
+.s-d-worktrees .s-d-worktrees__card[data-st="done"]::after { opacity: 1; }
+.s-d-worktrees .s-d-worktrees__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--lit);
+  opacity: 0.32;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__lit { opacity: 1; }
+
+.s-d-worktrees .s-d-worktrees__row,
+.s-d-worktrees .s-d-worktrees__name,
+.s-d-worktrees .s-d-worktrees__plan { position: relative; }
+.s-d-worktrees .s-d-worktrees__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: max(10px, 2.1cqw);
+}
+.s-d-worktrees .s-d-worktrees__mk { display: block; }
+.s-d-worktrees .s-d-worktrees__card .s-d-worktrees__mk {
+  width: max(10px, 2.05cqw);
+  height: max(10px, 2.05cqw);
+  color: var(--mk);
+}
+.s-d-worktrees .s-d-worktrees__idx {
+  font: 500 max(7px, 1.18cqw)/1 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.s-d-worktrees .s-d-worktrees__name {
+  margin-top: 1.55cqw;
+  font-size: var(--fs-name);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.014em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.s-d-worktrees .s-d-worktrees__plan {
+  margin-top: 0.3cqw;
+  font-size: var(--fs-plan);
+  line-height: 1.25;
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-d-worktrees .s-d-worktrees__who {
+  position: relative;
+  margin-top: 1.05cqw;
+  height: 1.2em;
+  font: 400 max(7px, 1.12cqw)/1.2 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--ink3);
+}
+.s-d-worktrees .s-d-worktrees__path,
+.s-d-worktrees .s-d-worktrees__pr {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition: opacity 0.45s ease, transform 0.7s var(--ease);
+}
+.s-d-worktrees .s-d-worktrees__pr {
+  color: var(--ink);
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(0.35em);
+}
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__path { opacity: 0; transform: translateY(-0.35em); }
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__pr { opacity: 1; transform: none; }
+.s-d-worktrees .s-d-worktrees__track {
+  position: relative;
+  margin-top: auto;
+  display: flex;
+  gap: 0.42cqw;
+  height: max(1px, 0.26cqw);
+}
+.s-d-worktrees .s-d-worktrees__seg {
+  position: relative;
+  flex: 1 1 0;
+  background: var(--track);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.s-d-worktrees .s-d-worktrees__seg b {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  background: var(--fill);
+  will-change: transform;
+}
+.s-d-worktrees .s-d-worktrees__seg b::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--done-fill);
+  opacity: 0;
+  transition: opacity 0.7s var(--ease);
+}
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__seg b::after { opacity: 1; }
+.s-d-worktrees .s-d-worktrees__tip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  margin: -0.55cqw 0 0 -0.55cqw;
+  border-radius: 50%;
+  background: var(--tip);
+  opacity: 1;
+  transition: opacity 0.5s var(--ease);
+  will-change: transform;
+}
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__tip { opacity: 0; }
+.s-d-worktrees .s-d-worktrees__status {
+  position: relative;
+  margin-top: 1.05cqw;
+  height: max(10px, 1.8cqw);
+  font-size: var(--fs-st);
+  line-height: max(10px, 1.8cqw);
+  letter-spacing: 0.002em;
+}
+.s-d-worktrees .s-d-worktrees__st {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+  color: var(--work);
+  opacity: 0;
+  transform: translateY(0.35em);
+  transition: opacity 0.45s ease, transform 0.7s var(--ease);
+}
+.s-d-worktrees .s-d-worktrees__st i {
+  flex: none;
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: var(--work-dot);
+  box-shadow: var(--work-glow);
+}
+.s-d-worktrees .s-d-worktrees__st--done { color: var(--done); }
+.s-d-worktrees .s-d-worktrees__st--done i {
+  background: var(--done);
+  box-shadow: var(--done-glow);
+}
+.s-d-worktrees .s-d-worktrees__st.is-on { opacity: 1; transform: none; }
+.s-d-worktrees .s-d-worktrees__n {
+  position: absolute;
+  right: 0;
+  top: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  transition: opacity 0.45s ease;
+}
+.s-d-worktrees .s-d-worktrees__n { color: var(--ink2); }
+.s-d-worktrees .s-d-worktrees__card[data-st="done"] .s-d-worktrees__n { opacity: 0; }
+
+.s-d-worktrees .s-d-worktrees__ring {
+  position: absolute;
+  left: 50cqw;
+  top: 15cqw;
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.5) 55%, transparent 80%);
+  mask: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.5) 55%, transparent 80%);
+}
+.s-d-worktrees .s-d-worktrees__ring--a {
+  width: 11cqw;
+  height: 11cqw;
+  margin: -5.5cqw 0 0 -5.5cqw;
+  border: 1px solid var(--ring-a);
+}
+.s-d-worktrees .s-d-worktrees__ring--b {
+  width: 17cqw;
+  height: 17cqw;
+  margin: -8.5cqw 0 0 -8.5cqw;
+  border: 1px dashed var(--ring-b);
+}
+.s-d-worktrees .s-d-worktrees__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+.s-d-worktrees .s-d-worktrees__node {
+  position: absolute;
+  left: 50cqw;
+  top: 15cqw;
+  width: 6.8cqw;
+  height: 6.8cqw;
+  margin: -3.4cqw 0 0 -3.4cqw;
+  border-radius: 50%;
+  background: var(--node);
+  box-shadow: var(--node-sh);
+  display: grid;
+  place-items: center;
+  z-index: 4;
+}
+.s-d-worktrees .s-d-worktrees__node::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 1px;
+  background: var(--node-edge);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.s-d-worktrees .s-d-worktrees__node::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 1px;
+  height: 30%;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  background: var(--node-hi);
+}
+.s-d-worktrees .s-d-worktrees__node .s-d-worktrees__mk {
+  width: 2.7cqw;
+  height: 2.7cqw;
+  color: var(--node-mk);
+  position: relative;
+}
+.s-d-worktrees .s-d-worktrees__label {
+  position: absolute;
+  left: 55.2cqw;
+  top: 15cqw;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35cqw;
+  z-index: 4;
+}
+.s-d-worktrees .s-d-worktrees__repo {
+  font-size: max(9.5px, 1.75cqw);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.s-d-worktrees .s-d-worktrees__caps {
+  position: relative;
+  width: 36cqw;
+  height: max(10px, 1.8cqw);
+  font-size: max(8px, 1.4cqw);
+  line-height: max(10px, 1.8cqw);
+  color: var(--ink2);
+}
+.s-d-worktrees .s-d-worktrees__cap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(0.4em);
+  transition: opacity 0.5s ease, transform 0.8s var(--ease);
+}
+.s-d-worktrees .s-d-worktrees__cap b { font-weight: 500; color: var(--hl); font-variant-numeric: tabular-nums; }
+.s-d-worktrees .s-d-worktrees__cap.is-on { opacity: 1; transform: none; }
+.s-d-worktrees .s-d-worktrees__grain {
+  position: absolute;
+  inset: 0;
+  background-size: 64px 64px;
+  opacity: var(--grain-op);
+  mix-blend-mode: overlay;
+  z-index: 5;
+  pointer-events: none;
+}
+.s-d-worktrees .s-d-worktrees__vig {
+  position: absolute;
+  inset: 0;
+  background: var(--vig);
+  z-index: 6;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .s-d-worktrees *,
+  .s-d-worktrees *::before,
+  .s-d-worktrees *::after { transition: none !important; }
+}
+@container (max-width: 520px) {
+  .s-d-worktrees .s-d-worktrees__who { display: none; }
+  .s-d-worktrees .s-d-worktrees__n { display: none; }
+  .s-d-worktrees .s-d-worktrees__card { padding: 1.5cqw 1.45cqw 1.4cqw; }
+  .s-d-worktrees .s-d-worktrees__name { margin-top: 1.25cqw; letter-spacing: -0.024em; }
+  .s-d-worktrees .s-d-worktrees__status { margin-top: 0.9cqw; }
+  .s-d-worktrees .s-d-worktrees__st { gap: 0.42em; }
+}
+@container (max-width: 360px) {
+  .s-d-worktrees .s-d-worktrees__card { padding-left: 1.3cqw; padding-right: 1.3cqw; }
+  .s-d-worktrees .s-d-worktrees__status { font-size: 7px; }
+  .s-d-worktrees .s-d-worktrees__st { gap: 0.38em; }
+}
+</style>
+<div class="s-d-worktrees" aria-hidden="true">
+  <div class="s-d-worktrees__ground"></div>
+  <div class="s-d-worktrees__dots"></div>
+  <div class="s-d-worktrees__under s-d-worktrees__under--1"></div>
+  <div class="s-d-worktrees__under s-d-worktrees__under--2"></div>
+  <div class="s-d-worktrees__under s-d-worktrees__under--3"></div>
+  <div class="s-d-worktrees__under s-d-worktrees__under--4"></div>
+  <div class="s-d-worktrees__card s-d-worktrees__card--1" data-st="run">
+    <div class="s-d-worktrees__lit"></div>
+    <div class="s-d-worktrees__row"><svg class="s-d-worktrees__mk" viewBox="0 0 24 24"></svg><span class="s-d-worktrees__idx">431</span></div>
+    <div class="s-d-worktrees__name">Opus 5</div>
+    <div class="s-d-worktrees__plan">Anthropic</div>
+    <div class="s-d-worktrees__who"><span class="s-d-worktrees__path">worktrees/431</span><span class="s-d-worktrees__pr">PR #1193</span></div>
+    <div class="s-d-worktrees__track"><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__tip"></i></div>
+    <div class="s-d-worktrees__status"><span class="s-d-worktrees__st"><i></i>Implement</span><span class="s-d-worktrees__st"><i></i>Review</span><span class="s-d-worktrees__st"><i></i>Security review</span><span class="s-d-worktrees__st"><i></i>Draft PR</span><span class="s-d-worktrees__st s-d-worktrees__st--done"><i></i>Ready to accept</span><span class="s-d-worktrees__n">1/4</span></div>
+  </div>
+  <div class="s-d-worktrees__card s-d-worktrees__card--2" data-st="run">
+    <div class="s-d-worktrees__lit"></div>
+    <div class="s-d-worktrees__row"><svg class="s-d-worktrees__mk" viewBox="0 0 24 24"></svg><span class="s-d-worktrees__idx">432</span></div>
+    <div class="s-d-worktrees__name">GPT-5.2 Codex</div>
+    <div class="s-d-worktrees__plan">OpenAI</div>
+    <div class="s-d-worktrees__who"><span class="s-d-worktrees__path">worktrees/432</span><span class="s-d-worktrees__pr">PR #1193</span></div>
+    <div class="s-d-worktrees__track"><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__tip"></i></div>
+    <div class="s-d-worktrees__status"><span class="s-d-worktrees__st"><i></i>Implement</span><span class="s-d-worktrees__st"><i></i>Review</span><span class="s-d-worktrees__st"><i></i>Security review</span><span class="s-d-worktrees__st"><i></i>Draft PR</span><span class="s-d-worktrees__st s-d-worktrees__st--done"><i></i>Ready to accept</span><span class="s-d-worktrees__n">1/4</span></div>
+  </div>
+  <div class="s-d-worktrees__card s-d-worktrees__card--3" data-st="run">
+    <div class="s-d-worktrees__lit"></div>
+    <div class="s-d-worktrees__row"><svg class="s-d-worktrees__mk" viewBox="0 0 24 24"></svg><span class="s-d-worktrees__idx">433</span></div>
+    <div class="s-d-worktrees__name">Gemini 3 Pro</div>
+    <div class="s-d-worktrees__plan">Google</div>
+    <div class="s-d-worktrees__who"><span class="s-d-worktrees__path">worktrees/433</span><span class="s-d-worktrees__pr">PR #1193</span></div>
+    <div class="s-d-worktrees__track"><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__tip"></i></div>
+    <div class="s-d-worktrees__status"><span class="s-d-worktrees__st"><i></i>Implement</span><span class="s-d-worktrees__st"><i></i>Review</span><span class="s-d-worktrees__st"><i></i>Security review</span><span class="s-d-worktrees__st"><i></i>Draft PR</span><span class="s-d-worktrees__st s-d-worktrees__st--done"><i></i>Ready to accept</span><span class="s-d-worktrees__n">1/4</span></div>
+  </div>
+  <div class="s-d-worktrees__card s-d-worktrees__card--4" data-st="run">
+    <div class="s-d-worktrees__lit"></div>
+    <div class="s-d-worktrees__row"><svg class="s-d-worktrees__mk" viewBox="0 0 24 24"></svg><span class="s-d-worktrees__idx">434</span></div>
+    <div class="s-d-worktrees__name">Qwen3 Coder</div>
+    <div class="s-d-worktrees__plan">Alibaba</div>
+    <div class="s-d-worktrees__who"><span class="s-d-worktrees__path">worktrees/434</span><span class="s-d-worktrees__pr">PR #1193</span></div>
+    <div class="s-d-worktrees__track"><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__seg"><b></b></i><i class="s-d-worktrees__tip"></i></div>
+    <div class="s-d-worktrees__status"><span class="s-d-worktrees__st"><i></i>Implement</span><span class="s-d-worktrees__st"><i></i>Review</span><span class="s-d-worktrees__st"><i></i>Security review</span><span class="s-d-worktrees__st"><i></i>Draft PR</span><span class="s-d-worktrees__st s-d-worktrees__st--done"><i></i>Ready to accept</span><span class="s-d-worktrees__n">1/4</span></div>
+  </div>
+  <div class="s-d-worktrees__ring s-d-worktrees__ring--a"></div>
+  <div class="s-d-worktrees__ring s-d-worktrees__ring--b"></div>
+  <canvas class="s-d-worktrees__fx"></canvas>
+  <div class="s-d-worktrees__node"><svg class="s-d-worktrees__mk" viewBox="0 0 24 24"></svg></div>
+  <div class="s-d-worktrees__label">
+    <span class="s-d-worktrees__repo">tally-api</span>
+    <span class="s-d-worktrees__caps"><span class="s-d-worktrees__cap is-on">Four tasks, a worktree each</span><span class="s-d-worktrees__cap"><b>431</b> ready to accept · PR #1193</span><span class="s-d-worktrees__cap"><b>435</b> starting in a fresh worktree</span></span>
+  </div>
+  <div class="s-d-worktrees__grain"></div>
+  <div class="s-d-worktrees__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-d-worktrees')) return
+  const C = 's-d-worktrees__'
+  const qa = (el, s) => Array.from(el.querySelectorAll('.' + C + s))
+  const q1 = (el, s) => el.querySelector('.' + C + s)
+
+  // Marks: a branch for the repository, a folder for each worktree. Drawn, not borrowed.
+  const BRANCH = '<g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="5.2" r="2.3"/><circle cx="6.5" cy="18.8" r="2.3"/><circle cx="17.5" cy="7.6" r="2.3"/><path d="M6.5 7.5v9M17.5 9.9c0 4.1-3.4 4.6-6.6 5.4-1.9.5-3.4 1-4.2 1.6"/></g>'
+  const FOLDER = '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 7.2c0-1 .8-1.8 1.8-1.8h4l2 2.2h7.4c1 0 1.8.8 1.8 1.8v8.3c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8z"/><path d="M3.5 10.2h17" opacity=".55"/></g>'
+  q1(root, 'node').querySelector('svg').innerHTML = BRANCH
+  qa(root, 'card').forEach((c) => (c.querySelector('svg').innerHTML = FOLDER))
+
+  const cards = qa(root, 'card')
+  const unders = qa(root, 'under')
+  const caps = qa(root, 'cap')
+  const nodeEl = q1(root, 'node')
+  const cv = q1(root, 'fx')
+  const ctx = cv.getContext('2d')
+  const parts = cards.map((c) => ({
+    fills: Array.from(c.querySelectorAll('.' + C + 'seg b')),
+    tip: q1(c, 'tip'),
+    track: q1(c, 'track'),
+    sts: qa(c, 'st'),
+    n: q1(c, 'n'),
+    idx: q1(c, 'idx'),
+    name: q1(c, 'name'),
+    plan: q1(c, 'plan'),
+    who: q1(c, 'path'),
+  }))
+  const TASKS = [
+    { n: '431', lead: 'Opus 5', lab: 'Anthropic' },
+    { n: '432', lead: 'GPT-5.2 Codex', lab: 'OpenAI' },
+    { n: '433', lead: 'Gemini 3 Pro', lab: 'Google' },
+    { n: '434', lead: 'Qwen3 Coder', lab: 'Alibaba' },
+    { n: '435', lead: 'Sonnet 5', lab: 'Anthropic' },
+  ]
+
+  // Film grain, generated once (no external images).
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    q1(root, 'grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  // The light's colours for each tone, read once. On paper the light is a little deeper and its glow softer.
+  const LIGHT = (root.closest('[data-tone]') || root).dataset.tone === 'light'
+  const P = LIGHT
+    ? {
+        add: 'source-over', gk: 0.55,
+        cob: [43, 59, 255], vio: [122, 63, 240], hot: [52, 66, 255],
+        tail: [122, 63, 240], mid: [43, 59, 255], head: [64, 78, 255],
+        line: ['rgb(43,59,255)', 'rgb(64,60,250)', 'rgb(122,63,240)'],
+        rest: 'rgba(20,20,28,0.11)', port: 'rgba(20,20,28,0.3)', quiet: 'rgba(20,20,28,0.2)',
+        pulse: '#2b3bff', ring: 'rgba(43,59,255,1)', ringHi: 'rgba(43,59,255,1)', wideK: 0.55, thin: 0.85,
+      }
+    : {
+        add: 'lighter', gk: 1,
+        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255],
+        tail: [128, 76, 244], mid: [78, 96, 255], head: [226, 230, 255],
+        line: ['rgb(176,184,255)', 'rgb(112,122,255)', 'rgb(128,96,250)'],
+        rest: 'rgba(255,242,228,0.075)', port: 'rgba(255,242,228,0.22)', quiet: 'rgba(255,242,228,0.14)',
+        pulse: '#dfe2ff', ring: 'rgba(120,132,255,1)', ringHi: 'rgba(200,206,255,1)', wideK: 1, thin: 0.92,
+      }
+
+  // Soft light sprites, rendered once.
+  function sprite(r, g, b, core) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(...P.cob, 0.18)
+  const SP_VIO = sprite(...P.vio, 0.16)
+  const SP_HOT = sprite(...P.hot, 0.12)
+
+  // Beam colour ramp, tail (violet) to head (pale cobalt).
+  const NB = 26
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    let r, g, b
+    const [A, B] = t < 0.62 ? [P.tail, P.mid] : [P.mid, P.head]
+    const f = t < 0.62 ? t / 0.62 : (t - 0.62) / 0.38
+    r = A[0] + (B[0] - A[0]) * f; g = A[1] + (B[1] - A[1]) * f; b = A[2] + (B[2] - A[2]) * f
+    BEAM_COL.push(`rgb(${r | 0},${g | 0},${b | 0})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const out = (t) => 1 - Math.pow(1 - t, 3)
+
+  // Timeline, in seconds of one loop.
+  const L = 14
+  const FIN = 5.0 // 431 finishes its last step
+  const OUT0 = 8.0, OUT1 = 8.7 // 431 leaves its worktree
+  const SWAP = 8.75 // the freed slot takes task 435
+  const PK0 = 8.85, PK1 = 9.85 // a fresh worktree: light runs down the freed lane
+  const IN0 = 9.1, IN1 = 10.0 // 435 fades into the lane
+  const D435 = 2.5
+  const F0 = 13.2, F1 = 13.62, FI = 0.6, STAG = 0.08 // fade out, then in, card by card, to start again
+  // Each task's own pace: where it starts in its four steps, and seconds per step.
+  const SPEC = [{ s: 4 - FIN / 2.4, d: 2.4 }, { s: 0.15, d: 4.4 }, { s: 1.6, d: 6.4 }, { s: 0.1, d: 8.6 }]
+  const LAP = [3.7, 4.6, 5.5, 6.3] // border beam lap, per task
+  const PULSE = [2.3, 2.9, 3.5, 4.1] // a packet down each lane, per task
+  const PH0 = [0.1, 0.55, 0.3, 0.8]
+  const RUN = 0.32 // light on a lane at work
+
+  function raw(j, t) {
+    if (j === 0) return t < SWAP ? Math.min(4, SPEC[0].s + t / SPEC[0].d) : Math.max(0, (t - PK1) / D435)
+    return Math.min(3.98, SPEC[j].s + t / SPEC[j].d)
+  }
+  // Within a step, the fill eases in and out, and holds for a beat before the next step.
+  function eased(r) {
+    if (r >= 4) return 4
+    const i = Math.floor(r), f = clamp((r - i) / 0.84)
+    return i + 0.2 * f + 0.8 * f * f * (3 - 2 * f)
+  }
+
+  // Geometry, measured on resize.
+  let W = 0, H = 0, U = 1, dpr = 1
+  const rects = cards.map(() => ({ x: 0, y: 0, w: 0, h: 0, r: 0, per: 0, by: 0 }))
+  const node = { x: 0, y: 0, r: 0 }
+  const M = 90
+  const routes = cards.map(() => ({ xs: new Float32Array(M), ys: new Float32Array(M), len: 0, grad: null, ang: 0, y0: 0, span: 1, dy: 0 }))
+  let trackW = 0, segGap = 0
+  const dyShown = new Float32Array(4).fill(0)
+
+  function measure() {
+    const rb = root.getBoundingClientRect()
+    W = rb.width; H = rb.height; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    const br = parseFloat(getComputedStyle(cards[0]).borderTopLeftRadius) || 10
+    cards.forEach((c, j) => {
+      const R = rects[j]
+      // Layout box, without any transform we have applied.
+      R.x = c.offsetLeft + 0.5
+      R.by = c.offsetTop + 0.5
+      R.y = R.by
+      R.w = c.offsetWidth - 1
+      R.h = c.offsetHeight - 1
+      R.r = Math.max(1, br - 0.5)
+      R.per = 2 * (R.w - 2 * R.r) + 2 * (R.h - 2 * R.r) + 2 * Math.PI * R.r
+    })
+    node.x = nodeEl.offsetLeft + nodeEl.offsetWidth / 2
+    node.y = nodeEl.offsetTop + nodeEl.offsetHeight / 2
+    node.r = nodeEl.offsetWidth / 2
+    trackW = parts[0].track.offsetWidth
+    segGap = parseFloat(getComputedStyle(parts[0].track).columnGap) || 0
+    const tmpX = new Float32Array(65), tmpY = new Float32Array(65), tmpL = new Float32Array(65)
+    routes.forEach((rt, j) => {
+      const ang = Math.PI / 2 + (1.5 - j) * 0.24
+      rt.ang = ang
+      const x0 = node.x + Math.cos(ang) * (node.r + 0.5)
+      const y0 = node.y + Math.sin(ang) * (node.r + 0.5)
+      const R = rects[j]
+      const x3 = R.x + R.w / 2
+      const y3 = R.by - 0.5
+      const dy = y3 - y0
+      const x1 = x0 + Math.cos(ang) * dy * 0.2, y1 = y0 + dy * 0.55
+      const x2 = x3, y2 = y3 - dy * 0.55
+      let Lr = 0
+      for (let i = 0; i <= 64; i++) {
+        const t = i / 64, m = 1 - t
+        const a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t
+        tmpX[i] = a * x0 + b * x1 + c * x2 + d * x3
+        tmpY[i] = a * y0 + b * y1 + c * y2 + d * y3
+        if (i) Lr += Math.hypot(tmpX[i] - tmpX[i - 1], tmpY[i] - tmpY[i - 1])
+        tmpL[i] = Lr
+      }
+      rt.len = Lr
+      let s = 0
+      for (let i = 0; i < M; i++) {
+        const want = (i / (M - 1)) * Lr
+        while (s < 63 && tmpL[s + 1] < want) s++
+        const span = tmpL[s + 1] - tmpL[s] || 1
+        const f = Math.min(1, Math.max(0, (want - tmpL[s]) / span))
+        rt.xs[i] = tmpX[s] + (tmpX[s + 1] - tmpX[s]) * f
+        rt.ys[i] = tmpY[s] + (tmpY[s + 1] - tmpY[s]) * f
+      }
+      const gr = ctx.createLinearGradient(x0, y0, x3, y3)
+      gr.addColorStop(0, P.line[0])
+      gr.addColorStop(0.5, P.line[1])
+      gr.addColorStop(1, P.line[2])
+      rt.grad = gr
+      rt.y0 = y0
+      rt.span = y3 - y0 || 1
+    })
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  function rrPoint(R, s) {
+    const { x, y, w, h, r } = R
+    s %= R.per
+    if (s < 0) s += R.per
+    const qq = (Math.PI * r) / 2
+    let Ls = w / 2 - r
+    if (s < Ls) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= Ls
+    if (s < qq) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= qq; Ls = h - 2 * r
+    if (s < Ls) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= Ls
+    if (s < qq) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= qq; Ls = w - 2 * r
+    if (s < Ls) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= Ls
+    if (s < qq) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= qq; Ls = h - 2 * r
+    if (s < Ls) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= Ls
+    if (s < qq) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= qq
+    PT[0] = x + r + s; PT[1] = y
+  }
+  function rrPath(R, inset) {
+    const x = R.x + inset, y = R.y + inset, w = R.w - inset * 2, h = R.h - inset * 2, r = Math.max(0.5, R.r - inset)
+    ctx.beginPath()
+    ctx.moveTo(x + r, y)
+    ctx.arcTo(x + w, y, x + w, y + h, r)
+    ctx.arcTo(x + w, y + h, x, y + h, r)
+    ctx.arcTo(x, y + h, x, y, r)
+    ctx.arcTo(x, y, x + w, y, r)
+    ctx.closePath()
+  }
+  // Route y with the card's lift spread along its length, so the line always meets the card.
+  const ry = (rt, y) => y + (rt.dy * (y - rt.y0)) / rt.span
+  function routePoint(rt, u) {
+    const f = clamp(u) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = rt.xs[i] + (rt.xs[i + 1] - rt.xs[i]) * t
+    PT[1] = ry(rt, rt.ys[i] + (rt.ys[i + 1] - rt.ys[i]) * t)
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    a *= P.gk
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+
+  // A comet of light along a card border; head at perimeter distance s.
+  function beam(R, s, len, a) {
+    if (a <= 0.004 || len < 1) return
+    const seg = len / NB
+    ctx.lineWidth = 1.4
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const s0 = s - len + i * seg
+      rrPoint(R, s0)
+      const ax = PT[0], ay = PT[1]
+      rrPoint(R, s0 + seg + 0.35)
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = P.add
+    for (let i = 0; i < 8; i++) {
+      const t = 0.3 + (i / 7) * 0.7
+      rrPoint(R, s - len * (1 - t))
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 1.7, a * 0.18 * t * t)
+    }
+    rrPoint(R, s)
+    glow(SP_VIO, PT[0], PT[1], U * 4.5, a * 0.13)
+    glow(SP_COB, PT[0], PT[1], U * 2.5, a * 0.36)
+    glow(SP_HOT, PT[0], PT[1], U * 0.75, a * 0.9)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  // Lit part of a lane between u0 (repository side) and u1.
+  function litRoute(rt, u0, u1, a, wide) {
+    if (a <= 0.004 || u1 - u0 < 0.002) return
+    const i0 = Math.ceil(u0 * (M - 1)), i1 = Math.floor(u1 * (M - 1))
+    ctx.beginPath()
+    routePoint(rt, u0)
+    ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], ry(rt, rt.ys[i]))
+    routePoint(rt, u1)
+    ctx.lineTo(PT[0], PT[1])
+    ctx.strokeStyle = rt.grad
+    ctx.globalCompositeOperation = P.add
+    if (wide > 0.003) {
+      ctx.globalAlpha = wide * 0.16 * P.wideK
+      ctx.lineWidth = Math.max(5, U * 1.3)
+      ctx.stroke()
+    }
+    ctx.globalAlpha = a * 0.13 * P.wideK
+    ctx.lineWidth = Math.max(3, U * 0.6)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * P.thin
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+
+  // A small packet running down a lane, head at q (0 at the repository, 1 at the card).
+  function pulse(rt, q, a) {
+    if (a <= 0.004) return
+    const tail = 0.1
+    ctx.lineWidth = 1.5
+    for (let i = 0; i < 10; i++) {
+      const ua = q - tail * (1 - i / 10), ub = q - tail * (1 - (i + 1) / 10)
+      if (ub < 0) continue
+      routePoint(rt, Math.max(0, ua))
+      const ax = PT[0], ay = PT[1]
+      routePoint(rt, ub)
+      ctx.globalAlpha = a * ((i + 1) / 10) * ((i + 1) / 10)
+      ctx.strokeStyle = P.pulse
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = P.add
+    routePoint(rt, q)
+    glow(SP_COB, PT[0], PT[1], U * 2.1, a * 0.38)
+    glow(SP_HOT, PT[0], PT[1], U * 0.62, a * 0.85)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  const shown = cards.map(() => ({ task: -1, st: '', step: -1, n: '', fills: new Float32Array(4).fill(-1), tip: -1, a: -1, tf: '' }))
+  const shownUnder = new Float32Array(4).fill(-1)
+  let shownCap = -1
+
+  function setTask(j, k) {
+    const p = parts[j], d = TASKS[k]
+    p.idx.textContent = d.n
+    p.name.textContent = d.lead
+    p.plan.textContent = d.lab
+    p.who.textContent = 'worktrees/' + d.n
+    shown[j].task = k
+  }
+
+  function render(T) {
+    if (!W) return
+    const t = ((T % L) + L) % L
+    const GAs = [0, 0, 0, 0], RY = [0, 0, 0, 0]
+    for (let j = 0; j < 4; j++) {
+      if (t >= F0) { const x = io(clamp((t - F0 - j * STAG) / (F1 - F0))); GAs[j] = 1 - x; RY[j] = U * 0.9 * x }
+      else { const x = out(clamp((t - j * STAG) / FI)); GAs[j] = x; RY[j] = U * 0.9 * (1 - x) }
+    }
+    const GA = (GAs[0] + GAs[1] + GAs[2] + GAs[3]) / 4
+
+    // Per card: which task, its state, its place in its steps, how it shows.
+    const la = [0, 0, 0, 0] // lane light
+    const lw = [0, 0, 0, 0] // wide glow on a lane
+    const pa = [0, 0, 0, 0] // packets down a lane
+    const ba = [0, 0, 0, 0] // border beam
+    const ug = [0, 0, 0, 0] // glow under the card
+    for (let j = 0; j < 4; j++) {
+      const task = j === 0 && t >= SWAP ? 4 : j
+      if (shown[j].task !== task) setTask(j, task)
+      const r = raw(j, t)
+      const p = eased(r)
+      let st = 'run', ca = 1, dy = 0, sc = 1
+      if (j === 0) {
+        if (t >= FIN && t < OUT1) st = 'done'
+        if (t >= FIN && t < OUT0) dy = -U * 0.55 * out(clamp((t - FIN) / 0.8))
+        if (t >= OUT0 && t < OUT1) {
+          const x = io(clamp((t - OUT0) / (OUT1 - OUT0)))
+          ca = 1 - x; dy = -U * 0.55 + U * 1.3 * x; sc = 1 - 0.02 * x
+        } else if (t >= OUT1 && t < IN0) ca = 0
+        else if (t >= IN0 && t < IN1) {
+          const x = out(clamp((t - IN0) / (IN1 - IN0)))
+          ca = x; dy = U * 1.4 * (1 - x)
+        }
+      }
+      // DOM
+      const S = shown[j]
+      if (st !== S.st) { cards[j].dataset.st = st; S.st = st }
+      const step = r >= 4 ? 4 : Math.floor(r)
+      if (step !== S.step) {
+        parts[j].sts.forEach((el, i) => el.classList.toggle('is-on', i === step))
+        S.step = step
+      }
+      const nTxt = Math.min(4, step + 1) + '/4'
+      if (nTxt !== S.n) { parts[j].n.textContent = nTxt; S.n = nTxt }
+      for (let i = 0; i < 4; i++) {
+        const f = clamp(p - i)
+        if (Math.abs(f - S.fills[i]) > 0.0005) { parts[j].fills[i].style.transform = `scaleX(${f.toFixed(4)})`; S.fills[i] = f }
+      }
+      const segW = (trackW - 3 * segGap) / 4
+      const si = Math.min(3, Math.floor(p)), sf = p >= 4 ? 1 : p - si
+      const tx = si * (segW + segGap) + sf * segW
+      if (Math.abs(tx - S.tip) > 0.05) { parts[j].tip.style.transform = `translate3d(${tx.toFixed(2)}px,0,0)`; S.tip = tx }
+      const a = ca * GAs[j]
+      dy += RY[j]
+      if (Math.abs(a - S.a) > 0.002) { cards[j].style.opacity = a < 0.999 ? a.toFixed(3) : ''; S.a = a }
+      const tf = dy || sc !== 1 ? `translate3d(0,${dy.toFixed(2)}px,0)${sc !== 1 ? ` scale(${sc.toFixed(4)})` : ''}` : ''
+      if (tf !== S.tf) { cards[j].style.transform = tf; S.tf = tf }
+      rects[j].y = rects[j].by + dy
+      routes[j].dy = dy
+
+      // Light
+      if (j !== 0 || t < FIN || t >= SWAP) {
+        const fresh = j === 0 && t >= SWAP ? clamp((t - PK1) / 0.9) : 1
+        la[j] = j === 0 && t >= SWAP ? RUN + (0.9 - RUN) * (1 - io(fresh)) : RUN
+        pa[j] = j === 0 && t >= SWAP ? clamp((t - PK1 - 0.4) / 0.6) : 1
+        ba[j] = j === 0 && t >= SWAP ? clamp((t - PK1) / 0.25) : 1
+        ug[j] = 0.24 * ca
+      } else if (t < OUT0) {
+        const x = t - FIN
+        la[j] = x < 0.25 ? RUN + (1 - RUN) * io(x / 0.25) : 0.8 + 0.2 * Math.exp(-(x - 0.25) / 0.6)
+        lw[j] = x < 0.25 ? io(x / 0.25) * 1.4 : Math.exp(-(x - 0.25) / 0.7) * 1.0 + 0.4
+        ba[j] = 1 - clamp(x / 0.45)
+        ug[j] = x < 0.3 ? 0.24 + 0.76 * io(x / 0.3) : 0.55 + 0.45 * Math.exp(-(x - 0.3) / 0.9)
+      } else if (t < OUT1) {
+        la[j] = 0.8
+        lw[j] = 0.4
+        ug[j] = 0.55 * ca
+      }
+      ug[j] *= GAs[j]
+      if (Math.abs(ug[j] - shownUnder[j]) > 0.004) { unders[j].style.opacity = ug[j].toFixed(3); shownUnder[j] = ug[j] }
+    }
+    const cap = t >= FIN && t < SWAP ? 1 : t >= SWAP && t < 12.4 ? 2 : 0
+    if (cap !== shownCap) { caps.forEach((c, i) => c.classList.toggle('is-on', i === cap)); shownCap = cap }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+
+    // Dormant lanes and their ports.
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1
+    ctx.strokeStyle = P.rest
+    for (let j = 0; j < 4; j++) {
+      const rt = routes[j]
+      ctx.beginPath()
+      ctx.moveTo(rt.xs[0], rt.ys[0])
+      for (let i = 1; i < M; i++) ctx.lineTo(rt.xs[i], ry(rt, rt.ys[i]))
+      ctx.stroke()
+    }
+    ctx.fillStyle = P.port
+    for (let j = 0; j < 4; j++) {
+      const rt = routes[j]
+      ctx.beginPath()
+      ctx.arc(rt.xs[M - 1], ry(rt, rt.ys[M - 1]), Math.max(1.2, U * 0.22), 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // Repository halo: steady, brighter when a task finishes and when a fresh worktree starts.
+    const finB = t >= FIN ? Math.exp(-Math.pow((t - FIN - 0.3) / 0.6, 2)) : 0
+    const pkB = Math.exp(-Math.pow((t - PK0 - 0.1) / 0.35, 2))
+    const haloA = (0.26 + 0.25 * finB + 0.35 * pkB) * (0.6 + 0.4 * GA)
+    ctx.globalCompositeOperation = P.add
+    glow(SP_VIO, node.x, node.y, U * 13, haloA * 0.45)
+    glow(SP_COB, node.x, node.y, U * 7.5, haloA * 0.9)
+    ctx.globalCompositeOperation = 'source-over'
+
+    for (let j = 0; j < 4; j++) {
+      const rt = routes[j]
+      const R = rects[j]
+      const G = GAs[j]
+      // The lane.
+      if (j === 0 && t >= OUT0 && t < SWAP) {
+        // Drains back into the repository as the task leaves.
+        const x = io(clamp((t - OUT0) / (OUT1 - OUT0 + 0.05)))
+        litRoute(rt, 0, 1 - x, 0.8 * G, 0.4 * (1 - x) * G)
+      } else if (j === 0 && t >= SWAP && t < PK1 + 0.05) {
+        // A fresh worktree: light runs down the freed lane to 435.
+        const u = iosine(clamp((t - PK0) / (PK1 - PK0)))
+        if (t > PK0) {
+          litRoute(rt, 0, u, 0.9 * G, 0.25 * G)
+          if (t < PK1) {
+            routePoint(rt, u)
+            const env = clamp((t - PK0) / 0.12)
+            ctx.globalCompositeOperation = P.add
+            glow(SP_VIO, PT[0], PT[1], U * 6, 0.2 * env * G)
+            glow(SP_COB, PT[0], PT[1], U * 3.8, 0.55 * env * G)
+            glow(SP_HOT, PT[0], PT[1], U * 1.05, env * G)
+            ctx.globalCompositeOperation = 'source-over'
+          }
+        }
+      } else litRoute(rt, 0, 1, la[j] * G, lw[j] * G)
+
+      // Each lane's own packets, each at its own pace.
+      if (pa[j] > 0.01) {
+        const per = PULSE[j]
+        const loc = ((((t / per) + PH0[j]) % 1) + 1) % 1
+        const travel = 0.62 // share of the period spent running
+        if (loc < travel) {
+          const v = loc / travel
+          pulse(rt, iosine(v), pa[j] * G * 0.85 * Math.pow(Math.sin(Math.PI * v), 0.5))
+        }
+      }
+
+      // Where the lane meets the card.
+      ctx.globalCompositeOperation = P.add
+      const cx = rt.xs[M - 1], cy = ry(rt, rt.ys[M - 1])
+      glow(SP_COB, cx, cy, U * 1.5, 0.32 * la[j] * G)
+      if (j === 0) {
+        const fl = Math.exp(-Math.pow((t - FIN) / 0.18, 2)) + Math.exp(-Math.pow((t - PK1) / 0.14, 2))
+        if (fl > 0.01) {
+          glow(SP_COB, cx, cy, U * 5, fl * 0.5 * G)
+          glow(SP_HOT, cx, cy, U * 1.3, fl * G)
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over'
+
+      // The card's own border beam.
+      if (ba[j] > 0.01) {
+        let sHead
+        if (j === 0 && t >= SWAP) sHead = ((t - PK1) / LAP[j]) * R.per
+        else sHead = ((t / LAP[j]) + PH0[j]) * R.per
+        let len = Math.min(R.per * 0.2, U * 11)
+        if (j === 0 && t >= SWAP) len = Math.min(len, Math.max(0, sHead * 0.9))
+        beam(R, sHead, len, ba[j] * G * 0.78)
+      }
+    }
+
+    // 431 finishing: its border lights all the way round, then settles.
+    if (t >= FIN - 0.05 && t < OUT1) {
+      const x = t - FIN
+      const ringA = (x < 0.2 ? clamp(x / 0.2) : Math.exp(-(x - 0.2) / 0.8)) * GA * (t < OUT0 ? 1 : 1 - clamp((t - OUT0) / 0.5))
+      if (ringA > 0.01) {
+        const R = rects[0]
+        ctx.globalCompositeOperation = P.add
+        rrPath(R, 0)
+        ctx.strokeStyle = P.ring
+        ctx.globalAlpha = ringA * 0.14
+        ctx.lineWidth = U * 1.1
+        ctx.stroke()
+        ctx.globalAlpha = ringA * 0.7
+        ctx.strokeStyle = P.ringHi
+        ctx.lineWidth = 1.2
+        ctx.stroke()
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    }
+    ctx.globalAlpha = 1
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let T = 3.0
+  let raf = 0, last = 0, onScreen = false, ready = false
+  const STILL = 6.6 // all four mid-way, 431 ready to accept
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    T = (T + dt) % L
+    render(T)
+    raf = requestAnimationFrame(frame)
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) render(STILL)
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) render(mq.matches ? STILL : T)
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>

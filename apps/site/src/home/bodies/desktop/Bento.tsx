@@ -7,17 +7,19 @@ import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
 import s from './Bento.module.css'
-import { Automations, Conflicts, Workspaces, Worktrees } from './Drawn'
+import { Automations, Conflicts } from './Drawn'
 import { Fragment } from './Fragment'
 import accounts from './styled/d-accounts.html?raw'
+import workspaces from './styled/d-workspaces.html?raw'
+import worktrees from './styled/d-worktrees.html?raw'
 
 /*
- * What keeps you in flow: eight tiles on a six-column grid. Three hold a
- * piece of the app in its light (what happened while you were away, home, a
- * review);
- * five hold a feature drawn as a small object in 3D (several accounts for
- * one agent, automations, conflicts settled, tasks side by side in their own
- * worktrees, workspaces side by side).
+ * What keeps you in flow: eight tiles on a six-column grid, each drawing at
+ * least half its row. Three hold a piece of the app in its light (what
+ * happened while you were away, home, a review); five hold a feature drawn
+ * as an interface lit by one light, dark or light (Althar fed by each of
+ * your accounts in turn, automations, conflicts settled, tasks side by side
+ * in worktrees of their own, workspaces bound to their projects).
  * Narrower, two columns, then one.
  */
 
@@ -101,7 +103,7 @@ const TILES: Tile[] = [
         Every plan you have. <b>One agent.</b>
       </>
     ),
-    lead: 'Sign Codex or Claude Code in once for each plan you pay for: yours, work’s, a client’s, a key. When one runs out, the work goes on with the next.',
+    lead: 'Sign Claude Code, Codex or OpenCode in once for each plan you pay for. When one runs out, Althar goes on with the next, in the order you set.',
     piece: (tone) => <Fragment key={tone} source={accounts} tone={tone} className={s.stage} />,
   },
   {
@@ -131,7 +133,7 @@ const TILES: Tile[] = [
   },
   {
     id: 'automations',
-    span: 2,
+    span: 3,
     drawn: true,
     title: (
       <>
@@ -142,8 +144,20 @@ const TILES: Tile[] = [
     piece: () => <Automations skin="ink" />,
   },
   {
+    id: 'conflicts',
+    span: 3,
+    drawn: true,
+    title: (
+      <>
+        Conflicts, <b>settled.</b>
+      </>
+    ),
+    lead: 'When a task’s change and the default branch disagree, Althar asks its lead to settle it. Only one it can’t settle comes to you.',
+    piece: () => <Conflicts skin="ink" />,
+  },
+  {
     id: 'home',
-    span: 4,
+    span: 3,
     title: (
       <>
         One home <b>for everything.</b>
@@ -176,18 +190,6 @@ const TILES: Tile[] = [
     ),
   },
   {
-    id: 'conflicts',
-    span: 3,
-    drawn: true,
-    title: (
-      <>
-        Conflicts, <b>settled.</b>
-      </>
-    ),
-    lead: 'When a task’s change and the default branch disagree, Althar asks its lead to settle it. Only one it can’t settle comes to you.',
-    piece: () => <Conflicts skin="ink" />,
-  },
-  {
     id: 'change',
     span: 3,
     title: (
@@ -211,27 +213,29 @@ const TILES: Tile[] = [
   },
   {
     id: 'worktrees',
-    span: 2,
+    span: 3,
     drawn: true,
+    tone: 'light',
     title: (
       <>
         Ten at once. <b>None in each other’s way.</b>
       </>
     ),
     lead: 'Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.',
-    piece: () => <Worktrees skin="ink" />,
+    piece: (tone) => <Fragment key={tone} source={worktrees} tone={tone} className={s.stage} />,
   },
   {
     id: 'workspaces',
-    span: 4,
+    span: 3,
     drawn: true,
+    tone: 'dark',
     title: (
       <>
         Every workspace, <b>side by side.</b>
       </>
     ),
     lead: 'Connect each Linear workspace you work in, one per company or client, and bind each project to its own. Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.',
-    piece: () => <Workspaces skin="ink" />,
+    piece: (tone) => <Fragment key={tone} source={workspaces} tone={tone} className={s.stage} />,
   },
 ]
 
