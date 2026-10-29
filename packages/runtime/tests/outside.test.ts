@@ -400,16 +400,38 @@ describe('a task that ends on its branch', () => {
     return Effect.gen(function* () {
       const runs = yield* Runs
       execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
-      const { task } = yield* onItsBranch(working)
+      const { task, projectId } = yield* onItsBranch(working)
       yield* connect('github')
       // Its run still going, as the person interrupting its lead leaves it; its lead about to carry on once it has a place.
       const sql = yield* SqlClient.SqlClient
       yield* sql`UPDATE runs SET state = 'running' WHERE task_id = ${task.taskId}`
       yield* sql`UPDATE threads SET waits_for_place = '2026-10-29T09:00:00.000Z' WHERE task_id = ${task.taskId}`
       assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'working')
+      // Nor while anything else of it carries on by itself: its step held for a place, a reset or the connection, an answer kept
+      // for a place. Each is undone with the transaction it is asked in, before anything that starts it can see it.
+      yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${task.taskId}`
+      const [step] = yield* sql<{ id: string }>`
+        SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+        JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} ORDER BY a.admitted_at DESC LIMIT 1`
+      const refusedWhile = (queued: Effect.Effect<unknown, unknown>) =>
+        Effect.flip(sql.withTransaction(Effect.andThen(queued, runs.publish(task.taskId))))
+      for (const reason of ['machine_busy', 'usage_limit', 'agent_unavailable']) {
+        const held = sql`UPDATE node_attempts SET state = 'held', hold_reason = ${reason} WHERE id = ${step?.id ?? ''}`
+        assert.strictEqual(((yield* refusedWhile(held)) as NoChangeToOpen).why, 'working', reason)
+      }
+      const kept = sql`INSERT INTO attention_requests ${sql.insert({
+        id: `attn_${'9'.repeat(32)}`,
+        projectId,
+        taskId: task.taskId,
+        kind: 'question',
+        payload: JSON.stringify({ threadId: task.threadId, message: 'Which lockfile?', waitsForPlace: '2026-10-29T09:00:00.000Z' }),
+        state: 'answered',
+        createdAt: '2026-10-29T08:59:00.000Z',
+        answeredAt: '2026-10-29T09:00:00.000Z',
+      })}`
+      assert.strictEqual(((yield* refusedWhile(kept)) as NoChangeToOpen).why, 'working')
       assert.lengthOf(github.changes, 0)
       // No agent at work on it, nor on its way: what it committed goes up as a draft.
-      yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${task.taskId}`
       yield* runs.publish(task.taskId)
       assert.deepStrictEqual(
         github.changes.map((change) => change.draft),

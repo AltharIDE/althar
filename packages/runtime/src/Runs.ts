@@ -940,9 +940,11 @@ export class Runs extends Context.Service<
        */
       /**
        * Whether an agent is at work on a task, or on its way to it, as the
-       * task's card counts it busy: a turn of its lead or reviewer running, a
-       * session starting, a step admitted, its lead about to be asked about a
-       * conflict, or a thread waiting for a place.
+       * task's card counts it under way: a turn of its lead or reviewer
+       * running, a session starting, a step admitted, or what carries on by
+       * itself: a step held for a place, a reset or the connection, its lead
+       * about to be asked about a conflict, an answer kept for a place, or a
+       * thread waiting for one.
        */
       const atWork = (taskId: string) =>
         Effect.gen(function* () {
@@ -950,8 +952,10 @@ export class Runs extends Context.Service<
           const [row] = yield* sql<{ coming: number }>`
             SELECT (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND s.state = 'starting')
               + (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-                JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND a.state = 'admitted')
+                JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND r.state = 'running' AND a.state IN ('admitted', 'held'))
               + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = ${taskId} AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+              + (SELECT count(*) FROM attention_requests x WHERE x.task_id = ${taskId} AND x.kind = 'question' AND x.state = 'answered'
+                AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL)
               + (SELECT count(*) FROM threads h WHERE h.task_id = ${taskId} AND h.waits_for_place IS NOT NULL) AS coming`
           if ((row?.coming ?? 0) > 0) return true
           const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
