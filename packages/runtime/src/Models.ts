@@ -205,16 +205,19 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
-      const probing = new Set<string>()
-      /* How often each agent's findings were forgotten: an asking begun before the last time counts for nothing. */
-      const forgotten = new Map<string, number>()
+      /* Which asking owns each reservation, so forgetting it cannot let stale work affect a newer asking. */
+      const probing = new Map<string, symbol>()
+      const ownsProbe = (agentId: string, reservation: symbol) => probing.get(agentId) === reservation
+      const releaseProbe = (agentId: string, reservation: symbol) => {
+        if (ownsProbe(agentId, reservation)) probing.delete(agentId)
+      }
 
       /**
        * Starts the agent in an empty folder, read-only, to read its settings,
        * and stops it. Its process is recorded before it is spawned, as any
        * agent's is, so one a crash leaves behind is stopped at the next launch.
        */
-      const probe = (entry: AgentEntry, asOf = forgotten.get(entry.definition.id) ?? 0) =>
+      const probe = (entry: AgentEntry, reservation: symbol) =>
         Effect.acquireUseRelease(
           Effect.sync(() => {
             mkdirSync(probeBase, { recursive: true })
@@ -277,10 +280,9 @@ export class Models extends Context.Service<
           (folder) => Effect.sync(() => rmSync(folder, { recursive: true, force: true })),
         ).pipe(
           Effect.orElseSucceed(() => null),
-          Effect.tap((found) => Effect.sync(() => current(entry, asOf) && probed.set(entry.definition.id, found))),
-          Effect.ensuring(Effect.sync(() => current(entry, asOf) && probing.delete(entry.definition.id))),
+          Effect.tap((found) => Effect.sync(() => ownsProbe(entry.definition.id, reservation) && probed.set(entry.definition.id, found))),
+          Effect.ensuring(Effect.sync(() => releaseProbe(entry.definition.id, reservation))),
         )
-      const current = (entry: AgentEntry, asOf: number) => (forgotten.get(entry.definition.id) ?? 0) === asOf
 
       const of = (entry: AgentEntry) =>
         Effect.gen(function* () {
@@ -299,15 +301,18 @@ export class Models extends Context.Service<
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
           if (!probing.has(definition.id) && isInstalled(installs, definition)) {
-            probing.add(definition.id)
+            const reservation = Symbol()
+            probing.set(definition.id, reservation)
             const status = yield* signIns
               .of(definition.id)
-              .pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? Effect.sync(() => void probing.delete(definition.id)) : Effect.void)))
-            if (status !== 'signed_out') {
-              yield* Effect.forkIn(probe(entry), scope)
+              .pipe(
+                Effect.onExit((exit) => (Exit.isFailure(exit) ? Effect.sync(() => releaseProbe(definition.id, reservation)) : Effect.void)),
+              )
+            if (ownsProbe(definition.id, reservation) && status !== 'signed_out') {
+              yield* Effect.forkIn(probe(entry, reservation), scope)
               return { ...seen, ...now, defaults, blocked, probing: true }
             }
-            probing.delete(definition.id)
+            releaseProbe(definition.id, reservation)
           }
           return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })
@@ -326,7 +331,6 @@ export class Models extends Context.Service<
           }).pipe(Effect.provide(context)),
         forget: (agentId) =>
           Effect.sync(() => {
-            forgotten.set(agentId, (forgotten.get(agentId) ?? 0) + 1)
             probed.delete(agentId)
             probing.delete(agentId)
           }),

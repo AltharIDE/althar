@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent, fakeAgentMain, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
@@ -273,6 +273,70 @@ describe('the models each agent offers', () => {
       assert.strictEqual(rows?.count, 1)
     }).pipe(Effect.provide(withAgents(['process'], (agentId) => definition(agentId)))),
   )
+
+  it.live('does not start a probe from a sign-in check forgotten while pending', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-model-sign-in-'))
+    const gates = [0, 1].map((attempt) => ({
+      started: join(folder, `started-${attempt}`),
+      release: join(folder, `release-${attempt}`),
+      finished: join(folder, `finished-${attempt}`),
+    }))
+    const waitForRelease =
+      'const fs = require("node:fs"); const [started, release, finished] = process.argv.slice(1); ' +
+      'fs.writeFileSync(started, ""); ' +
+      'while (!fs.existsSync(release)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); ' +
+      'fs.writeFileSync(finished, ""); console.log(process.env.FAKE_HOME)'
+    let checks = 0
+    const define = (agentId: string): AgentDefinition => {
+      const agent = definition(agentId)
+      return {
+        ...agent,
+        signIn: {
+          ...agent.signIn,
+          status: () => {
+            const gate = gates[checks++]
+            if (gate === undefined) throw new Error('Unexpected extra sign-in check')
+            return { command: process.execPath, args: ['-e', waitForRelease, gate.started, gate.release, gate.finished] }
+          },
+        },
+      }
+    }
+    const fileExists = (path: string) =>
+      Effect.map(
+        Effect.sync(() => existsSync(path)),
+        (exists) => [exists],
+      )
+
+    return Effect.gen(function* () {
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      const first = yield* Effect.forkChild(models.catalog)
+      yield* until(fileExists(gates[0]!.started), (rows) => rows[0] === true)
+
+      yield* models.forget('process')
+      const second = yield* Effect.forkChild(models.catalog)
+      yield* until(fileExists(gates[1]!.started), (rows) => rows[0] === true)
+
+      writeFileSync(gates[0]!.release, '')
+      yield* Fiber.join(first)
+      writeFileSync(gates[1]!.release, '')
+      yield* Fiber.join(second)
+
+      yield* until(
+        sql<{ count: number; active: number | null }>`
+          SELECT COUNT(*) AS count, SUM(CASE WHEN state IN ('launching', 'running') THEN 1 ELSE 0 END) AS active
+          FROM processes WHERE purpose = 'probe'`,
+        (rows) => (rows[0]?.count ?? 0) > 0 && rows[0]?.active === 0,
+        Duration.seconds(20),
+      )
+      const [rows] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM processes WHERE purpose = 'probe'`
+      assert.strictEqual(checks, 2)
+      assert.strictEqual(rows?.count, 1)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => gates.forEach((gate) => writeFileSync(gate.release, '')))),
+      Effect.provide(withAgents(['process'], define)),
+    )
+  })
 
   it.live('record the process asking starts, as any agent’s, ended once asked', () =>
     Effect.gen(function* () {
