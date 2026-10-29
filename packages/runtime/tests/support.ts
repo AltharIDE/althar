@@ -95,6 +95,7 @@ export const definition = (
   oneAccount: ReadonlyArray<string> = [],
   /** Agents whose status can't tell a plan from a key, as Mistral Vibe's can't. */
   unsure: ReadonlyArray<string> = [],
+  agentVersions: Readonly<Record<string, string>> = {},
 ): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
@@ -105,6 +106,14 @@ export const definition = (
   // Claude Code's runs on Anthropic's and Codex on OpenAI's, as the registry says; OpenCode on whichever the person picks.
   ...(id === 'claude-code' ? { service: { name: 'Anthropic', url: 'https://api.anthropic.test' } } : {}),
   ...(id === 'codex' ? { service: { name: 'OpenAI', url: 'https://api.openai.test' } } : {}),
+  ...(id === 'codex'
+    ? {
+        version: () => ({
+          command: process.execPath,
+          args: ['-e', `process.stdout.write(${JSON.stringify(agentVersions.codex ?? '0.164.0')})`],
+        }),
+      }
+    : {}),
   // Its status says the home it ran in: signed out, or paid per use, where the test names the agent or that home.
   signIn: {
     status: () => ({ command: 'sh', args: ['-c', 'printf %s "$FAKE_HOME"'] }),
@@ -145,7 +154,14 @@ export const definition = (
   ...(id === 'claude-code'
     ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
     : id === 'codex'
-      ? { skills: { layout: 'agents' as const, capabilities: ['subagents'], via: { kind: 'directory' as const } } }
+      ? {
+          skills: {
+            layout: 'agents' as const,
+            capabilities: ['subagents'],
+            externalMinimumVersion: '0.164.0',
+            via: { kind: 'directory' as const },
+          },
+        }
       : id === 'opencode'
         ? {
             skills: {
@@ -173,9 +189,10 @@ export const fakeAgents = (
   perUse: ReadonlyArray<string> = [],
   oneAccount: ReadonlyArray<string> = [],
   unsure: ReadonlyArray<string> = [],
+  agentVersions: Readonly<Record<string, string>> = {},
 ) => {
   const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
+    definition: definition(agentId, signedOut, perUse, oneAccount, unsure, agentVersions),
     transport: (cwd, env = {}, session) => {
       launches.push({ agentId, cwd, env, options: session })
       // As a real process, it carries whose work it is, as every agent does (machine.ts).
@@ -299,6 +316,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The skills store and local catalog; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
+    /** Fake versions printed by agents in tests that exercise external-version capability gates. */
+    readonly agentVersions?: Readonly<Record<string, string>>
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
     /** The keychain, kept across runtimes given the same one; else each its own. */
@@ -325,7 +344,7 @@ export const runtime = (
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
+    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure, more.agentVersions),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),

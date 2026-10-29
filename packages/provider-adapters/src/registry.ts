@@ -240,7 +240,9 @@ export interface AgentDefinition {
    * How a lead's session is given the skills Althar chose for its run (docs/plans/skills-across-harnesses.md), each
    * from a folder of Althar's own laid out as `layout` (`@althar/skills`' projection), for that session alone: never
    * the account's home, the person's own folders or a repository. `capabilities`, what it can do that a skill may
-   * need: one needing more is left out and reported. `via`, how the session finds the folder: `meta`, its
+   * need: one needing more is left out and reported. `externalMinimumVersion`, when Althar delegates the harness to a
+   * host-installed CLI, is the minimum version at which those capabilities are available; an unknown or older version
+   * gets none of them. `via`, how the session finds the folder: `meta`, its
    * `sessionMeta` (given `skills` in its options); `directory`, as a directory added to the session; `env`, what its
    * environment adds over its own. `null`, its sessions get none: each agent says which, so one added is never given
    * none by leaving it out.
@@ -248,6 +250,7 @@ export interface AgentDefinition {
   readonly skills: {
     readonly layout: 'claude-plugin' | 'agents' | 'plain'
     readonly capabilities: ReadonlyArray<string>
+    readonly externalMinimumVersion?: string
     readonly via:
       | { readonly kind: 'meta' }
       | { readonly kind: 'directory' }
@@ -873,10 +876,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /*
      * codex-acp 2.3.0 bundles Codex 0.164.0, which can dispatch subagents. Althar does not negotiate the adapter's native
      * ACP child-session capability, so it reports them as ordinary tool calls; that fallback still lets Codex use skills
-     * that require dispatch. The added directory is an extra `.agents/skills` root, and its read-only copies are the only
+     * that require dispatch. In a Flatpak, the adapter uses the host CLI instead, so it is counted on for dispatch only
+     * at 0.164.0 or newer. The added directory is an extra `.agents/skills` root, and its read-only copies are the only
      * files there.
      */
-    skills: { layout: 'agents', capabilities: ['subagents'], via: { kind: 'directory' } },
+    skills: {
+      layout: 'agents',
+      capabilities: ['subagents'],
+      externalMinimumVersion: '0.164.0',
+      via: { kind: 'directory' },
+    },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file

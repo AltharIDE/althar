@@ -140,6 +140,7 @@ describe('the agent registry', () => {
       },
     )
     assert.deepStrictEqual(agents.codex.skills?.capabilities, ['subagents'])
+    assert.strictEqual(agents.codex.skills?.externalMinimumVersion, '0.164.0')
     const via = agents.opencode.skills?.via
     assert.strictEqual(via?.kind, 'env')
     if (via?.kind !== 'env') return

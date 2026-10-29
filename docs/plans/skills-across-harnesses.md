@@ -598,8 +598,11 @@ checks and the harness permission rules remain the enforcement.
   The bundled codex-acp 2.3.0 adapter includes Codex 0.164.0, which can dispatch
   subagents. Althar does not negotiate native ACP child sessions, so the adapter
   reports them as ordinary tool calls; skills that need dispatch are still
-  given to Codex. Other harnesses without subagent support are left out, and
-  their thread gets a notice naming what was left out and why.
+  given to Codex. In a Flatpak, `CODEX_PATH` delegates to the host CLI instead;
+  Althar counts it as able to dispatch only at 0.164.0 or newer. If its version
+  is older or unknown, subagent skills are left out and the thread says why.
+  Other harnesses without subagent support are left out, and their thread gets
+  a notice naming what was left out and why.
 - **Who gets it.** Only a task's lead, on any agent that says how, and only where the runtime
   was given a skills store. Readers, reviewers, a review's lead (untrusted) and
   other agents get none. A failure to set skills up costs the session its

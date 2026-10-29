@@ -11,7 +11,7 @@ import { SqlClient } from 'effect/sql'
 
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
-import { runSkills } from '../src/Skills'
+import { runSkills, skillsCapabilities } from '../src/Skills'
 import { items, launches, notices, runtime, sessionMetas, task, until } from './support'
 
 /*
@@ -44,6 +44,15 @@ const skillFilesUnder = (folder: string): Array<string> =>
         .filter((path) => path.endsWith('SKILL.md'))
         .map((path) => join(folder, path))
     : []
+
+it('counts Codex as able to use subagent skills only when its external version is supported', () => {
+  const codex = { skills: { capabilities: ['subagents'], externalMinimumVersion: '0.164.0' } } as const
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.164.0', true), ['subagents'])
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.165.0', true), ['subagents'])
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.163.9', true), [])
+  assert.deepStrictEqual(skillsCapabilities(codex, null, true), [])
+  assert.deepStrictEqual(skillsCapabilities(codex, null, false), ['subagents'])
+})
 
 /** Where the last session of an agent was given its skills, one folder per skill, as the registry lays them out for it. */
 const skillsFolderOf = (agentId: string, root: string) => {
@@ -87,11 +96,13 @@ const withStore = <A, E, R>(
   needs: Record<string, Array<string>>,
   body: (store: NonNullable<RuntimeOptions['skills']>) => Effect.Effect<A, E, R>,
   off: ReadonlyArray<string> = [],
+  agentVersions: Readonly<Record<string, string>> = {},
 ) =>
   Effect.flatMap(
     Effect.promise(() => makeStore(skills, needs, off)),
     // With failures said to a listener, as the app's are, so a test hears what is reported.
-    (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }).pipe(Layer.provideMerge(failuresLayer)))),
+    (store) =>
+      body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store, agentVersions }).pipe(Layer.provideMerge(failuresLayer)))),
   )
 
 describe('skills for a task’s lead', () => {
@@ -155,6 +166,48 @@ describe('skills for a task’s lead', () => {
         yield* sessions.stop(created.threadId)
         assert.isFalse(existsSync(folder))
       }),
+    ),
+  )
+
+  it.live('leaves subagent skills out for an older host Codex in Flatpak', () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.FLATPAK_ID
+        process.env.FLATPAK_ID = 'dev.althar.app.test'
+        return previous
+      }),
+      () =>
+        withStore(
+          { alpha: skill('alpha'), beta: skill('beta') },
+          { beta: ['subagents'] },
+          (skills) =>
+            Effect.gen(function* () {
+              const sessions = yield* Sessions
+              const { task: created } = yield* task()
+              yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+              const folder = skillsFolderOf('codex', skills.root)
+              const given = yield* givenTo(created.threadId)
+              assert.isTrue(existsSync(join(folder, 'alpha', 'SKILL.md')))
+              assert.isFalse(existsSync(join(folder, 'beta', 'SKILL.md')))
+              assert.deepStrictEqual(
+                given.map(({ id }) => id),
+                ['alpha'],
+              )
+              assert.isTrue(
+                (yield* notices(created.threadId)).some(
+                  (notice) => notice.title?.endsWith("codex wasn't given a skill it can't use.") === true,
+                ),
+              )
+              yield* sessions.stop(created.threadId)
+            }),
+          [],
+          { codex: '0.163.9' },
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.FLATPAK_ID
+          else process.env.FLATPAK_ID = previous
+        }),
     ),
   )
 
