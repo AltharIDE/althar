@@ -357,7 +357,11 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           const run = loner(`run:${removed.projectId}`)
           open.push(run)
           yield* nothingLeft(task.taskId, Duration.seconds(20))
-          assert.isTrue(outlived.every((pid) => !alive(pid)))
+          // Its mark disappears as it exits, just before Linux has finished reaping the process.
+          yield* until(
+            Effect.sync(() => outlived.filter(alive)),
+            (pids) => pids.length === 0,
+          )
           yield* until(
             Effect.sync(() => (alive(run) ? [] : [run])),
             (gone) => gone.length === 1,
