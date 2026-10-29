@@ -2013,8 +2013,8 @@ describe('a ready card’s next step, done from the card', () => {
   })
 
   it('shows a stopped task in conflict as stopped: what stopped it and when, the conflict a line under it, and Carry on settles both', async () => {
-    // As an automation's run its lead stopped two days ago over a declined command: on its branch, no pull request, and a conflict
-    // Althar didn't ask its lead about, as it is stopped.
+    // An automation's run Althar stopped two days ago, out of its minutes: on its branch, no pull request, and a conflict Althar
+    // didn't ask its lead about, as it is stopped.
     tasks = [
       task({
         taskId: 's9',
@@ -2026,7 +2026,7 @@ describe('a ready card’s next step, done from the card', () => {
         branch: 'althar/nightly-dependency-check-27-oct',
         changed: { files: 3, add: 287, del: 375 },
         startedAt: '2026-09-29T08:00:00.000Z',
-        stopped: { by: 'declined', at: '2026-09-29T09:00:00.000Z' },
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z' },
         conflictUnsent: 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
         automation: { id: 'au1', name: 'Nightly dependency check' },
       }),
@@ -2053,7 +2053,7 @@ describe('a ready card’s next step, done from the card', () => {
     const yours = within(screen.getByRole('region', { name: 'Needs you' }))
     expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
-    expect(card.getByText('Stopped when you declined a command')).toBeTruthy()
+    expect(card.getByText('Stopped by Althar')).toBeTruthy()
     expect(card.getByText('Sep 29')).toBeTruthy()
     expect(card.queryByText(/^\d+d \d+h$/)).toBeNull()
     // The conflict is one quiet line, not why it waits, and not that the person stopped it.

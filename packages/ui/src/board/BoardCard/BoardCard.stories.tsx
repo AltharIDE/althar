@@ -378,7 +378,7 @@ export const StoppedInConflict: Story = {
     kind: TaskKind.Change,
     at: 'Oct 27',
     title: 'Nightly dependency check, 27 Oct',
-    why: 'Stopped when you declined a command',
+    why: 'Stopped by Althar',
     from: 'Nightly dependency check',
     object: <BranchChip name="althar/nightly-dependency-check-27-oct" add={287} del={375} />,
     foot: (
@@ -396,7 +396,7 @@ export const StoppedInConflict: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const card = within(canvasElement)
-    await expect(card.getByText('Stopped when you declined a command')).toBeInTheDocument()
+    await expect(card.getByText('Stopped by Althar')).toBeInTheDocument()
     await expect(card.getByText('Conflicts with the default branch')).toBeInTheDocument()
     await expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
     await userEvent.click(card.getByRole('button', { name: 'Carry on' }))

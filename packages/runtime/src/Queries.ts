@@ -1910,12 +1910,28 @@ export class Queries extends Context.Service<
             phase !== 'stopped'
               ? undefined
               : yield* Effect.gen(function* () {
+                  // Suspended, its run stopped when its latest attempt ended: what stopped it is the turn that attempt ended in, not
+                  // one its lead was sent after without the run carried on, so a later turn doesn't make it stopped "just now".
+                  // Who suspended it is on record: Althar, as an automation's run out of time, or the coordinator, is no one's call.
+                  const [suspended] =
+                    task.runState === 'suspended'
+                      ? yield* sql<{ endedAt: string | null; actorId: string | null }>`
+                          SELECT
+                            (SELECT a.ended_at FROM run_attempts a WHERE a.run_id = r.id ORDER BY a.attempt_number DESC LIMIT 1) AS ended_at,
+                            (SELECT e.actor_id FROM record_events e WHERE e.aggregate_type = 'run' AND e.aggregate_id = r.id AND e.type = 'run.suspended'
+                              ORDER BY e.sequence DESC LIMIT 1) AS actor_id
+                          FROM runs r WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+                      : []
+                  const until = suspended?.endedAt ?? null
+                  if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
+                    return { by: 'althar' as const, at: until ?? task.runAt ?? '' }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
-                    WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+                    WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
+                    ORDER BY requested_at DESC, rowid DESC LIMIT 1`
                   const [run] = yield* sql<{ endedAt: string | null }>`
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
-                  const at = turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
+                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
