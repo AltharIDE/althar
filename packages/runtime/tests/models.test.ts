@@ -254,6 +254,26 @@ describe('the models each agent offers', () => {
     }).pipe(Effect.provide(withAgents(['claude-code', 'codex', 'missing'], (agentId) => definition(agentId, ['codex'])))),
   )
 
+  it.live('starts one probe while several model catalogs are read at once', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      yield* Effect.all(
+        Array.from({ length: 8 }, () => models.catalog),
+        { concurrency: 'unbounded' },
+      )
+      yield* until(
+        sql<{ count: number; active: number | null }>`
+          SELECT COUNT(*) AS count, SUM(CASE WHEN state IN ('launching', 'running') THEN 1 ELSE 0 END) AS active
+          FROM processes WHERE purpose = 'probe'`,
+        (rows) => (rows[0]?.count ?? 0) > 0 && rows[0]?.active === 0,
+        Duration.seconds(20),
+      )
+      const [rows] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM processes WHERE purpose = 'probe'`
+      assert.strictEqual(rows?.count, 1)
+    }).pipe(Effect.provide(withAgents(['process'], (agentId) => definition(agentId)))),
+  )
+
   it.live('record the process asking starts, as any agent’s, ended once asked', () =>
     Effect.gen(function* () {
       const models = yield* Models

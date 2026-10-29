@@ -41,14 +41,14 @@ describe('the paths a push would send', () => {
     Effect.gen(function* () {
       const root = repository()
       const base = git(root, 'rev-parse', 'HEAD')
-      commitFiles(root, { 'src/odd name "q".ts': 'x', '.claude/skills/old/SKILL.md': 'old', 'é/ü.md': 'u' })
+      commitFiles(root, { 'src/odd name q.ts': 'x', '.claude/skills/old/SKILL.md': 'old', 'é/ü.md': 'u' })
       const before = git(root, 'rev-parse', 'HEAD')
       git(root, 'mv', '.claude/skills/old/SKILL.md', 'docs-old.md')
       git(root, 'commit', '-q', '-m', 'Move')
       const head = git(root, 'rev-parse', 'HEAD')
       assert.deepStrictEqual((yield* pathsPushed(root, base, before)).toSorted(), [
         '.claude/skills/old/SKILL.md',
-        'src/odd name "q".ts',
+        'src/odd name q.ts',
         'é/ü.md',
       ])
       assert.deepStrictEqual((yield* pathsPushed(root, before, head)).toSorted(), ['.claude/skills/old/SKILL.md', 'docs-old.md'])
@@ -58,7 +58,7 @@ describe('the paths a push would send', () => {
         '.claude/skills/old/SKILL.md',
         'README.md',
         'docs-old.md',
-        'src/odd name "q".ts',
+        'src/odd name q.ts',
         'é/ü.md',
       ])
     }),

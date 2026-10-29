@@ -298,10 +298,16 @@ export class Models extends Context.Service<
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
-          if (!probing.has(definition.id) && isInstalled(installs, definition) && (yield* signIns.of(definition.id)) !== 'signed_out') {
+          if (!probing.has(definition.id) && isInstalled(installs, definition)) {
             probing.add(definition.id)
-            yield* Effect.forkIn(probe(entry), scope)
-            return { ...seen, ...now, defaults, blocked, probing: true }
+            const status = yield* signIns
+              .of(definition.id)
+              .pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? Effect.sync(() => void probing.delete(definition.id)) : Effect.void)))
+            if (status !== 'signed_out') {
+              yield* Effect.forkIn(probe(entry), scope)
+              return { ...seen, ...now, defaults, blocked, probing: true }
+            }
+            probing.delete(definition.id)
           }
           return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })

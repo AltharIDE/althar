@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { ModelRoom, PlanUsage } from '@althar/contracts'
 
@@ -15,6 +15,13 @@ import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
 import { agents, changed, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
 import { withServices } from './render'
+
+/* The keys are read once from the system the window runs on (the kit's keys.ts), a Mac here; a test off a Mac says so through this. */
+const system = vi.hoisted(() => ({ offMac: false }))
+vi.mock('@althar/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@althar/ui')>()
+  return { ...actual, primaryDown: (event: KeyboardEvent) => (system.offMac ? event.ctrlKey && !event.metaKey : actual.primaryDown(event)) }
+})
 
 /*
  * Plan usage in the window: the gauge after CPU and memory, and its peek, opened by a
@@ -238,6 +245,10 @@ describe('the plan gauge in the bar', () => {
   })
 
   it('opens on Control-U off a Mac, and closes on the same key', async () => {
+    system.offMac = true
+    onTestFinished(() => {
+      system.offMac = false
+    })
     windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'linux' }))
     await gauge()
     // ⌘ is not the key there, and neither is Control with Shift.
