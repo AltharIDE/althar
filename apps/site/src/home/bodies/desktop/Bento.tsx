@@ -9,8 +9,7 @@ import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/w
 import s from './Bento.module.css'
 import { Automations, Conflicts, Workspaces, Worktrees } from './Drawn'
 import { Fragment } from './Fragment'
-import darkAccounts from './styled/d-accounts.html?raw'
-import glossyAccounts from './styled/g-accounts.html?raw'
+import accounts from './styled/d-accounts.html?raw'
 
 /*
  * What keeps you in flow: eight tiles on a six-column grid. Three hold a
@@ -82,11 +81,11 @@ interface Tile {
   lead: string
   /** How many of the six columns it takes. */
   span: 2 | 3 | 4
-  piece: (style: Style) => ReactNode
+  piece: (tone: Tone) => ReactNode
   /** Drawn, not a piece of the app: it stands whole in the middle of its tile. */
   drawn?: boolean
-  /** Drawn in the style being compared: its tile takes that style's ground. */
-  styled?: boolean
+  /** Drawn as an interface lit by one light, dark or light: its tile takes the drawing's ground. */
+  tone?: Tone
   /** A small piece: whole in the middle of its tile, not running off its foot. */
   small?: boolean
 }
@@ -96,14 +95,14 @@ const TILES: Tile[] = [
     id: 'accounts',
     span: 4,
     drawn: true,
-    styled: true,
+    tone: 'dark',
     title: (
       <>
         Every plan you have. <b>One agent.</b>
       </>
     ),
     lead: 'Sign Codex or Claude Code in once for each plan you pay for: yours, work’s, a client’s, a key. When one runs out, the work goes on with the next.',
-    piece: (style) => <Fragment key={style} source={style === 'dark' ? darkAccounts : glossyAccounts} className={s.stage} />,
+    piece: (tone) => <Fragment key={tone} source={accounts} tone={tone} className={s.stage} />,
   },
   {
     id: 'away',
@@ -238,26 +237,29 @@ const TILES: Tile[] = [
 
 const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4 } as const
 
-/** The two drawing styles being compared: a glossy object, or a dark interface with ?style=dark. Glossy when prerendered. */
-type Style = 'glossy' | 'dark'
-const styleAsked = (): Style => (new URLSearchParams(window.location.search).get('style') === 'dark' ? 'dark' : 'glossy')
+/** A drawing's tone: dark or light. Each tile has its own; ?tone=dark or ?tone=light shows every one in that tone, while the mix is chosen. */
+type Tone = 'dark' | 'light'
+const toneAsked = (): Tone | null => {
+  const asked = new URLSearchParams(window.location.search).get('tone')
+  return asked === 'dark' || asked === 'light' ? asked : null
+}
 const unchanging = () => none
 
 export function Bento() {
-  const style = useSyncExternalStore(unchanging, styleAsked, (): Style => 'glossy')
+  const asked = useSyncExternalStore(unchanging, toneAsked, () => null)
   return (
     <ul className={s.bento}>
       {TILES.map((tile) => (
         <li
           key={tile.id}
           className={cx(s.tile, SPAN[tile.span], tile.drawn && s.drawn, tile.small && s.small)}
-          data-style={(tile.styled && style) || undefined}
+          data-tone={(tile.tone && (asked ?? tile.tone)) || undefined}
         >
           <div className={s.head}>
             <h3 className={s.title}>{tile.title}</h3>
             <p className={s.lead}>{tile.lead}</p>
           </div>
-          <div className={s.pic}>{tile.piece(style)}</div>
+          <div className={s.pic}>{tile.piece(asked ?? tile.tone ?? 'light')}</div>
         </li>
       ))}
     </ul>

@@ -11,7 +11,8 @@ import { useEffect, useRef } from 'react'
 /** Styles already in the head, by the fragment that brought them. */
 const styled = new Set<string>()
 
-export function Fragment({ source, className }: { source: string; className?: string }) {
+/** `tone` is put on the host, where a fragment drawn in two tones looks for it. */
+export function Fragment({ source, tone, className }: { source: string; tone?: string; className?: string }) {
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = host.current
@@ -32,5 +33,5 @@ export function Fragment({ source, className }: { source: string; className?: st
       el.appendChild(run)
     }
   }, [source])
-  return <div ref={host} className={className} aria-hidden="true" />
+  return <div ref={host} className={className} data-tone={tone} aria-hidden="true" />
 }

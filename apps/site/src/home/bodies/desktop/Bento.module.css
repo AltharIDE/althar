@@ -36,14 +36,14 @@
 .drawn .pic { align-items: center; padding: 0 18px 18px; }
 .drawn .pic > * { max-width: 660px; margin-bottom: 0; }
 
-/* A drawing in the style being compared: its stage runs the tile's width, on a ground the tile continues, so it has no frame. */
+/* A drawing as an interface lit by one light: its stage runs the tile's width, on a ground the tile continues, so it has no frame. */
 .stage { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; container-type: inline-size; }
-.drawn[data-style] .pic { padding: 0 1px 1px; }
-.drawn[data-style] .pic > * { max-width: none; }
-.drawn[data-style='glossy'] { background: linear-gradient(#f5f3ee, #ebe8e0); }
-.drawn[data-style='dark'] { background: #0e0b09; box-shadow: none; }
-.drawn[data-style='dark'] .title { color: #f4efe7; }
-.drawn[data-style='dark'] .lead { color: rgba(244, 239, 231, 0.66); }
+.drawn[data-tone] .pic { padding: 0 1px 1px; }
+.drawn[data-tone] .pic > * { max-width: none; }
+.drawn[data-tone='light'] { background: #f8f6f1; }
+.drawn[data-tone='dark'] { background: #0e0b09; box-shadow: none; }
+.drawn[data-tone='dark'] .title { color: #f4efe7; }
+.drawn[data-tone='dark'] .lead { color: rgba(244, 239, 231, 0.66); }
 
 /* Pieces of the app, framed as pictures: a card on its own, or a window. */
 .card { border-radius: 14px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line-2), 0 24px 50px rgba(40, 30, 10, 0.08); }
@@ -62,5 +62,5 @@
   .pic { padding: 0 18px; margin-top: 20px; }
   /* A wide drawing, larger than the tile, its empty sides cut off. */
   .drawn.span4 .pic > * { width: 132%; max-width: none; margin: 0 -16%; }
-  .drawn[data-style].span4 .pic > * { width: 100%; margin: 0; }
+  .drawn[data-tone].span4 .pic > * { width: 100%; margin: 0; }
 }
