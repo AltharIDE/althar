@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { rmSync, writeFileSync } from 'node:fs'
+import { realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -54,7 +54,13 @@ const twoRepositories = () => {
   ])
   const github: FakeService = makeFakeService({
     pushUrl: (path) => (path[1] === 'web' ? web.bare : api.bare),
-    headOf: (number) => heads.get(number) ?? null,
+    // Where each branch is now on its remote, so a push made since shows.
+    headOf: (number) =>
+      number === 3
+        ? git(api.bare, 'rev-parse', 'fix-retry')
+        : heads.has(number)
+          ? git(web.bare, 'rev-parse', number === 1 ? 'fix-nav' : 'fix-footer')
+          : null,
   })
   github.addRepository(['meridian', 'api'])
   github.addRepository(['meridian', 'web'])
@@ -200,4 +206,55 @@ describe('a project of two repositories on one connected host', () => {
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
+
+  it.live(
+    'pushes what the lead commits to each repository’s pull request on its own, leaving alone the one someone else pushed to (ADR-071)',
+    () => {
+      const { api, web, github } = twoRepositories()
+      return Effect.gen(function* () {
+        const { projectId, across, personId } = yield* opened(api.working, web.working)
+        const task = yield* across('Fix both')
+        const changes = yield* Changes
+        const links = { web: `${HOST}/meridian/web/pull/1`, api: `${HOST}/meridian/api/pull/3` }
+        for (const link of Object.values(links))
+          assert.strictEqual(
+            (yield* changes.attach({ taskId: task.taskId, pullRequest: link, start: true, actorId: personId })).kind,
+            'attached',
+          )
+        const sql = yield* SqlClient.SqlClient
+        const paths = (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`).map((row) => row.path)
+        // Each repository's worktree of the task, by the repository it belongs to.
+        const folderOf = (working: string) =>
+          paths.find(
+            (path) =>
+              realpathSync(git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir')) === realpathSync(join(working, '.git')),
+          ) ?? ''
+        const folders = { web: folderOf(web.working), api: folderOf(api.working) }
+        const commit = (path: string, message: string) => {
+          git(path, 'commit', '-q', '--allow-empty', '-m', message)
+          return git(path, 'rev-parse', 'HEAD')
+        }
+        // The person pushes to each once, so Althar knows where each stands.
+        // The host keeps them at its own address.
+        const stored = { web: 'https://github.com/meridian/web/pull/1', api: 'https://github.com/meridian/api/pull/3' }
+        for (const name of ['web', 'api'] as const) yield* changes.push(task.taskId, commit(folders[name], 'Start'), stored[name])
+        // Someone pushes to web's branch outside Althar; then the lead commits in both and pushes each.
+        git(web.working, 'fetch', '-q', web.bare, 'fix-nav')
+        git(web.working, 'checkout', '-q', '-b', 'theirs', 'FETCH_HEAD')
+        const theirs = commit(web.working, 'Theirs')
+        git(web.working, 'push', '-q', web.bare, 'theirs:fix-nav')
+        git(web.working, 'checkout', '-q', 'main')
+        const mine = { web: commit(folders.web, 'Lead on web'), api: commit(folders.api, 'Lead on api') }
+        const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+        const toApi = yield* callTool(lead, 'push_to_pull_request', { pull_request: 'api#3' })
+        const toWeb = yield* callTool(lead, 'push_to_pull_request', { pull_request: 'web#1' })
+        // api's goes up by itself; web's doesn't go over what they pushed, which the lead is told to bring in first.
+        assert.include(toApi, 'Pushed 1 commit to api#3')
+        assert.strictEqual(git(api.bare, 'rev-parse', 'fix-retry'), mine.api)
+        assert.include(toWeb, "Your branch no longer has web#1's head")
+        assert.strictEqual(git(web.bare, 'rev-parse', 'fix-nav'), theirs)
+        assert.notStrictEqual(theirs, mine.web)
+      }).pipe(Effect.provide(withQueries(github)))
+    },
+  )
 })

@@ -11,12 +11,14 @@
   waited. So cards sat in Needs you saying "Push 1 commit" for work the
   person had already asked for, and pushing was all they did with it. The
   person asked on 29 October: "Why am I needed for that? Perhaps it can be a
-  setting."
+  setting." The plan had kept "always push" for later, as a per-project
+  choice ([usable](../plans/usable.md), 4 October; DEV-38).
 - **Decision:**
   - **A project rule, `pushCommits`, on unless the person turns it off:**
     "Push the lead's commits automatically", among the project's Tasks
     switches beside resolving conflicts. Like those, it is the project's
-    alone, with no app-wide default.
+    alone, with no app-wide default. DEV-38 had it off by default; it is on,
+    since what the person asked was not to be needed for it at all.
   - **On, what a lead commits goes up to its task's open pull request as its
     turn ends,** whoever has looked (`Changes.pushLeft`). Its turn ending, or
     its session going, is waited out as a conflict round's is: a lead may
@@ -24,7 +26,9 @@
     running is pushed for when that ends. Not while its plan publishes, or a
     conflict round is under way: those push themselves. `push_to_pull_request`
     pushes at once too, rather than asking. Turned on, and at launch, what
-    open tasks' leads left waiting goes up (`pushNow`).
+    open tasks' leads left waiting goes up (`pushNow`). In a task of several
+    repositories, each pull request goes up or is held on its own. The
+    task's thread says what went up, and where.
   - **What goes up never changes:** the task's own pull request's branch,
     never the default branch, as a plain push, never forced: a branch whose
     pushed commits were rewritten waits for the person's Replace, as before.
