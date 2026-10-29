@@ -103,7 +103,9 @@
   In every mode, the rules no longer read as lost what can't be: git in a
   folder that is there but in no checkout fails, and deleting what isn't
   there deletes nothing: a file that isn't, in a folder that is; a
-  wildcard nothing in its folder matches; and a relative path, read from
+  wildcard nothing in its folder matches, where the rules read it as the
+  shell does (`*`, `?`, `[a-z]`, `[!a]`; a class such as `[[:digit:]]`,
+  braces or zsh's patterns read as naming what is there); and a relative path, read from
   where the rules guess the shell is, that names nothing there, not even
   its folder. An agent's shell keeps the folder it moved to from one
   command to the next, and no request says where it is, so the rules
@@ -112,10 +114,15 @@
   Where that names nothing, either the shell is elsewhere or nothing goes;
   where it names what is there, it asks, from wherever it could be. Both
   are still writing outside the worktree. `$TMPDIR`, `$TMP`, `$TEMP` and
-  `$PWD` at a path's start are read as the folders they name, the temp
-  folder and where the command runs, as `~` and `$HOME` were: `cp
-  $TMPDIR/x ./y` reads as `cp /…/x ./y`, and `rm -f $TMPDIR/../notes.md`
-  as what it reaches.
+  `$PWD` at a path's start are read as the folders they name, as `~` and
+  `$HOME` were: `$PWD` as where the command runs, and the temp variables
+  as the agent's own temp folder where Althar made it one at launch
+  (`privateTemp`), so `cp $TMPDIR/x ./y` reads as `cp /…/x ./y` and
+  `rm -f $TMPDIR/../../notes.md` as what it reaches. Other agents pick
+  their own temp folder (Claude Code's sandbox sets one), which Althar
+  doesn't know: a path in it is read as in a temp folder, the task's own
+  whichever it is, and one that climbs out of it as worked out only when
+  it runs.
 - **What holds as before:** while Never lists anything, a command the
   rules can't read is still refused, with how to spell it out. No one
   reads keys and sign-ins. In every other mode what the rules can't read

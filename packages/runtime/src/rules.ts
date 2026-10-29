@@ -182,6 +182,12 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /**
+   * The folder `$TMPDIR`, `$TMP` and `$TEMP` name in the agent's commands,
+   * where Althar knows it: its own, as its launch made it (`privateTemp`).
+   * Other agents name a temp folder of their own choosing.
+   */
+  readonly temp?: string
   /** The system the agent works on, whose paths and commands it names: this computer's unless a test gives one. */
   readonly platform?: NodeJS.Platform
   /** The person's home folder: this computer's unless a test gives one. */
@@ -334,6 +340,7 @@ const secretCommandReason = (text: string, cwd?: string, system: System = system
     paths,
     folder: isFolder,
     unknown: paths.parse(home).root,
+    unsettled: (word) => unsettled(word),
   }
   // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
   const inSecret = (folders: ReadonlyArray<Folder>) => folders.some(({ at }) => at !== undefined && secretPath(at, paths.sep, system))
@@ -1603,7 +1610,7 @@ interface Places {
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
-  /** The temp folder `$TMPDIR` names, where the rules know it: the first scratch folder. */
+  /** The folder `$TMPDIR` names in the agent's commands, where the rules know it (`RuleContext`'s `temp`). */
   readonly temp: string | undefined
 }
 
@@ -1637,7 +1644,17 @@ const places = (context: RuleContext): Places => {
   const scratch = [
     ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
   ].map(real)
-  return { system, exists, folder, names, real, worktrees: (context.worktrees ?? [context.worktree]).map(real), scratch, temp: scratch[0] }
+  const temp = context.temp === undefined ? undefined : real(context.temp)
+  return {
+    system,
+    exists,
+    folder,
+    names,
+    real,
+    worktrees: (context.worktrees ?? [context.worktree]).map(real),
+    scratch: temp === undefined ? scratch : [...scratch, temp],
+    temp,
+  }
 }
 
 const within = ({ paths }: System, root: string, path: string) => {
@@ -1651,16 +1668,25 @@ const TEMP_WORD = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|
 /** The folder a command runs in, as it may name it at the start of a path. */
 const HERE_WORD = /^(\$PWD|\$\{PWD\})(?=$|[/\\])/
 
+/** Whether a path that starts with the temp folder's name climbs out of it: `$TMPDIR/../notes.md`. */
+const leavesTemp = (word: string) => {
+  const rest = word.replace(TEMP_WORD, '')
+  if (rest === word) return false
+  const inner = posix.normalize(`.${rest.replaceAll('\\', '/')}`)
+  return inner === '..' || inner.startsWith('../')
+}
+
 /**
  * Where a path a command names really is, from the folder the command runs
  * in: with the home folder, the temp folder and `$PWD` written out, so
- * `cp $TMPDIR/x ./y` reads as `cp /…/x ./y`. An agent's own temp folder is
- * in the temp folder Althar's is in; while the rules don't know it, `$TMPDIR`
- * stays a folder of its name.
+ * `cp $TMPDIR/x ./y` reads as `cp /…/x ./y`. Where the rules don't know the
+ * agent's temp folder, a path in it is read as in Althar's: what is in any
+ * temp folder is the task's own, whichever it is; one that climbs out of it
+ * is worked out only when the command runs (`unsettled`).
  */
 const locate = (where: Places, cwd: string, path: string) => {
   const { paths, home } = where.system
-  const temp = where.temp
+  const temp = where.temp ?? where.scratch[0]
   const written = path
     .replace(HOME_WORD, home)
     .replace(HERE_WORD, cwd)
@@ -1689,18 +1715,41 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
 /** A wildcard's characters in a path's name: `*.log`, `b-?.png`, `[ab].txt`. */
 const WILDCARD = /[*?[]/
 
-/** What a shell's wildcard in a name matches, as a pattern: `*` any run of characters, `?` one, `[…]` one of them. None it can't read. */
-const wildcardPattern = (name: string, caseless: boolean): RegExp | undefined => {
+/**
+ * What a shell may make of a word besides `*`, `?` and `[…]`, where the
+ * rules don't read what it names: braces (`{a,b}.txt`), escapes, zsh's and
+ * extglob's patterns (`(a|b)`, `<1-9>`, `^*.ts`, `a#`, `*~x`, `=ls`).
+ */
+const EXPANDED = /[{}()<>|^#\\]|.~|^=/
+
+/**
+ * What a shell's wildcard in a name matches, as a pattern: `*` any run of
+ * characters, `?` one, `[…]` one listed or in a range, `[!…]` or `[^…]` one
+ * not. None where it can't read it as the shell would, such as a class
+ * (`[[:digit:]]`), an equivalence (`[[=a=]]`) or an unclosed `[`. In any
+ * case: matching more than the shell would only reads more as there.
+ */
+const wildcardPattern = (name: string): RegExp | undefined => {
+  let pattern = '^'
+  for (let at = 0; at < name.length; at++) {
+    const char = name.charAt(at)
+    if (char === '*') pattern += '.*'
+    else if (char === '?') pattern += '.'
+    else if (char === '[') {
+      const negated = name.charAt(at + 1) === '!' || name.charAt(at + 1) === '^'
+      const from = at + (negated ? 2 : 1)
+      const end = name.indexOf(']', from)
+      const listed = end === -1 ? '' : name.slice(from, end)
+      // `[]a]` and `[!]a]` list `]` itself; with `[` or `\` in it, it is a class, an equivalence or an escape.
+      if (listed === '' || /[[\\]/.test(listed)) return undefined
+      pattern += `[${negated ? '^' : ''}${listed.replace(/\^/g, '\\^')}]`
+      at = end
+    } else pattern += char.replace(/[.+^${}()|\]\\]/g, '\\$&')
+  }
   try {
-    return new RegExp(
-      `^${name
-        .replace(/[.+^${}()|]/g, '\\$&')
-        .replaceAll('*', '.*')
-        .replaceAll('?', '.')
-        .replace(/\[!/g, '[^')}$`,
-      caseless ? 'i' : '',
-    )
+    return new RegExp(`${pattern}$`, 'i')
   } catch {
+    // A range out of order, `[z-a]`.
     return undefined
   }
 }
@@ -1712,9 +1761,11 @@ const wildcardPattern = (name: string, caseless: boolean): RegExp | undefined =>
  * folder holds from one command to the next) or a `cd` they followed leads
  * nowhere. With a wildcard in its name, nothing in its folder matches it;
  * with one before, the folder before it is named from there and isn't there.
+ * Never what the shell could expand otherwise (`EXPANDED`).
  */
 const missing = (where: Places, word: string, path: string, guessed: boolean) => {
-  const { paths, caseless } = where.system
+  if (EXPANDED.test(word.replace(HOME_WORD, ''))) return false
+  const { paths } = where.system
   const relative = guessed && !paths.isAbsolute(word.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
   const folder = paths.dirname(path)
   if (!WILDCARD.test(path)) return !where.exists(path) && (relative || where.exists(folder))
@@ -1733,7 +1784,7 @@ const missing = (where: Places, word: string, path: string, guessed: boolean) =>
     )
   }
   if (!where.exists(folder)) return relative
-  const pattern = wildcardPattern(paths.basename(path), caseless)
+  const pattern = wildcardPattern(paths.basename(path))
   return pattern !== undefined && where.folder(folder) && !where.names(folder).some((each) => pattern.test(each))
 }
 
@@ -1747,8 +1798,13 @@ const changesCheckout = (path: string) =>
  */
 const KNOWN_START = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%|\$PWD|\$\{PWD\})(?=$|[/\\])/i
 
-/** Whether a word is worked out only when the command runs: `$DIR`, `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`. */
-const unsettled = (word: string) => /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
+/**
+ * Whether a word is worked out only when the command runs: `$DIR`,
+ * `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`; and, where the rules
+ * don't know the agent's temp folder, a path climbing out of it.
+ */
+const unsettled = (word: string, where?: Places) =>
+  (where?.temp === undefined && leavesTemp(word)) || /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -2367,6 +2423,7 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     paths: where.system.paths,
     folder: where.folder,
     unknown: where.system.paths.parse(where.system.home).root,
+    unsettled: (word) => unsettled(word, where),
   }
   for (const line of lines)
     walkFolders(line, context.worktree, following, (written, folders) => {
@@ -2424,6 +2481,8 @@ interface Following {
   readonly folder: (path: string) => boolean
   /** Where a `cd` that shows only when it runs is read as going: the root of the disk, the worst it could be. */
   readonly unknown: string
+  /** Whether a word is worked out only when the command runs (`unsettled`). */
+  readonly unsettled: (word: string) => boolean
 }
 
 const distinct = (folders: ReadonlyArray<Folder>): Array<Folder> => [
@@ -2476,7 +2535,7 @@ const walkFolders = (
             certain = false
             return seen
           }
-          if (target !== undefined && unsettled(target)) {
+          if (target !== undefined && following.unsettled(target)) {
             certain = false
             return [unknown]
           }
@@ -2642,9 +2701,9 @@ const programNamed = (words: ReadonlyArray<string>) => {
  */
 const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: RuleContext): ReadonlyArray<ReadonlyArray<string>> => {
   const xargs = xargsRuns(unwrap(words))
-  if (!words.some(unsettled) && xargs === undefined) return []
+  if (!words.some((word) => unsettled(word, where)) && xargs === undefined) return []
   return [where.system.paths.parse(where.system.home).root, context.defaultBranch].map((worst) => {
-    const read = words.map((word) => (unsettled(word) ? worst : word))
+    const read = words.map((word) => (unsettled(word, where) ? worst : word))
     return xargs === undefined ? read : [...(xargsRuns(unwrap(read)) ?? []), worst]
   })
 }

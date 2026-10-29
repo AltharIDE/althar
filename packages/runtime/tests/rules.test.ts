@@ -2365,6 +2365,8 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     const tree = join(root, 'tasks', 'tree')
     mkdirSync(join(tree, 'packages', 'ui'), { recursive: true })
     writeFileSync(join(root, 'notes.md'), 'mine')
+    mkdirSync(join(root, '.evidence'))
+    for (const name of ['1-log.txt', '7-log.txt']) writeFileSync(join(root, '.evidence', name), 'mine')
     const here = rules(allow, { worktree: tree, scratch: [] })
     // The shell kept `packages/ui` from the command before: read from the worktree's top, these name nothing that is there.
     for (const command of [
@@ -2373,8 +2375,19 @@ describe('allowing everything trusts the agent with what the rules can’t read 
       'cd ../.. && rm packages/ui/src/a.tsx-E',
       'cd ../../.althar/scratch/runs && rm -rf shots',
       'cd ../.. && git checkout HEAD -- packages/ui/src',
+      'rm -f ../../.evidence/[8-9]-log.txt ../../.evidence/*.png',
     ])
       assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
+    // A wildcard the rules can't read as the shell does, or braces, reads as naming what is there.
+    for (const command of [
+      'rm -f ../../.evidence/[[:digit:]]-log.txt',
+      'rm -f ../../.evidence/[0-9]-log.txt',
+      'rm -f ../../.evidence/[!a]-log.txt',
+      'rm -f ../../.evidence/?-LOG.txt',
+      'rm -f ../../.evidence/{1,2}-log.txt',
+      'rm -f ../../.evidence/<1-9>-log.txt',
+    ])
+      assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
     // What it reaches that is there still asks, from the top as from anywhere, and so does what is named outright.
     for (const command of ['rm -f ../../notes.md', 'cd ../.. && rm -f *.md', 'rm -rf ../../../..', `rm -rf ${join(root, 'gone')}/x`])
       assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
@@ -2382,19 +2395,34 @@ describe('allowing everything trusts the agent with what the rules can’t read 
   })
 
   it('reads `$TMPDIR`, `$TEMP` and `$PWD` at a path’s start as the folders they name', () => {
+    // An agent launched with a temp folder of its own (`privateTemp`) has it in Althar's.
     const root = mkdtempSync(join(tmpdir(), 'althar-temp-'))
     const temp = join(root, 'temp')
+    const own = join(temp, 'althar-agent-1')
     const tree = join(root, 'tree')
-    mkdirSync(temp)
+    mkdirSync(own, { recursive: true })
     mkdirSync(tree)
     writeFileSync(join(root, 'notes.md'), 'mine')
-    const here = (mode: 'allow' | 'rules') => rules({ mode }, { worktree: tree, scratch: [temp] })
+    const here = (mode: 'allow' | 'rules', known = true) =>
+      rules({ mode }, { worktree: tree, scratch: [temp], ...(known ? { temp: own } : {}) })
     // Into or out of the temp folder, or the worktree by `$PWD`, is the task's own, as the same paths written out are.
-    for (const command of ['cp $TMPDIR/keep.ts ./a.ts', 'rm -rf $TMPDIR/sw', 'mv ${TMPDIR}/a.log $PWD/a.log', `rm -rf ${temp}/sw`])
+    for (const command of [
+      'cp $TMPDIR/keep.ts ./a.ts',
+      'rm -rf $TMPDIR/sw',
+      'mv ${TMPDIR}/a.log $PWD/a.log',
+      `rm -rf ${own}/sw`,
+      // The agent's `$TMPDIR/..` is Althar's temp folder, still scratch.
+      'rm -f $TMPDIR/../a.log',
+    ])
       assert.strictEqual(decide(runs(command), here('rules')).verdict, 'allow', command)
     // Out of it, it is what it reaches.
-    for (const command of ['rm -f $TMPDIR/../notes.md', `rm -f ${join(root, 'notes.md')}`, 'rm -f $PWD/../notes.md'])
+    for (const command of ['rm -f $TMPDIR/../../notes.md', `rm -f ${join(root, 'notes.md')}`, 'rm -f $PWD/../notes.md'])
       assert.deepInclude(decide(runs(command), here('allow')), { verdict: 'ask', held: false }, command)
+    // Where Althar doesn't know the agent's temp folder, a path in it is in some temp folder, and one climbing out of it is
+    // worked out only when it runs: it asks, but goes ahead with everything allowed.
+    assert.strictEqual(decide(runs('rm -rf $TMPDIR/sw'), here('rules', false)).verdict, 'allow')
+    assert.strictEqual(decide(runs('rm -f $TMPDIR/../../notes.md'), here('rules', false)).verdict, 'ask')
+    assert.strictEqual(decide(runs('rm -f $TMPDIR/../../notes.md'), here('allow', false)).verdict, 'allow')
   })
 
   it('reads deleting what isn’t there, or git where there is no checkout, as losing nothing', () => {
