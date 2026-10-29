@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { REFUSAL_META } from '../registry'
 import { recorded } from './recorded'
 
 /*
@@ -341,6 +342,8 @@ interface SessionState {
   coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
+  /** Why Althar refused the last call, where its answer said so (`REFUSAL_META`), as Claude Code's adapter hands it the model. */
+  told?: string | undefined
   /** What it left running, by its task's id. */
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
@@ -1535,6 +1538,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         asking -= 1
         if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
+        const told = answer._meta?.[REFUSAL_META]
+        if (typeof told === 'string') session.told = told
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
@@ -1732,6 +1737,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)
+          if (session.told !== undefined) {
+            await say(` told=${session.told}`)
+            session.told = undefined
+          }
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
