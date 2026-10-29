@@ -46,6 +46,10 @@ const FROM_THE_EXECUTOR = [
   'GIT_CONFIG_COUNT',
   'GIT_CONFIG_KEY_0',
   'GIT_CONFIG_VALUE_0',
+  'GIT_CONFIG_KEY_1',
+  'GIT_CONFIG_VALUE_1',
+  'GIT_CONFIG_KEY_2',
+  'GIT_CONFIG_VALUE_2',
   'GIT_TERMINAL_PROMPT',
   // The agents after the first three: each one's home, and what its launch sets to keep it asking, off its own and the repository's settings, and not updating itself.
   'COPILOT_HOME',

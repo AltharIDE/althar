@@ -63,22 +63,39 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
 /**
  * Why the rules keep a request for the person, and which kind it is: one a
  * project names, or one they can't tell. `floor` marks what could lose work
- * or a secret (docs/plans/safety-pass.md): a force push, a push to or a
- * deletion of the default branch, deleting or moving by force a branch that
- * isn't the task's, git discarding work in another checkout or what it keeps
- * to recover lost work, deleting outside the task's worktree, reading a
- * `.env` outside it, and a push the rules can't read. It asks the person even
- * with everything allowed, and the coordinator never answers it; only Never,
- * or a kind the person always allows while everything isn't allowed, settles
- * it otherwise.
+ * or a secret (docs/plans/safety-pass.md): what is `irreversible`, and
+ * besides it git touching the stash every checkout shares or throwing away
+ * what it keeps to recover lost work, and reading a `.env` outside the task's
+ * worktree. The coordinator never answers it; only Never, or a kind the
+ * person always allows while everything isn't allowed, settles it otherwise.
+ *
+ * `irreversible` marks what can't be undone from the task (ADR-067): a force
+ * push, a push to or a deletion of the default branch, deleting or moving by
+ * force a branch that isn't the task's, git discarding work in another
+ * checkout, deleting or moving away what's outside the task's worktree,
+ * changing another checkout, and a push the rules can't read. It asks the
+ * person even with everything allowed.
  */
 interface Kept {
   readonly reason: string
   readonly rule: RuleId | 'unclear'
   readonly floor?: boolean
+  readonly irreversible?: boolean
 }
 
-const kept = (reason: string, rule: RuleId | 'unclear', floor = false): Kept => (floor ? { reason, rule, floor } : { reason, rule })
+/** How firmly a kind is kept: `floor` past the coordinator, `irreversible` past allowing everything too. */
+type Floor = 'floor' | 'irreversible'
+
+const kept = (reason: string, rule: RuleId | 'unclear', floor?: Floor): Kept =>
+  floor === undefined
+    ? { reason, rule }
+    : floor === 'floor'
+      ? { reason, rule, floor: true }
+      : { reason, rule, floor: true, irreversible: true }
+
+/** The firmest of what kinds are kept: what a request standing for them all is. */
+const floorOf = (kinds: ReadonlyArray<Kept>): Floor | undefined =>
+  kinds.some((each) => each.irreversible === true) ? 'irreversible' : kinds.some((each) => each.floor === true) ? 'floor' : undefined
 
 /**
  * A command the person named (ADR-013, ADR-018): asked about, refused, or
@@ -363,7 +380,7 @@ const envFile = (path: string) => {
 
 /** A `.env` file outside the task's worktree, which the person keeps: it asks, whoever else would answer. */
 const envKept = (path: string) =>
-  kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', true)
+  kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', 'floor')
 
 const DEVICE_BRIDGE_REFUSED =
   'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
@@ -371,7 +388,7 @@ const DEVICE_BRIDGE_REFUSED =
 /**
  * The Flatpak grants the app a broad host bridge; agents must not invoke it
  * directly, nor the ssh Althar's own git runs through it, which signs in with
- * the person's SSH agent (ADR-066).
+ * the person's SSH agent (ADR-071).
  */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
   ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
@@ -1708,9 +1725,10 @@ const places = (context: RuleContext): Places => {
     folder,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    scratch: [...(context.scratch ?? (system.windows ? [tmpdir()] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr']))].map(
-      real,
-    ),
+    // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
+    scratch: [
+      ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
+    ].map(real),
   }
 }
 
@@ -1742,7 +1760,7 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
 }
 
 const changesCheckout = (path: string) =>
-  kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', true)
+  kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', 'irreversible')
 
 /**
  * A variable a path may start with that the rules can read: the temp folder,
@@ -1812,34 +1830,47 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
       continue
     }
     if (/^(-f|--force|--force-with-lease(=.*)?|--force-if-includes)$/.test(arg) || /^-[a-z]*f[a-z]*$/.test(arg))
-      found.push(kept('A force push always asks.', 'force-push', true))
+      found.push(kept('A force push always asks: it can throw away commits on the remote.', 'force-push', 'irreversible'))
     else if (arg === '--mirror')
       // A mirror makes the remote's branches the same as here: it forces them, and deletes those not here.
       found.push(
         kept('Pushing every branch always asks.', 'many-branches'),
-        kept('A mirror push forces every branch, which always asks.', 'force-push', true),
-        kept("A mirror push deletes the remote's branches that aren't here, which always asks.", 'delete-branch', true),
+        kept(
+          'A mirror push forces every branch, which always asks: it can throw away commits on the remote.',
+          'force-push',
+          'irreversible',
+        ),
+        kept(
+          "A mirror push deletes the remote's branches that aren't here, which always asks: their commits may be nowhere else.",
+          'delete-branch',
+          'irreversible',
+        ),
       )
     else if (/^(--all|--branches)$/.test(arg)) found.push(kept('Pushing every branch always asks.', 'many-branches'))
     else if (/^(--tags|--follow-tags)$/.test(arg))
       found.push(kept('Pushing tags always asks; they often start a release.', 'many-branches'))
-    else if (arg === '--prune') found.push(kept('A push that deletes remote branches always asks.', 'delete-branch', true))
+    else if (arg === '--prune')
+      found.push(
+        kept('A push that deletes remote branches always asks: their commits may be nowhere else.', 'delete-branch', 'irreversible'),
+      )
     else if (arg === '-d' || arg === '--delete') deleting = true
     else if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
     else if (!PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) && !PUSH_FLAGS_HARMLESS.test(arg))
-      found.push(kept(`Althar can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear', true))
+      found.push(kept(`Althar can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear', 'irreversible'))
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
-  if (refspecs.length === 0) {
-    if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear', true))
+  // `--tags` alone pushes the tags and no branch, whichever is checked out.
+  if (refspecs.length === 0 && (deleting || !args.includes('--tags'))) {
+    if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear', 'irreversible'))
     else if (context.currentBranch === undefined)
-      found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', true))
+      found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', 'irreversible'))
     else destinations.push({ branch: context.currentBranch, deletes: false })
   }
   for (const written of refspecs) {
     // A forced refspec still goes somewhere, which counts too.
-    if (written.startsWith('+')) found.push(kept('A force push always asks.', 'force-push', true))
+    if (written.startsWith('+'))
+      found.push(kept('A force push always asks: it can throw away commits on the remote.', 'force-push', 'irreversible'))
     const refspec = written.replace(/^\+/, '')
     if (refspec.includes('*')) {
       found.push(kept('A push to a pattern of branches always asks.', 'many-branches'))
@@ -1854,7 +1885,7 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
     }
     if (destination === 'HEAD' || (colon === -1 && source === 'HEAD')) {
       if (context.currentBranch === undefined) {
-        found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', true))
+        found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', 'irreversible'))
         continue
       }
       destination = context.currentBranch
@@ -1864,16 +1895,30 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
       continue
     }
     if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/')) {
-      found.push(kept(`Althar can't tell what \`${destination}\` is, so it asks.`, 'unclear', true))
+      found.push(kept(`Althar can't tell what \`${destination}\` is, so it asks.`, 'unclear', 'irreversible'))
       continue
     }
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
   }
   for (const { branch, deletes } of destinations) {
     if (mains.includes(branch))
-      found.push(kept(deletes ? `Deleting ${branch} always asks.` : `A push to ${branch} always asks.`, 'default-branch', true))
+      found.push(
+        kept(
+          deletes
+            ? `Deleting ${branch} always asks: everyone's work starts from it.`
+            : `A push to ${branch} always asks: once others have it, it can't be taken back.`,
+          'default-branch',
+          'irreversible',
+        ),
+      )
     else if (deletes && !own(branch))
-      found.push(kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch', true))
+      found.push(
+        kept(
+          `Deleting ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`,
+          'delete-branch',
+          'irreversible',
+        ),
+      )
   }
   return found
 }
@@ -2216,7 +2261,11 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
     others(branches)
       .slice(0, 1)
       .map((branch) =>
-        kept(`${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`, 'delete-branch', true),
+        kept(
+          `${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`,
+          'delete-branch',
+          'irreversible',
+        ),
       )
   const named = git.args.filter((arg) => !arg.startsWith('-'))
   switch (git.subcommand) {
@@ -2238,7 +2287,7 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
     case 'update-ref': {
       // What it changes comes in on its input, which isn't read here: deleting or moving any branch, say.
       if (git.args.includes('--stdin'))
-        return [kept("Althar can't tell which branches `git update-ref --stdin` changes, so it asks.", 'unclear', true)]
+        return [kept("Althar can't tell which branches `git update-ref --stdin` changes, so it asks.", 'unclear', 'irreversible')]
       const ref = git.args.filter((arg, index, all) => !arg.startsWith('-') && all[index - 1] !== '-m')[0] ?? ''
       if (!ref.startsWith('refs/heads/')) return []
       return branchKept(git.args.includes('-d') ? 'Deleting the branch' : 'Moving the branch', [ref.slice('refs/heads/'.length)])
@@ -2248,7 +2297,7 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
       const how = { clear: "Clearing git's stash", drop: 'Dropping a stash entry', pop: 'Popping a stash entry' }[git.args[0] ?? '']
       return how === undefined
         ? []
-        : [kept(`${how} always asks: every checkout of the repository shares the stash, the person's too.`, 'outside', true)]
+        : [kept(`${how} always asks: every checkout of the repository shares the stash, the person's too.`, 'outside', 'floor')]
     }
     case 'reflog':
     case 'gc':
@@ -2262,7 +2311,7 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
             kept(
               `\`git ${git.subcommand}\` throws away what git keeps to recover lost work, in every checkout of the repository, so it always asks.`,
               'outside',
-              true,
+              'floor',
             ),
           ]
         : []
@@ -2345,15 +2394,17 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
-      let blind = false
+      const unseenKinds: Array<Kept> = []
       for (const { at = context.worktree, blind: unseen } of folders)
         for (const words of readings(written)) {
           const found = kindsOf(words, at, where, context)
           kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-          if (unseen && found.kinds.some((each) => each.floor === true)) blind = true
+          if (unseen) unseenKinds.push(...found.kinds)
         }
-      if (blind) kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', true))
+      const blind = floorOf(unseenKinds)
+      if (blind !== undefined)
+        kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', blind))
       each.push({ words: written, kinds, redirected })
     })
   return { opaque: lines.some((line) => line.opaque), commands: each }
@@ -2484,10 +2535,11 @@ const kindsOf = (
     .map((path) => kept(`Writing outside the task's worktree always asks: ${path}`, 'outside'))
   const kinds: Array<Kept> = [...redirected]
   const done = (moved?: string) => {
-    if (!kinds.some((each) => each.floor === true)) {
-      const hidden = unseenReadings(words, where, context)
-      if (hidden.some((each) => kindsOf(each, cwd, where, context).kinds.some((found) => found.floor === true)))
-        kinds.push(kept(`Althar can't tell what \`${programNamed(words)}\` acts on until it runs, so it asks.`, 'unclear', true))
+    // What it could be once it runs, where that is firmer than what it is as written.
+    if (floorOf(kinds) !== 'irreversible') {
+      const hidden = floorOf(unseenReadings(words, where, context).flatMap((each) => kindsOf(each, cwd, where, context).kinds))
+      if (hidden !== undefined && hidden !== floorOf(kinds))
+        kinds.push(kept(`Althar can't tell what \`${programNamed(words)}\` acts on until it runs, so it asks.`, 'unclear', hidden))
     }
     return { kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) }
   }
@@ -2511,7 +2563,11 @@ const kindsOf = (
         })
       if (discards(git, isPath))
         kinds.push(
-          kept(`\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`, 'outside', true),
+          kept(
+            `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
+            'outside',
+            'irreversible',
+          ),
         )
     }
     kinds.push(...(git.subcommand === 'push' ? pushKinds(git.args, context) : gitKinds(git, context)))
@@ -2523,7 +2579,11 @@ const kindsOf = (
       if (target !== undefined)
         kinds.push(
           git.subcommand === 'worktree' && git.args.includes('remove')
-            ? kept(`Removing a worktree that isn't the task's always asks: ${target}`, 'outside', true)
+            ? kept(
+                `Removing a worktree that isn't the task's always asks: what isn't committed there is nowhere else: ${target}`,
+                'outside',
+                'irreversible',
+              )
             : kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'),
         )
     }
@@ -2541,7 +2601,13 @@ const kindsOf = (
     .flatMap((each) => overwrites(each, where, cwd))
     .find((path) => outside(where, locate(where, cwd, path)) && checkoutOf(where, locate(where, cwd, path)) !== undefined)
   if (gone !== undefined)
-    kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
+    kinds.push(
+      kept(
+        `Deleting or moving away what's outside the task's worktree always asks: it could be someone's only copy: ${gone}`,
+        'outside',
+        'irreversible',
+      ),
+    )
   else if (replaced !== undefined) kinds.push(changesCheckout(replaced))
   else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
@@ -2585,7 +2651,13 @@ const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> =
   const read = withoutQuotedHeredocs(text)
   return [
     ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(read)
-      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(read))]
+      ? [
+          kept(
+            `Althar can't tell what this command does until it runs, so it asks.`,
+            'unclear',
+            /\bpush\b/.test(read) ? 'irreversible' : undefined,
+          ),
+        ]
       : []),
     ...commands.flatMap((command) => command.kinds),
   ]
@@ -2725,7 +2797,11 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
         ...secrets,
         // Deleting or moving away what's outside could be anyone's work; an edit there only writes.
         request.kind !== 'edit'
-          ? kept(`Deleting or moving away what's outside the task's worktree always asks: ${first}`, 'outside', true)
+          ? kept(
+              `Deleting or moving away what's outside the task's worktree always asks: it could be someone's only copy: ${first}`,
+              'outside',
+              'irreversible',
+            )
           : replaced !== undefined
             ? changesCheckout(replaced)
             : kept(`Writing outside the task's worktree always asks: ${first}`, 'outside'),
@@ -2733,6 +2809,12 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
   }
   return secrets
 }
+
+/** Why what can't be undone asks with everything allowed, in the card's one line. */
+const evenAllowed = (reason: string) =>
+  reason
+    .replace(/ always asks/, ' asks even with everything allowed')
+    .replace(/, so it asks\.$/, ", so it asks even with everything allowed: it could do what can't be undone.")
 
 /** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */
 const BROADER_THAN_FLOOR: ReadonlyArray<Kept['rule']> = ['outside', 'unclear']
@@ -2751,8 +2833,9 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  *   the project named;
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can; and short of what could lose
- *   work or a secret (`Kept`'s floor), which asks the person;
+ *   refused, with how to run it so they can; and short of what can't be
+ *   undone from the task (`Kept`'s `irreversible`, ADR-067), which asks the
+ *   person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what could lose work or a secret asks the person where the project would
@@ -2800,9 +2883,9 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
         verdict: 'deny',
         reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
       }
-    // What could lose work or a secret still asks: allowing everything is for what the person would wave through.
-    const floor = found.find((each) => each.floor === true)
-    return floor === undefined ? ALLOW : ask(floor.reason.replace(/ always asks/, ' always asks, even with everything allowed'), false)
+    // What can't be undone from the task still asks: allowing everything is for what the person could take back if it went wrong.
+    const lasting = found.find((each) => each.irreversible === true)
+    return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
   // What always asks waits for the person, whatever the allow rules say.
@@ -3814,6 +3897,12 @@ const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['r
 const GLOB_CHARACTER = /[*?[{]/
 
 /**
+ * A pattern that starts at a root: `/`, or on Windows a drive's (`C:\`, `C:/`). Not a bare backslash, which starts many a
+ * regex Grep is given (`\bretry`).
+ */
+const ROOTED = /^(\/|[A-Za-z]:[/\\])/
+
+/**
  * Where a search starts: the folder it names, or the working folder, and the
  * folder a pattern of paths names before its first glob character where it
  * leaves that folder (absolute, from home, or up with `..`), as Glob's
@@ -3825,14 +3914,14 @@ const searchRootsOf = (request: PermissionRequest, cwd: string): ReadonlyArray<s
   const patterns = ['pattern', 'glob']
     .map((key) => field(request.rawInput, key))
     .filter((value): value is string => typeof value === 'string')
-    .filter((value) => value.startsWith('/') || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
+    .filter((value) => ROOTED.test(value) || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
     .map((value) => {
       const glob = value.search(GLOB_CHARACTER)
       const fixed = glob === -1 ? value : value.slice(0, glob)
       const folder = fixed.slice(0, Math.max(fixed.lastIndexOf('/'), fixed.lastIndexOf('\\')) + 1)
       return folder === '' ? fixed : folder
     })
-    .map((folder) => (folder.startsWith('/') || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
+    .map((folder) => (ROOTED.test(folder) || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
   return [...(named.length === 0 ? [cwd] : named), ...patterns]
 }
 

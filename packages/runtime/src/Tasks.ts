@@ -23,6 +23,7 @@ import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
 
 /*
@@ -151,7 +152,7 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes | LeftBehind
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -189,9 +190,10 @@ export class Tasks extends Context.Service<
      * or a review posted and answered since,
      * or is the round its lead is in, with no pull request, nothing waiting on
      * the person and no plan to start. What its agents left running, such as
-     * a page, stops. Writing to its lead later opens it again (ADR-034).
-     * Whether it settled; refused (`left_running`), and not settled, where
-     * something it left running wouldn't stop.
+     * a page, stops after, in the background, and its agents once their
+     * turns end (LeftBehind.ts); what wouldn't is said in its thread, and the
+     * task is done all the same. Writing to its lead later opens it again
+     * (ADR-034), and starts it again. Whether it settled.
      */
     markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
     /**
@@ -222,6 +224,7 @@ export class Tasks extends Context.Service<
       const setups = yield* Setups
       const changes = yield* Changes
       const launches = yield* Launches
+      const leftBehind = yield* LeftBehind
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /*
        * A task's course changes one at a time, through stopping its agents
@@ -404,6 +407,8 @@ export class Tasks extends Context.Service<
           // Its run is suspended, so no step answers an agent going: each one on it stops, and what it runs with them.
           yield* stopAgents(input.taskId)
           yield* launches.stopAll(standing.projectId, input.taskId)
+          // What its agents left that outlived them, in the background.
+          yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
         })
 
@@ -481,7 +486,9 @@ export class Tasks extends Context.Service<
                       SELECT parameters FROM task_plans WHERE task_id = ${input.taskId} AND state = 'declined'
                       ORDER BY proposed_at DESC LIMIT 1`
                   : []
-              const state = yield* transition(taskLifecycle, now, declined === undefined ? 'open' : 'draft')
+              // A review is never a draft: it is open from the start, its lead waiting for its plan (Reviews.ts).
+              const reads = declined !== undefined && (JSON.parse(declined.parameters) as { reads?: boolean }).reads === true
+              const state = yield* transition(taskLifecycle, now, declined === undefined || reads ? 'open' : 'draft')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: null })
               yield* fact({
                 projectId: standing.projectId,
@@ -507,6 +514,7 @@ export class Tasks extends Context.Service<
               held: true,
               // A quick task's stays on this Mac, as it was started.
               ...(plan.here === true ? { here: true } : {}),
+              ...(plan.reads === true ? { reads: true } : {}),
             })
           }
           if (restored || back) yield* setups.begin(input.taskId)
@@ -562,34 +570,6 @@ export class Tasks extends Context.Service<
         })
 
       /**
-       * What its agents left running in the background, such as a page, stops: on each of its threads. Whether all of it did: one
-       * its agent wouldn't stop is still running.
-       */
-      const stopLeftRunning = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
-          let stopped = true
-          for (const thread of threads) {
-            const running = yield* sessions.running(thread.id)
-            if (Option.isNone(running)) continue
-            for (const left of running.value.background)
-              if (left.ended === null)
-                yield* sessions.stopBackground(thread.id, left.id).pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.andThen(
-                      Effect.logWarning('Could not stop what a task left running', cause),
-                      Effect.sync(() => {
-                        stopped = false
-                      }),
-                    ),
-                  ),
-                )
-          }
-          return stopped
-        })
-
-      /**
        * Whether it can be settled as Done now: open, finished or its lead at work on it as the person told it, nothing waiting on
        * the person, and not a change. A quick task, or a review whose review was posted and that its lead answered since.
        */
@@ -617,8 +597,6 @@ export class Tasks extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const ready = yield* doneable(input.taskId)
           if (ready === undefined) return false
-          // What it left running stops first: one that wouldn't stays up, and the task isn't done, for the person to try again.
-          if (!(yield* stopLeftRunning(input.taskId))) return yield* new TaskRefused({ taskId: input.taskId, why: 'left_running' })
           const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -641,8 +619,10 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
-          // What it runs stops too: nothing is left to stop it from.
+          // What it runs stops too: nothing is left to stop it from. What its agents left running stops in the background, then
+          // they do once their turns end, and what wouldn't is said in its thread (LeftBehind.ts).
           yield* launches.stopAll(ready.projectId, input.taskId)
+          yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
           return true
         })

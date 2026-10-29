@@ -377,6 +377,7 @@ describe('the client', () => {
           DropRunnable: () => Effect.die('unused'),
           OrderRunnables: () => Effect.die('unused'),
           GetRepositoryScripts: () => Effect.die('unused'),
+          GetRunnableRefs: () => Effect.die('unused'),
           ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)

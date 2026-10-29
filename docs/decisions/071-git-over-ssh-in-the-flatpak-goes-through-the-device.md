@@ -1,4 +1,4 @@
-# ADR-066: git over SSH in the Flatpak: Althar's own goes through the device's ssh, and nothing asks
+# ADR-071: git over SSH in the Flatpak: Althar's own goes through the device's ssh, and nothing asks
 
 - **Status:** Accepted
 - **Date:** 2026-10-24

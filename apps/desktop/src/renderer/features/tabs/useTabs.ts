@@ -11,7 +11,7 @@ import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
 import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
-import { useWarmTabs } from './warm'
+import { useWarmHome, useWarmTabs } from './warm'
 
 /*
  * The window's tabs: one for each project the person keeps open, with where
@@ -44,8 +44,8 @@ export interface TabsModel {
   /** Althar's settings: whether they have a tab, and whether it has the window. */
   readonly settings: { readonly open: boolean; readonly current: boolean }
   readonly select: (id: string | null) => void
-  /** A project's tab is pointed at: what it shows is read ahead, where the window doesn't hold it as it is. */
-  readonly preview: (id: string) => void
+  /** A tab is pointed at, a project's or (null) the home's: what it shows is read ahead, where the window doesn't hold it as it is. */
+  readonly preview: (id: string | null) => void
   readonly close: (id: string) => void
   readonly open: (id: string) => void
   /** A project's tab moves before another's, or to the end: the order is kept. */
@@ -137,6 +137,8 @@ export const useTabs = (): TabsModel => {
   const places = kept?.places ?? {}
   // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
   const preview = useWarmTabs(open, places)
+  // And the home's, once there are projects: going back to it never waits either.
+  const previewHome = useWarmHome(projects !== null && projects.length > 0)
   // The project being made, at the end; once made, its own tab has its id, and stands in its place.
   const making: ProjectTab | null =
     draft === null || draft.made || open.includes(draft.id)
@@ -177,6 +179,7 @@ export const useTabs = (): TabsModel => {
       void go(id, places)
     },
     preview: (id) => {
+      if (id === null) return previewHome()
       if (id !== making?.id) preview(id)
     },
     close: (id) => {

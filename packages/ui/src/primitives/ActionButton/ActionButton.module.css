@@ -11,7 +11,8 @@
   white-space: nowrap;
   transition:
     background var(--fast) var(--ease),
-    color var(--fast) var(--ease);
+    color var(--fast) var(--ease),
+    transform var(--press) var(--ease-out);
 }
 .small {
   --action-h: 22px;
@@ -34,6 +35,10 @@
 }
 .action:disabled {
   opacity: 0.45;
+}
+/* it gives under the pointer, a little, and comes back */
+.action:active:not(:disabled, [aria-disabled='true']) {
+  transform: scale(var(--scale-press));
 }
 
 .default {

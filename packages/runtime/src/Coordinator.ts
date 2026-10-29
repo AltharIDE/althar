@@ -557,8 +557,9 @@ export class Coordinator extends Context.Service<
                   )
           // What the person said in the turn the coordinator is on is what they asked for, not what they sent since: the task's thread starts with it.
           const sql = yield* SqlClient.SqlClient
-          const said = yield* sql<{ body: string }>`
-            SELECT u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
+          // The images and files they sent with it are the task's too, referred to where their messages keep them.
+          const said = yield* sql<{ id: string; body: string }>`
+            SELECT u.id, u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
             WHERE d.provider_session_id = ${access.sessionId}
               AND d.requested_at = (SELECT max(requested_at) FROM turn_deliveries WHERE provider_session_id = ${access.sessionId})
             ORDER BY di.position`
@@ -577,7 +578,8 @@ export class Coordinator extends Context.Service<
               draft: true,
               ...(issue === undefined ? {} : { issueKey: issue.key }),
               ...(repositories === undefined ? {} : { repositories }),
-              ...(request === undefined ? {} : { request }),
+              // Sent with no words, its images and files are still what they asked for.
+              ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
             })
             .pipe(
@@ -696,8 +698,10 @@ export class Coordinator extends Context.Service<
 
       /**
        * A review of someone else's pull request: a task whose lead reads a
-       * read-only copy of it and drafts a review, which the person posts.
-       * Asked again, it says the task already reviewing it.
+       * read-only copy of it and drafts a review, which the person posts. Its
+       * plan, of its lead alone, starts after the countdown, so the person can
+       * hold it or pick another lead first, as for any planned task. Asked
+       * again, it says the task already reviewing it.
        */
       const review = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -727,6 +731,7 @@ export class Coordinator extends Context.Service<
               pullRequest,
               lead: { agentId: lead.agentId, model: lead.model, ...(lead.effort === undefined ? {} : { effort: lead.effort }) },
               ...(said.length === 0 ? {} : { request: said.map((input) => input.body).join('\n\n') }),
+              planned: true,
             })
             .pipe(
               Effect.catch((error) => Effect.fail(error instanceof ReviewRefused ? new ToolRefused({ message: error.message }) : error)),
@@ -742,8 +747,17 @@ export class Coordinator extends Context.Service<
             ? "The person has their team's reviews posted without asking, so it posts itself once drafted."
             : 'Nothing is posted until the person posts it from its card.'
           if (!started.leading)
-            return `Started ${started.slug} to review ${started.author}'s ${started.name}, "${started.title}", but its lead couldn't start: its thread says why, and the person starts another there. Tell them.`
-          return `Started ${started.slug}: its lead reviews ${started.author}'s ${started.name}, "${started.title}", from a read-only copy of its code, running nothing of it. ${reach} ${posting} The person sees it as a card; say in a sentence that it's under way.`
+            return `Made ${started.slug} to review ${started.author}'s ${started.name}, "${started.title}", but Althar couldn't make a copy of its code to read: its thread says so. Tell the person.`
+          yield* plans.propose({
+            projectId: access.projectId as ProjectId,
+            taskId: started.taskId,
+            steps: [{ key: 'implement', ...lead, skipped: false }],
+            reason: asked.lead.reason ?? null,
+            actorId: instance.coordinatorId,
+            end: null,
+            reads: true,
+          })
+          return `Planned ${started.slug}: its lead will review ${started.author}'s ${started.name}, "${started.title}", from a read-only copy of its code, running nothing of it. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again. ${reach} ${posting}`
         })
 
       /**
@@ -954,17 +968,10 @@ export class Coordinator extends Context.Service<
                     'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
                 })
               if (task.state === 'done') return 'It is done already: it is in Settled.'
-              {
-                // A page it left running that wouldn't stop keeps it from being done: said so, for the person to try again.
-                const marked = yield* tasks
-                  .markDone({ envelope: yield* said('task.mark_done'), taskId: task.id })
-                  .pipe(Effect.catch((error) => (error instanceof TaskRefused ? Effect.succeed('left' as const) : Effect.fail(error))))
-                if (marked === 'left')
-                  return 'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.'
-                return marked
-                  ? 'Marked it done: it is in Settled, and what it left running, such as a page, stopped. Say so in a sentence; writing to you again picks it up.'
-                  : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
-              }
+              // What it left running, such as a page, stops after, in the background, and this lead once its turn ends.
+              return (yield* tasks.markDone({ envelope: yield* said('task.mark_done'), taskId: task.id }))
+                ? 'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.'
+                : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
             case 'keep':
               if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to keep.'
               if (task.keptAt !== null) return 'It is kept for later already.'
@@ -1625,7 +1632,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'review_pull_request',
-          "Starts a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Nothing reaches the code host until they do. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then start one review each.",
+          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Only a model whose agent can be held to reading only leads one: not Codex. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each.",
           {
             type: 'object',
             properties: {

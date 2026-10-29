@@ -7,6 +7,7 @@ import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
+import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
@@ -19,12 +20,15 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * The runtime keeps the countdown, so a plan starts with the window closed.
  * A plan whose time came while Althar wasn't running is held, not started
  * unannounced at the next launch.
+ * A review of someone else's pull request has a plan too, of its lead alone
+ * (`reads`): it has no run, and starting it starts its lead (Reviews.lead);
+ * its lead is only ever one its session holds to reading.
  */
 
 /** How long a proposed plan waits before it starts on its own (docs/plans/mvp.md). */
 export const COUNTDOWN = Duration.seconds(25)
 
-type Store = SqlClient.SqlClient | Instance | Runs | Ledger | Crypto.Crypto | RuntimeConfig
+type Store = SqlClient.SqlClient | Instance | Runs | Reviews | Ledger | Crypto.Crypto | RuntimeConfig
 
 export class Plans extends Context.Service<
   Plans,
@@ -43,6 +47,8 @@ export class Plans extends Context.Service<
       readonly held?: boolean
       /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
       readonly here?: boolean
+      /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
+      readonly reads?: boolean
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -67,6 +73,7 @@ export class Plans extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const runs = yield* Runs
+      const reviews = yield* Reviews
       const countdownOf = (yield* RuntimeConfig).countdown ?? COUNTDOWN
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
@@ -112,6 +119,15 @@ export class Plans extends Context.Service<
           return true
         })
 
+      const parametersOf = (plan: PlanRow) =>
+        JSON.parse(plan.parameters) as {
+          steps: ReadonlyArray<PlanStep>
+          reason?: string | null
+          end?: TaskEnd | null
+          here?: boolean
+          reads?: boolean
+        }
+
       /** Whether a plan still counts down. */
       const counting = (plan: PlanRow) => plan.state === 'proposed' && plan.startsAt !== null
 
@@ -149,6 +165,7 @@ export class Plans extends Context.Service<
                     reason: input.reason,
                     end: input.end ?? null,
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.reads === true ? { reads: true } : {}),
                   }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
@@ -183,9 +200,18 @@ export class Plans extends Context.Service<
             'task_plan.accepted',
             actorId,
           )
+          const plan = yield* load(planId)
+          const parameters = parametersOf(plan)
+          if (parameters.reads === true) {
+            // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
+            const [lead] = parameters.steps
+            if (!accepted || lead === undefined) return null
+            yield* reviews.lead(plan.taskId, lead, actorId)
+            return 'running' as const
+          }
           if (accepted) return yield* runs.run(planId)
           // Accepted, but Althar stopped before its run was made: it runs now, once.
-          return !due && (yield* load(planId)).state === 'accepted' ? yield* runs.run(planId) : null
+          return !due && plan.state === 'accepted' ? yield* runs.run(planId) : null
         })
 
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
@@ -235,15 +261,18 @@ export class Plans extends Context.Service<
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const changed = (plan: PlanRow) => {
-                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null; here?: boolean }
+                const before = parametersOf(plan)
                 return JSON.stringify({
                   steps,
                   reason: before.reason ?? null,
                   end: end === undefined ? (before.end ?? null) : end,
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.reads === true ? { reads: true } : {}),
                 })
               }
               const plan = yield* load(planId)
+              // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
+              if (parametersOf(plan).reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               if (plan.state === 'proposed') {
                 yield* transition(
                   planId,

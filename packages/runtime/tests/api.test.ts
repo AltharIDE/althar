@@ -2606,7 +2606,7 @@ describe('words', () => {
           ...(resetsAt === undefined ? {} : { resetsAt }),
         }),
       )
-    assert.strictEqual(failed('auth_required'), "The agent isn't signed in. Sign in with its own tool, then try again.")
+    assert.strictEqual(failed('auth_required'), 'The agent is signed out. Sign it in again in Settings, then try again.')
     assert.strictEqual(failed('usage_limit'), "The agent's usage limit is reached.")
     assert.strictEqual(failed('usage_limit', '15:00'), "The agent's usage limit is reached until 15:00.")
     assert.strictEqual(failed('context_full'), "The agent's context is full.")
@@ -2667,7 +2667,9 @@ describe('steps that need the person', () => {
       round: 3,
       open: 2,
     })
-    for (const why of ['no_report', 'session_ended', 'restarted']) assert.strictEqual(stuckOf({ why }).why, why)
+    for (const why of ['no_report', 'session_ended', 'restarted', 'transient', 'signed_out']) assert.strictEqual(stuckOf({ why }).why, why)
+    // A service that kept failing keeps its name, for the call to say whose.
+    assert.strictEqual(stuckOf({ why: 'transient', service: 'Anthropic' }).service, 'Anthropic')
     assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
     assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })
@@ -2732,6 +2734,11 @@ describe('thread items', () => {
       title: 'Hm',
       description: null,
     })
+    // A failed turn's notice keeps why, for the thread's way out.
+    assert.deepInclude(
+      itemOf(row('notice', { source: 'agent', severity: 'error', title: 'Codex is signed out.', failure: 'auth_required' }))?.content,
+      { failure: 'auth_required' },
+    )
     assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '', pictures: [], files: [] })
     assert.isUndefined(itemOf(row('something_new', {})))
     assert.deepStrictEqual(

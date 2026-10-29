@@ -88,11 +88,11 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
     await expect(page.getByText(/^Changelog, \d+ \w+$/).first()).toBeVisible({ timeout: 15_000 })
     await page.screenshot({ path: 'test-results/automations-7-task.png', animations: 'disabled', scale: 'css' })
 
-    // Back from its task, on the project's Automations view; paused from its
-    // page, nothing of it starts until it is turned on again.
+    // Back from its task, on the project's Automations view, on its page as
+    // it was left; paused from there, nothing of it starts until it is turned on again.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: /^Automations/ })).toBeChecked()
-    await page.getByRole('button', { name: 'Changelog', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Changelog', level: 2 })).toBeVisible()
     await page.getByRole('switch', { name: 'On' }).click()
     await expect(page.getByText('Paused', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('switch', { name: 'On' })).not.toBeChecked()

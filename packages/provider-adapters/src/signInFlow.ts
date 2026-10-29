@@ -80,6 +80,8 @@ export interface SignInFlowOptions {
 }
 
 const FIFTEEN_MINUTES = 15 * 60_000
+/** How long a sign-in told to stop has to read that, before it is killed. */
+const CANCEL_GRACE = 2_000
 
 /** The text at the end of what an agent printed: its last line that says something. */
 const lastLine = (text: string) =>
@@ -132,12 +134,14 @@ export const startSignInFlow = (
   child.on('exit', () => removeTemp(temp?.folder))
   child.on('error', () => removeTemp(temp?.folder))
   let over = false
-  const end = (event?: SignInFlowEvent) => {
+  const end = (event?: SignInFlowEvent, grace = 0) => {
     if (over) return
     over = true
     clearTimeout(timer)
     if (event !== undefined) say(event)
-    if (child.exitCode === null) child.kill()
+    if (child.exitCode !== null) return
+    if (grace === 0) child.kill()
+    else setTimeout(() => child.exitCode === null && child.kill(), grace).unref()
   }
   const timer = setTimeout(
     () => end({ kind: 'failed', message: 'The sign-in wasn’t finished in time.' }),
@@ -146,12 +150,22 @@ export const startSignInFlow = (
   child.on('error', (error) => end({ kind: 'failed', message: error.message }))
   // Its input closed under a write (EPIPE) ends the sign-in, rather than the process Althar runs in.
   child.stdin.on('error', () => end({ kind: 'failed', message: 'The agent stopped listening while signing in.' }))
+  // Once over, one still running out its grace says nothing more and opens no page; its input closed, it is sent nothing.
+  const saying = (event: SignInFlowEvent) => {
+    if (!over) say(event)
+  }
+  const opening = {
+    ...options,
+    openUrl: (url: string) => {
+      if (!over) options.openUrl?.(url)
+    },
+  }
   const driven =
     inApp.kind === 'claude-login'
-      ? claude(agent, child, say, end, env)
+      ? claude(agent, child, saying, end, env)
       : inApp.kind === 'codex-app-server'
-        ? codex(child, say, end, options)
-        : acpAuthenticate(agent, inApp, child, say, end, options)
+        ? codex(child, saying, end, opening)
+        : acpAuthenticate(agent, inApp, child, saying, end, opening)
   return {
     paste: (code) => {
       if (!over) driven.paste(code)
@@ -159,7 +173,10 @@ export const startSignInFlow = (
     cancel: () => {
       if (over) return
       driven.cancel()
-      end()
+      // Told to stop, with its input closed after, it has a moment to read that before it is killed: a kill ends it at
+      // once on Windows, where no process can hold on through one.
+      child.stdin.end()
+      end(undefined, CANCEL_GRACE)
     },
   }
 }

@@ -91,7 +91,7 @@ describe('the settings’ tab', () => {
   })
 })
 
-describe('a project’s tab, before it is pressed', () => {
+describe('a tab, before it is pressed', () => {
   it('says it is pointed at or reached by keyboard, so what it shows can be read ahead', () => {
     const onPreview = vi.fn()
     const onSelect = vi.fn()
@@ -102,6 +102,9 @@ describe('a project’s tab, before it is pressed', () => {
     expect(onPreview).toHaveBeenLastCalledWith(open[0]!.id)
     fireEvent.focus(nav(container).getByRole('button', { name: new RegExp(`^${open[1]!.name}`) }))
     expect(onPreview).toHaveBeenLastCalledWith(open[1]!.id)
+    // The home's says so as well, with no project's id.
+    fireEvent.pointerEnter(nav(container).getByRole('button', { name: /^Home/ }))
+    expect(onPreview).toHaveBeenLastCalledWith(null)
     expect(onSelect).not.toHaveBeenCalled()
   })
 })

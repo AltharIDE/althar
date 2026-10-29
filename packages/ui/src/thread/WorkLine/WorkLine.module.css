@@ -48,6 +48,14 @@ button.row:hover,
   content: '·';
   margin-right: 6px;
 }
+.relabelled {
+  animation: relabel var(--enter) var(--ease-out);
+}
+@keyframes relabel {
+  from {
+    opacity: 0;
+  }
+}
 /* opened: every step in order, in the same column, on a quiet sheet */
 .body {
   display: flex;

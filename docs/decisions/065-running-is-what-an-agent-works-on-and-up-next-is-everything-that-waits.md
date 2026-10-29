@@ -52,7 +52,7 @@
     Running, or a row of the line is dragged, a task that would move between
     the two stays in the lane it was in, saying what it does now, and moves
     once the pointer leaves. The board has no move animation; a card arrives
-    in its new lane in place.
+    in its new lane in place. (Amended by ADR-069: it travels there.)
   - **The task's dock names it Up next, and the home and the task's header
     already said Waiting or Paused**, not running; the home counts only what
     is moving.

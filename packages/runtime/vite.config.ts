@@ -6,6 +6,8 @@ export default defineConfig({
     include: ['tests/*.test.ts'],
     environment: 'node',
     testTimeout: 20_000,
+    // What the runtime logs as agents start and turns run is read only for a test that failed.
+    silent: 'passed-only',
     coverage: {
       include: ['src/**/*.ts'],
       exclude: ['src/index.ts'],

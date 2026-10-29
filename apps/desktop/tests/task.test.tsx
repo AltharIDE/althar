@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Activity } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
@@ -273,6 +274,65 @@ describe('a task', () => {
     // Stopped, the task is still led by who led it last, not by nobody.
     expect(screen.queryByText('No lead yet')).toBeNull()
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
+  })
+
+  it('opens its thread with the screenshot and file the person sent with what they asked for, as the coordinator’s chat shows them', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('On it.', 'codex')],
+          task: {
+            ...base.task,
+            request: 'did we fix this already',
+            requestPictures: [
+              { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 2048, width: 640, height: 400, name: 'bug.png', unkept: null },
+            ],
+            requestFiles: [
+              {
+                id: 'inp_1:1',
+                name: 'build.log',
+                kind: 'file',
+                mediaType: 'text/plain',
+                bytes: 33,
+                entries: null,
+                path: '/tmp/coordinator/.althar/attachments/abc/build.log',
+              },
+            ],
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('did we fix this already')
+    const shot = screen.getByRole('button', { name: 'View bug.png' })
+    // With the person's words, before anything the lead did.
+    expect(shot.compareDocumentPosition(screen.getByText('On it.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('build.log')).toBeTruthy()
+    // The screenshot opens in the lightbox.
+    await userEvent.click(shot)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+  })
+
+  it('opens its thread with the screenshot the person sent with no words', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('On it.', 'codex')],
+          task: {
+            ...base.task,
+            request: null,
+            requestPictures: [
+              { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 2048, width: 640, height: 400, name: 'bug.png', unkept: null },
+            ],
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const shot = await screen.findByRole('button', { name: 'View bug.png' })
+    expect(shot.compareDocumentPosition(screen.getByText('On it.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('reviews someone else’s pull request: opens with it, says what its lead can reach, and posts its draft only as the person says', async () => {
@@ -2787,13 +2847,13 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `The work waits: Codex is out of usage until ${clock(until)}`,
     })
-    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
+    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many more.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
       state: 'Waiting: 4 of 4 agents busy on this Mac',
     })
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, which runs 2 at once',
+      'Waiting: 2 of 2 agents busy on this Mac, and 4 more',
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
@@ -3006,6 +3066,25 @@ describe('the face a task opens on', () => {
   it('opens a quick task that became a change on its outputs from then on', () => {
     expect(of({ kind: 'plain', phase: 'ready', files: [file], commits: 1 })).toBe('talk')
     expect(of({ kind: 'change', phase: 'ready', files: [file], commits: 1 })).toBe('out')
+  })
+
+  it('reads what it changed from git again as its screen shows again from where it was kept (`KeptScreens`)', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    const services = servicesFor(client)
+    const kept = (mode: 'visible' | 'hidden') => (
+      <ServicesProvider value={services}>
+        <Activity mode={mode}>
+          <Task />
+        </Activity>
+      </ServicesProvider>
+    )
+    const view = render(kept('visible'))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0, fresh: true }))
+    // The person goes elsewhere, commits in its folder by hand, and comes back.
+    view.rerender(kept('hidden'))
+    vi.mocked(client.getThread).mockClear()
+    view.rerender(kept('visible'))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0, fresh: true }))
   })
 
   it('shows the conversation, not the outputs, for a prototype that is ready', async () => {

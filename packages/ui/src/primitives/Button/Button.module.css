@@ -13,7 +13,7 @@
     background var(--fast) var(--ease),
     box-shadow var(--fast) var(--ease),
     color var(--fast) var(--ease),
-    transform var(--fast) var(--ease);
+    transform var(--press) var(--ease-out);
 }
 /* a label longer than the room it has is cut, never run out of the button */
 .button > span {
@@ -28,8 +28,9 @@
   border-radius: 6px;
   font-size: 12px;
 }
-.button:active:not(:disabled, .busy) {
-  transform: translateY(0.5px);
+/* it gives under the pointer, a little, and comes back */
+.button:active:not(:disabled, .busy, [aria-disabled='true']) {
+  transform: scale(var(--scale-press));
 }
 .button:disabled {
   opacity: 0.45;

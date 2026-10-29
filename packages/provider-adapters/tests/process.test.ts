@@ -2,11 +2,12 @@ import { existsSync, mkdtempSync, readdirSync, realpathSync, symlinkSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { assert, describe, it } from '@effect/vitest'
+import { assert, beforeAll, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
+import { keeper } from '../src/keeper'
 import { adapterNode, asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
 import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
@@ -40,6 +41,12 @@ const goneSoon = (pid: number) =>
   })
 
 describe('the process transport', () => {
+  // On Windows the first process spawned builds the keeper it runs under with the .NET compiler, once for the machine,
+  // which takes seconds; built first, so each test times only its own work.
+  beforeAll(async () => {
+    if (windows) await Effect.runPromise(keeper())
+  }, 60_000)
+
   it.live('runs a turn with the agent as a process it owns, and records what it started', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -129,17 +136,21 @@ describe('the process transport', () => {
     }),
   )
 
-  it.live('keeps what a process printed though it exited before it was read, every time', () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        for (let n = 0; n < 20; n += 1) {
-          const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
-          assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
-          const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
-          assert.strictEqual(printed, 'done\n')
-        }
-      }),
-    ),
+  it.live(
+    'keeps what a process printed though it exited before it was read, every time',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          for (let n = 0; n < 20; n += 1) {
+            const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
+            assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
+            const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+            assert.strictEqual(printed, 'done\n')
+          }
+        }),
+      ),
+    // Twenty Nodes started one after another: a quarter of a second each on Windows' runner fills the usual five.
+    20_000,
   )
 
   it.live.skipIf(windows)('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>

@@ -50,7 +50,7 @@ const HOST_SSH = '/app/bin/althar-host-ssh'
 /**
  * The ssh Althar's own git runs, by its environment: inside a Flatpak, the
  * device's, through the bridge, so the person's SSH agent and known hosts
- * sign it in and nothing of either enters the sandbox (ADR-066). Everywhere
+ * sign it in and nothing of either enters the sandbox (ADR-071). Everywhere
  * else nothing is set, and git runs the ssh the person's would, their
  * `core.sshCommand` included.
  */
@@ -351,6 +351,38 @@ export const fetchRefs = (
     ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, ...refs.map((ref) => `+${ref.from}:${ref.into}`)],
     signedIn(target),
   ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
+/**
+ * Where git fetches from: a URL with the header that signs Althar in, or a
+ * remote by name, with no header, as the person's own git reaches it.
+ */
+export interface FetchSource {
+  readonly url: string
+  readonly header: string | null
+}
+
+/** The branches a remote has, each with its commit, as it says now: null where it can't be asked. */
+export const remoteHeads = (cwd: string, source: FetchSource) =>
+  run(60_000, cwd, ['ls-remote', '--heads', source.url], signedIn(source)).pipe(
+    Effect.map((listed) =>
+      listed.split('\n').flatMap((line) => {
+        const found = /^([0-9a-f]{40,64})\trefs\/heads\/(.+)$/.exec(line)
+        return found === null ? [] : [{ name: found[2] ?? '', commit: found[1] ?? '' }]
+      }),
+    ),
+    Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches refspecs as written, a `+` before one that may move however it
+ * likes: whether git could. Tags come only where a refspec names them, and
+ * nothing is written to FETCH_HEAD.
+ */
+export const fetchSpecs = (cwd: string, source: FetchSource, refspecs: ReadonlyArray<string>) =>
+  run(120_000, cwd, ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', source.url, ...refspecs], signedIn(source)).pipe(
     Effect.as(true),
     Effect.orElseSucceed(() => false),
   )

@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useCallback, useRef } from 'react'
 
+import { useArrivals } from '../../lib/arrivals'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import s from './Thread.module.css'
@@ -18,11 +19,22 @@ export type ThreadProps = RootProps<
 /**
  * A conversation's column: a new turn is 30px from the last, and everything
  * inside a turn is 14px from what comes before it. Turns and messages are
- * named articles, so a screen reader can move between them.
+ * named articles, so a screen reader can move between them. What lands in
+ * it, or in one of its turns or rounds, rises into its place (useArrivals).
  */
-export function Thread({ children, label, busy, className, ...rest }: ThreadProps) {
+export function Thread({ children, label, busy, className, ref, ...rest }: ThreadProps) {
+  const own = useRef<HTMLElement | null>(null)
+  useArrivals(own)
+  const both = useCallback(
+    (el: HTMLElement | null) => {
+      own.current = el
+      if (typeof ref === 'function') ref(el)
+      else if (ref) ref.current = el
+    },
+    [ref],
+  )
   return (
-    <section aria-label={label} aria-busy={busy || undefined} className={cx(s.thread, className)} {...rest}>
+    <section ref={both} aria-label={label} aria-busy={busy || undefined} className={cx(s.thread, className)} data-arrivals="" {...rest}>
       {children}
     </section>
   )

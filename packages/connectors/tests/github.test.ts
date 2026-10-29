@@ -91,14 +91,24 @@ describe('GitHub as a code host', () => {
   it.effect('merges in the first way the repository allows, only the head it last saw, and says why it can’t', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
-        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
-        ['GET', `${REPO}/pulls/12`, { json: pull({ merged_at: '2026-10-01T12:00:00Z', state: 'closed' }) }],
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true, sha: 'merge-sha' } }],
+        // GitHub's replica can still say open just after: what the merge answered is what counts.
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
       ])
       const open = yield* host.change(repository, 12)
       const merged = yield* host.merge(repository, open)
-      assert.strictEqual(merged.state, 'merged')
+      assert.deepInclude(merged, { state: 'merged', number: 12, headSha: open.headSha, url: open.url })
       const asked = sent.find((request) => request.method === 'PUT')
       assert.deepStrictEqual(asked?.body, { merge_method: 'squash', sha: open.headSha })
+      // Not read back: one read, before the merge.
+      assert.strictEqual(sent.filter((request) => request.method === 'GET').length, 1)
+      // Where GitHub doesn't say it merged, it is read back.
+      const unsaid = github([
+        ['PUT', `${REPO}/pulls/12/merge`, { json: {} }],
+        ['GET', `${REPO}/pulls/12`, { json: pull({ merged_at: '2026-10-01T12:00:00Z', state: 'closed' }) }],
+      ])
+      assert.strictEqual((yield* unsaid.host.merge(repository, open)).state, 'merged')
+      assert.strictEqual(unsaid.sent.filter((request) => request.method === 'GET').length, 1)
       const refusing = github([
         ['PUT', `${REPO}/pulls/12/merge`, { status: 405, json: { message: 'Pull Request is not mergeable' } }],
         ['GET', `${REPO}/pulls/12`, { json: pull() }],
