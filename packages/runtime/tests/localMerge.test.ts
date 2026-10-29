@@ -243,9 +243,13 @@ describe('merging a task here', () => {
             .pipe(Effect.repeat({ until: (at) => at === head, schedule: Schedule.spaced('25 millis') }), Effect.timeout('10 seconds'))
           return yield* remoteOf
         })
-        // Its first commit reaches origin from elsewhere, by its address, so nothing here notes it; then the lead commits again.
+        // Its first commit reaches origin from another clone, so nothing here notes it (git from 2.56 notes a push here even by
+        // origin's address); then the lead commits again.
         commit(worktree, 'retry.ts', 'retry\n')
-        git(worktree, 'push', '-q', remote, `HEAD:refs/heads/${branch}`)
+        const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+        git(elsewhere, 'clone', '-q', remote, '.')
+        git(elsewhere, 'fetch', '-q', root, `refs/heads/${branch}:refs/heads/${branch}`)
+        git(elsewhere, 'push', '-q', 'origin', branch)
         commit(worktree, 'more.ts', 'more\n')
         // Until origin says, how much of it origin has isn't known: no count.
         assert.deepInclude(yield* remoteOf, { pushed: false, ahead: null })
