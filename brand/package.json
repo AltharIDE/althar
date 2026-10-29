@@ -24,11 +24,11 @@
     "@types/fontkit": "^2.0.8",
     "@types/node": "^24.0.0",
     "fontkit": "^2.0.4",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "typescript": "^7.0.2",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
-    "vite-plus": "1.0.0-rc.0",
-    "vitest": "5.0.1",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vite-plus": "1.4.0",
+    "vitest": "5.0.5",
     "wawoff2": "^2.0.1"
   },
   "engines": {
