@@ -1534,6 +1534,8 @@ export class Queries extends Context.Service<
               container: text(kept, 'container') || null,
             }
           })()
+          // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-071).
+          const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
           const changes = yield* Effect.forEach(
             links.flatMap((link) => {
               const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
@@ -1567,8 +1569,10 @@ export class Queries extends Context.Service<
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
                         b.created_at, b.rowid
                       LIMIT 1`
-                        if (here === undefined || !existsSync(here.path)) return change
-                        return { ...change, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
+                        const held = pushing?.get(change.url)
+                        const shown = held === undefined ? change : { ...change, pushing: held }
+                        if (here === undefined || !existsSync(here.path)) return shown
+                        return { ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
                       }),
                 ),
               ),

@@ -1154,6 +1154,7 @@ describe('project rules, through the API', () => {
           commands: [],
           end: null,
           resolveConflicts: false,
+          pushCommits: true,
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,

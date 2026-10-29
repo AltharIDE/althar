@@ -8,6 +8,7 @@ import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
+import { personPushes } from '../../shared/standing'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
 
@@ -240,7 +241,8 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = ready && state === ChangeState.Ready && pushes.length === 0
           const actions: ReactNode[] = [
-            ...pushes.map((one) => (
+            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-071).
+            ...pushes.filter(personPushes).map((one) => (
               <Button
                 key={`push-${one.url}`}
                 variant="signal"

@@ -574,6 +574,8 @@ export const ProjectRulesView = Schema.Struct({
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
   resolveConflicts: Schema.Boolean,
+  /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-071). */
+  pushCommits: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
@@ -896,6 +898,13 @@ export const ChangeSummary = Schema.Struct({
   localHead: Schema.NullOr(Schema.String),
   /** Commits on the task's branch here that aren't on it yet: the person pushes them once they've looked. */
   unpushed: Schema.Number,
+  /**
+   * Where its project's rules push the lead's commits on their own (ADR-071):
+   * `held` null while those here go up as its lead's turn ends, so they are
+   * nothing for the person to push; else why they wait for the person's push,
+   * in a few words. Absent where every push is the person's.
+   */
+  pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String) })),
   /**
    * Where the task's branch here no longer simply adds to it, so a plain
    * push would be refused; null while it does. `rewritten`: commits Althar
@@ -3395,6 +3404,8 @@ export const Api = RpcGroup.make(
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
       /** Turned on, the project's tasks that already conflict are resolved now, not at their next conflict. */
       resolveConflicts: Schema.optional(Schema.Boolean),
+      /** Turned on, what each open task's lead committed and left waiting goes up now, not at its next turn's end. */
+      pushCommits: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),

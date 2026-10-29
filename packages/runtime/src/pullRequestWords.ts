@@ -175,7 +175,7 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke and commit it, then ask the person to push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
+    'Fix what broke and commit it, then push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
   ].join('\n\n')
 
 /**
@@ -291,4 +291,4 @@ export const filesLine = (paths: ReadonlyArray<string>, shown = 8) => {
 
 /** How the lead answers what people said. */
 export const answerHint =
-  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code, commit it, and ask the person to push it with push_to_pull_request. If it needs the person, say so.'
+  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code, commit it, and push it with push_to_pull_request. If it needs the person, say so.'

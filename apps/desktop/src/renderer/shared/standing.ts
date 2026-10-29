@@ -12,13 +12,16 @@ import type { IconName } from '@althar/ui'
  * that thing at its end; the home's line, as its brief with that thing as
  * its button. Both say them in the same words, and both do the person's own
  * (push, merge) right there; the lead's (resolve, fix) the card leaves to its
- * task.
+ * task. Where the project's rules push the lead's commits on their own
+ * (ADR-071), commits here are the person's to push only where Althar held
+ * them, and the card says why.
  */
 
 export type Blocker =
   /** The branch here and the pull request have parted, so a plain push would be refused. */
   | { readonly kind: 'parted' }
-  | { readonly kind: 'unpushed'; readonly commits: number }
+  /** `held`: why they didn't go up on their own, where the project's rules push them so. */
+  | { readonly kind: 'unpushed'; readonly commits: number; readonly held: string | null }
   | { readonly kind: 'conflict'; readonly target: string | null }
   | { readonly kind: 'failed'; readonly failing: ReadonlyArray<string>; readonly failed: number }
   | { readonly kind: 'running'; readonly passed: number; readonly total: number }
@@ -79,12 +82,20 @@ export const standingText = {
   },
 }
 
+/**
+ * Whether the commits here are the person's to push: always, unless the
+ * project's rules push them on their own and nothing held them (ADR-071).
+ */
+export const personPushes = (change: Pick<ChangeSummary, 'pushing'>): boolean =>
+  change.pushing === undefined || change.pushing.held !== null
+
 export const standingOf = (change: ChangeSummary): Standing => {
   const checks = change.checks
   const blockers: Blocker[] = []
-  // Commits here count only once the branch's head here is known, as the task's own Push does.
+  // Commits here count only once the branch's head here is known, as the task's own Push does; going up on their own, they don't.
   if (change.diverged !== null) blockers.push({ kind: 'parted' })
-  else if (change.localHead !== null && change.unpushed > 0) blockers.push({ kind: 'unpushed', commits: change.unpushed })
+  else if (change.localHead !== null && change.unpushed > 0 && personPushes(change))
+    blockers.push({ kind: 'unpushed', commits: change.unpushed, held: change.pushing?.held ?? null })
   if (change.conflicts === true) blockers.push({ kind: 'conflict', target: change.target ?? null })
   // The checks say one thing: one failed, or they're still running, or, once done, one was cancelled.
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
@@ -125,7 +136,7 @@ export const saidOf = (blocker: Blocker, change: Pick<ChangeSummary, 'short'>): 
     case 'parted':
       return { words: t.parted(change.short), icon: 'branch', tone: 'warm' }
     case 'unpushed':
-      return { words: t.unpushed(blocker.commits, change.short), icon: 'up', tone: 'warm' }
+      return { words: blocker.held ?? t.unpushed(blocker.commits, change.short), icon: 'up', tone: 'warm' }
     case 'conflict':
       return { words: t.conflict(blocker.target), icon: 'branch', tone: 'warm' }
     case 'failed':
@@ -167,13 +178,15 @@ const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, fai
  * What stands, as facts: what blocks first (a conflict, failed checks), then
  * checks running, or, where nothing is in the way, how its checks went.
  * Commits to push aren't a fact of their own, as the button that pushes them
- * says their count; only that pushing clears a conflict is said, in place of
- * it. Where they were all that was in the way, how the checks went stands.
+ * says their count, unless Althar held them where it pushes a lead's commits
+ * on its own: then why (ADR-071). Only that pushing clears a conflict is said,
+ * in place of it. Where they were all that was in the way, how the checks
+ * went stands.
  */
 export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> => {
   const together = pushResolves(standing)
   const facts = standing.blockers
-    .filter((one) => one.kind !== 'unpushed')
+    .filter((one) => one.kind !== 'unpushed' || one.held !== null)
     .sort((a, b) => readOrder[a.kind] - readOrder[b.kind])
     .map((one): Said => {
       if (together && one.kind === 'conflict') return { words: standingText.pushResolves(one.target), icon: 'up', tone: 'warm' }
