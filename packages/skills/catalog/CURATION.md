@@ -118,8 +118,11 @@ into a few kinds:
 `doubt-driven-development`, `dispatching-parallel-agents`,
 `requesting-code-review`, `subagent-driven-development` and `writing-skills`
 cannot be followed without dispatching subagents. They are marked
-`needs: subagents`, and a harness Althar does not count on for subagents
-(Codex, for now) is not given them; its thread says which were left out.
+`needs: subagents`. Codex can dispatch them through the bundled
+`codex-acp` 2.3.0 adapter; Althar does not negotiate native ACP child sessions,
+so Codex's subagent activity remains an ordinary tool call. A harness that
+does not support subagents is not given these skills, and its thread says
+which were left out.
 
 ## Still to watch
 

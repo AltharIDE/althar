@@ -145,7 +145,7 @@ export const definition = (
   ...(id === 'claude-code'
     ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
     : id === 'codex'
-      ? { skills: { layout: 'agents' as const, capabilities: [], via: { kind: 'directory' as const } } }
+      ? { skills: { layout: 'agents' as const, capabilities: ['subagents'], via: { kind: 'directory' as const } } }
       : id === 'opencode'
         ? {
             skills: {

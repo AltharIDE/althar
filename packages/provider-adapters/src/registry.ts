@@ -871,11 +871,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
     /*
-     * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
-     * (`skills/extraRoots/set`, Codex 0.160). That also makes the folder writable in its sandbox: only the run's own
-     * read-only copies are there. Whether it dispatches subagents isn't settled, so a skill that needs them is left out.
+     * codex-acp 2.3.0 bundles Codex 0.164.0, which can dispatch subagents. Althar does not negotiate the adapter's native
+     * ACP child-session capability, so it reports them as ordinary tool calls; that fallback still lets Codex use skills
+     * that require dispatch. The added directory is an extra `.agents/skills` root, and its read-only copies are the only
+     * files there.
      */
-    skills: { layout: 'agents', capabilities: [], via: { kind: 'directory' } },
+    skills: { layout: 'agents', capabilities: ['subagents'], via: { kind: 'directory' } },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file

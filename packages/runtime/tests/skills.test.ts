@@ -132,7 +132,7 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('gives a Codex lead the same skills as an added directory, less one it cannot use, and says so', () =>
+  it.live('gives a Codex lead the same skills as an added directory, including those that use subagents', () =>
     withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
@@ -141,22 +141,14 @@ describe('skills for a task’s lead', () => {
         const [run = ''] = readdirSync(join(skills.root, 'runs'))
         const folder = join(skills.root, 'runs', run, 'codex')
         assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
-        // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
-        assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
         const said = yield* notices(created.threadId)
-        assert.isTrue(
-          said.some(
-            (notice) =>
-              notice.title?.endsWith("codex wasn't given a skill it can't use.") === true && notice.description === 'beta needs subagents',
-          ),
-          JSON.stringify(said),
-        )
-        // Its brief names only what it got.
-        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha.')
-        // Recorded as given: what it got, not what it couldn't use.
+        assert.isTrue(existsSync(join(folder, '.agents', 'skills', 'beta', 'SKILL.md')))
+        assert.isFalse(said.some((notice) => notice.title?.endsWith("codex wasn't given a skill it can't use.") === true))
+        // Its brief and record include the active skills it got.
+        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha, beta.')
         assert.deepStrictEqual(
           (yield* givenTo(created.threadId)).map(({ id }) => id),
-          ['alpha'],
+          ['alpha', 'beta'],
         )
         const worktree = yield* worktreeOf(created.threadId)
         for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)

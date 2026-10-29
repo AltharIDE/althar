@@ -139,6 +139,7 @@ describe('the agent registry', () => {
         antigravity: 'none',
       },
     )
+    assert.deepStrictEqual(agents.codex.skills?.capabilities, ['subagents'])
     const via = agents.opencode.skills?.via
     assert.strictEqual(via?.kind, 'env')
     if (via?.kind !== 'env') return

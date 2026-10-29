@@ -589,14 +589,17 @@ checks and the harness permission rules remain the enforcement.
 - **Delivery to Codex and OpenCode (2026-10-18).** Each agent's registry entry
   says how it is given the run's folder (`skills.via`). Codex: the folder is laid
   out as `<run>/codex/.agents/skills/<id>/` and handed to the session as an added
-  directory; codex-acp 2.2.2 sets each added directory's `.agents/skills` as
-  Codex's extra skill roots (`skills/extraRoots/set`, Codex 0.160.1). It also
+  directory; codex-acp 2.3.0 sets each added directory's `.agents/skills` as
+  Codex's extra skill roots (`skills/extraRoots/set`, Codex 0.164.0). It also
   makes that folder writable in Codex's sandbox, where only the run's read-only
   copies are. OpenCode: the folder (`<run>/opencode/<id>/`) is added to its
   config's `skills.paths` in `OPENCODE_CONFIG_CONTENT`, beside its asks
   (OpenCode 1.19.0 reads it; read from the binary, not yet a live session).
-  Codex is not counted on for subagents, so a skill that needs them is left out
-  for it, and the thread gets a notice naming what was left out and why.
+  The bundled codex-acp 2.3.0 adapter includes Codex 0.164.0, which can dispatch
+  subagents. Althar does not negotiate native ACP child sessions, so the adapter
+  reports them as ordinary tool calls; skills that need dispatch are still
+  given to Codex. Other harnesses without subagent support are left out, and
+  their thread gets a notice naming what was left out and why.
 - **Who gets it.** Only a task's lead, on any agent that says how, and only where the runtime
   was given a skills store. Readers, reviewers, a review's lead (untrusted) and
   other agents get none. A failure to set skills up costs the session its
