@@ -93,7 +93,7 @@ export function DesktopBody() {
             <b>with building again.</b>
           </>
         }
-        lead="What breaks your stride when you work with agents, taken out of the way."
+        lead="Tired of juggling terminals, re-explaining your project and babysitting agents? So were we."
       >
         <Bento />
       </Scene>
