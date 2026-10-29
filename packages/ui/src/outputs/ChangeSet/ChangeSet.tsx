@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { Children, useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
@@ -167,13 +167,15 @@ export function ChangeSet({
   }
   const files = prs.flatMap((pr) => pr.files)
   const acting = actions !== undefined && actions !== null && actions !== false
+  // Wide, one or two buttons sit beside what they act on; more, as several repositories' are, get a row of their own under it.
+  const many = Children.toArray(actions).length > 2
   // Merged with no checks, none will run: nothing to say of them.
   const checked = checks !== undefined && (checks.length > 0 || state !== ChangeState.Merged)
   // The files at the top of the repository are under its name; in a task of several, each path starts with its own.
   const root = nameOf(prs[0]?.repo ?? '')
   return (
     <article className={cx(s.change, className)} aria-label={t.label}>
-      <div className={cx(s.decide, acting && s.acting)}>
+      <div className={cx(s.decide, acting && !many && s.acting)}>
         <div className={s.facts}>
           <Head state={state} host={host} prs={prs} branch={branch} remote={remote} uncommitted={uncommitted} push={push} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}

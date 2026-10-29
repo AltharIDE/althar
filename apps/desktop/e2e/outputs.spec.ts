@@ -12,10 +12,11 @@ import { connectGitHub, launch, openFirstProject, shown, startTask } from './sup
  * A task's outputs in a real window, with the fake agent and the fake GitHub,
  * at a wide window and a narrow one: a stopped task whose branch has no pull
  * request, as a nightly dependency check leaves it, which says Stopped, names
- * its branch and what of it isn't pushed, lists its files, and opens its
- * draft pull request; and a pull request, open and then merged. The
- * screenshots are this change's own evidence (test-results/outputs/ at the
- * repository's root, which a run here doesn't clear).
+ * its branch and what of it GitHub doesn't have, as GitHub says, lists its
+ * files, and opens its draft pull request; and a pull request, open and then
+ * merged. The screenshots, light and dark, are this change's own evidence
+ * (test-results/outputs/ at the repository's root, which a run here doesn't
+ * clear).
  */
 
 const SHOTS = join('..', '..', 'test-results', 'outputs')
@@ -63,17 +64,24 @@ const worktreeOf = (repo: string, branch: RegExp) => {
   return { path, branch: name }
 }
 
+/** Shoots the window wide and narrow, light and then dark. */
 const shoot = async (electronApp: ElectronApplication, page: Page, name: string) => {
   const prefix = process.env.ALTHAR_SHOTS ?? 'after'
-  for (const [width, size] of [
-    [WIDE, 'wide'],
-    [NARROW, 'narrow'],
-  ] as const) {
-    await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), width)
-    await page.mouse.move(width - 10, 890)
-    await page.waitForTimeout(400)
-    await page.screenshot({ path: join(SHOTS, `${prefix}-${name}-${size}.png`), scale: 'css', animations: 'disabled' })
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+    for (const [width, size] of [
+      [WIDE, 'wide'],
+      [NARROW, 'narrow'],
+    ] as const) {
+      await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), width)
+      await page.mouse.move(width - 10, 890)
+      await page.waitForTimeout(400)
+      const shot = `${prefix}-${name}-${size}${scheme === 'dark' ? '-dark' : ''}.png`
+      await page.screenshot({ path: join(SHOTS, shot), scale: 'css', animations: 'disabled' })
+    }
   }
+  await page.emulateMedia({ colorScheme: 'light' })
   await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), WIDE)
 }
 
@@ -143,10 +151,11 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
     await expect(shown(page, 'Stopped', { exact: true })).toBeVisible({ timeout: 15_000 })
     await toOutputs(page)
-    // GitHub has the first commit, but nothing here says so: both are counted, rather than the branch called missing.
+    // GitHub has the first commit, though nothing here noted it: asked as the person looks, it says so, and only the second counts.
     const branch = page.getByRole('article', { name: 'Nightly dependency check, 27 Oct' })
     await expect(branch.getByText(nightly.branch, { exact: true })).toBeVisible()
-    await expect(branch.getByText('2 commits not pushed')).toBeVisible()
+    await expect(branch.getByText('1 commit not pushed')).toBeVisible({ timeout: 15_000 })
+    await expect(branch.getByText('2 commits not pushed')).toBeHidden()
     await expect(branch.getByRole('button', { name: 'Open the diff of apps/cli/package.json' })).toBeVisible()
     await shoot(electronApp, page, 'branch')
 

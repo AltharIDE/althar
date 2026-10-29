@@ -2258,7 +2258,9 @@ export const TaskRepositoryHere = Schema.Struct({
    * pushing it without a connection: the remote it goes to, whether the
    * remote has it, how many commits of it the remote doesn't have, and the
    * host's page for a new pull request from it, where that can be told.
-   * None for a repository without a remote.
+   * None for a repository without a remote. How many it doesn't have is
+   * null until the remote says, as the task is looked at, unless this
+   * computer knows it has them all.
    */
   remote: Schema.optional(
     Schema.NullOr(
@@ -2267,7 +2269,7 @@ export const TaskRepositoryHere = Schema.Struct({
         /** The task's branch, as it is named there. */
         branch: Schema.String,
         pushed: Schema.Boolean,
-        ahead: Schema.Number,
+        ahead: Schema.NullOr(Schema.Number),
         newPullRequest: Schema.NullOr(Schema.String),
       }),
     ),

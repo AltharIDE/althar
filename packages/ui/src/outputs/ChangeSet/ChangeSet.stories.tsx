@@ -240,6 +240,34 @@ export const BranchPushedSeveral: Story = {
   },
 }
 
+/**
+ * Drafts in two repositories, each with commits to push and to mark ready, and a new one to open: more than two buttons, so
+ * they get a row of their own under what they act on, each at its own width, wrapping, just past where the card turns wide.
+ */
+export const SeveralActing: Story = {
+  args: {
+    ...CHANGE_DRAFT,
+    actions: [
+      <Button key="push-api" variant="signal">
+        Push 2 commits to meridian-api
+      </Button>,
+      <Button key="push-web" variant="signal">
+        Push 1 commit to meridian-web
+      </Button>,
+      <Button key="ready-api">Mark meridian-api ready for review</Button>,
+      <Button key="ready-web">Mark meridian-web ready for review</Button>,
+      <Button key="open">Open a new draft pull request</Button>,
+    ],
+  },
+  parameters: { width: 560 },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('article')
+    const edge = card.getBoundingClientRect().right
+    for (const button of within(card).getAllByRole('button', { name: /^(Push|Mark|Open a new)/ }))
+      await expect(button.getBoundingClientRect().right).toBeLessThanOrEqual(edge)
+  },
+}
+
 /** Merged on this Mac, not on its remote yet: a line says so, and the page gives the push. */
 export const MergedHere: Story = {
   args: {

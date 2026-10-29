@@ -300,14 +300,17 @@ span.you {
   font-size: 12.5px;
 }
 
-/* wide, as alone on the page: the button beside what it acts on, at its own width; where it stands after its name; more room around */
+/*
+ * wide, as alone on the page: each button at its own width, wrapping where they don't fit; one or two beside what they act on,
+ * in at most half the card; where it stands after its name; more room around
+ */
 @container (min-width: 520px) {
   .decide {
     padding: 20px 22px;
   }
   .acting {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) fit-content(50%);
     align-items: start;
     gap: 12px 28px;
   }
@@ -317,10 +320,9 @@ span.you {
   .state {
     margin-left: 4px;
   }
-  .actions {
+  .acting .actions {
     grid-column: 2;
     grid-row: 1;
-    flex-wrap: nowrap;
     justify-content: flex-end;
   }
   .actions > * {

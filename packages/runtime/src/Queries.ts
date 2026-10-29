@@ -1121,18 +1121,24 @@ export class Queries extends Context.Service<
       /**
        * Where a task's branch stands on its repository's remote, for pushing
        * it without a connection: the remote it goes to, whether that has the
-       * branch, as git or Althar's own push noted it, how many commits of it
-       * it doesn't have, and the host's page for a new pull request from it.
-       * None without a remote.
+       * branch, how many commits of it it doesn't have, and the host's page
+       * for a new pull request from it. None without a remote. What it has
+       * is what it said when last asked at this commit (`askRemotes`); not
+       * asked, only what git or Althar's own push noted here, which can miss
+       * a push made elsewhere: so then a count above none isn't known.
        */
       const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
         Effect.gen(function* () {
           const remote = yield* remoteOf(root, base)
           if (remote === null) return null
-          const [there = null, pushed = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`, `${PUSHED}${branch}`])
-          // Its own commits, since it started, on nothing the remote is known here to have: what a default branch merged in
+          const asked = (yield* (yield* Changes).askedAt(worktree, branch)) === head
+          const [there = null, pushed = null] = yield* commitsOf(root, [
+            `refs/remotes/${remote}/${branch}`,
+            ...(asked ? [] : [`${PUSHED}${branch}`]),
+          ])
+          // Its own commits, since it started, on nothing the remote is known to have: what a default branch merged in
           // brought, the remote has already, and the branch where it pushed it, Althar noted.
-          const ahead =
+          const counted =
             head === there || head === pushed
               ? 0
               : yield* gitOutcome(
@@ -1144,7 +1150,8 @@ export class Queries extends Context.Service<
                   ...(baseCommit === null ? [] : [baseCommit]),
                   `--remotes=${remote}`,
                   ...(pushed === null ? [] : [pushed]),
-                ).pipe(Effect.map(({ code, stdout }) => (code === 0 ? Number(stdout) || 0 : 0)))
+                ).pipe(Effect.map(({ code, stdout }) => (code === 0 ? Number(stdout) || 0 : null)))
+          const ahead = asked || counted === 0 ? counted : null
           // Where the branch goes: the remote's push URL, which can be a fork of the one it fetches from.
           const url = (yield* namedRemotes(root, 'push').pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
           return {
@@ -2642,6 +2649,8 @@ export class Queries extends Context.Service<
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
           const graph = yield* Effect.option(graphFor(head.projectId, head.taskId, threadId))
+          // Looked at, its branches' remotes are asked where they are, and it is read again once they say.
+          if (page.fresh === true) yield* (yield* Changes).askRemotes(head.taskId)
           // What git says of its worktrees, and its host, read at the same time.
           const [said, host] = yield* Effect.all(
             [gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],

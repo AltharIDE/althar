@@ -332,15 +332,16 @@ export function Outputs({
       />
     ) : null
 
-  // Where its branch stands on its repositories' remotes, pushed with the person's own git: what of it they don't have.
+  // Where its branch stands on its repositories' remotes, pushed with the person's own git: what of it they don't have, once
+  // they have all said.
   const remotes = task.here.flatMap((repo) => (repo.remote == null ? [] : [repo.remote]))
   const remote =
-    remotes.length === 0
+    remotes.length === 0 || remotes.some((one) => one.ahead === null)
       ? undefined
       : {
           name: [...new Set(remotes.map((one) => one.name))].join(', '),
           pushed: remotes.every((one) => one.pushed),
-          ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
+          ahead: remotes.reduce((sum, one) => sum + (one.ahead ?? 0), 0),
         }
 
   // Work on its branch: the repositories without a pull request, which merge here once it is ready; before that, its branch so far.

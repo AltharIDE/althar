@@ -634,7 +634,7 @@ describe('a task', () => {
   it('names its branch and what of it isn’t pushed, pushes it quietly, and offers connecting its host, which opens its pull request', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const page = 'https://github.com/meridian/api/compare/main...althar/add-a-retry?expand=1'
-    const at = (remote: { pushed: boolean; ahead: number }, phase: ThreadSnapshot['task']['phase'] = 'ready') => {
+    const at = (remote: { pushed: boolean; ahead: number | null }, phase: ThreadSnapshot['task']['phase'] = 'ready') => {
       const base = thread({ session: null })
       return {
         ...base,
@@ -656,7 +656,17 @@ describe('a task', () => {
         },
       }
     }
-    let stands = { pushed: false, ahead: 2 }
+    let stands: { pushed: boolean; ahead: number | null } = { pushed: false, ahead: null }
+    // Before origin says where its branch is, nothing is said of what it has, and nothing offers to push.
+    const unasked = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(stands, 'running')) }).client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const unsaid = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(unsaid.getByText('althar/add-a-retry')).toBeTruthy()
+    expect(unsaid.queryByText(/not pushed/)).toBeNull()
+    expect(unsaid.queryByRole('button', { name: 'Push to origin' })).toBeNull()
+    unasked.unmount()
+
+    stands = { pushed: false, ahead: 2 }
     // Under way, its branch so far can go up already, quietly; its pull request waits for its lead to be done.
     const early = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(stands, 'running')) }).client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
