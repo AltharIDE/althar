@@ -181,7 +181,7 @@ describe('a task that ends in a pull request', () => {
       // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's line below.
       assert.strictEqual(
         opened?.body,
-        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
+        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\nOpened by [Althar](https://github.com/AltharIDE/althar).`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

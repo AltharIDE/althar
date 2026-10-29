@@ -1,6 +1,8 @@
 name: report
 
 on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
   push:
     branches: [main]
     paths: ['apps/report/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/report.yml']

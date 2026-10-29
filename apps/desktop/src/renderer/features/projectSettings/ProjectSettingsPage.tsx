@@ -17,7 +17,7 @@ import { HEADING, PROJECT_GROUPS, type ProjectSection, projectSectionText } from
 import type { ProjectSettingsModel } from './useProjectSettings'
 
 /*
- * A project's settings, as a view of the project under its front page, laid
+ * A project's settings, as a view of the project under its header, laid
  * out as Althar's own Settings are: down the side, its sections by what each
  * is about, a violet dot by Code and issues where a connection waits on the
  * person, and at the foot, apart and in red, taking the project out of

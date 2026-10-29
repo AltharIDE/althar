@@ -172,6 +172,27 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test:coverage
+
+  # The desktop app's end-to-end run, a job of its own: a check or a coverage gate that fails doesn't keep it from running,
+  # so what it finds shows on the merge that broke it.
+  desktop-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
       # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
       # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
@@ -220,7 +241,7 @@ jobs:
   # on main's newest commit speaks for main: a re-run of an older commit, or one a newer push is already waiting
   # behind, leaves the issue to that newer run.
   report:
-    needs: [harness, runtime, harness-runtime, ui, desktop, package, package-windows]
+    needs: [harness, runtime, harness-runtime, ui, desktop, desktop-e2e, package, package-windows]
     if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

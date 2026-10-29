@@ -11,7 +11,7 @@ import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, sa
 /*
  * A project made in a tab of its own, named first and then given its
  * folders; and a project after it is made, from its settings, a view of it
- * in the window's bar: renamed and drawn in another ink in place, a
+ * in its header: renamed and drawn in another ink in place, a
  * repository added, its host connected from where its work goes, and left
  * out, and removed from Althar, each showing in the tabs and the home at
  * once, with the person's folders left exactly as they were.
@@ -42,11 +42,13 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     const before = [asLeft(meridian), asLeft(web)]
 
-    // Its front page says what it is made of, and never where it is.
-    await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
+    // Its header's ⋯ says what it is made of, and never where it is.
+    await page.getByRole('button', { name: 'Made of' }).click()
+    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.keyboard.press('Escape')
     await expect(page.getByText(meridian)).toHaveCount(0)
 
-    // Renamed in place: the front page and the tab say it at once.
+    // Renamed in place: the header and the tab say it at once.
     await projectSettings(page, 'General')
     const name = page.getByRole('textbox', { name: 'Name' })
     await name.fill('Refunds v2')
@@ -55,13 +57,12 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
 
-    // Drawn in another ink: the front page's wash takes it, and it is kept.
+    // Drawn in another ink: the header's mark takes it, and it is kept.
     await page.getByRole('radio', { name: /^Rose/ }).click()
     await expect(page.getByRole('radio', { name: /^Rose/ })).toBeChecked()
-    await expect(page.locator('header', { has: page.getByRole('heading', { name: 'Refunds v2', level: 1 }) })).toHaveAttribute(
-      'style',
-      /--project-rose/,
-    )
+    await expect(
+      page.locator('header', { has: page.getByRole('heading', { name: 'Refunds v2', level: 1 }) }).locator('[data-ink]'),
+    ).toHaveAttribute('data-ink', 'rose')
     // Tasks: each switch says when it acts.
     await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).not.toBeChecked()
     await expect(page.getByRole('switch', { name: 'Move issues along with their tasks' })).toBeChecked()

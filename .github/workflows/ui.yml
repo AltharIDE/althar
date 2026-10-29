@@ -2,6 +2,8 @@ name: ui
 
 # On a pull request, checks, unit tests and the Storybook build. The coverage gate runs after merge, in post-merge.yml.
 on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
   pull_request:
     paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/ui.yml']
 

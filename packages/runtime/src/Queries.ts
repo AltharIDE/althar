@@ -1619,10 +1619,9 @@ export class Queries extends Context.Service<
             unshipped:
               links.changes.length === 0
                 ? 0
-                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId)).pipe(Effect.orElseSucceed(() => []))).reduce(
-                    (sum, one) => sum + one.commits.length,
-                    0,
-                  ),
+                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId, { kept: true })).pipe(
+                    Effect.orElseSucceed(() => []),
+                  )).reduce((sum, one) => sum + one.commits.length, 0),
           }
         })
 
@@ -1765,7 +1764,7 @@ export class Queries extends Context.Service<
             FROM tasks k WHERE k.id = ${taskId}`
           const after =
             shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
-              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
+              ? yield* (yield* Changes).unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{
             threadId: string
@@ -1841,6 +1840,10 @@ export class Queries extends Context.Service<
           const hands =
             task.runState === 'succeeded' ? yield* (yield* Changes).inHands(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const seeing = hands !== null && !hands.given
+          // Checks that failed, whoever has looked, are its lead's to see through: under way while the checks on its fix run, and
+          // why they are the person's where they are (ADR-070).
+          const fixing = task.state === 'open' ? yield* (yield* Changes).fixing(taskId).pipe(Effect.orElseSucceed(() => null)) : null
+          const checksRun = (seeing && hands.running) || fixing?.running === true
           const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
@@ -1892,7 +1895,7 @@ export class Queries extends Context.Service<
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return checksRun ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null ? 'running' : 'stopped'
@@ -2009,8 +2012,8 @@ export class Queries extends Context.Service<
                   ? resolving.checks
                     ? 'checks'
                     : 'conflict'
-                  : seeing
-                    ? busy || !hands.running
+                  : seeing || fixing?.open === true
+                    ? busy || !checksRun
                       ? 'checks'
                       : 'checks_running'
                     : null),
@@ -2035,6 +2038,8 @@ export class Queries extends Context.Service<
                 ? { continues: true, place: line.place }
                 : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            // Its checks fail, and its lead brought them to the person, or spent its tries: why, on its card.
+            ...(fixing?.why != null && phase === 'ready' ? { checksBack: fixing.why } : {}),
             // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
@@ -2652,6 +2657,7 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              checksBack: card?.checksBack ?? null,
               conflictUnsent: card?.conflictUnsent ?? null,
               conflictUnchecked: card?.conflictUnchecked ?? null,
               madeChangeAt: head.madeChangeAt,

@@ -34,7 +34,7 @@
   },
   "packageManager": "bun@1.3.5",
   "patchedDependencies": {
-    "@agentclientprotocol/claude-agent-acp@0.98.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.98.0.patch"
+    "@agentclientprotocol/claude-agent-acp@0.99.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.99.0.patch"
   },
   "trustedDependencies": [
     "electron",
