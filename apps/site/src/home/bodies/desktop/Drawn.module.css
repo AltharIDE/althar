@@ -241,3 +241,19 @@
 .check { display: flex; align-items: center; gap: calc(10 * var(--u)); height: 100%; padding: 0 calc(16 * var(--u)); font-size: calc(14.5 * var(--u)); font-weight: 600; letter-spacing: -0.01em; }
 .check i { flex: none; width: calc(18 * var(--u)); height: calc(18 * var(--u)); border-radius: 50%; background: var(--ok); }
 .check i::after { content: ''; display: block; width: calc(5 * var(--u)); height: calc(9 * var(--u)); margin: calc(3.5 * var(--u)) 0 0 calc(6.5 * var(--u)); border: solid #fff; border-width: 0 calc(1.8 * var(--u)) calc(1.8 * var(--u)) 0; transform: rotate(45deg); }
+
+/* ---- tasks side by side ---- */
+.repoTop { position: absolute; inset: calc(16 * var(--u)); border-radius: calc(5 * var(--u)); box-shadow: inset 0 0 0 var(--hair) var(--ink-c); background: repeating-linear-gradient(90deg, transparent 0 calc(40 * var(--u)), var(--ink-c) calc(40 * var(--u)) calc(41 * var(--u))); }
+.tree { position: absolute; transform-style: preserve-3d; animation: bobTree 6.4s ease-in-out infinite alternate; }
+@keyframes bobTree { from { transform: translateZ(calc(-5 * var(--u))); } to { transform: translateZ(calc(7 * var(--u))); } }
+.treeTop { position: absolute; inset: 0; display: grid; align-content: start; padding: calc(13 * var(--u)) calc(14 * var(--u)); }
+.treeHead { display: flex; align-items: center; gap: calc(8 * var(--u)); }
+.treeHead svg { flex: none; width: calc(16 * var(--u)); height: calc(16 * var(--u)); color: var(--ink); }
+[data-tone='live'] .treeHead svg { color: #fff; }
+.treeHead b { font: 600 calc(17 * var(--u)) var(--mono); letter-spacing: -0.02em; }
+.treeLead { margin-top: calc(6 * var(--u)); font-size: calc(12.5 * var(--u)); opacity: 0.72; }
+.tree .meter { top: auto; bottom: calc(16 * var(--u)); left: calc(14 * var(--u)); right: calc(14 * var(--u)); }
+.meterTree { width: 100%; transform-origin: 0 50%; animation: tree 8s linear infinite; }
+@keyframes tree { from { transform: scaleX(0.06); } to { transform: scaleX(1); } }
+.art[data-still] .meterTree { transform: scaleX(0.6); }
+

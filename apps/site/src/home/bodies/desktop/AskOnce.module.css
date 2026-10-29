@@ -10,11 +10,13 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 18px;
   padding: 24px 24px 0;
   -webkit-mask-image: linear-gradient(transparent, #000 56px);
   mask-image: linear-gradient(transparent, #000 56px);
 }
+/* What the thread holds, stacked; it glides as it grows (AskOnce.tsx), and fades before the conversation starts again. */
+.flow { display: flex; flex-direction: column; gap: 18px; transition: opacity 600ms var(--ease); }
+.leaving { opacity: 0; }
 .said { margin: 0; }
 .composer { flex: none; padding: 14px 24px 22px; }
 

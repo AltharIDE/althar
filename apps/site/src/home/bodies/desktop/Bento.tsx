@@ -1,25 +1,24 @@
-import { Button, CallCard, ListPeek, NeedLine } from '@althar/ui'
+import { Button, NeedLine, Shots } from '@althar/ui'
 import { Home } from '@althar/ui/screens'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
-import { CALLS, DECISION, NOTES_KEPT, NOTES_SEEN, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
+import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SHOT_AFTER, SHOT_BEFORE, SINCE } from '../kit/world'
 import s from './Bento.module.css'
-import { Accounts, Automations, Conflicts, type Skin, Workspaces } from './Drawn'
+import { Accounts, Automations, Conflicts, type Skin, Workspaces, Worktrees } from './Drawn'
 
 /*
- * What keeps you in flow: eight tiles on a six-column grid. Four hold a
- * piece of the app in its light (a decision, home, a review, the notes);
- * four hold a feature drawn as a small object in 3D (several accounts for
- * one agent, automations, conflicts settled, workspaces side by side).
+ * What keeps you in flow: eight tiles on a six-column grid. Three hold a
+ * piece of the app in its light (screenshots a lead took, home, a review);
+ * five hold a feature drawn as a small object in 3D (several accounts for
+ * one agent, automations, conflicts settled, tasks side by side in their own
+ * worktrees, workspaces side by side).
  * Narrower, two columns, then one.
  */
 
 const none = () => {}
-
-const DECIDE = CALLS.find((c) => c.kind === 'Decision') ?? CALLS[0]!
 
 const NEEDS = [
   {
@@ -100,19 +99,24 @@ const TILES: Tile[] = [
     piece: (finish) => <Accounts skin={finish} />,
   },
   {
-    id: 'calls',
+    id: 'shots',
     span: 2,
     small: true,
     title: (
       <>
-        You make <b>the calls.</b>
+        It looks at <b>what it built.</b>
       </>
     ),
-    lead: 'Only real decisions reach you, as one card with the options laid out. Everything else goes ahead.',
+    lead: 'A lead opens the page it changed and screenshots it, before and after, at the size that matters. You see the change without running it.',
     piece: () => (
-      <Shot w={400} maxScale={1.2} label={`A decision for you: ${DECIDE.title}`} frame={s.card}>
+      <Shot
+        w={460}
+        maxScale={1.1}
+        label="Two screenshots a lead took of the refunds page: before, a generic error; after, saying the refund is sent again in 12 seconds"
+        frame={s.card}
+      >
         <div className={s.pad}>
-          <CallCard {...DECIDE} />
+          <Shots items={[SHOT_BEFORE, SHOT_AFTER]} />
         </div>
       </Shot>
     ),
@@ -180,10 +184,10 @@ const TILES: Tile[] = [
     span: 3,
     title: (
       <>
-        The change <b>comes back to you.</b>
+        Nothing reaches you <b>half done.</b>
       </>
     ),
-    lead: 'Finished: a pull request, its checks run, a second lab’s review, and what wasn’t verified. Merging stays yours.',
+    lead: 'By the time you see it, it’s planned, built, reviewed by another lab, fixed, reviewed again, and open as a pull request with its checks run.',
     piece: () => (
       <Shot
         w={740}
@@ -198,32 +202,16 @@ const TILES: Tile[] = [
     ),
   },
   {
-    id: 'notes',
+    id: 'worktrees',
     span: 2,
+    drawn: true,
     title: (
       <>
-        Never explain it <b>twice.</b>
+        Ten at once. <b>None in each other’s way.</b>
       </>
     ),
-    lead: 'What the project knows outlasts every chat, agent and model. Each task starts with its notes, and adds what it saw.',
-    piece: () => (
-      <Shot
-        w={400}
-        maxScale={1}
-        label="Tally’s notes: conventions and decisions every task starts with, and what tasks have seen"
-        frame={s.card}
-      >
-        <div className={s.pad}>
-          <ListPeek
-            about="Held by the project. Every task starts with its notes, and adds what it saw."
-            sections={[
-              { label: 'Notes', entries: NOTES_KEPT },
-              { label: 'Seen in tasks', entries: NOTES_SEEN },
-            ]}
-          />
-        </div>
-      </Shot>
-    ),
+    lead: 'Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.',
+    piece: (finish) => <Worktrees skin={finish} />,
   },
   {
     id: 'workspaces',

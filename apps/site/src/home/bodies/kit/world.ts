@@ -7,6 +7,7 @@ import * as edge from '../../../../../../packages/ui/src/fixtures/edge'
 import * as home from '../../../../../../packages/ui/src/fixtures/home'
 import * as marks from '../../../../../../packages/ui/src/fixtures/marks'
 import * as review from '../../../../../../packages/ui/src/fixtures/meridian'
+import * as shots from '../../../../../../packages/ui/src/fixtures/shots'
 
 /*
  * The kit's demo world, as the site shows it: a payments API and its
@@ -48,3 +49,4 @@ export const { edgeLineOf } = edge
 export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
 export const { FINDINGS, PROJECT, reviewDoc, STEPS } = renamed({ ...review })
+export const { SHOT_AFTER, SHOT_BEFORE } = renamed({ ...shots })

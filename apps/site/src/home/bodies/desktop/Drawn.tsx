@@ -362,6 +362,75 @@ export function Automations({ skin }: { skin: Skin }) {
   )
 }
 
+/* ---- tasks side by side: four floating over the repository, each in a worktree of its own, tethered to main ---- */
+
+const TREES = [
+  { task: '431', agent: Agent.Claude, lead: 'Opus 5', x: -132, y: -102, every: 7.2, at: 0.62 },
+  { task: '432', agent: Agent.Codex, lead: 'GPT-5.2 Codex', x: 8, y: -102, every: 9.4, at: 0.35 },
+  { task: '433', agent: Agent.Gemini, lead: 'Gemini 3 Pro', x: -132, y: 10, every: 8.1, at: 0.8 },
+  { task: '434', agent: Agent.Qwen, lead: 'Qwen3 Coder', x: 8, y: 10, every: 10.6, at: 0.15 },
+] as const
+
+export function Worktrees({ skin }: { skin: Skin }) {
+  return (
+    <World
+      skin={skin}
+      camera={{ tilt: 58, turn: -34, drop: 14 }}
+      size={[440, 380]}
+      label="Four tasks at once over tally-api, each in a worktree of its own and led by another lab: Opus, GPT, Gemini and Qwen."
+    >
+      {() => (
+        <>
+          <Shade x={-180} y={-150} w={360} d={320} soft={1.2} />
+          <Box
+            x={-150}
+            y={-122}
+            w={300}
+            d={244}
+            h={18}
+            top={<span className={s.repoTop} />}
+            front={
+              <span className={s.plinth}>
+                <BrandMark brand={Brand.GitHub} size={13} />
+                tally-api · main
+              </span>
+            }
+          />
+          {TREES.map((tree, i) => (
+            <div key={tree.task} className={s.tree} style={{ '--i': i, animationDelay: `${-i * 1.7}s` } as CSSProperties}>
+              <i className={s.tether} style={{ left: u(tree.x + 62), top: u(tree.y + 46), '--tz': 96, '--th': 78 } as CSSProperties} />
+              <Box
+                x={tree.x}
+                y={tree.y}
+                z={96}
+                w={124}
+                d={92}
+                h={5}
+                tone={i === 1 ? 'live' : 'paper'}
+                top={
+                  <span className={s.treeTop}>
+                    <span className={s.treeHead}>
+                      <AgentMark agent={tree.agent} size={16} />
+                      <b>{tree.task}</b>
+                    </span>
+                    <span className={s.treeLead}>{tree.lead}</span>
+                    <span className={s.meter}>
+                      <i
+                        className={s.meterTree}
+                        style={{ animationDuration: `${tree.every}s`, animationDelay: `${-tree.at * tree.every}s` }}
+                      />
+                    </span>
+                  </span>
+                }
+              />
+            </div>
+          ))}
+        </>
+      )}
+    </World>
+  )
+}
+
 /* ---- workspaces: Linear's, standing side by side, and a project on the ground bound to its own, an issue coming down to it ---- */
 
 const SPACES = [
