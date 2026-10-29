@@ -80,6 +80,10 @@ export const projectRules: ProjectRulesView = {
     hosts: ['github.com', 'registry.npmjs.org'],
     edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
   },
+  tally: [
+    { kind: 'outside', asked: 13, allowed: 13, refused: 0, workedAround: 0 },
+    { kind: 'unclear', asked: 0, allowed: 0, refused: 5, workedAround: 4 },
+  ],
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [

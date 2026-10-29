@@ -75,6 +75,7 @@ import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
+import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
@@ -348,10 +349,15 @@ export const handlers = Api.toLayer(
           hosts: withEdits(reach.hosts, edits.hosts),
           edits,
         }
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox }
+        // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
+        const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox'> => {
+    const rulesFields = (
+      projectId: string,
+      rules: ProjectRules,
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
