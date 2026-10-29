@@ -630,7 +630,12 @@ export class Permissions extends Context.Service<
             // What the rules refuse outright, such as an agent changing things on the code host, is answered at once with what to do
             // instead; what they let through, by the allow rules where they did, goes through.
             if (verdict.verdict !== 'ask') {
-              const { decision, cited } = decisionOf(verdict, policyId)
+              const ruledOn = decisionOf(verdict, policyId)
+              // What the sandbox holds says so on the record, not that a rule let it through.
+              const { decision, cited } =
+                inside && verdict.verdict === 'allow'
+                  ? { decision: { decision: 'allow' as const, reason: 'It runs inside the sandbox.' }, cited: undefined }
+                  : ruledOn
               yield* sql.withTransaction(
                 recordDecision({
                   context: requestContext,
