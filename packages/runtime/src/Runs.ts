@@ -51,15 +51,20 @@ import {
   evidenceForReview,
   evidencePaths,
   keepEvidence,
+  keepShown,
+  PictureGiven,
   readEvidence,
+  readShown,
+  SHOWN_MOST,
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { summarize } from './words'
+import { signedOutWords, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -156,6 +161,13 @@ export const PlanParameters = Schema.Struct({
    * (make_it_a_change), which the person asked to end in a pull request.
    */
   publishes: Schema.optional(Schema.Boolean),
+  /**
+   * A review of someone else's pull request (`review_pull_request`): its one
+   * step is the review's lead, which reads a read-only copy, so only an
+   * agent its session holds to reading may take it. It has no run: started,
+   * its lead starts in the task's thread (Reviews.lead).
+   */
+  reads: Schema.optional(Schema.Boolean),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -183,6 +195,7 @@ const Finished = Schema.Struct({
     ),
   ),
 })
+const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
 const Reviewed = Schema.Struct({
   verdict: Schema.Literals(['pass', 'changes_requested']),
   summary: Schema.String,
@@ -300,6 +313,7 @@ type Store =
   | Questions
   | Artifacts
   | Connectivity
+  | LeftBehind
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -321,6 +335,8 @@ export type StuckWhy =
   | 'refused'
   /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-060). */
   | 'transient'
+  /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
+  | 'signed_out'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -537,6 +553,7 @@ export class Runs extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -1090,9 +1107,12 @@ export class Runs extends Context.Service<
        * them, and a call in the task says why. A run has one such call open at
        * a time.
        */
-      const stuck = (run: RunRow, attempt: { readonly id: string } | null, info: StuckInfo) =>
+      const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
+          const info: StuckInfo =
+            asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
           const opened = yield* sql.withTransaction(
             Effect.gen(function* () {
               const [open] = yield* sql<{ id: string }>`
@@ -1422,7 +1442,9 @@ export class Runs extends Context.Service<
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
           // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
-          // Refused, it won't go on however it's reminded.
+          // Signed out, or refused, it won't go on however it's reminded.
+          if (event.errorClass === 'auth_required')
+            return yield* stuck(on.run, { id: on.attemptId }, info('signed_out', event.failure ?? null))
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
           // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
           const continued = output.continued ?? 0
@@ -1882,6 +1904,8 @@ export class Runs extends Context.Service<
             payload: { round: run.runId, back: true },
             actorId: instance.systemId,
           })
+          // Settled again, its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(run.taskId)
         })
 
       /**
@@ -3067,6 +3091,38 @@ export class Runs extends Context.Service<
           return 'Althar has your summary. The task is ready for the person.'
         })
 
+      /**
+       * The lead shows the person pictures in its thread, at any time, with a
+       * step open or none: kept in the artifact store as a step's screenshots
+       * are, so they stay once the worktree goes; in the lead's turn, where it
+       * showed them.
+       */
+      const showPictures = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
+          const sql = yield* SqlClient.SqlClient
+          const { pictures: given } = yield* read(Shown, input)
+          const worktrees = yield* worktreesOf(access.taskId)
+          const shown = yield* readShown(
+            given,
+            worktrees.map((worktree) => worktree.path),
+          )
+          const itemId = yield* newId(Ids.threadItem)
+          const pictures = yield* keepShown({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
+          const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE id = ${access.sessionId}`
+          yield* addItem(
+            {
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              ...(session === undefined ? {} : { sessionId: session.id }),
+            },
+            'pictures',
+            { pictures },
+            { id: itemId },
+          )
+          return `Althar shows ${pictures.length === 1 ? 'it' : `the ${pictures.length}`} in the thread now, each with its caption, and keeps ${pictures.length === 1 ? 'it' : 'them'}: don't list ${pictures.length === 1 ? 'it' : 'them'} again in what you say.`
+        })
+
       /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */
       const settleFindings = (
         run: RunRow,
@@ -3248,6 +3304,28 @@ export class Runs extends Context.Service<
             required: ['summary'],
           },
           finishStep,
+        ),
+        tool(
+          'show_pictures',
+          `Shows the person pictures in the task's thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in the worktree (its scratch folder too), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
+          {
+            type: 'object',
+            properties: {
+              pictures: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    path: { type: 'string', description: 'The picture, from the worktree.' },
+                    caption: { type: 'string', description: 'What it shows, in a line: "The settings page in the dark theme".' },
+                  },
+                  required: ['path', 'caption'],
+                },
+              },
+            },
+            required: ['pictures'],
+          },
+          showPictures,
         ),
       ])
       yield* toolServer.serve('reviewer', [

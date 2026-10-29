@@ -1,30 +1,26 @@
+import { useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 
-import { Room } from '@althar/ui'
-
-import { reads } from '../../data/reads'
+import { held, readFirst, reads } from '../../data/reads'
+import { useServices } from '../../data/services'
 import { rootRoute } from '../../root'
 import { HomePending } from '../../shared/Pending'
 import { useAccountSignIn } from '../accounts/useAccountSignIn'
-import { HomeView } from '../home/HomeView'
-import { useHome } from '../home/useHome'
+import { useShown } from '../tabs/kept'
 import { StartView } from './StartView'
-import { type StartModel, useStart } from './useStart'
+import { useStart } from './useStart'
 
-function Home({ start }: { start: StartModel }) {
-  const navigate = useNavigate()
-  return (
-    <HomeView
-      model={useHome()}
-      start={start}
-      onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
-      onTalk={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })}
-      onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-    />
-  )
+/**
+ * The home on show: its screen is the window's own, kept while the person is
+ * elsewhere and shown again as they come back (`KeptScreens`), as they left it.
+ */
+function ShownHome() {
+  useShown({ kind: 'home' })
+  return null
 }
 
-function Start() {
+/** The first screen, before there is any project, or while the runtime doesn't answer. */
+function First() {
   const navigate = useNavigate()
   const start = useStart()
   const accounts = useAccountSignIn(start)
@@ -33,9 +29,15 @@ function Start() {
       model={start}
       accounts={accounts}
       onProject={(projectId) => void navigate({ to: '/projects/$projectId', params: { projectId } })}
-      home={() => <Home start={start} />}
+      home={() => <ShownHome />}
     />
   )
+}
+
+function Start() {
+  const { client } = useServices()
+  const projects = useQuery(reads(client).projects()).data?.projects
+  return projects !== undefined && projects.length > 0 ? <ShownHome /> : <First />
 }
 
 /** Where the window starts: the first screen with no project yet, the home once there are. */
@@ -44,10 +46,15 @@ export const startRoute = createRoute({
   path: '/',
   component: Start,
   pendingComponent: HomePending,
-  // The projects and the agents, and, once there are projects, the home.
-  loader: async ({ context: { client, cache } }) => {
+  // The projects and the agents, and, once there are projects, the home. Only what the window has never read waits: a
+  // home the person has been on shows at once, and what changed since is read behind it.
+  loader: ({ context: { client, cache } }) => {
     const read = reads(client)
-    const [listed] = await Promise.allSettled([cache.fetchQuery(read.projects()), cache.fetchQuery(read.status())])
-    if (listed.status === 'fulfilled' && listed.value.projects.length > 0) await cache.fetchQuery(read.home()).catch(() => undefined)
+    return readFirst(
+      held(cache, read.status()),
+      held(cache, read.projects()).then(() => {
+        if ((cache.getQueryData(read.projects().queryKey)?.projects.length ?? 0) > 0) return held(cache, read.home())
+      }),
+    )
   },
 })

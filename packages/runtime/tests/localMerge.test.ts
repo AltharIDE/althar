@@ -52,7 +52,7 @@ const taskIn = (roots: ReadonlyArray<string>, opened: string) =>
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title: 'Add a retry',
-      ...(roots.length > 1 ? { repositories: roots.map((root) => root.split('/').at(-1) ?? '') } : {}),
+      ...(roots.length > 1 ? { repositories: roots.map((root) => basename(root)) } : {}),
     })
     const worktrees = yield* sql<{ slug: string; path: string }>`
       SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -140,9 +140,7 @@ describe('merging a task here', () => {
       assert.strictEqual(git(remote, 'rev-parse', 'main'), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
       assert.notStrictEqual(git(remote, 'rev-parse', 'main'), head)
       assert.include(git(remote, 'log', '-1', '--format=%B', 'main'), coAuthorLine)
-      assert.deepStrictEqual(yield* mergedOf, [
-        { repository: slug, name: root.split('/').at(-1) ?? '', branch: 'main', remote: 'origin/main', ahead: 0 },
-      ])
+      assert.deepStrictEqual(yield* mergedOf, [{ repository: slug, name: basename(root), branch: 'main', remote: 'origin/main', ahead: 0 }])
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         'Pushed main to origin.',

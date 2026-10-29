@@ -1124,9 +1124,12 @@ describe('the agents', () => {
       assert.isTrue(existsSync(env.GH_CONFIG_DIR ?? ''))
       assert.strictEqual(env.GLAB_CONFIG_DIR, env.GH_CONFIG_DIR)
       assert.deepInclude(env, {
-        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_COUNT: '2',
         GIT_CONFIG_KEY_0: 'credential.helper',
         GIT_CONFIG_VALUE_0: '',
+        // A branch made from a remote's follows nothing, so making one never writes the repository's config.
+        GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
+        GIT_CONFIG_VALUE_1: 'false',
         GIT_TERMINAL_PROMPT: '0',
       })
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
@@ -1160,8 +1163,13 @@ describe('the agents', () => {
       }
       for (const agentId of ['claude-code', 'codex', 'opencode']) {
         // Git's credential helper stays reset beside it.
-        assert.deepInclude(envOf(agentId, true), { ...readingUntrusted, GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' })
-        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '1')
+        assert.deepInclude(envOf(agentId, true), {
+          ...readingUntrusted,
+          GIT_CONFIG_KEY_0: 'credential.helper',
+          GIT_CONFIG_VALUE_0: '',
+          GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
+        })
+        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '2')
       }
       assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
       assert.isUndefined(envOf('codex', false).CODEX_CONFIG)

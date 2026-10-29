@@ -15,18 +15,28 @@
   color: var(--t-2);
   text-align: left;
   white-space: normal;
-  animation: pop var(--fast) var(--ease);
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop var(--enter) var(--ease-out);
 }
-.card[data-side='top'] {
-  --from: 3px;
+/* The first waits and grows from what it names; the next, while the pointer
+   moves along, is there at once: it would only be motion in the way. */
+.card[data-state='instant-open'] {
+  animation: none;
 }
-.card[data-side='bottom'] {
-  --from: -3px;
+.card[data-state='closed'] {
+  animation: shut 90ms var(--ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(var(--from, 0));
+    transform: scale(var(--scale-pop));
+  }
+}
+@keyframes shut {
+  to {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
   }
 }
 

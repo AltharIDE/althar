@@ -69,14 +69,15 @@ export type ClipboardBytes = (format: string, raw: boolean) => Promise<Buffer | 
 /** How Electron's clipboard names a format of the system's own, which it reads as it is. */
 export const rawFormat = (format: string) => `electron application/osclipboard;format="${format}"`
 
-const fromUrls = (text: string) =>
+/** The paths in a list of addresses, read as the platform's own: `file:///Users/…` is no path on Windows. */
+const fromUrls = (text: string, platform: string) =>
   text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.startsWith('file://'))
     .flatMap((line) => {
       try {
-        return [fileURLToPath(line)]
+        return [fileURLToPath(line, { windows: platform === 'win32' })]
       } catch {
         return []
       }
@@ -104,15 +105,15 @@ export const pathsInNames = (names: Buffer): ReadonlyArray<string> =>
  */
 export const clipboardPaths = async (bytes: ClipboardBytes, platform: string): Promise<ReadonlyArray<string>> => {
   const text = async (format: string, raw: boolean) => (await bytes(format, raw).catch(() => null))?.toString('utf8') ?? ''
-  const listed = fromUrls(await text('text/uri-list', false))
+  const listed = fromUrls(await text('text/uri-list', false), platform)
   if (listed.length > 0) return listed
   if (platform === 'darwin') {
     const names = pathsInList(await text('NSFilenamesPboardType', true))
-    return names.length > 0 ? names : fromUrls(await text('public.file-url', true))
+    return names.length > 0 ? names : fromUrls(await text('public.file-url', true), platform)
   }
   if (platform === 'win32') {
     const names = await bytes('FileNameW', true).catch(() => null)
     return names === null ? [] : pathsInNames(names)
   }
-  return fromUrls(await text('x-special/gnome-copied-files', true))
+  return fromUrls(await text('x-special/gnome-copied-files', true), platform)
 }

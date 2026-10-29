@@ -3,7 +3,7 @@
   inset: 0;
   z-index: var(--z-dialog);
   background: var(--scrim);
-  animation: fade var(--fast) var(--ease);
+  animation: fade var(--enter) var(--ease-out);
 }
 .dialog {
   position: fixed;
@@ -22,7 +22,9 @@
   container-type: inline-size;
   box-shadow: var(--lift-dialog);
   color: var(--t-1);
-  animation: in var(--fast) var(--ease);
+  /* it grows from its middle; it closes at once, as its consumer takes it away */
+  transform-origin: 50% 50%;
+  animation: in var(--enter) var(--ease-out);
 }
 .dialog:focus {
   outline: none;
@@ -30,7 +32,7 @@
 @keyframes in {
   from {
     opacity: 0;
-    transform: translate(-50%, 4px);
+    transform: translateX(-50%) scale(var(--scale-pop));
   }
 }
 @keyframes fade {

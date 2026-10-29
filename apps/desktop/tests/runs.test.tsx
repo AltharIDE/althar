@@ -203,6 +203,80 @@ describe('what the project runs, from its front', () => {
     expect(await screen.findByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
   })
 
+  it('runs a branch or a pull request from the list, picked from what the remote has now, and says in the picker what went wrong', async () => {
+    // The host has more open than it listed: words are searched there.
+    const older = { number: 12, name: 'PR #12', title: 'An older pull request', branch: 'older', author: 'sam', draft: false, fork: true }
+    const getRunnableRefs = vi.fn(async (_projectId: string, text?: string) =>
+      text === undefined
+        ? [
+            {
+              repository: 'meridian-api',
+              pullRequests: [
+                {
+                  number: 41,
+                  name: 'PR #41',
+                  title: 'Add a services directory',
+                  branch: 'feature/find-a-pro',
+                  author: 'mira',
+                  draft: false,
+                  fork: false,
+                },
+              ],
+              branches: ['main', 'feature/find-a-pro'],
+              note: null,
+              more: true,
+            },
+          ]
+        : [{ repository: 'meridian-api', pullRequests: text === 'older' ? [older] : [], branches: [], note: null, more: false }],
+    )
+    const runProject = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'LaunchRefused', message: 'origin has no branch feature/gone.' }))
+      .mockResolvedValue(launch({ id: 'proc_9', branch: 'PR #41 · feature/find-a-pro', where: 'PR #41 · feature/find-a-pro' }))
+    const { client, emit } = await shown([], { getRunnableRefs, runProject })
+    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Run a branch or pull request…' }))
+    const picker = within(await screen.findByRole('dialog', { name: 'Run a branch' }))
+    // Asked as it opens: the pull request first, then the branches.
+    const options = await picker.findAllByRole('option')
+    expect(getRunnableRefs).toHaveBeenCalledWith('p1')
+    expect(options.map((one) => one.textContent)).toEqual([
+      expect.stringContaining('Add a services directory'),
+      'main',
+      'feature/find-a-pro',
+    ])
+    // One past the listing, found on the host by its words.
+    await userEvent.type(picker.getByRole('combobox'), 'older')
+    expect(await picker.findByRole('option', { name: /An older pull request/ })).toBeTruthy()
+    expect(getRunnableRefs).toHaveBeenCalledWith('p1', 'older')
+    await userEvent.clear(picker.getByRole('combobox'))
+    // Refused, it says why and stays open.
+    await userEvent.type(picker.getByRole('combobox'), 'main')
+    await userEvent.keyboard('{Enter}')
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', undefined, { branch: 'main' })
+    expect((await picker.findByRole('alert')).textContent).toBe('origin has no branch feature/gone.')
+    await userEvent.clear(picker.getByRole('combobox'))
+    await userEvent.click(picker.getByRole('option', { name: /Add a services directory/ }))
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', undefined, { pullRequest: '41' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run a branch' })).toBeNull())
+    // Running, the pill names it, and the default branch's run is still one press away.
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [
+          launch({
+            id: 'proc_9',
+            url: 'http://localhost:5199/',
+            branch: 'PR #41 · feature/find-a-pro',
+            where: 'PR #41 · feature/find-a-pro',
+          }),
+        ],
+      }),
+    )
+    expect((await screen.findByRole('button', { name: /^Running/ })).textContent).toContain('PR #41 · feature/find-a-pro')
+    expect(screen.getByRole('button', { name: /^Run$/ })).toBeTruthy()
+  })
+
   it('says in the whole list what went wrong removing or ordering one', async () => {
     const { client } = await shown()
     vi.mocked(client.dropRunnable).mockRejectedValueOnce(

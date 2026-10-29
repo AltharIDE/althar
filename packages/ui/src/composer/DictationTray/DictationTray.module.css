@@ -11,7 +11,7 @@
   border-radius: 10px 10px 0 0;
   background: var(--n-3);
   color: var(--t-2);
-  animation: rise var(--base) var(--ease);
+  animation: rise var(--enter) var(--ease-out);
   /* narrow, the actions go under the words */
   flex-wrap: wrap;
 }

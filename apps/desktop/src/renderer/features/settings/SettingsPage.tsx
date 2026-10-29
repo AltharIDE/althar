@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
@@ -89,9 +89,14 @@ export interface SettingsPageProps {
   onSection: (section: Section) => void
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
+  /**
+   * An agent to sign in again, by its id, as a signed-out agent's error asks:
+   * its tab opens, with its sign-in started, once while the page shows.
+   */
+  signIn?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -100,6 +105,21 @@ export function SettingsPage({ start, section, onSection, onTask }: SettingsPage
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
   const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
   const agents = start.status?.agents ?? []
+  // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
+  const [asked, setAsked] = useState(signIn)
+  if (signIn !== undefined && signIn !== asked) setAsked(signIn)
+  // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
+  const [openedAt] = useState(start.checkedAt)
+  const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
+  useEffect(() => {
+    if (wanted === undefined) return
+    if (wanted.installed && wanted.problem === null) {
+      const account = wanted.accounts.find((one) => one.signIn === 'signed_out') ?? wanted.accounts[0]
+      if (account === undefined) accounts.add(wanted.id)
+      else accounts.again(wanted.id, account.id)
+    }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
+  }, [wanted?.id])
   // A section where something waits on the person has a dot: an account to sign in again.
   const yours: Partial<Record<Section, boolean>> = {
     agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),
@@ -137,6 +157,7 @@ export function SettingsPage({ start, section, onSection, onTask }: SettingsPage
         accounts={accounts}
         connections={connections}
         looks={looks}
+        {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
       />
     </SettingsLayout>
@@ -155,6 +176,7 @@ function SectionBody({
   accounts,
   connections,
   looks,
+  asked,
   onTask,
 }: {
   section: Section
@@ -162,11 +184,13 @@ function SectionBody({
   accounts: AccountSignInModel
   connections: ConnectionsModel
   looks: Looks
+  /** The agent the person was sent here to sign in again. */
+  asked?: string
   onTask?: (threadId: string) => void
 }) {
   switch (section) {
     case 'agents':
-      return <AgentsSection start={start} accounts={accounts} />
+      return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
@@ -212,15 +236,16 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 }
 
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
-function AgentsSection({ start, accounts }: { start: StartModel; accounts: AccountSignInModel }) {
+function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
   // Those on this computer first, then the others Althar runs, each in the registry's order.
   const all = start.status?.agents ?? []
   const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
-  // The agent chosen, else the one signing in, else one that needs the person, else the first.
+  // The agent chosen, else the one signing in, else the one the person was sent here for, else one that needs them, else the first.
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
     agents.find((agent) => agent.id === accounts.signingIn?.agentId) ??
+    agents.find((agent) => agent.id === asked) ??
     agents.find((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')) ??
     agents[0]
   if (chosen === undefined)

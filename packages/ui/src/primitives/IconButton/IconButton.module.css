@@ -5,7 +5,8 @@
   border-radius: 7px;
   transition:
     background var(--fast) var(--ease),
-    color var(--fast) var(--ease);
+    color var(--fast) var(--ease),
+    transform var(--press) var(--ease-out);
 }
 .medium {
   width: 28px;
@@ -18,6 +19,10 @@
 }
 .button:disabled {
   opacity: 0.45;
+}
+/* it gives under the pointer, a little, and comes back */
+.button:active:not(:disabled, [aria-disabled='true']) {
+  transform: scale(var(--scale-press));
 }
 
 .default {

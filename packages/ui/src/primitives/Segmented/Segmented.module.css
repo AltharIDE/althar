@@ -28,7 +28,7 @@
 /* moving: the text changes colour in time with the slide */
 .sliding .option {
   transition-duration: var(--slide);
-  transition-timing-function: var(--ease);
+  transition-timing-function: var(--ease-out);
 }
 /* the selection: one element behind the options, moved by transform */
 .indicator {

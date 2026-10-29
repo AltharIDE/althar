@@ -6,7 +6,7 @@
   flex-direction: column;
   background: var(--paper);
   border-left: 1px solid var(--line-2);
-  animation: in var(--base) var(--ease);
+  animation: in var(--enter) var(--ease-out);
 }
 .panel:focus-visible {
   outline: none;

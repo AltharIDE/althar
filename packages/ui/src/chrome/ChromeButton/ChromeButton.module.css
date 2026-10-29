@@ -10,7 +10,8 @@
   white-space: nowrap;
   transition:
     background var(--fast) var(--ease),
-    color var(--fast) var(--ease);
+    color var(--fast) var(--ease),
+    transform var(--press) var(--ease-out);
 }
 .button svg {
   color: var(--t-3);
@@ -22,6 +23,10 @@
 }
 .button:active {
   background: var(--line-2);
+}
+/* it gives under the pointer, a little, and comes back */
+.button:active:not(:disabled, [aria-disabled='true']) {
+  transform: scale(var(--scale-press));
 }
 .button[aria-expanded='true'] {
   background: var(--line-2);
