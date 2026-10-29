@@ -11,8 +11,8 @@ import { connectGitHub, launch, openFirstProject, say, startTask } from './suppo
 /*
  * The line up next, in a real window with the fake agent and the fake
  * GitHub: with one agent at a time, held by a server a finished task left
- * running, three reviews of someone else's pull requests and a quick task
- * wait in Up next, not Running, though none has a plan's first step. The
+ * running, three reviews of someone else's pull requests, each started from
+ * its plan, and a quick task with none, wait in Up next, not Running. The
  * person drags the quick task to the front, to the back, and to the front
  * again let go outside the lane, starts a drag they cancel with Escape, and
  * moves the review last in line to the front from its own view; when the server stops, the line starts
@@ -66,6 +66,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
     for (const [index] of PULLS.entries()) {
       await say(page, `Review https://github.test/meridian/api/pull/${index + 1} [coordinator:review]`)
+      // A review starts from a plan of its lead alone: started at once, not after its countdown.
+      await page.getByRole('button', { name: 'Start now' }).last().click({ timeout: 20_000 })
       await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1, { timeout: 20_000 })
     }
     // The quick task's lead keeps at it once it starts, so it keeps the place.
@@ -84,18 +86,26 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(3)).toContainText('4th in line')
     await expect(running.getByRole('article')).toHaveCount(0)
-    await expect(next.getByText('Drag to change the order')).toBeVisible()
+    await expect(next.getByText('Drag to change the order')).toHaveCount(0)
     await page.mouse.move(1400, 880)
     await page.waitForTimeout(400)
     await work.screenshot({ path: 'test-results/line-board.png', scale: 'css', animations: 'disabled' })
 
-    // A shot of the line mid-drag. Not on Linux: under X, a shot has the window report X's own pointer, which no button
-    // holds, and the line takes it for a release it missed, ending the drag Playwright's mouse still holds.
-    const midDrag = async (path: string) => {
-      if (process.platform !== 'linux') await next.screenshot({ path, scale: 'css', animations: 'disabled' })
-    }
+    // No shot of the line mid-drag: a shot has the window report the pointer as the system has it, which no button holds, and
+    // the line takes it for a release it missed or a lost capture, ending the drag Playwright's mouse still holds.
+    // The line as it shows, top to bottom: mid-drag the document keeps its order, and the rows move by transforms.
+    const inOrder = async (titles: ReadonlyArray<string>) =>
+      expect
+        .poll(async () => {
+          const shown = await rows.evaluateAll((items) =>
+            items.map((item) => ({ text: item.textContent ?? '', y: item.getBoundingClientRect().y })),
+          )
+          return shown.toSorted((a, b) => a.y - b.y).map(({ text }) => titles.find((title) => text.includes(title)) ?? text)
+        })
+        .toEqual(titles)
+    const JUMP = 'Try the double jump'
 
-    // The person drags the quick task by its grip to the front: the rows make room, and it says it is next as it goes.
+    // The person drags the quick task by its grip to the front: the rows make room, and once let go it says it is next.
     await rows.nth(3).hover()
     const grip = next.getByRole('button', { name: /^Move Try the double jump.* in the line$/ })
     const from = await grip.boundingBox()
@@ -105,10 +115,10 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.mouse.down()
     for (let step = 1; step <= 10; step++)
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - ((from.y - top.y + 10) * step) / 10)
-    await expect(rows.nth(0)).toContainText('Try the double jump')
-    await expect(rows.nth(0)).toContainText('Next in line')
-    await midDrag('test-results/line-dragging.png')
+    await inOrder([JUMP, ...PULLS])
     await page.mouse.up()
+    await expect(rows.nth(0)).toContainText(JUMP)
+    await expect(rows.nth(0)).toContainText('Next in line')
     await expect(next.getByRole('button', { name: 'Back to oldest first' })).toBeVisible()
     await expect(rows.nth(1)).toContainText(PULLS[0] ?? '')
     await expect(rows.nth(1)).toContainText('2nd in line')
@@ -116,10 +126,6 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.waitForTimeout(400)
     await next.screenshot({ path: 'test-results/line-dropped.png', scale: 'css', animations: 'disabled' })
 
-    const JUMP = 'Try the double jump'
-    const inOrder = async (titles: ReadonlyArray<string>) => {
-      for (const [index, title] of titles.entries()) await expect(rows.nth(index)).toContainText(title)
-    }
     // Presses a row's grip, to drag it from there.
     const grab = async (title: string) => {
       await rows.filter({ hasText: title }).hover()
@@ -141,11 +147,10 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     const down = await grab(JUMP)
     await glide(down, { x: down.x, y: bottom.y + bottom.height - 4 })
     await inOrder([...reviews, JUMP])
-    await expect(rows.nth(3)).toContainText('4th in line')
-    await midDrag('test-results/line-dragging-down.png')
     await page.mouse.up()
     await page.waitForTimeout(2500)
     await inOrder([...reviews, JUMP])
+    await expect(rows.nth(3)).toContainText('4th in line')
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
     const above = await next.getByText('Starts when an agent is free').boundingBox()
@@ -185,6 +190,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await behind.screenshot({ path: 'test-results/line-task.png', scale: 'css', animations: 'disabled' })
     await front.click()
     await expect(front).toHaveCount(0)
+    // First in the line before the place frees, or what was first starts in it.
+    await expect(page.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeVisible()
 
     // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the quick
     // task, which keeps the place; the two older reviews wait on, oldest first.

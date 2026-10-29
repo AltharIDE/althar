@@ -1,4 +1,5 @@
 import { cx } from '../../lib/cx'
+import type { RootProps } from '../../lib/props'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import b from '../Board/Board.module.css'
@@ -21,28 +22,31 @@ export const keptRowText: KeptRowText = {
   done: 'Done',
 }
 
-export interface KeptRowProps {
-  title: string
-  /** When it was kept, in words: kept 5h ago. */
-  at: string
-  current?: boolean
-  onOpen?: () => void
-  /** Settles it; absent where it isn't the person's to settle here. */
-  onDone?: () => void
-  /** What Done does, on hover: that it stops its page, where it left one running. */
-  doneHint?: string
-  /** Done under way. */
-  busy?: boolean
-  /** What went wrong settling it, in words. */
-  error?: string
-  text?: Partial<KeptRowText>
-}
+export type KeptRowProps = RootProps<
+  'article',
+  {
+    title: string
+    /** When it was kept, in words: kept 5h ago. */
+    at: string
+    current?: boolean
+    onOpen?: () => void
+    /** Settles it; absent where it isn't the person's to settle here. */
+    onDone?: () => void
+    /** What Done does, on hover: that it stops its page, where it left one running. */
+    doneHint?: string
+    /** Done under way. */
+    busy?: boolean
+    /** What went wrong settling it, in words. */
+    error?: string
+    text?: Partial<KeptRowText>
+  }
+>
 
 /** One row of what was kept for later. Put it in a BoardList. */
-export function KeptRow({ title, at, current, onOpen, onDone, doneHint, busy = false, error, text }: KeptRowProps) {
+export function KeptRow({ title, at, current, onOpen, onDone, doneHint, busy = false, error, text, className, ...rest }: KeptRowProps) {
   const t = { ...keptRowText, ...text }
   return (
-    <article className={cx(b.row, s.row)} aria-current={current || undefined}>
+    <article className={cx(b.row, s.row, className)} aria-current={current || undefined} {...rest}>
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>

@@ -7,6 +7,9 @@
   margin: 0;
   font-size: 11.5px;
   color: var(--t-3);
+  /* it comes in from the bar's end, where it sits */
+  transform-origin: 100% 50%;
+  animation: arrive var(--enter) var(--ease-out);
 }
 .ready {
   color: var(--t-2);
@@ -14,4 +17,11 @@
 }
 .error {
   color: var(--danger);
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateX(6px) scale(var(--scale-pop));
+  }
 }

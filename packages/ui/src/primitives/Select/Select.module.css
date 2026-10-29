@@ -61,12 +61,23 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);
-  animation: pop var(--fast) var(--ease);
+  transform-origin: var(--radix-select-content-transform-origin);
+  animation: pop var(--enter) var(--ease-out);
+}
+.content[data-state='closed'] {
+  animation: shut var(--exit) var(--ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(-3px);
+    transform: scale(var(--scale-pop));
+  }
+}
+@keyframes shut {
+  to {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
   }
 }
 @media (prefers-reduced-motion: reduce) {

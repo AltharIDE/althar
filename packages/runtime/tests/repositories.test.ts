@@ -83,7 +83,8 @@ describe('opening a folder', () => {
       const inside = yield* projects.read(join(single, 'packages', 'api'))
       assert.deepStrictEqual(
         [inside.kind, inside.name, inside.repositories.map((found) => [found.path, found.folder])],
-        ['inside', 'api', [[single, join('packages', 'api')]]],
+        // Its folder in the repository the way git writes it, with `/` on Windows too.
+        ['inside', 'api', [[single, 'packages/api']]],
       )
       const folder = folderOf('web', 'api')
       const several = yield* projects.read(folder)
@@ -147,7 +148,7 @@ describe('opening a folder', () => {
       assert.strictEqual(opened.name, 'api')
       const coordinator = yield* coordinatorFolder(opened.projectId)
       assert.isTrue(coordinator.repositories[0]?.path.endsWith(join('packages', 'api')))
-      assert.strictEqual(coordinator.repositories[0]?.within, join('packages', 'api'))
+      assert.strictEqual(coordinator.repositories[0]?.within, 'packages/api')
       const task = yield* createTask(opened.projectId)
       yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
       assert.strictEqual(launches.at(-1)?.cwd, join(task.worktree, 'packages', 'api'))

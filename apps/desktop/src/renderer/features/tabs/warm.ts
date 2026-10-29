@@ -1,7 +1,7 @@
 import { QueryObserver } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 
-import { projectReads, type Read, readAhead, type Reads, reads, threadReads } from '../../data/reads'
+import { homeReads, projectReads, type Read, readAhead, type Reads, reads, threadReads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import type { Place } from './tabs'
 
@@ -11,7 +11,8 @@ import type { Place } from './tabs'
  * and the feed keeps it up to date (`feed.ts`), or marks it out of date to be
  * read behind the screen as it shows. Each tab is read ahead once the window
  * is idle, as the window starts or the tab opens, and again as the person
- * points at it, so going to it never waits on the runtime.
+ * points at it, so going to it never waits on the runtime. The home's tab
+ * is kept warm the same way, for as long as there are projects.
  */
 
 /** What a tab's place shows: its project's screen, and the task it was last on, if it was. */
@@ -63,4 +64,25 @@ export const useWarmTabs = (open: ReadonlyArray<string>, places: Readonly<Record
   }, [client, cache, tabs])
 
   return useCallback((projectId: string) => readAhead(cache, readsOf(reads(client), projectId, latest.current[projectId])), [client, cache])
+}
+
+/** Keeps the home warm while there are projects (`ready`); returns the way to read it ahead, as its tab is pointed at. */
+export const useWarmHome = (ready: boolean): (() => void) => {
+  const { client, cache } = useServices()
+
+  // Held as the tabs' are, and read ahead once the window is idle: the window may have started on a project, not on the home.
+  useEffect(() => {
+    if (!ready) return
+    const read = reads(client)
+    const holding = homeReads(read).map((options) => new QueryObserver(cache, { ...options, enabled: false }).subscribe(() => undefined))
+    const ahead = whenIdle(() => readAhead(cache, homeReads(read)))
+    return () => {
+      ahead()
+      holding.forEach((stop) => stop())
+    }
+  }, [client, cache, ready])
+
+  return useCallback(() => {
+    if (ready) readAhead(cache, homeReads(reads(client)))
+  }, [client, cache, ready])
 }

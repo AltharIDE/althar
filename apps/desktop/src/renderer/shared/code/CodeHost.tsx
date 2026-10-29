@@ -123,7 +123,7 @@ function CodePeekOf({
 }: {
   found: FoundCode
   threadId: string
-  onBeside: () => void
+  onBeside: (() => void) | undefined
   onGo: (name: string) => void
 }) {
   const { client } = useServices()
@@ -135,7 +135,7 @@ function CodePeekOf({
       found={found}
       {...(place === undefined ? {} : { where: whereOf(place, found) })}
       {...(read === undefined ? {} : { read })}
-      onBeside={onBeside}
+      {...(onBeside === undefined ? {} : { onBeside })}
       onGo={onGo}
       {...(main === undefined || found.kind !== 'file' ? {} : { editor: { name: main.name, onOpen: () => open(main.id, found) } })}
       text={{ inEditor: openInText.in }}
@@ -326,9 +326,9 @@ export const useCodeHost = ({
   }, [threadId, open])
 
   // The latest of what the kit's parts call, so what they are given changes only with what they show.
-  const latest = useRef({ onOpen, onClose, go, inEditor: editors.open })
+  const latest = useRef({ onOpen, onClose, go, inEditor: editors.open, taskId })
   useLayoutEffect(() => {
-    latest.current = { onOpen, onClose, go, inEditor: editors.open }
+    latest.current = { onOpen, onClose, go, inEditor: editors.open, taskId }
   })
   const opened = open === null ? null : codeKey(open.found)
   const mainId = main?.id
@@ -343,7 +343,8 @@ export const useCodeHost = ({
         <CodePeekOf
           found={found}
           threadId={threadId}
-          onBeside={() => latest.current.onOpen(found, from)}
+          // Not from the coordinator's, which has no task: there a press on the name is the one way beside.
+          onBeside={latest.current.taskId === null ? undefined : () => latest.current.onOpen(found, from)}
           onGo={(name) => latest.current.go(name, false)}
         />
       ),

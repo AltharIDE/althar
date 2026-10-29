@@ -151,7 +151,7 @@ describe('the picture evidence names', () => {
 
       const read = yield* readEvidence([shot, { kind: 'note', caption: 'Nothing else moved' }], [first, second])
       // Where it is, from the worktree it is in, so it isn't counted as left uncommitted there.
-      assert.deepStrictEqual(evidenceFiles(read), [{ worktree: second, file: join('shots', 'after.png') }])
+      assert.deepStrictEqual(evidenceFiles(read), [{ worktree: second, file: 'shots/after.png' }])
       assert.strictEqual(read[0]?.found?.name, 'after.png')
       assert.strictEqual(read[0]?.found?.size, PNG.length)
       assert.deepStrictEqual(Buffer.from(read[0]?.found?.bytes ?? []), PNG)

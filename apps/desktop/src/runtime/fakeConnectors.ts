@@ -21,7 +21,9 @@ import { Effect, Layer } from 'effect'
  * ALTHAR_FAKE_REMOTE_WEB is set, with the pull requests ALTHAR_FAKE_PULLS
  * lists for a test to review; what is pushed to one goes to the bare
  * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE, and its commits have the checks
- * ALTHAR_FAKE_CHECKS names, where it does. A pasted token connects it, and so
+ * ALTHAR_FAKE_CHECKS names, where it does; each call takes as long as
+ * ALTHAR_FAKE_LATENCY says by its method, in milliseconds, as JSON: at once
+ * unless it does. A pasted token connects it, and so
  * does gh's sign-in, which is signed in to it. Loaded only when
  * ALTHAR_FAKE_AGENTS is set, or, with real agents, ALTHAR_FAKE_CONNECTORS=github.
  */
@@ -32,10 +34,14 @@ export const HOST = 'https://github.test'
 const namedChecks =
   process.env.ALTHAR_FAKE_CHECKS === undefined ? undefined : (JSON.parse(process.env.ALTHAR_FAKE_CHECKS) as ReadonlyArray<FakeCheck>)
 
+/** How long each of its calls takes, by method, where a test says (ALTHAR_FAKE_LATENCY): as a host far away answers. */
+const latencies = JSON.parse(process.env.ALTHAR_FAKE_LATENCY ?? '{}') as Readonly<Record<string, number>>
+
 // A repository's pushes go to ALTHAR_FAKE_REMOTE_<NAME> where that is set, as a test of several repositories gives each its own.
 const github = makeFakeService({
   pushUrl: (path) => process.env[`ALTHAR_FAKE_REMOTE_${(path.at(-1) ?? '').toUpperCase()}`] ?? process.env.ALTHAR_FAKE_REMOTE ?? '',
   ...(namedChecks === undefined ? {} : { checksFor: () => namedChecks }),
+  latency: (method) => latencies[method] ?? 0,
 })
 github.addRepository(['meridian', 'api'])
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.

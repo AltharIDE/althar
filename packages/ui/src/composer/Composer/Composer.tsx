@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, type FormEvent, type UIEvent, type Whee
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
+import { ListMotion } from '../../lib/ListMotion'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -309,6 +310,7 @@ export function Composer({
   /* Whether the arriving words are followed to the end: until the person scrolls up to read, then again once they are back at the end. */
   const following = useRef(true)
   const arriving = useRef<HTMLSpanElement>(null)
+  const form = useRef<HTMLFormElement>(null)
   /* where the overlay rests to show the newest words: their last line at the bottom, which is the end of the text when they come at the end */
   const newest = (el: HTMLElement) => {
     const words = arriving.current
@@ -411,7 +413,7 @@ export function Composer({
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
-      <form className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
+      <form ref={form} className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
         {drop.over && (
           <div className={s.dropping} aria-hidden="true">
             <Icon name="clip" size={14} />
@@ -452,56 +454,59 @@ export function Composer({
           <output className={s.imageNote}>{fileNote}</output>
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
-        {attached > 0 && (
-          <ul className={s.images} aria-label={t.attachments(attached)}>
-            {images.map((image) => (
-              <li key={image.id} className={s.image}>
-                {image.reading ? (
-                  <Spinner size="small" label={t.readingImage(image.name)} />
-                ) : image.src ? (
-                  <img src={image.src} alt={image.name} className={s.imageThumb} />
-                ) : (
-                  <span role="img" aria-label={image.name} className={s.imagePlaceholder}>
-                    <Icon name="image" size={14} />
-                  </span>
-                )}
-                {onRemoveImage && (
-                  <IconButton
-                    className={s.imageRemove}
-                    icon="close"
-                    size="small"
-                    label={t.removeImage(image.name)}
-                    onClick={() => onRemoveImage(image.id)}
-                  />
-                )}
-              </li>
-            ))}
-            {files.map((file) => (
-              <li key={file.id} className={s.file}>
-                <span className={s.fileIcon}>
-                  {file.reading ? (
-                    <Spinner size="small" label={t.readingImage(file.name)} />
+        {/* what is attached grows in, and fades once taken off */}
+        <ListMotion within={form} enter="grow">
+          {attached > 0 && (
+            <ul className={s.images} aria-label={t.attachments(attached)}>
+              {images.map((image) => (
+                <li key={image.id} data-move={image.id} className={s.image}>
+                  {image.reading ? (
+                    <Spinner size="small" label={t.readingImage(image.name)} />
+                  ) : image.src ? (
+                    <img src={image.src} alt={image.name} className={s.imageThumb} />
                   ) : (
-                    <Icon name={file.folder ? 'folder' : 'file'} size={13} />
+                    <span role="img" aria-label={image.name} className={s.imagePlaceholder}>
+                      <Icon name="image" size={14} />
+                    </span>
                   )}
-                </span>
-                <span className={s.fileMain}>
-                  <span className={s.fileName}>{file.name}</span>
-                  {file.meta && <span className={s.fileMeta}>{file.meta}</span>}
-                </span>
-                {onRemoveFile && (
-                  <IconButton
-                    className={s.fileRemove}
-                    icon="close"
-                    size="small"
-                    label={t.removeImage(file.name)}
-                    onClick={() => onRemoveFile(file.id)}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                  {onRemoveImage && (
+                    <IconButton
+                      className={s.imageRemove}
+                      icon="close"
+                      size="small"
+                      label={t.removeImage(image.name)}
+                      onClick={() => onRemoveImage(image.id)}
+                    />
+                  )}
+                </li>
+              ))}
+              {files.map((file) => (
+                <li key={file.id} data-move={file.id} className={s.file}>
+                  <span className={s.fileIcon}>
+                    {file.reading ? (
+                      <Spinner size="small" label={t.readingImage(file.name)} />
+                    ) : (
+                      <Icon name={file.folder ? 'folder' : 'file'} size={13} />
+                    )}
+                  </span>
+                  <span className={s.fileMain}>
+                    <span className={s.fileName}>{file.name}</span>
+                    {file.meta && <span className={s.fileMeta}>{file.meta}</span>}
+                  </span>
+                  {onRemoveFile && (
+                    <IconButton
+                      className={s.fileRemove}
+                      icon="close"
+                      size="small"
+                      label={t.removeImage(file.name)}
+                      onClick={() => onRemoveFile(file.id)}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </ListMotion>
         <div className={s.field} onWheel={interim ? readEarlier : undefined}>
           {/* the words still arriving, faint where they will land; while they show, this draws what is written too, and the field's own text goes clear */}
           {interim && (

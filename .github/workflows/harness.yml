@@ -40,7 +40,6 @@ jobs:
             packages/domain,
             packages/persistence-sqlite,
             packages/provider-adapters,
-            packages/runtime,
             packages/skills,
             apps/cli,
           ]
@@ -59,3 +58,46 @@ jobs:
         working-directory: .
       - run: bun run check
       - run: bun run test
+
+  # The runtime's tests in four parts by file (vitest's --shard), each its own job: as one they took most of a quarter
+  # of an hour, and often more.
+  runtime:
+    name: verify (packages/runtime ${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    # A few times a part's usual run, so a hang fails here, not at the limit.
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/4, 2/4, 3/4, 4/4]
+    defaults:
+      run:
+        working-directory: packages/runtime
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test --shard=${{ matrix.shard }}
+
+  # The runtime's parts as the one check they were before, under its name: passes only when every part did.
+  runtime-verified:
+    name: verify (packages/runtime)
+    needs: runtime
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          PARTS: ${{ needs.runtime.result }}
+        run: |
+          if [ "$PARTS" != success ]; then
+            echo "::error::A part of the runtime's tests didn't pass: $PARTS"
+            exit 1
+          fi

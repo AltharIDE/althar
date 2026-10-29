@@ -53,6 +53,9 @@ const hostDenied =
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
+/** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
+export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
+
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
@@ -76,7 +79,7 @@ export const agentSaid = (error: unknown): string | undefined => {
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return "The agent isn't signed in. Sign in with its own tool, then try again."
+          return signedOutWords
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -249,6 +252,7 @@ export const words = (
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
       case 'AttachRefused':
+      case 'ReviewRefused':
         return text(error, 'message')
       case 'AutomationRefused':
         return text(error, 'message')
@@ -380,8 +384,6 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
   title_too_long: 'Keep the title short: what should change, in a few words.',
-  left_running:
-    'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
   folder_in_use: 'Something runs from the task’s folder, or an agent works in it, so it stays. Stop it first, then remove the folder.',
   folder_in_way:
     'Something that isn’t the task’s worktree is where its folder goes, so the folder can’t come back there. Move it away, then try again.',
@@ -425,6 +427,7 @@ export const expected = new Set([
   'ChangesClosed',
   'ReviewDraftClosed',
   'ReviewDraftIncomplete',
+  'ReviewRefused',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

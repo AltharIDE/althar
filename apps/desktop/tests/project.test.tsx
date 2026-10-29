@@ -6,6 +6,7 @@ import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/con
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import type { SettingsWays } from '../src/renderer/features/settings/open'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
@@ -18,11 +19,13 @@ function Project({
   room,
   newTask,
   onRoomChange,
+  ways,
 }: {
   onTask?: (threadId: string) => void
   room?: Room
   newTask?: boolean
   onRoomChange?: (room: Room) => void
+  ways?: SettingsWays
 }) {
   return (
     <ProjectView
@@ -34,6 +37,7 @@ function Project({
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
       {...(onRoomChange === undefined ? {} : { onRoomChange })}
+      {...(ways === undefined ? {} : { ways })}
     />
   )
 }
@@ -386,6 +390,60 @@ describe('the Talk room', () => {
         null,
       ),
     )
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+  })
+
+  it('plans a review of someone else’s pull request with its one lead, offering only agents held to reading', async () => {
+    const review = card({
+      slug: 'review-1199-send-back',
+      title: 'Review #1199: Send back won’t restart a dead lead session',
+      kind: 'review',
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1199,
+        url: 'https://github.com/meridian/api/pull/1199',
+        title: 'Send back won’t restart a dead lead session',
+        author: 'ninemate',
+        outside: true,
+        additions: 58,
+        deletions: 20,
+        findings: 0,
+        blocking: 0,
+        verdict: null,
+        posted: null,
+      },
+      plan: {
+        ...card().plan!,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: 'Strong at reading.',
+        agents: ['claude-code'],
+      },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(review)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    // One step, which reviews, with why; nothing to pick for when it is done.
+    const lead = await screen.findByRole('button', { name: /^Lead for this task: / })
+    expect(screen.getByText('Review')).toBeTruthy()
+    expect(screen.getByText('Strong at reading.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByText('When the work is done')).toBeNull()
+    // Codex can't be held to reading only, so it isn't offered.
+    await userEvent.click(lead)
+    expect(await screen.findByRole('radio', { name: /Claude Code default/ })).toBeTruthy()
+    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: 'High' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [{ key: 'implement', agentId: 'claude-code', model: null, effort: 'high', skipped: false }],
+        null,
+      ),
+    )
+    await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
@@ -833,8 +891,12 @@ describe('what can go wrong', () => {
     const { client } = fakeClient({
       status: vi.fn(async () => ({ ...status, agents: agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) })),
     })
-    withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('No agent is signed in. Sign one in from Settings, then come back.')).toBeTruthy()
+    const ways = { signIn: vi.fn(), agents: vi.fn(), connections: vi.fn() }
+    withServices(<Project room={Room.Talk} ways={ways} />, client)
+    expect(await screen.findByText(/^No agent is signed in\./)).toBeTruthy()
+    // Its way out: Settings, at the agents.
+    await userEvent.click(screen.getByRole('button', { name: 'Sign one in' }))
+    expect(ways.agents).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
 

@@ -1,5 +1,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
+import type { ThreadItem } from '@althar/contracts'
+
 import {
   Composer,
   DictationTray,
@@ -42,6 +44,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
@@ -91,7 +94,9 @@ export const text = {
   queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
-  needsAgent: 'No agent is signed in. Sign one in from Settings, then come back.',
+  signIn: 'Sign in again',
+  needsAgent: 'No agent is signed in.',
+  signOneIn: 'Sign one in',
   earlier: 'Earlier',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
@@ -102,8 +107,11 @@ export const text = {
   width: 'Width of the conversation',
 }
 
-/** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
-const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480 } as const
+/**
+ * How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches.
+ * `lane` is the least of the board worth leaving beside a file open over it.
+ */
+const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
 const storedWidth = (): number => {
   try {
@@ -114,7 +122,7 @@ const storedWidth = (): number => {
   }
 }
 
-/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room. */
+/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room; `room`, the window's. */
 const useBothWidth = () => {
   const [width, setWidth] = useState(storedWidth)
   const [room, setRoom] = useState(() => window.innerWidth)
@@ -132,7 +140,7 @@ const useBothWidth = () => {
       // Not kept; it still holds for this window.
     }
   }
-  return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
+  return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
 /** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
@@ -151,6 +159,13 @@ export interface ProjectSettingsActions {
   readonly onConnections: () => void
 }
 
+/** The thread of the newest task card waiting for a free agent, if any. */
+const newestWaiting = (items: ReadonlyArray<ThreadItem>): string | null => {
+  const waiting = items.filter((item) => item.kind === 'task' && item.content.queued !== null)
+  const newest = waiting.at(-1)
+  return newest?.kind === 'task' ? newest.content.threadId : null
+}
+
 export function ProjectView({
   model,
   board,
@@ -162,6 +177,7 @@ export function ProjectView({
   automation: openingAutomation = null,
   onAutomationChange,
   visit,
+  ways,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -179,6 +195,8 @@ export function ProjectView({
   onAutomationChange?: (automation: string | null) => void
   /** Counts the times its address asked for it, the screen kept in between: each time, it goes to the view, automation or section asked. */
   visit?: number
+  /** Where in Althar's settings an error is put right: an agent's sign-in, or the agents. */
+  ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
@@ -200,7 +218,7 @@ export function ProjectView({
   const both = useBothWidth()
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
-  const lanes = board.board === null ? null : lanesOf(board.board)
+  const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
@@ -286,6 +304,8 @@ export function ProjectView({
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
+    // Every waiting card has the same holders, so only the newest says them.
+    holdersOn: newestWaiting(coordinator?.items ?? []),
   }
   const draftActions: DraftActions = {
     onFile: (draftId) => void model.fileIssueDraft(draftId),
@@ -354,9 +374,14 @@ export function ProjectView({
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
       </>
     ) : (session === null || !session.held) && model.agents.length === 0 ? (
-      text.needsAgent
+      <>
+        {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
+      </>
     ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
-      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+      <>
+        {text.signedOut(suggested.agentName, agentName(chosen.agentId))}{' '}
+        {ways !== undefined && <LinkButton onClick={() => ways.signIn(suggested.agentId)}>{text.signIn}</LinkButton>}
+      </>
     ) : null
 
   const composer = (
@@ -474,6 +499,7 @@ export function ProjectView({
                 now={now}
                 onRun={(id) => void model.runProject(null, id)}
                 onStop={(id) => void model.stopLaunch(id)}
+                onRunBranch={model.runBranch}
               />
             ),
           })}
@@ -563,7 +589,8 @@ export function ProjectView({
                         )}
                         threadId={coordinator.threadId}
                         session={session}
-                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain() })}
+                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                        {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                         automation={(card, itemId) => (
@@ -582,7 +609,7 @@ export function ProjectView({
                             run={run}
                             now={now}
                             onStop={(id) => void model.stopLaunch(id)}
-                            onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
+                            onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
                           />
                         )}
                         queued={text.queued}
@@ -606,11 +633,15 @@ export function ProjectView({
               )}
             </div>
           )}
-          {/* Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far edge. */}
+          {/*
+           * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+           * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+           */}
           {room === Room.Both &&
             talking &&
             shown.workbench(null, {
-              max: Math.max(360, window.innerWidth - both.width - 48),
+              room: both.room - both.width,
+              keep: WIDTH.lane,
               className: s.over,
               style: { left: both.width },
             })}

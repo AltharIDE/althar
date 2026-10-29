@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -111,6 +111,22 @@ const say = (threadId: string, body: string) =>
     yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
   })
 
+/**
+ * What the person says to a task once it is done: its lead stopped as it settled, so the task's screen starts it again
+ * after queuing what they said, as it does for any thread no agent is on.
+ */
+const sayAfterDone = (threadId: string, body: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    yield* until(
+      Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
+      (gone) => gone.length === 1,
+      Duration.seconds(10),
+    )
+    yield* say(threadId, body)
+    yield* sessions.startLast(threadId)
+  })
+
 describe('a plain task', () => {
   it.live('starts with no branch, set up as any task, and a lead that changed nothing finishes with only its summary', () =>
     Effect.gen(function* () {
@@ -203,7 +219,7 @@ describe('a plain task', () => {
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
       // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task waits in Needs you again, to be settled.
-      yield* say(task.threadId, 'And the v2 ones?')
+      yield* sayAfterDone(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
         (rows) => rows.length === 1,
@@ -218,7 +234,11 @@ describe('a plain task', () => {
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
-        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', { blank: (prompt) => prompt.endsWith('And the v2 ones?') }, { idle: { blank: Duration.millis(100) } }),
+          ),
+        ),
       ),
     ),
   )
@@ -328,7 +348,7 @@ describe('a plain task', () => {
         const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
         yield* until(state, (rows) => rows[0]?.state === 'done')
         // A question: the follow-up changes nothing, and it waits in Needs you, not settled again, still with no branch.
-        yield* say(task.threadId, 'And the v2 ones?')
+        yield* sayAfterDone(task.threadId, 'And the v2 ones?')
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
           (rows) => (rows[0]?.n ?? 0) === 1,
@@ -381,7 +401,7 @@ describe('a plain task', () => {
         assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'settled'), { kind: 'plain', branch: worktree.branch })
         // Asked for more, it commits again in a round of its own, Finished again: nothing offers a pull request for it.
-        yield* say(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
+        yield* sayAfterDone(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state = 'succeeded'`,
           (rows) => rows[0]?.n === 1,
