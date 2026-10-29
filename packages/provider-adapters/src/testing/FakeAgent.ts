@@ -1693,6 +1693,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
 
+      // A refusal carried with the next prompt (`refusals: 'withNext'`) is no resume: it says what it was sent.
+      if (text.startsWith('(From Althar, about your last turn:')) {
+        await say(`echo: ${text}`)
+        return ended()
+      }
       const resumed = /Althar's rules refused this|not allowed by the coordinator|The person declined/.test(text)
       if (resumed && !session.stubborn) {
         await say('carrying on without it')

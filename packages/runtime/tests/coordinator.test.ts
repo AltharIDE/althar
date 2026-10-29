@@ -1490,4 +1490,47 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       }
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('runs a loop that only looks, and answers once where its rules refuse a command, with nothing more in its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId } = yield* opened
+      const settled = (count: number) =>
+        until(turns(threadId), (rows) => rows.length === count && rows.every((row) => row.state === 'completed'))
+      const decided = (command: string) =>
+        until(
+          sql<{ outcome: string }>`
+            SELECT d.outcome FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+            WHERE json_extract(r.raw_input, '$.command') = ${command}`,
+          (rows) => rows.length > 0,
+        )
+      const said = sql<{ kind: string; text: string | null }>`
+        SELECT kind, json_extract(content, '$.text') AS text FROM thread_items WHERE thread_id = ${threadId} ORDER BY sequence`
+      yield* say(threadId, 'hello')
+      yield* settled(1)
+      const loop = 'for r in api web docs; do git -C "$r" status -sb; done'
+      yield* say(threadId, `${scenarios.run}${loop}`)
+      assert.strictEqual((yield* decided(loop))[0]?.outcome, 'allow')
+      yield* settled(2)
+      // Refused, the agent carries on past it in the same turn, and no turn of its own follows to explain it.
+      const before = (yield* said).length
+      yield* say(threadId, `${scenarios.run}git fetch origin`)
+      assert.strictEqual((yield* decided('git fetch origin'))[0]?.outcome, 'reject')
+      yield* settled(3)
+      const refused = (yield* said).slice(before)
+      assert.deepStrictEqual(
+        refused.filter((item) => item.kind === 'agent_message').map((item) => item.text),
+        ['chosen=decline'],
+      )
+      assert.notInclude(JSON.stringify(refused), 'Carry on without it')
+      // Nor does the person's next message carry it: the agent worked around it already.
+      yield* say(threadId, 'what next?')
+      yield* settled(4)
+      // The fake agent says back what it was sent.
+      const echoed = (yield* said).findLast((item) => item.kind === 'agent_message')?.text ?? ''
+      assert.include(echoed, 'what next?')
+      assert.notInclude(echoed, 'From Althar')
+      assert.notInclude(JSON.stringify(yield* said), 'Carry on without it')
+    }).pipe(Effect.provide(runtime())),
+  )
 })

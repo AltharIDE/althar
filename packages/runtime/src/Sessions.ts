@@ -2069,6 +2069,8 @@ export class Sessions extends Context.Service<
                 modeOptionId: definition.options.mode,
                 // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
                 ...heldFor(definition, reads),
+                // The coordinator's every turn is a reply the person reads: a refusal never starts one of its own (ADR-019).
+                ...(thread.role === 'coordinator' ? { refusals: 'withNext' as const } : {}),
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
