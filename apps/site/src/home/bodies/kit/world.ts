@@ -39,7 +39,10 @@ export function renamed<T>(x: T): T {
 
 export const { CALLS, NEXT, READY_TWO_REPOS, SETTLED } = renamed({ ...board })
 export const { NOTES_KEPT, NOTES_SEEN } = renamed({ ...chrome })
-export const { DRAFT_LINEAR, FROM_231, PLAN_432 } = renamed({ ...coordinator })
+const planned = renamed({ ...coordinator })
+export const { DRAFT_LINEAR, FROM_231 } = planned
+/** Task 432's team as the site shows it: the lead and its reviewers, without the kit's dry run. */
+export const PLAN_432 = planned.PLAN_432.filter((step) => step.id !== 'dry')
 export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
 export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
