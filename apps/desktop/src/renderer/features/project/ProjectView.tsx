@@ -14,8 +14,7 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  ProjectFront,
-  type ProjectFrontProps,
+  ProjectHeader,
   Running,
 } from '@althar/ui'
 
@@ -47,7 +46,7 @@ import { BoardView } from '../board/BoardView'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
-import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
+import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import type { ConnectionsModel } from '../connections/useConnections'
@@ -59,19 +58,20 @@ import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
-import { nextRoom, ProjectBar } from './ProjectBar'
+import { partsOf, tasksOf, trackersOf } from './front'
+import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 
 /*
- * A project: its front page across the top, then the conversation with its
- * coordinator, the board of its work, or both side by side, the conversation
- * as wide as the person drags it (b steps through them); or its automations,
- * or its settings, in their place, a violet dot in the bar on Automations
- * where one paused itself, and on Settings where a connection waits on the
- * person. The front page says how the project stands (what needs you:
- * pointed at, what it is; clicked, the first of it) and what it is made of.
+ * A project: its header across the top, the bar a task has, then the
+ * conversation with its coordinator, the board of its work, or both side by
+ * side, the conversation as wide as the person drags it (b steps through
+ * them); or its automations, or its settings, in their place, a violet dot on
+ * Automations where one paused itself, and on Settings where a connection
+ * waits on the person. The header says how the project stands (what needs
+ * you: pointed at, what it is; clicked, the first of it), holds its views,
+ * runs it, and lists what it is made of under ⋯.
  * The coordinator answers questions itself and turns changes into tasks:
  * there is no task to start without it. What you open from the board opens
  * its task.
@@ -141,13 +141,6 @@ const useBothWidth = () => {
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
-}
-
-/** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
-function Front({ lanes, ...front }: Omit<ProjectFrontProps, 'last'> & { lanes: Lanes | null }) {
-  const now = useNow(true, 60_000)
-  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
-  return <ProjectFront {...front} {...(last === undefined ? {} : { last })} />
 }
 
 /** The project's settings, and where they lead out of the project. */
@@ -456,7 +449,7 @@ export function ProjectView({
     if (first !== null) onTask(first)
   }
 
-  // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
+  // The header: its name and ink as the person last chose them, how it stands, its views, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
   const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
@@ -469,15 +462,18 @@ export function ProjectView({
     setAutomation(id)
     setRoom(Room.Automations)
   }
-  const front = (
-    <Front
-      lanes={lanes}
+  const header = (
+    <ProjectHeader
       name={kept.name ?? name}
       seed={projectId}
       ink={kitInk(kept.ink ?? model.project?.ink ?? 'clay')}
-      yours={yours}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
+      // Until the board is read, where it stands isn't said, rather than said wrong.
+      {...(lanes === null ? {} : { yours, needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
       onYours={openYours}
+      room={room}
+      onRoom={setRoom}
+      settingsNeedYou={settingsNeedYou}
+      automationsNeedYou={automations.needsYou}
       parts={partsOf({
         repositories: model.repositories,
         names: model.project?.repositories ?? [],
@@ -508,8 +504,7 @@ export function ProjectView({
 
   return (
     <div className={s.window}>
-      <ProjectBar room={room} onRoom={setRoom} settingsNeedYou={settingsNeedYou} automationsNeedYou={automations.needsYou} />
-      {front}
+      {header}
       {room === Room.Automations ? (
         <AutomationsView
           projectId={projectId}

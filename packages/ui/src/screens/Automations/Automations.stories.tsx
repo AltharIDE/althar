@@ -10,7 +10,7 @@ const meta = {
   title: 'Screens/Automations',
   component: Automations,
   parameters: { layout: 'fullscreen' },
-  // On the project's ground, as its tab shows it under the front page.
+  // On the project's ground, as its tab shows it under the header.
   decorators: [
     (Story) => (
       <div style={{ background: 'var(--n-2)', height: '100vh' }}>
