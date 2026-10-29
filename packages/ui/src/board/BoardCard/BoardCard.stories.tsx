@@ -26,7 +26,7 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, NextStep, PullChip } from './Chips'
+import { Fact, FactLine, NextStep, NextSteps, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
 
 const resolveNow = fn()
@@ -366,6 +366,37 @@ export const WaitingOverTheNumber: Story = {
   },
 }
 export const Stopped: Story = { args: CHANGE_STOPPED }
+/** The main action's one place: its own row, from the left, under the conflict line; the second action quiet beside the one violet button. */
+export const StoppedWithAConflict: Story = {
+  args: {
+    ...CHANGE_STOPPED,
+    foot: (
+      <>
+        <FactLine>
+          <Fact icon="branch" tone="warm">
+            It conflicts with main, and nothing asked its lead to resolve it.
+          </Fact>
+        </FactLine>
+        <NextSteps>
+          <NextStep signal onPress={resolveNow}>
+            Resolve now
+          </NextStep>
+          <NextStep onPress={fn()}>Carry on</NextStep>
+        </NextSteps>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    const resolve = card.getByRole('button', { name: 'Resolve now' })
+    const carry = card.getByRole('button', { name: 'Carry on' })
+    await expect(resolve.compareDocumentPosition(carry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  },
+}
+/** A failed check and Push: the check above, the button on its own row below, never beside it. */
+export const ReadyChecksFailedWithPush: Story = {
+  ...readyFoot(340, false, [{ words: '7 checks failed', icon: 'close', tone: 'danger' }], 'Push 1 commit'),
+}
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {
   args: {

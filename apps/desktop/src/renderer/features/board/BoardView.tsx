@@ -22,6 +22,7 @@ import {
   NextLine,
   NextRow,
   NextStep,
+  NextSteps,
   Outcome,
   PullChip,
   SettledRow,
@@ -361,6 +362,18 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
   const card = runningCard(work, '', () => '')
   const sendBack = actions?.sendBack
+  // Carry on is the card's one violet button, unless Resolve now is: then it is the quiet one beside it.
+  const carryOn = (quiet: boolean) =>
+    sendBack === undefined ? null : (
+      <NextStep
+        signal={!quiet}
+        busy={actions?.sending?.has(work.taskId) ?? false}
+        doing={text.carryingOn}
+        onPress={() => void sendBack(work, text.carryOnNote)}
+      >
+        {text.carryOn}
+      </NextStep>
+    )
   const { at: _, ...rest } = card
   return {
     ...rest,
@@ -373,15 +386,8 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
       : {
           foot: (
             <>
-              {work.conflictUnsent != null && unsentFoot(work, work.conflictUnsent, actions)}
-              <NextStep
-                signal
-                busy={actions?.sending?.has(work.taskId) ?? false}
-                doing={text.carryingOn}
-                onPress={() => void sendBack(work, text.carryOnNote)}
-              >
-                {text.carryOn}
-              </NextStep>
+              {work.conflictUnsent != null && unsentFoot(work, work.conflictUnsent, actions, carryOn(actions?.resolveNow !== undefined))}
+              {work.conflictUnsent == null && carryOn(false)}
             </>
           ),
         }),
@@ -514,7 +520,7 @@ export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merg
   Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending'>>
 
 /** A conflict that is the person's, handed back or not asked of its lead: why, in one line, and Resolve now, which asks the lead anyway. */
-const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined): ReactNode => {
+const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined, second?: ReactNode): ReactNode => {
   const resolveNow = actions?.resolveNow
   return (
     <>
@@ -523,15 +529,20 @@ const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefin
           {why}
         </Fact>
       </FactLine>
-      {resolveNow !== undefined && (
-        <NextStep
-          signal
-          busy={actions?.resolving?.has(work.taskId) ?? false}
-          doing={text.resolvingNow}
-          onPress={() => void resolveNow(work.taskId)}
-        >
-          {text.resolveNow}
-        </NextStep>
+      {resolveNow !== undefined ? (
+        <NextSteps>
+          <NextStep
+            signal
+            busy={actions?.resolving?.has(work.taskId) ?? false}
+            doing={text.resolvingNow}
+            onPress={() => void resolveNow(work.taskId)}
+          >
+            {text.resolveNow}
+          </NextStep>
+          {second}
+        </NextSteps>
+      ) : (
+        second
       )}
     </>
   )

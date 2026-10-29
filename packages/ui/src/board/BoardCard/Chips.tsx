@@ -323,7 +323,7 @@ export type NextStepProps = RootProps<
 export function NextStep({ children, className, onPress, label, busy = false, doing, signal = false, ...rest }: NextStepProps) {
   if (onPress === undefined)
     return (
-      <span className={cx(b.go, className)} {...rest}>
+      <span className={cx(b.go, s.step, className)} {...rest}>
         {children}
         <Icon name="arrow" size={11} />
       </span>
@@ -343,6 +343,20 @@ export function NextStep({ children, className, onPress, label, busy = false, do
       >
         {busy && doing !== undefined ? doing : children}
       </Button>
+    </span>
+  )
+}
+
+export type NextStepsProps = RootProps<'span', { children: ReactNode }>
+
+/**
+ * A next step with a second action beside it, on the one row a card's main action has: the first is the card's one
+ * violet button, the second quiet (a NextStep without `signal`).
+ */
+export function NextSteps({ children, className, ...rest }: NextStepsProps) {
+  return (
+    <span className={cx(s.steps, className)} {...rest}>
+      {children}
     </span>
   )
 }
