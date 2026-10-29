@@ -164,6 +164,33 @@ export const NightlyCheck: Story = {
 /** The same beside what a task made: the button under the facts, as wide as the card. */
 export const NightlyCheckBeside: Story = { args: NightlyCheck.args }
 
+/**
+ * The nightly check once all of it is on origin, GitHub connected: nothing said of where it stands, and Althar's own button opens
+ * its pull request, never GitHub's page for one.
+ */
+export const NightlyCheckPushed: Story = {
+  args: {
+    ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
+    remote: { name: 'origin', pushed: true, ahead: 0 },
+    actions: (
+      <Button variant="signal" onClick={open}>
+        Open a draft pull request
+      </Button>
+    ),
+  },
+  parameters: { width: ALONE },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('althar/nightly-dependency-check-27-oct')).toBeInTheDocument()
+    await expect(c.queryByText(/pushed|origin|so far/)).toBeNull()
+    await expect(c.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Open a draft pull request' }))
+    await expect(open).toHaveBeenCalled()
+  },
+}
+
 /** Althar can't open its pull request until GitHub is connected: connecting is the button, pushing it alone stays quiet. */
 export const NotConnected: Story = {
   args: {
@@ -182,7 +209,10 @@ export const NotConnected: Story = {
   parameters: { width: ALONE },
 }
 
-/** All of it pushed and committed: nothing said of it; with no connection, the host's page for its pull request is a press away. */
+/**
+ * All of it pushed and committed: nothing said of it. With no connection, connecting is the button, and the host's own page for its
+ * pull request is a press away.
+ */
 export const BranchPushed: Story = {
   args: {
     ...CHANGE_BRANCH,
@@ -194,11 +224,18 @@ export const BranchPushed: Story = {
       },
     ],
     remote: { name: 'origin', pushed: true, ahead: 0 },
-    actions: <Button variant="signal">Merge into main here</Button>,
+    note: 'Althar opens its pull request once GitHub is connected.',
+    actions: (
+      <>
+        <Button variant="signal">Connect GitHub</Button>
+        <Button>Merge into main here</Button>
+      </>
+    ),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByText(/pushed|origin/)).toBeNull()
+    await expect(c.getByRole('button', { name: 'Connect GitHub' })).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /Open a pull request on GitHub/ })).toHaveAttribute(
       'href',
       'https://github.com/meridian/api/compare/main...althar/return-409-on-reuse?expand=1',
@@ -368,7 +405,8 @@ export const AllStates: Story = {
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
         { state: 'on its branch, commits not pushed', node: <ChangeSet {...args} {...NightlyCheck.args} /> },
         { state: 'on its branch, not connected', node: <ChangeSet {...args} {...NotConnected.args} /> },
-        { state: 'on its branch, pushed', node: <ChangeSet {...args} {...BranchPushed.args} /> },
+        { state: 'on its branch, pushed', node: <ChangeSet {...args} {...NightlyCheckPushed.args} /> },
+        { state: 'on its branch, pushed, not connected', node: <ChangeSet {...args} {...BranchPushed.args} /> },
         { state: 'on its branch, uncommitted', node: <ChangeSet {...args} {...Uncommitted.args} /> },
         { state: 'merged here, not pushed', node: <ChangeSet {...args} {...MergedHere.args} /> },
         { state: 'accept failed', node: <ChangeSet {...args} error="GitHub refused the merge: meridian-web is behind main." /> },

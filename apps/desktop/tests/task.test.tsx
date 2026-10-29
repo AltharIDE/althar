@@ -1875,7 +1875,7 @@ describe('a task', () => {
     expect(client.startSession).not.toHaveBeenCalled()
   })
 
-  it('opens the draft pull request of work that ended on its branch, or that its lead was stopped on', async () => {
+  it('opens the draft pull request of work on its branch whenever no agent is at work on it', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } })),
     })
@@ -1894,17 +1894,37 @@ describe('a task', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Open a draft pull request' }))
     await waitFor(() => expect(stopped.client.openChange).toHaveBeenCalledWith('t1'))
     halted.unmount()
-    // Its lead's turn cut short with its run still going: it carries on, or is stopped, first.
+    // Its lead's turn cut short with its run still going, its branch on GitHub already: Althar opens it, not GitHub's own page.
+    const pushed = {
+      name: 'origin',
+      branch: 'althar/add-a-retry',
+      pushed: true,
+      ahead: 0,
+      newPullRequest: 'https://github.com/acme/web/pull/new/x',
+    }
     const interrupted = fakeClient({
-      getThread: vi.fn(async () =>
-        thread({ session: null, task: { ...snapshot().task, phase: 'stopped', commits: 2, actions: ['stop', 'abandon'] } }),
-      ),
+      getThread: vi.fn(async () => {
+        const base = thread({ session: null, task: { ...snapshot().task, phase: 'stopped', commits: 2, actions: ['stop', 'abandon'] } })
+        const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111', remote: pushed }]
+        return { ...base, task: { ...base.task, here } }
+      }),
     })
     const cut = withServices(<Task />, interrupted.client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const card = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(card.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Open a draft pull request' }))
+    await waitFor(() => expect(interrupted.client.openChange).toHaveBeenCalledWith('t1'))
+    cut.unmount()
+    // Its lead at work: its run opens it as it ends.
+    const working = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...snapshot().task, phase: 'running', commits: 2, actions: ['stop', 'abandon'] } })),
+    })
+    const busy = withServices(<Task />, working.client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     expect(await screen.findByRole('article', { name: 'Add a retry' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
-    cut.unmount()
+    busy.unmount()
     // With its host not connected, connecting it is what opens one.
     const unconnected = fakeClient({
       getThread: vi.fn(async () => ({

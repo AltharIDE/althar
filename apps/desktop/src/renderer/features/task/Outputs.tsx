@@ -24,8 +24,10 @@ import { device } from '../../shared/device'
  * opens one. Asking for changes is a word to the lead in the conversation. A
  * branch its pull request won't take a plain push of says why, and offers
  * what puts it right. Work with no pull request is its branch by name, what
- * of it isn't pushed, and its files, from the first commit; its draft pull
- * request opens once its lead is done or stopped. A task that went back to
+ * of it isn't pushed, and its files, from the first commit; Althar opens its
+ * draft pull request whenever no agent is at work on it, its host connected,
+ * and the host's own page for one is offered only where it isn't, beside
+ * connecting it. A task that went back to
  * work after its pull request merged or closed shows its latest pull
  * request, the earlier ones under it, and offers a new one for the commits
  * that are in none yet (ADR-034). With nothing it made to read beside it,
@@ -346,10 +348,11 @@ export function Outputs({
 
   // Work on its branch: the repositories without a pull request, which merge here once it is ready; before that, its branch so far.
   const branchOnly = first === undefined && task.merged.length === 0 && (task.files.length > 0 || task.commits > 0)
-  // Its draft pull request opens once its lead is done, or stopped with its run: interrupted mid-run, it carries on or is stopped first.
-  const settled =
-    ready || task.phase === 'kept' || (task.phase === 'stopped' && (task.actions.includes('resume') || !task.actions.includes('stop')))
-  const opening = settled && first === undefined && task.commits > 0
+  // Its draft pull request opens whenever no agent is at work on it: done, kept, stopped however, or waiting with no turn running.
+  // At work, its run opens it as it ends.
+  const idle =
+    (ready || task.phase === 'kept' || task.phase === 'stopped' || task.phase === 'waiting') && snapshot.session?.turnRunning !== true
+  const opening = idle && first === undefined && task.commits > 0
   const host = snapshot.host
   // Opened by Althar on its host, connected; else connecting it is what to do, where Althar knows the host: by its name.
   const opens = opening && host?.connected === true

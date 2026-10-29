@@ -393,6 +393,31 @@ describe('a task that ends on its branch', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 
+  it.live('opens the draft pull request of a task whose lead’s turn was cut short, once no agent is on its way to it', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
+      const { task } = yield* onItsBranch(working)
+      yield* connect('github')
+      // Its run still going, as the person interrupting its lead leaves it; its lead about to carry on once it has a place.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'running' WHERE task_id = ${task.taskId}`
+      yield* sql`UPDATE threads SET waits_for_place = '2026-10-29T09:00:00.000Z' WHERE task_id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'working')
+      assert.lengthOf(github.changes, 0)
+      // No agent at work on it, nor on its way: what it committed goes up as a draft.
+      yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${task.taskId}`
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual(
+        github.changes.map((change) => change.draft),
+        [true],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
   it.live('opens its pull request after all when its host is connected before the work is done', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

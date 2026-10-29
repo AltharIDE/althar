@@ -10,11 +10,12 @@ import { connectGitHub, launch, openFirstProject, shown, startTask } from './sup
 
 /*
  * A task's outputs in a real window, with the fake agent and the fake GitHub,
- * at a wide window and a narrow one: a stopped task whose branch has no pull
- * request, as a nightly dependency check leaves it, which says Stopped, names
- * its branch and what of it GitHub doesn't have, as GitHub says, lists its
- * files, and opens its draft pull request; and a pull request, open and then
- * merged. The screenshots, light and dark, are this change's own evidence
+ * at a wide window and a narrow one: a task whose lead the person
+ * interrupted, its branch with no pull request, as a nightly dependency check
+ * leaves it, which says Stopped, names its branch and what of it GitHub
+ * doesn't have, as GitHub says, lists its files, and opens its draft pull
+ * request, before and after its branch is pushed; and a pull request, open
+ * and then merged. The screenshots, light and dark, are this change's own evidence
  * (test-results/outputs/ at the repository's root, which a run here doesn't
  * clear).
  */
@@ -113,6 +114,8 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
   git(repo, 'commit', '-q', '-m', 'Workspaces')
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
   git(repo, 'remote', 'add', 'origin', 'https://github.test/meridian/api.git')
+  // The person's own push to origin lands where the fake GitHub's does.
+  git(repo, 'config', 'remote.origin.pushurl', remote)
   git(repo, 'push', '-q', remote, 'main')
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE: remote })
   try {
@@ -147,8 +150,8 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
       `on: push\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: bun install --frozen-lockfile\n`,
     )
     git(nightly.path, 'commit', '-q', '-am', 'Install from the lockfile as it is')
-    await page.getByRole('button', { name: 'More for this task' }).click()
-    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    // The person interrupts its lead: its run is still going, with no agent at work on it.
+    await page.getByRole('button', { name: 'Interrupt the lead' }).click()
     await expect(shown(page, 'Stopped', { exact: true })).toBeVisible({ timeout: 15_000 })
     await toOutputs(page)
     // GitHub has the first commit, though nothing here noted it: asked as the person looks, it says so, and only the second counts.
@@ -157,7 +160,14 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await expect(branch.getByText('1 commit not pushed')).toBeVisible({ timeout: 15_000 })
     await expect(branch.getByText('2 commits not pushed')).toBeHidden()
     await expect(branch.getByRole('button', { name: 'Open the diff of apps/cli/package.json' })).toBeVisible()
+    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
     await shoot(electronApp, page, 'branch')
+    // All of it pushed: nothing to say of it, and Althar opens its pull request, never GitHub's own page for one.
+    await branch.getByRole('button', { name: 'Push to origin' }).click()
+    await expect(branch.getByText(/not pushed/)).toBeHidden({ timeout: 15_000 })
+    await expect(branch.getByRole('link', { name: /Open a pull request/ })).toHaveCount(0)
+    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
+    await shoot(electronApp, page, 'branch-pushed')
 
     // A pull request: opened as the lead finishes, then four more files the lead committed, pushed.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
@@ -190,7 +200,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await expect(shown(page, 'Merged', { exact: true }).first()).toBeVisible({ timeout: 20_000 })
     await shoot(electronApp, page, 'merged')
 
-    // Stopped, the check's branch still opens its draft pull request: pushed as it opens.
+    // Stopped, the check's branch still opens its draft pull request, at what it has.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page
       .getByRole('button', { name: /Open task/ })
