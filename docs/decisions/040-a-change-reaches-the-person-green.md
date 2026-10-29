@@ -1,6 +1,6 @@
 # ADR-040: Until the person has looked, a change's checks are Althar's to see through
 
-- **Status:** Accepted; amended by [ADR-070](070-failing-checks-go-to-the-lead-whoever-has-looked.md): failures go to the lead after the person has looked too
+- **Status:** Accepted; amended by [ADR-070](070-failing-checks-go-to-the-lead-whoever-has-looked.md): failures go to the lead after the person has looked too; and by [ADR-071](071-a-lead-s-commits-push-as-its-turn-ends.md): where the project says so, as it does unless turned off, all the lead commits goes up as its turn ends
 - **Date:** 2026-10-15
 - **Owner:** Repository maintainers
 - **Context:** A change came to the person (Needs you) as soon as its pull
@@ -42,7 +42,8 @@
     failure reaches a running lead only, and every push is theirs.
     Superseded by ADR-070: a failure goes to its lead, started again where it
     must be, whether or not the person has looked, and its fix pushes at
-    once.
+    once; and by ADR-071: where the project's rules push a lead's commits on
+    their own, everything it commits goes up as its turn ends.
   - What Althar writes to an agent quietly is now authored by Althar, not
     by the person whose command it came with, so the person's words are only
     what they said.

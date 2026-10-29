@@ -1,6 +1,6 @@
 # ADR-070: Failing checks go to the lead, whoever has looked
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-071](071-a-lead-s-commits-push-as-its-turn-ends.md): where the project pushes a lead's commits on their own, a fix goes up with whatever else it committed, said since or not
 - **Date:** 2026-10-28
 - **Amends:** [ADR-040](040-a-change-reaches-the-person-green.md)
 - **Owner:** Repository maintainers

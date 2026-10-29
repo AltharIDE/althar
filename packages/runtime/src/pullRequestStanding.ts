@@ -75,6 +75,14 @@ const staleWords = (seen: SeenChange) => {
   return null
 }
 
+/** Who pushes the commits not on it yet: Althar as its lead's turn ends, where the project says so and nothing held them (ADR-071). */
+const pushedWords = (change: SeenChange['change']): string =>
+  change.pushing === undefined
+    ? 'the person pushes them.'
+    : change.pushing.held === null
+      ? "Althar pushes them as the lead's turn ends."
+      : `the person pushes them, since they didn't go up by themselves: ${change.pushing.held}.`
+
 /** One pull request in a few words: `PR #113 draft, checks passing, 2 unpushed`. */
 export const changeWords = (seen: SeenChange, several: boolean): string => {
   const { change } = seen
@@ -193,7 +201,7 @@ const changeSection = (seen: SeenChange, several: boolean): string => {
       : null,
     checkSection(change),
     change.state === 'open' && change.unpushed > 0
-      ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; the person pushes them.`
+      ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; ${pushedWords(change)}`
       : null,
     change.state === 'open' ? divergedWords(change) : null,
     // The host snapshot doesn't carry whether it merges cleanly: Althar finds out only when it merges the task here.

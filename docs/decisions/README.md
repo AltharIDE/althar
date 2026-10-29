@@ -78,3 +78,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [068](068-a-settled-task-stops-everything-it-left-running.md) | A settled task stops everything it left running, however it settled, and what Althar lost track of is found by its mark |
 | [069](069-motion-is-one-system-named-by-what-happens.md) | Motion is one system, named by what happens, in CSS and the browser's own animations |
 | [070](070-failing-checks-go-to-the-lead-whoever-has-looked.md) | Failing checks go to the lead, whoever has looked, and it tells a failure of its own from one broken on main |
+| [071](071-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
