@@ -23,6 +23,7 @@ const BROWSER_ONLY = new Set<string>([
   'primitives/Fold/Fold.stories.tsx#Opening',
   'thread/Snippet/Snippet.stories.tsx#ShowingAll',
   'thread/WorkedFor/WorkedFor.stories.tsx#Opening',
+  'setup/Preferences/Preferences.stories.tsx#Groups',
   'primitives/CheckList/CheckList.stories.tsx#Default',
   'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
   'composer/Composer/Composer.stories.tsx#LongDictation',
