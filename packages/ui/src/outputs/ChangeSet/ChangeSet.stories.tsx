@@ -133,6 +133,8 @@ export const OnItsBranch: Story = {
 export const NightlyCheck: Story = {
   args: {
     ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
     push: (
       <Button variant="quiet" size="small" onClick={push}>
         Push to origin
@@ -166,7 +168,10 @@ export const NightlyCheckBeside: Story = { args: NightlyCheck.args }
 export const NotConnected: Story = {
   args: {
     ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
     remote: { name: 'origin', pushed: false, ahead: 2 },
+    note: 'Althar opens its pull request once GitHub is connected.',
     push: (
       <Button variant="quiet" size="small">
         Push to origin
