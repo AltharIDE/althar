@@ -322,7 +322,8 @@ describe('downloading an agent', () => {
     assert.lengthOf(asked, 2)
   })
 
-  it('takes only releases of the major Althar runs the agent at, and keeps no copy that says it is another', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('takes only releases of the major Althar runs the agent at, and keeps no copy that says it is another', async () => {
     // Where GitHub's newest releases are OpenCode 2, the newest 1.x one is downloaded.
     const { fetch, asked } = github(archive('1.19.0'), { tag: 'v1.19.0' })
     const { root, run } = using({ fetch })

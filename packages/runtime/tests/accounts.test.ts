@@ -23,6 +23,8 @@ import { anyOf, SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
 import { definition, fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
 
+const windows = process.platform === 'win32'
+
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
  * homes Althar makes and folders other tools made, each a sign-in of its
@@ -392,7 +394,8 @@ describe('accounts', () => {
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
 
-  it.effect('never run the sign-in status of an agent at a version no session starts on, or one that can’t be told', () => {
+  // Not on Windows: the fake agent's version and status are shell commands, writing to a path sh is given.
+  it.effect.skipIf(windows)('never run the sign-in status of an agent at a version no session starts on, or one that can’t be told', () => {
     /* The fake `too-new`, its version as given, its status command leaving a trace in a file of its own when it runs. */
     const at = (version: string) => {
       const asked = join(mkdtempSync(join(tmpdir(), 'althar-asked-')), 'asked')
@@ -430,7 +433,8 @@ describe('accounts', () => {
     })
   })
 
-  it.effect(
+  // Not on Windows: the fake agent's version is a shell command, counting its runs in a file sh is given.
+  it.effect.skipIf(windows)(
     'read an agent’s version once for all its accounts checked together, which Settings reads too, and give no sign-in line on 2.x',
     () => {
       const dir = mkdtempSync(join(tmpdir(), 'althar-versions-'))
