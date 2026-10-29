@@ -176,7 +176,6 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
-  const { host } = useServices()
   const [end, setEnd] = useState<HTMLElement | null>(null)
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)

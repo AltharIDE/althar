@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 /* The keys and the words for this computer, read once from the system the window runs on. */
 
 const on = async (platform?: string) => {
+  vi.unstubAllGlobals()
   vi.resetModules()
   if (platform !== undefined) vi.stubGlobal('window', { althar: { platform } })
   return { keys: await import('../src/foundations/keys'), device: await import('../src/foundations/device') }

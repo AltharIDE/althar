@@ -1,8 +1,10 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
-index b306b0c8b336f4591dc2c6dc8fc3733db7e86da6..b28f23448c79c18f8ab0bbb609b60a067996d7d6 100644
+index 5e55d82e90e0a6caded3c7276949c9662751580d..755c3071f521752499ce1087d0839798dfb48887 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
-@@ -6131,17 +6131,16 @@ export class ClaudeAcpAgent {
+@@ -6183,21 +6183,20 @@
+                             await sendUpdate({ sessionId: params.sessionId, update: beat });
+                         }
                          break;
                      }
                      case "rate_limit_event": {
@@ -30,3 +32,5 @@ index b306b0c8b336f4591dc2c6dc8fc3733db7e86da6..b28f23448c79c18f8ab0bbb609b60a06
                          break;
                      }
                      case "conversation_reset": {
+                         // The SDK has switched to a fresh conversation, whose Task* IDs
+                         // and task store are independent of the previous transcript.
