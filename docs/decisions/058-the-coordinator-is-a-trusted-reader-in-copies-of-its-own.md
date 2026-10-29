@@ -2,6 +2,19 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
+- **Amended:** 2026-10-29: the coordinator's line may also loop (`for … in …`,
+  `while read …`), branch (`if`, `&&`, `||`), set variables of its own and
+  use them later in it, and work out arithmetic, where every command inside
+  only looks. Each variable holds what sets it, as written or as what a
+  substitution prints (where what sets it may not run, whatever the
+  environment holds too), and the line is read once for each value, with
+  the value in its place, by every rule here. What a command printed is
+  never a `sed` script nor arithmetic, which would run it, unless it keeps
+  only digits (`| grep -oE '[0-9]+'`, `wc -l`, `git rev-list --count`).
+  Arithmetic sets nothing and reads only numbers. No variable the shells
+  read for themselves may be set: none with an upper-case name, nor zsh's
+  own (`path`). It was refused a loop of `git status` across its copies
+  many times a day. A review's lead keeps the strict list.
 - **Owner:** Repository maintainers
 - **Context:** The coordinator talks with the person about the project and
   reads the project's repositories in throwaway copies (ADR-004), under the
