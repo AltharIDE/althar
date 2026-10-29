@@ -528,6 +528,15 @@ export const transcript = (
         }
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
+        // What the lead showed the person, by its captions: an agent that takes the thread over knows what they have seen.
+        case 'pictures': {
+          const captions = (Array.isArray(content['pictures']) ? (content['pictures'] as ReadonlyArray<unknown>) : []).flatMap((piece) =>
+            typeof piece === 'object' && piece !== null && typeof (piece as { caption?: unknown }).caption === 'string'
+              ? [(piece as { caption: string }).caption]
+              : [],
+          )
+          return [`[${agent} showed the person] ${captions.join(' / ')}`]
+        }
         case 'step_result':
           return [`[${text('step')}${text('verdict') === '' ? '' : `, ${text('verdict')}`}] ${text('summary')}`]
         case 'task':

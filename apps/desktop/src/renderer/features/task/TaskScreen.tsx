@@ -2,6 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { memo } from 'react'
 
 import { settingsSearch } from '../project/search'
+import { useSettingsWays } from '../settings/open'
 import { useWhenRemoved } from '../projectSettings/useProjectSettings'
 import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
@@ -11,6 +12,7 @@ import { useTask } from './useTask'
 export const TaskScreen = memo(function TaskScreen({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
   const model = useTask(threadId)
+  const ways = useSettingsWays()
   const project = model.snapshot?.project
   useVisit(threadId, project?.id)
   // Its project removed, from here or another window: home.
@@ -25,5 +27,5 @@ export const TaskScreen = memo(function TaskScreen({ threadId }: { threadId: str
       : {
           onRules: () => void navigate({ to: '/projects/$projectId', params: { projectId: project.id }, search: settingsSearch('rules') }),
         }
-  return <TaskView model={model} onBack={back} {...rules} />
+  return <TaskView model={model} onBack={back} {...rules} onSignIn={ways.signIn} onConnections={ways.connections} />
 })

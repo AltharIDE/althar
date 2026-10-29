@@ -98,8 +98,16 @@
       Clean up takes, then, below a hairline, what is held back, each with
       why and its own Remove.
     - **Clean up:** it takes what nothing holds, whatever its wait, and
-      says what it freed, measured on the disk after (`du` overstates
-      folders whose installs share blocks).
+      says what it freed: the sizes of what went, measured just before each
+      went. A size is what a task's folders, its review copies too, hold
+      that nothing outside them shares: on APFS each file's private size,
+      so the clones bun installs `node_modules` as count nothing, edited or
+      not, though `du` and Finder count them in full, and clones made of
+      each other inside the folders count short; elsewhere a file hardlinked
+      from outside counts nothing. A folder part of which can't be read has
+      no size, never what the rest takes; Clean up then says what the disk
+      freed. The disk's free space after is otherwise no measure: other
+      writes move it by as much as a worktree frees.
     - **Nothing in Needs you, and no notifications:** it is housekeeping.
 - **Alternatives considered:**
   - **Right away, as a task settles:** a merged task is often run,

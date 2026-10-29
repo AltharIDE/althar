@@ -60,6 +60,14 @@ const ended = (threadId: string, count: number) =>
     withInput,
   )
 
+/**
+ * How long a quiet server is waited for, as its port is looked up every two seconds: on Windows each lookup starts
+ * PowerShell to list the processes, which takes seconds on a busy machine, where Althar goes on looking ten minutes.
+ */
+const LOOKUPS = Duration.seconds(30)
+/** How long a test that waits for a quiet server may take: that wait, and its setup and stopping it on a busy machine. */
+const LOOKING = Duration.toMillis(LOOKUPS) + 20_000
+
 /** Waits until the thread has `count` turns, all ended. */
 const settled = (threadId: string, count: number) => until(turns(threadId), (rows) => rows.length >= count && rows.every(done))
 
@@ -598,9 +606,9 @@ describe('sessions', () => {
           ['completed', null],
         ],
       )
-      // The thread says why no answer came, in the agent's words.
+      // The thread says plainly that it is signed out, with the agent's own words under it.
       const notice = (yield* threadItems(created.threadId)).find((item) => item.kind === 'notice' && item.content.severity === 'error')
-      assert.deepInclude(notice?.content, { source: 'agent', title: "Fake codex couldn't answer.", failure: 'auth_required' })
+      assert.deepInclude(notice?.content, { source: 'agent', title: 'Fake codex is signed out.', failure: 'auth_required' })
       assert.isNotEmpty(notice?.content.description)
     }).pipe(Effect.provide(runtime())),
   )
@@ -686,32 +694,38 @@ describe('sessions', () => {
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
-    it.live('finds where one answers from its port when its output never says, and it keeps its name', () =>
-      Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task: created } = yield* task()
-        yield* begin(created.threadId, 'claude-code')
-        yield* say(created.threadId, scenarios.backgroundQuiet)
-        yield* ended(created.threadId, 1)
-        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
-        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
-        assert.strictEqual(serving?.name, 'Start the dev server')
-        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    it.live(
+      'finds where one answers from its port when its output never says, and it keeps its name',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.backgroundQuiet)
+          yield* ended(created.threadId, 1)
+          const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null, LOOKUPS)
+          assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+          assert.strictEqual(serving?.name, 'Start the dev server')
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+      LOOKING,
     )
 
-    it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>
-      Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task: created } = yield* task()
-        // A process, so its tree is known; no file its output goes to, so that is all there is to tell it by.
-        yield* begin(created.threadId, 'process')
-        yield* say(created.threadId, scenarios.backgroundCodexQuiet)
-        yield* ended(created.threadId, 1)
-        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
-        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
-        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    it.live(
+      'finds a silent server in the agent’s tree that was already listening when the agent reported it',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          // A process, so its tree is known; no file its output goes to, so that is all there is to tell it by.
+          yield* begin(created.threadId, 'process')
+          yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+          yield* ended(created.threadId, 1)
+          const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null, LOOKUPS)
+          assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+      LOOKING,
     )
 
     it.live.skipIf(process.platform === 'win32')(

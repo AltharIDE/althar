@@ -31,6 +31,12 @@ import { items, repository, runtime, until } from './support'
  */
 
 const HOUR = 60 * 60 * 1000
+/**
+ * How long a test of a later round may take: a lead and a review, then the round after, each review three seconds by
+ * design (`[review:slowly]`), which `reviewed` and the wait for the card allow 20 and 30 seconds; the suite's 20 cut
+ * them short on a slow runner.
+ */
+const ROUNDS = { timeout: 50_000 }
 
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, database = ':memory:') =>
   Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each })))
@@ -228,7 +234,7 @@ const sessionsOn = (threadId: string) =>
     SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`,
   )
 
-describe('a settle step on a lead that fell nearly out since it worked', () => {
+describe('a settle step on a lead that fell nearly out since it worked', ROUNDS, () => {
   it.live('goes to an agent with room where the project moves on, and the thread says why', () => {
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
@@ -420,7 +426,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
   })
 })
 
-describe('a later round of review on a reviewer that fell nearly out since the last', () => {
+describe('a later round of review on a reviewer that fell nearly out since the last', ROUNDS, () => {
   it.live('starts afresh on another of its agent’s accounts with room where the project rotates, and says so', () => {
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {

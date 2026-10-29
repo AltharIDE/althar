@@ -15,6 +15,7 @@ import {
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -68,6 +69,8 @@ export interface TaskModel {
   /** The agents have been read: none above then means none can lead, not that none are known yet. */
   readonly agentsKnown: boolean
   readonly error: string | null
+  /** The error is a code host or tracker that no longer takes Althar's sign-in: signing in to it again in Settings puts it right. */
+  readonly hostSignedOut: boolean
   /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
   readonly conflict: string | null
   readonly dismissConflict: () => void
@@ -96,6 +99,8 @@ export interface TaskModel {
   readonly interrupt: () => Promise<void>
   /** Has the agent on the task compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
+  /** Tries its lead's last turn again, where it failed: what the person said in it goes again. */
+  readonly tryAgain: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
@@ -217,6 +222,8 @@ export interface TaskModel {
 
 export const useTask = (threadId: string): TaskModel => {
   const { client, cache } = useServices()
+  // Kept by the window: back on the board meanwhile, its card says Merging, and why it didn't, if it doesn't.
+  const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
@@ -261,9 +268,22 @@ export const useTask = (threadId: string): TaskModel => {
     if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
   }, [client, taskId, phase])
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  // Hidden while its screen is kept (`KeptScreens`) as well as gone: the read it gathered for goes, and so does the timer,
+  // or shown again it would gather what it hears for a read that never comes.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      timer.current = undefined
+    },
+    [],
+  )
 
-  const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
+  // What a code host or tracker said as it stopped taking Althar's sign-in, so the error offers signing in to it again.
+  const [hostSaid, setHostSaid] = useState<string | null>(null)
+  const fail = useCallback((failure: unknown) => {
+    setError(messageOf(failure))
+    if (failure instanceof ApiError && failure.reason === 'ConnectorFailed' && failure.why === 'unauthorized') setHostSaid(failure.message)
+  }, [])
 
   const arrived = useCallback(
     (items: ReadonlyArray<ThreadItem>) => {
@@ -465,6 +485,7 @@ export const useTask = (threadId: string): TaskModel => {
     agents,
     agentsKnown: status !== undefined,
     error,
+    hostSignedOut: error !== null && error === hostSaid,
     conflict,
     dismissConflict: () => setConflict(null),
     refused,
@@ -518,6 +539,7 @@ export const useTask = (threadId: string): TaskModel => {
     },
     interrupt: () => act(() => client.interrupt(threadId)),
     compact: () => act(() => client.compact(threadId)),
+    tryAgain: () => act(() => client.tryAgain(threadId)),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session
@@ -636,7 +658,7 @@ export const useTask = (threadId: string): TaskModel => {
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return
-        for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
+        for (const change of changes) await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
       }, doing.accept),
     push: (head, url) =>
       act(

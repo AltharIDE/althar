@@ -11,6 +11,12 @@
   task's worktree, and reading a `.env` outside it. Its card says "even with
   everything allowed", and offers no "always allow": only Never, or turning
   the switch off and always allowing the kind, settles it otherwise.
+- **Amended:** 2026-10-28: with everything allowed, only what can't be
+  undone from the task still asks
+  ([ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)):
+  the stash, git forgetting what it keeps to recover lost work, and
+  reading a `.env` outside the task's worktree go ahead. The other modes
+  keep the whole floor.
 - **Owner:** Repository maintainers
 - **Context:** A project's rules ([ADR-013](013-project-rules.md)) said what
   happens to what no rule keeps in one of four modes, and "allow everything"

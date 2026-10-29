@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,13 +12,14 @@ import { launch, openFirstProject, say } from './support'
  * A finished task's folder (ADR-056), in a real window with the fake agent,
  * on a profile and worktrees of the test's own: a quick task that committed
  * a change is marked Done; Settings › Work on this computer lists its folder as
- * one that can go, and Clean up removes it; its thread says so as a line,
- * and what it changed still reads. Run brings the folder back, its header
- * saying so while it is set up again, and runs once it is; cleaned up
- * again, a message to its lead brings it back before the lead starts. Its
- * repository's install takes a few seconds, so its coming back shows. The
- * screenshots it takes are this change's own evidence
- * (test-results/folders-*.png).
+ * one that can go, by what it holds that its install doesn't share with a
+ * store outside it, and Clean up removes it, saying it freed that; its
+ * thread says so as a line, and what it changed still reads. Run brings
+ * the folder back, its header saying so while it is set up again, and runs
+ * once it is; cleaned up again, a message to its lead brings it back before
+ * the lead starts. Its repository's install takes a few seconds, so its
+ * coming back shows. The screenshots it takes are this change's own
+ * evidence (test-results/folders-*.png).
  */
 
 /** A page that answers on a port of its own and says where. */
@@ -97,17 +98,27 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     const kept = folder()
     expect(kept).not.toBeNull()
     expect(existsSync(kept ?? '')).toBe(true)
+    // An install it shares with a store outside it, a clone or a hardlink, frees nothing; what a package built there, it holds.
+    const store = join(home, 'store')
+    mkdirSync(store)
+    writeFileSync(join(store, 'pkg.node'), Buffer.alloc(64 * 1024 ** 2, 1))
+    const pkg = join(kept ?? '', 'node_modules', 'pkg')
+    mkdirSync(pkg, { recursive: true })
+    if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'pkg.node'), join(pkg, 'pkg.node')])
+    else linkSync(join(store, 'pkg.node'), join(pkg, 'pkg.node'))
+    writeFileSync(join(pkg, 'built.node'), Buffer.alloc(12 * 1024 ** 2, 2))
 
     // Work on this computer lists its folder as one that can go; Clean up removes it, and says what it freed.
     await thisComputer()
     const legend = row.getByRole('button', { name: /Can go now/ })
     await expect(legend).toBeVisible({ timeout: 30_000 })
+    await expect(legend).toHaveAccessibleName(/Can go now\s*12 MB/, { timeout: 30_000 })
     await legend.click()
     await expect(page.getByRole('region', { name: 'Goes with Clean up' }).getByText(TITLE)).toBeVisible()
     await page.screenshot({ path: 'test-results/folders-1-settings.png', animations: 'disabled', scale: 'css' })
     await page.keyboard.press('Escape')
     await row.getByRole('button', { name: 'Clean up' }).click()
-    await expect(row.getByText(/^Freed .* just now$/)).toBeVisible({ timeout: 30_000 })
+    await expect(row.getByText(/^Freed 12 MB just now$/)).toBeVisible({ timeout: 30_000 })
     expect(existsSync(kept ?? '')).toBe(false)
     await page.screenshot({ path: 'test-results/folders-2-freed.png', animations: 'disabled', scale: 'css' })
     await backToProject()

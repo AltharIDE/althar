@@ -47,6 +47,9 @@ export interface Work {
   readonly now: string | null
 }
 
+/** Pictures the lead showed the person (show_pictures), as one set. */
+export type Shown = Extract<Part, { kind: 'pictures' }>
+
 export interface Round {
   readonly kind: 'round'
   readonly id: string
@@ -59,9 +62,11 @@ export interface Round {
   /** Its report, where it handed one in: what it built, and what it showed. */
   readonly report: { readonly id: string; readonly result: StepResult } | null
   /** The error its agent's turn ended with, said in the open: there's no answer to come. */
-  readonly failed: string | null
+  readonly failed: Extract<Part, { kind: 'notice' }> | null
   /** What it handed back along the way, where it has no result to stand with: shown under its work. */
   readonly handed: Handed
+  /** Pictures it showed the person, in order, where it showed them: before its result, or after it. */
+  readonly shown: { readonly before: ReadonlyArray<Shown>; readonly after: ReadonlyArray<Shown> }
   readonly live: boolean
   /** Everything its lead did, in order: what a document it wrote was last changed by is read from them. */
   readonly parts: ReadonlyArray<Part>
@@ -280,6 +285,7 @@ export const roundsOf = (
             report: { id: block.id, result },
             failed: null,
             handed: handedBy([], worktree),
+            shown: { before: [], after: [] },
             live: false,
             parts: [],
           })
@@ -338,8 +344,14 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
   const failed = !live && ending?.kind === 'notice' && ending.tone === 'error' ? ending : undefined
   // What it said after its report, by where it stands among its steps.
   const afterReport = new Set(open.steps.slice(open.reportedAfter).map((step) => step.id))
+  // Pictures it showed the person stand open in the round, not in its work.
+  const pictures = open.steps.flatMap((step) => (step.kind === 'pictures' ? [step] : []))
   const steps: ReadonlyArray<WorkStep> = open.steps.flatMap((step) =>
-    step === failed ? [] : step.kind === 'notice' ? [{ kind: 'aside' as const, id: step.id, text: step.text }] : [step],
+    step === failed || step.kind === 'pictures'
+      ? []
+      : step.kind === 'notice'
+        ? [{ kind: 'aside' as const, id: step.id, text: step.text }]
+        : [step],
   )
   const messages = steps.flatMap((step) => (step.kind === 'message' && step.text.trim() !== '' ? [step] : []))
   const time = (id: string) => Date.parse(at.get(id) ?? now)
@@ -405,8 +417,13 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
           },
     result: result === undefined ? null : said(result, true),
     report: open.report,
-    failed: failed === undefined ? null : failed.text,
+    failed: failed === undefined ? null : failed,
     handed: handedBy(result === undefined ? files : [], worktree),
+    // Where it showed them: after its result where it said that first.
+    shown: {
+      before: pictures.filter((shown) => result === undefined || open.steps.indexOf(shown) < open.steps.indexOf(result)),
+      after: pictures.filter((shown) => result !== undefined && open.steps.indexOf(shown) > open.steps.indexOf(result)),
+    },
     live,
     parts: open.steps.filter((step): step is Part => step.kind !== 'aside' && step !== failed),
   }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -96,27 +96,26 @@ describe('a review’s lead', () => {
 })
 
 describe('the coordinator’s review_pull_request', () => {
-  it.live('says the review started but its lead couldn’t, where Althar couldn’t make the copy it reads', () => {
+  it.live('says the review was made but its lead can’t start, where Althar couldn’t make the copy it reads', () => {
     const at = hosted()
     const github = githubWithPull(at)
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* opened(at)
-      // The project's folder of worktrees, where the copy would go, as one that can't be written.
+      // A file where the review's folder in the project's folder of worktrees would go, so its copy can't be made there.
       const other = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Other' })
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${other.taskId}`
-      const folder = dirname(dirname(workspace?.path ?? ''))
-      chmodSync(folder, 0o555)
+      writeFileSync(join(dirname(dirname(workspace?.path ?? '')), 'review-1-send-back'), '')
       // The person asked for Claude Code's large model, thinking hard.
       const models = yield* Models
       yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       const said = yield* callTool(coordinator, 'review_pull_request', {
         pull_request: '#1',
         lead: { agent: 'claude-code', model: 'large', effort: 'high' },
-      }).pipe(Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))))
+      })
       assert.match(
         said,
-        /^Started review-1-send-back to review ninemate's pull request #1, "Send back", but its lead couldn't start: its thread says why, and the person starts another there\. Tell them\.$/,
+        /^Made review-1-send-back to review ninemate's pull request #1, "Send back", but Althar couldn't make a copy of its code to read: its thread says so\. Tell the person\.$/,
       )
       const [task] = yield* sql<{ threadId: string }>`
         SELECT t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.slug = 'review-1-send-back'`
@@ -171,7 +170,7 @@ describe('a quick task', () => {
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
-  it.live('isn’t marked done while what its lead left running won’t stop, and says so', () =>
+  it.live('is marked done even where what its lead left running won’t stop, and its thread says so', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -210,9 +209,16 @@ describe('a quick task', () => {
       }
       assert.strictEqual(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.',
+        'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.',
       )
-      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'done' }])
+      // What wouldn't stop is said in its thread, in one line.
+      const said = yield* until(
+        Effect.map(notices(task?.threadId ?? ''), (all) => all.filter((one) => one.title?.startsWith('Couldn’t stop'))),
+        (lines) => lines.length > 0,
+        Duration.seconds(20),
+      )
+      assert.lengthOf(said, 1)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { refusesStop: () => true }))))),
   )
 })

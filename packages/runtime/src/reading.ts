@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, sep } from 'node:path'
+import { extname, isAbsolute, join, normalize, relative, sep } from 'node:path'
 
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -67,9 +67,10 @@ export const documentKept = (path: string, kept: { readonly root: string; readon
   Effect.gen(function* () {
     if (!MARKDOWN.has(extname(path).toLowerCase())) return yield* new DocumentRefused({ path, reason: 'not_markdown' })
     const within = isAbsolute(path) ? relative(kept.worktree, path) : path
-    if (within === '' || isAbsolute(within) || within.split(sep).includes('..'))
-      return yield* new DocumentRefused({ path, reason: 'outside' })
-    const object = `${kept.head}:${within.split(sep).join('/')}`
+    // By this system's separators, which on Windows take / as well as \.
+    const parts = within === '' ? [] : normalize(within).split(sep)
+    if (parts.length === 0 || isAbsolute(within) || parts.includes('..')) return yield* new DocumentRefused({ path, reason: 'outside' })
+    const object = `${kept.head}:${parts.join('/')}`
     const bytes = yield* gitExactly(kept.root, 'cat-file', '-s', object).pipe(
       Effect.map((size) => Number(size.trim())),
       Effect.orElseSucceed(() => null),

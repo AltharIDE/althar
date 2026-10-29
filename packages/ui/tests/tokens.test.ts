@@ -3,6 +3,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { EASE_OUT, MOTION, SCALE } from '../src/lib/motion'
+
 /*
  * The colour tokens, light and dark, as files: dark is a full second set
  * (every colour of tokens.css set again in dark.css, but for what is the
@@ -40,7 +42,8 @@ const light = declarations(readFileSync(join(styles, 'tokens.css'), 'utf8'), ':r
 const dark = declarations(readFileSync(join(styles, 'dark.css'), 'utf8'), ":root[data-theme='dark']")
 
 /** What isn't a colour: stacking, radii, type, air, motion. */
-const NOT_COLOUR = /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|prose|lede|frost-blur$)/
+const NOT_COLOUR =
+  /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|enter$|exit$|move$|press$|scale-|prose|lede|frost-blur$)/
 
 /**
  * The same in every theme, so dark.css leaves them alone: what is drawn on
@@ -323,6 +326,38 @@ describe('the dark theme, read', () => {
       expect(Math.abs(got.r * 255 - r)).toBeLessThanOrEqual(1)
       expect(Math.abs(got.g * 255 - g)).toBeLessThanOrEqual(1)
       expect(Math.abs(got.b * 255 - b)).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+describe('the motion tokens', () => {
+  /** A curve as written, one point a line, read as one line. */
+  const curve = (name: string) =>
+    light
+      .get(name)
+      ?.replace(/\(\s*/, '(')
+      .replace(/,?\s*\)$/, ')')
+
+  it('are the springs and timings script moves by, so CSS and script move alike', () => {
+    expect(light.get('--ease-out')).toBe(EASE_OUT)
+    expect(light.get('--enter')).toBe(`${MOTION.enter.duration}ms`)
+    expect(light.get('--exit')).toBe(`${MOTION.exit.duration}ms`)
+    expect(light.get('--move')).toBe(`${MOTION.move.duration}ms`)
+    expect(curve('--ease-move')).toBe(MOTION.move.easing)
+    expect(light.get('--slide')).toBe(`${MOTION.slide.duration}ms`)
+    expect(curve('--ease-slide')).toBe(MOTION.slide.easing)
+    expect(light.get('--scale-pop')).toBe(String(SCALE.pop))
+    expect(light.get('--scale-press')).toBe(String(SCALE.press))
+  })
+
+  it('leave quicker than they come, and settle the springs at their place', () => {
+    expect(MOTION.exit.duration).toBeLessThan(MOTION.enter.duration)
+    for (const one of [MOTION.move, MOTION.slide]) {
+      const points = one.easing.slice('linear('.length, -1).split(', ').map(Number)
+      expect(points[0]).toBe(0)
+      expect(points.at(-1)).toBe(1)
+      // A hair past its place and back, never a bounce.
+      expect(Math.max(...points)).toBeLessThan(1.02)
     }
   })
 })

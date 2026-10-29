@@ -14,7 +14,7 @@ import {
   type FieldAnswer,
 } from '@althar/contracts'
 
-import { messageOf } from '../../data/client'
+import { messageOf, type RunRef } from '../../data/client'
 import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
@@ -42,7 +42,7 @@ const GATHER = 25
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
-  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  /** Its repositories as this Mac has them, each with its remote: what its header says it is made of. */
   readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
@@ -69,7 +69,9 @@ export interface ProjectModel {
   /** Has the coordinator compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
+  readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
+  /** Runs a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for the picker to say. */
+  readonly runBranch: (ref: RunRef) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -130,7 +132,15 @@ export const useProject = (projectId: string): ProjectModel => {
     [cache, projectId],
   )
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  // Hidden while its screen is kept (`KeptScreens`) as well as gone: the read it gathered for goes, and so does the timer,
+  // or shown again it would gather what it hears for a read that never comes.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      timer.current = undefined
+    },
+    [],
+  )
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
@@ -343,8 +353,19 @@ export const useProject = (projectId: string): ProjectModel => {
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     tryAgain: () => act(async () => (threadId === null ? undefined : client.tryAgain(threadId))),
     compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
-    runProject: (taskId = null, runnableId = null) =>
-      act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
+    runProject: (taskId = null, runnableId = null, ref) =>
+      act(() =>
+        ref === undefined
+          ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
+          : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref),
+      ),
+    runBranch: async (ref) => {
+      try {
+        await client.runProject(projectId, null, threadId, undefined, ref)
+      } finally {
+        await readHead()
+      }
+    },
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>

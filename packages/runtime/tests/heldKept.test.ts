@@ -11,7 +11,7 @@ import { Queries } from '../src/Queries'
 import { planWaits, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { repository, runtime, until } from './support'
+import { outUntilSoon, repository, runtime, until } from './support'
 
 /*
  * Held steps as the store keeps them, read back however an earlier Althar
@@ -86,20 +86,6 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
     until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === reason, Duration.seconds(15)),
     (rows) => rows.at(-1) ?? { id: '', step: '', state: '', holdReason: null, output: null },
   )
-
-/**
- * A reviewer out of usage until a reset some seconds after it first says so: after the other task's lead takes the one
- * place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start may fall either
- * side on a busy machine.
- */
-const outUntilSoon = () => {
-  let until: number | undefined
-  return {
-    get until() {
-      return (until ??= Date.now() + 2_500)
-    },
-  }
-}
 
 /**
  * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another

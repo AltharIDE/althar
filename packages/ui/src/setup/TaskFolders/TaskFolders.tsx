@@ -20,7 +20,9 @@ import s from './TaskFolders.module.css'
  * and its own Remove, which takes the place of its words and size on the row
  * the pointer is on and asks first, under the row, where something of the
  * person's goes with it. Clean up asks nothing: what it takes loses nothing
- * for good. No violet: nothing here needs the person.
+ * for good. Until each of a group's folders is measured, its figure is a
+ * placeholder and its part of the bar is left out: a part never shows as the
+ * whole. No violet: nothing here needs the person.
  */
 
 /** When finished tasks' folders go: by how each task ended, or one wait for all, or only when the person cleans up. */
@@ -59,6 +61,8 @@ export interface TaskFoldersText {
   freed: (bytes: number) => string
   /** The folders' sizes are still being worked out. */
   measuring: string
+  /** What folders take where some couldn't be measured: what those that could take, in bytes. */
+  unknown: (bytes: number) => string
   /** What the legend opens, as a screen reader names it. */
   list: string
   goesHead: string
@@ -73,10 +77,11 @@ export interface TaskFoldersText {
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
 
-/** Bytes as GB, or MB under one: 2.3 GB, 14 GB, 640 MB. */
+/** Bytes as GB, or MB under one: 2.3 GB, 14 GB, 640 MB, under 1 MB. */
 const sizeOf = (bytes: number): string => {
   const gb = bytes / 1024 ** 3
-  if (gb < 1) return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
+  if (bytes < 1024 ** 2) return bytes === 0 ? '0 MB' : 'under 1 MB'
+  if (gb < 1) return `${Math.round(bytes / 1024 ** 2)} MB`
   return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
 }
 
@@ -97,6 +102,7 @@ export const taskFoldersText: TaskFoldersText = {
   cleanUp: 'Clean up',
   freed: (bytes) => `Freed ${sizeOf(bytes)} just now`,
   measuring: 'Measuring…',
+  unknown: (bytes) => (bytes === 0 ? 'unknown' : `at least ${sizeOf(bytes)}`),
   list: 'Finished tasks’ folders',
   goesHead: 'Goes with Clean up',
   heldHead: 'Held back',
@@ -125,8 +131,17 @@ const WHY_GLYPH: Record<HeldWhy, IconName> = {
   unreadable: 'close',
 }
 
-/** What folders take, of those measured. */
-const total = (folders: ReadonlyArray<FinishedFolder>) => folders.reduce((sum, one) => sum + (one.bytes ?? 0), 0)
+/** What removing folders frees; null until each is measured, never a part as if it were the whole. */
+const total = (folders: ReadonlyArray<FinishedFolder>) =>
+  folders.reduce<number | null>((sum, one) => (sum === null || one.bytes === null ? null : sum + one.bytes), 0)
+
+/** Folders' total; while some are being measured, a placeholder in its place; where some couldn't be, what the rest take, as such. */
+function Total({ folders, measuring, t }: { folders: ReadonlyArray<FinishedFolder>; measuring: boolean; t: TaskFoldersText }) {
+  const bytes = total(folders)
+  if (bytes !== null) return <>{sizeOf(bytes)}</>
+  if (measuring) return <span className={s.pending}>{t.measuring}</span>
+  return <>{t.unknown(folders.reduce((sum, one) => sum + (one.bytes ?? 0), 0))}</>
+}
 
 /** Removing it by hand loses something of the person's: its Remove is red. */
 const loses = (why: HeldWhy) => why === 'uncommitted' || why === 'unreadable'
@@ -230,8 +245,9 @@ function FolderList({
   onRemove,
   onOpen,
   busy,
+  measuring,
   t,
-}: Pick<TaskFoldersProps, 'goes' | 'held' | 'onRemove' | 'onOpen' | 'busy'> & { t: TaskFoldersText }) {
+}: Pick<TaskFoldersProps, 'goes' | 'held' | 'onRemove' | 'onOpen' | 'busy'> & { measuring: boolean; t: TaskFoldersText }) {
   const [asking, setAsking] = useState<string | null>(null)
   return (
     <div className={s.list}>
@@ -239,7 +255,9 @@ function FolderList({
         <section className={s.section} aria-label={t.goesHead}>
           <div className={s.head}>
             <h3 className={s.eyebrow}>{t.goesHead}</h3>
-            <span className={s.total}>{sizeOf(total(goes))}</span>
+            <span className={s.total}>
+              <Total folders={goes} measuring={measuring} t={t} />
+            </span>
           </div>
           <ul className={s.rows}>
             {goes.map((one) => (
@@ -252,7 +270,9 @@ function FolderList({
         <section className={cx(s.section, goes.length > 0 && s.apart)} aria-label={t.heldHead}>
           <div className={s.head}>
             <h3 className={s.eyebrow}>{t.heldHead}</h3>
-            <span className={s.total}>{sizeOf(total(held))}</span>
+            <span className={s.total}>
+              <Total folders={held} measuring={measuring} t={t} />
+            </span>
           </div>
           <ul className={s.rows}>
             {held.map((one) => (
@@ -307,9 +327,9 @@ export function TaskFolders({
           <div className={s.space}>
             {disk !== null && (
               <span className={s.bar} aria-hidden="true">
-                <i className={s.others} style={{ width: width(disk.used - going - holding) }} />
-                <i className={s.heldPart} style={{ width: width(holding) }} />
-                <i className={s.goesPart} style={{ width: width(going) }} />
+                <i className={s.others} style={{ width: width(disk.used - (going ?? 0) - (holding ?? 0)) }} />
+                <i className={s.heldPart} style={{ width: width(holding ?? 0) }} />
+                <i className={s.goesPart} style={{ width: width(going ?? 0) }} />
               </span>
             )}
             <span className={s.legend}>
@@ -325,23 +345,37 @@ export function TaskFolders({
                       {goes.length > 0 && (
                         <span className={s.key}>
                           <i className={s.hatch} aria-hidden="true" />
-                          {t.canGo} <b>{sizeOf(going)}</b>
+                          {t.canGo}{' '}
+                          <b>
+                            <Total folders={goes} measuring={measuring} t={t} />
+                          </b>
                         </span>
                       )}
                       {held.length > 0 && (
                         <span className={s.key}>
                           <i className={s.pale} aria-hidden="true" />
-                          {t.held} <b>{sizeOf(holding)}</b>
+                          {t.held}{' '}
+                          <b>
+                            <Total folders={held} measuring={measuring} t={t} />
+                          </b>
                         </span>
                       )}
                       <Caret />
                     </button>
                   }
                 >
-                  <FolderList goes={goes} held={held} onRemove={onRemove} {...(onOpen === undefined ? {} : { onOpen })} busy={busy} t={t} />
+                  <FolderList
+                    goes={goes}
+                    held={held}
+                    onRemove={onRemove}
+                    {...(onOpen === undefined ? {} : { onOpen })}
+                    busy={busy}
+                    measuring={measuring}
+                    t={t}
+                  />
                 </Popover>
               )}
-              {measuring && <span>{t.measuring}</span>}
+              {measuring && going !== null && holding !== null && <span>{t.measuring}</span>}
               <span className={s.grow} />
               {freed !== null && <span>{t.freed(freed)}</span>}
               {goes.length > 0 && (

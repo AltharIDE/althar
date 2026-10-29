@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -9,7 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { attachmentsIn } from '../src/attachments'
 import { bringBack, folderOf, KEPT } from '../src/bringBack'
-import { FolderCleanup, goneWords, sizeWords, waitDays } from '../src/FolderCleanup'
+import { FolderCleanup, goneWords, ownedBytes, sizeWords, waitDays } from '../src/FolderCleanup'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
@@ -159,6 +159,65 @@ describe('finished tasks’ folders', () => {
       assert.match((yield* folderLines(task.threadId))[0]?.title ?? '', /^Folder removed when you cleaned up/)
       assert.deepStrictEqual((yield* cleanup.list).folders, [])
     }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('measures what removing a folder frees, not installs it shares with a store outside it, and says it freed what went', () =>
+    Effect.gen(function* () {
+      const MB = 1024 ** 2
+      const store = realpathSync(mkdtempSync(join(tmpdir(), 'althar-store-')))
+      writeFileSync(join(store, 'cloned.node'), Buffer.alloc(8 * MB, 1))
+      writeFileSync(join(store, 'linked.node'), Buffer.alloc(8 * MB, 2))
+      writeFileSync(join(store, 'edited.node'), Buffer.alloc(8 * MB, 5))
+      const task = yield* finished('done', 1, 'Add a retry', (root) => {
+        writeFileSync(join(root, '.gitignore'), 'node_modules\n')
+        git(root, 'add', '.')
+        git(root, 'commit', '-q', '-m', 'Install')
+      })
+      // Installs from the store: a clone where the disk has them, a hardlink; and what a package built, which is the folder's own.
+      const modules = join(task.worktree, 'node_modules', 'pkg')
+      mkdirSync(modules, { recursive: true })
+      if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'cloned.node'), join(modules, 'cloned.node')])
+      linkSync(join(store, 'linked.node'), join(modules, 'linked.node'))
+      writeFileSync(join(modules, 'built.node'), Buffer.alloc(8 * MB, 3))
+      // A clone from the store edited after: it holds its new block, not the ones it still shares with the store.
+      if (process.platform === 'darwin') {
+        execFileSync('cp', ['-c', join(store, 'edited.node'), join(modules, 'edited.node')])
+        appendFileSync(join(modules, 'edited.node'), 'patched')
+      }
+      const listed = yield* measured
+      const bytes = listed.folders[0]?.bytes ?? null
+      assert.isNotNull(bytes)
+      assert.isAbove(bytes!, 8 * MB)
+      assert.isBelow(bytes!, 9 * MB)
+      // Built after it was listed: what it freed is what went, measured as it went.
+      writeFileSync(join(modules, 'later.node'), Buffer.alloc(4 * MB, 4))
+      const freed = yield* (yield* FolderCleanup).cleanUp(yield* person)
+      assert.strictEqual(freed.failed, 0)
+      assert.isAbove(freed.freed, bytes! + 4 * MB - 1)
+      assert.isBelow(freed.freed, bytes! + 5 * MB)
+      assert.isFalse(existsSync(task.worktree))
+      rmSync(store, { recursive: true, force: true })
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  // Windows reads a folder whatever its mode, and root reads any: neither can lock one.
+  it.live.skipIf(windows || process.getuid?.() === 0)(
+    "lists a folder part of which can't be read as of a size not known, not as what the rest takes",
+    () =>
+      Effect.gen(function* () {
+        const task = yield* finished('done', 1, 'Add a retry', (root) => {
+          writeFileSync(join(root, '.gitignore'), 'cache\n')
+          git(root, 'add', '.')
+          git(root, 'commit', '-q', '-m', 'Ignore')
+        })
+        const locked = join(task.worktree, 'cache')
+        mkdirSync(locked)
+        writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
+        chmodSync(locked, 0o000)
+        const listed = yield* measured.pipe(Effect.ensuring(Effect.sync(() => chmodSync(locked, 0o755))))
+        assert.strictEqual(listed.folders.length, 1)
+        assert.isNull(listed.folders[0]?.bytes)
+      }).pipe(Effect.provide(withCleanup())),
   )
 
   it.live('holds back a folder with changes not committed, which goes by hand', () =>
@@ -468,11 +527,18 @@ describe('a removed folder set up again', () => {
       const launches = yield* Launches
       const setups = yield* Setups
       const sql = yield* SqlClient.SqlClient
+      // Its first setup, begun as it was made, done before the one kept below: one reading it late would wait in the
+      // folder, which Windows won't remove while a process works in it.
+      yield* setups.ready(task.taskId)
       // Its setup waits until the test says.
       const go = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-go-'))), 'go')
       yield* launches.keep({
         projectId: task.projectId,
-        run: { command: LONG, setup: `while [ ! -f '${go}' ]; do sleep 0.05; done` },
+        // In Node, which both a POSIX shell and cmd.exe run, and by a path with /, which Node takes on Windows too.
+        run: {
+          command: LONG,
+          setup: `node -e "const fs = require('fs'); const wait = () => fs.existsSync('${go.replaceAll('\\', '/')}') || setTimeout(wait, 50); wait()"`,
+        },
         actorId: yield* person,
       })
       yield* cleanup.sweep
@@ -550,5 +616,41 @@ describe('the words for a folder going', () => {
     assert.strictEqual(goneWords('wait', 3, 640 * 1024 ** 2), 'Folder removed 3 days after the task finished · 640 MB')
     assert.strictEqual(goneWords('low', 7, null), 'Folder removed when this computer ran low on space')
     assert.strictEqual(sizeWords(10 * 1024 ** 3), '10 GB')
+    assert.strictEqual(sizeWords(300 * 1024), 'under 1 MB')
+    assert.strictEqual(sizeWords(0), '0 MB')
+    assert.strictEqual(goneWords('hand', 7, 300 * 1024), 'You removed its folder · under 1 MB')
+  })
+
+  it('counts a file hardlinked from outside folders as nothing, and one linked only inside them once, across them', async () => {
+    const MB = 1024 ** 2
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
+    const folder = join(root, 'folder')
+    mkdirSync(folder)
+    writeFileSync(join(root, 'outside'), Buffer.alloc(2 * MB, 1))
+    linkSync(join(root, 'outside'), join(folder, 'shared'))
+    writeFileSync(join(folder, 'own'), Buffer.alloc(MB, 2))
+    linkSync(join(folder, 'own'), join(folder, 'own-again'))
+    const next = join(root, 'next')
+    mkdirSync(next)
+    linkSync(join(folder, 'own'), join(next, 'own-there'))
+    const bytes = await ownedBytes([folder, next])
+    rmSync(root, { recursive: true, force: true })
+    assert.isAtLeast(bytes, MB)
+    assert.isBelow(bytes, MB + 64 * 1024)
+  })
+
+  it.skipIf(windows || process.getuid?.() === 0)("can't say what a folder holds where part of it can't be read", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
+    const locked = join(root, 'locked')
+    mkdirSync(locked)
+    writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
+    chmodSync(locked, 0o000)
+    const failed = await ownedBytes([root]).then(
+      () => false,
+      () => true,
+    )
+    chmodSync(locked, 0o755)
+    rmSync(root, { recursive: true, force: true })
+    assert.isTrue(failed)
   })
 })

@@ -29,7 +29,8 @@ const withTool = <A, E>(tool: string, prints: string, effect: Effect.Effect<A, E
     )
   })
 
-describe('a command-line tool’s sign-in', () => {
+// Not on Windows: the stand-in gh is a shell script, which Windows doesn't run as a program; gh.exe is found as any is.
+describe.skipIf(process.platform === 'win32')('a command-line tool’s sign-in', () => {
   it.live('is the token gh or glab hands out, read as it is', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* withTool('gh', 'gho_0123456789abcdefghij', cliToken('gh', 'github.com')), 'gho_0123456789abcdefghij')

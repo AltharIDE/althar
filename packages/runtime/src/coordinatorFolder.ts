@@ -214,7 +214,16 @@ export const freshCopy = (repository: string, path: string, base: string, from =
       Effect.orElseSucceed(() => false),
     )
     const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
-    const commit = Option.isSome(remote) ? remote.value : yield* commitOf(repository, base)
+    yield* copyAt(repository, path, Option.isSome(remote) ? remote.value : yield* commitOf(repository, base), from)
+  })
+
+/**
+ * A copy of `repository` at `path`, detached at `commit`, as `freshCopy`
+ * makes one: its git folder made again, borrowing the repository's objects,
+ * and anything written in it since thrown away, but what git ignores.
+ */
+export const copyAt = (repository: string, path: string, commit: string, from = repository) =>
+  Effect.gen(function* () {
     const objects = yield* objectsOf(repository)
     if (from !== repository) yield* freshMirror(repository, from)
     yield* clearedFor(repository, path)

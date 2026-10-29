@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -17,6 +17,9 @@ import { freshCopy, readsOf } from '../src/coordinatorFolder'
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd, encoding: 'utf8' }).trim()
+
+/** A path as git prints it, with `/` on Windows too. */
+const asGit = (path: string) => path.split(sep).join('/')
 
 /** A remote with `main`, a branch and a tag, the person's clone of it, and where the coordinator's copy goes. */
 const place = () => {
@@ -49,7 +52,7 @@ describe("the coordinator's copies", () => {
     Effect.gen(function* () {
       const { person, copy } = place()
       yield* freshCopy(person, copy, 'main')
-      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), join(copy, '.git'))
+      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
       // Its only remote is the person's repository: no network, and no other folder.
       assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), person)
       // What the remote has, as Althar fetched it into the person's repository before the turn.
@@ -118,10 +121,10 @@ describe("the coordinator's copies", () => {
     Effect.gen(function* () {
       const { person, copy } = place()
       git(person, 'worktree', 'add', '-q', '--detach', copy, 'main')
-      assert.include(git(person, 'worktree', 'list'), copy)
+      assert.include(git(person, 'worktree', 'list'), asGit(copy))
       yield* freshCopy(person, copy, 'main')
-      assert.notInclude(git(person, 'worktree', 'list'), copy)
-      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), join(copy, '.git'))
+      assert.notInclude(git(person, 'worktree', 'list'), asGit(copy))
+      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
       assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
     }),
   )
@@ -136,9 +139,9 @@ describe("the coordinator's copies", () => {
       rmSync(join(copy, '.git'), { recursive: true })
       writeFileSync(join(copy, '.git'), readFileSync(join(task, '.git'), 'utf8'))
       yield* freshCopy(person, copy, 'main')
-      assert.include(git(person, 'worktree', 'list'), task)
+      assert.include(git(person, 'worktree', 'list'), asGit(task))
       assert.strictEqual(git(task, 'branch', '--show-current'), 'althar/retry')
-      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), join(copy, '.git'))
+      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
     }),
   )
 

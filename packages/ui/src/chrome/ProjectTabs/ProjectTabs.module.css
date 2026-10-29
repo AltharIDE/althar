@@ -55,6 +55,8 @@
   flex: none;
 }
 .tabs {
+  /* where its tabs' places are taken from, to keep the one with the window in sight */
+  position: relative;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;

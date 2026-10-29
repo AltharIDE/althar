@@ -154,3 +154,13 @@ export const SameLabel: Story = {
     await expect(page.getByText(/^cd apps\/b && bun run dev/)).toBeInTheDocument()
   },
 }
+
+/** Where the screen runs the default branch, the list offers a branch or a pull request too, in a copy of its own. */
+export const RunABranch: Story = {
+  args: { onRunBranch: fn(), defaultOpen: true },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await userEvent.click(await page.findByRole('menuitem', { name: 'Run a branch or pull request…' }))
+    await expect(args.onRunBranch).toHaveBeenCalled()
+  },
+}

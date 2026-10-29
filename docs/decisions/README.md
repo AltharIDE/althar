@@ -73,3 +73,8 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [063](063-althar-s-part-is-all-its-work-started-and-itself.md) | Althar's part of the load is everything its work started, however it runs, and Althar itself |
 | [064](064-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |
 | [065](065-running-is-what-an-agent-works-on-and-up-next-is-everything-that-waits.md) | Running is what an agent works on now, and Up next is everything that waits, in the order it goes on |
+| [066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md) | Althar runs any branch or pull request in a copy of its own, fetched with its sign-in, and fetches for leads, which carry none |
+| [067](067-allow-everything-asks-only-before-what-can-t-be-undone.md) | Allow everything asks only before what can't be undone from the task |
+| [068](068-a-settled-task-stops-everything-it-left-running.md) | A settled task stops everything it left running, however it settled, and what Althar lost track of is found by its mark |
+| [069](069-motion-is-one-system-named-by-what-happens.md) | Motion is one system, named by what happens, in CSS and the browser's own animations |
+| [070](070-failing-checks-go-to-the-lead-whoever-has-looked.md) | Failing checks go to the lead, whoever has looked, and it tells a failure of its own from one broken on main |

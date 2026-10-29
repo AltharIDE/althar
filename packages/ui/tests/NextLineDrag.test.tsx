@@ -84,6 +84,33 @@ afterEach(() => {
 })
 
 describe('dragging a row up next', () => {
+  it('lifts a row pressed by its grip though the pointer leaves the row before it has gone far enough to drag it', () => {
+    const onMove = vi.fn()
+    render(draw(['a', 'b', 'c', 'd'], onMove))
+    layOut()
+    fireEvent.pointerDown(grip('d'), { pointerId: 1, isPrimary: true, button: 0, buttons: 1, clientY: 140 })
+    // Up and off the row at once, into the lane's margin: none of the row's handlers hear it.
+    fireEvent.pointerMove(document.body, { pointerId: 1, isPrimary: true, buttons: 1, clientY: 100 })
+    expect(lifted()).toEqual([item('d')])
+    // Dragged, the row holds the pointer, and the browser sends it the moves.
+    pointer('pointerMove', 'd', 0)
+    expect(shift('a')).toBe(`translateY(${HEIGHT}px)`)
+    pointer('pointerUp', 'd', 0)
+    settle()
+    expect(onMove).toHaveBeenCalledWith('d', 0)
+  })
+
+  it('follows a press no longer once the line is gone: a move on the window after starts no drag', () => {
+    const { unmount } = render(draw(['a', 'b', 'c', 'd'], vi.fn()))
+    layOut()
+    fireEvent.pointerDown(grip('d'), { pointerId: 1, isPrimary: true, button: 0, buttons: 1, clientY: 140 })
+    unmount()
+    const pending = vi.getTimerCount()
+    fireEvent.pointerMove(document.body, { pointerId: 1, isPrimary: true, buttons: 1, clientY: 100 })
+    // No frame asked for to scroll a lane that isn't there.
+    expect(vi.getTimerCount()).toBe(pending)
+  })
+
   it('lifts the row with the pointer, the others giving way, and lands it where it is let go once it has settled', () => {
     const onMove = vi.fn()
     render(draw(['a', 'b', 'c', 'd'], onMove))

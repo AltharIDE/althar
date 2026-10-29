@@ -1,8 +1,8 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
-index 1371c2c9a009bfa5a43a265238d20a1cc615524e..0213cc94e63d90f295e21fac8273ad2248b2d896 100644
+index 5e55d82e90e0a6caded3c7276949c9662751580d..755c3071f521752499ce1087d0839798dfb48887 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
-@@ -6128,17 +6128,16 @@ export class ClaudeAcpAgent {
+@@ -6185,17 +6185,16 @@ export class ClaudeAcpAgent {
                          break;
                      }
                      case "rate_limit_event": {
