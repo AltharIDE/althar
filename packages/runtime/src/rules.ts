@@ -486,6 +486,8 @@ export const essentials = (
     } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
     // The host a network request is for (Claude Code's sandbox asks by it): a name, never a secret.
     else if (key === 'host' && typeof value === 'string') input.host = value.slice(0, 253)
+    // Whether a command asked to run outside its sandbox (ADR-071): what was counted as crossing it.
+    else if (key === 'dangerouslyDisableSandbox' && typeof value === 'boolean') input[key] = value
     else if (key === 'changes' && typeof value === 'object' && value !== null) {
       // A patch's files, without their contents.
       input.changes = Array.isArray(value)
@@ -2803,6 +2805,106 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (asked === undefined && project.mode === 'coordinator') return { verdict: 'judge', reason }
   return ask(reason, false)
 }
+
+// ---- Inside a sandbox ------------------------------------------------------
+
+/*
+ * Where a session's sandbox holds its shell commands (ADR-071), it is the
+ * boundary, not these words: a command it holds runs without the rules
+ * reading what it does, whatever the line is, a loop, `$(…)`, a heredoc or a
+ * script. What it can't do there it can't do at all: write outside the task's
+ * worktree or the coordinator's folder, read where the person keeps keys,
+ * reach a host it isn't given, push without a sign-in. What crosses (a
+ * command that runs outside it, an edit outside, a host it asks for) still
+ * meets the rules as it did.
+ */
+
+/** How a session's sandbox holds its shell commands: what runs outside it from the start, and whether a command may ask to. */
+export interface Hold {
+  /** The commands that run outside it from the start, by how they start (Claude Code's `excludedCommands`). */
+  readonly outside: ReadonlyArray<string>
+  /** Whether a request may ask to run outside it (`dangerouslyDisableSandbox`); the coordinator's never may. */
+  readonly unsandboxed: boolean
+}
+
+/**
+ * Whether a request is a shell command its session's sandbox holds: one that
+ * doesn't ask to run outside it, where it may, and of whose commands none
+ * starts as one that runs outside from the start. A line runs outside only
+ * where every command in it does, but one is enough to read it.
+ */
+export const runsInside = (request: PermissionRequest, hold: Hold): boolean => {
+  if (request.kind !== 'execute') return false
+  const command = commandIn(request.rawInput)
+  if (command === undefined || command.trim() === '') return false
+  if (hold.unsandboxed && field(request.rawInput, 'dangerouslyDisableSandbox') === true) return false
+  const parts = command.split(/&&|\|\||[;|\n()]/).map((part) => part.trim().replace(/\s+/g, ' '))
+  return !hold.outside.some((start) => parts.some((part) => part === start || part.startsWith(`${start} `)))
+}
+
+/**
+ * Decides a shell command its session's sandbox holds (ADR-071). Nothing is
+ * read for what it does but what the project said itself: a command it never
+ * allows, or a kind it never allows that the line plainly is, is refused; a
+ * command it asks about asks. And no one reads the keychain or git's stored
+ * passwords, which the sandbox reaches on a Mac. The rest runs.
+ */
+export const decideInside = (request: PermissionRequest, context?: RuleContext): Verdict => {
+  const system = systemOf(context)
+  const command = commandOf(request)
+  const credentials = lineReadings(command, system)
+    .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+    .map(credentialReason)
+    .find((reason) => reason !== undefined)
+  if (credentials !== undefined) return { verdict: 'deny', reason: credentials }
+  const project = context?.project
+  if (context === undefined || project === undefined) return ALLOW
+  const named = commandRule(command, project.commands, system)
+  if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
+  if (project.never.length > 0) {
+    const never = commandKinds(command, context).find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
+    if (never !== undefined && never.rule !== 'unclear')
+      return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
+  }
+  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+  return ALLOW
+}
+
+// ---- What each ask and refusal is counted as ------------------------------
+
+/**
+ * The kinds an ask or a refusal is counted as (ADR-071), so the person sees
+ * which mostly get worked around: one of the project's kinds, what the rules
+ * can't read, a command the project named, what no project can change
+ * (credentials and keys, the code host), what a role that only reads may not
+ * do, and the rest (a project that asks about everything).
+ */
+export const TALLY_KINDS = [...RULES, 'unclear', 'command', 'credentials', 'code-host', 'reader', 'other'] as const
+export type TallyKind = (typeof TALLY_KINDS)[number]
+
+/**
+ * What an ask or a refusal of a task's request is counted as: what decided
+ * it, in the order `decide` meets them, the firmest of the kinds it is.
+ */
+export const tallyKindOf = (request: PermissionRequest, context: RuleContext): TallyKind => {
+  const system = systemOf(context)
+  const runs = request.kind === 'execute' || request.kind === 'other'
+  if (runs) {
+    const words = lineReadings(commandOf(request), system).flatMap((line) => line.commands.flatMap((each) => readings(unwrap(each))))
+    if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
+    if (words.some((each) => hostReason(each) !== undefined)) return 'code-host'
+  }
+  if (secretReason(request, context.worktree, system) !== undefined) return 'credentials'
+  const project = context.project ?? MVP_RULES
+  if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
+  const found = keptOf(request, context)
+  const firmest = found.find((each) => each.irreversible === true) ?? found.find((each) => each.floor === true) ?? found[0]
+  return firmest?.rule ?? 'other'
+}
+
+/** Whether a request is, as the rules read it, one of what can't be undone from the task (ADR-067): what a lead's git guard stops. */
+export const lasting = (request: PermissionRequest, context: RuleContext): boolean =>
+  keptOf(request, context).some((each) => each.irreversible === true)
 
 /** How far an "always" answer reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export type AlwaysScope = 'exact' | 'prefix' | 'kind'

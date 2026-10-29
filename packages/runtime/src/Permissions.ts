@@ -34,14 +34,21 @@ import {
   holds,
   commandOf,
   decide,
+  decideInside,
   decideReader,
   essentials,
+  type Hold,
+  lasting,
   pathsOf,
   type ProjectRuleSet,
   type RuleContext,
+  runsInside,
   sayAllowRule,
+  type TallyKind,
+  tallyKindOf,
   type Verdict,
 } from './rules'
+import { passGuard } from './pushGuard'
 import { type Reach, withEdits, workedOutReach } from './sandboxReach'
 import { addItem } from './threads'
 
@@ -56,6 +63,12 @@ import { addItem } from './threads'
  * the person answers or the turn is cancelled. An answer can keep a rule
  * (ADR-018): Allow always and Deny always save one to the project, and every
  * request still waiting is decided again by the rules as they now are.
+ *
+ * Where a session's sandbox holds its shell commands (ADR-071), a command
+ * it holds runs without the rules reading it, short of what the project
+ * itself never allows or asks about; what crosses meets the rules. Every ask
+ * and refusal is recorded with the kind it is counted as (`tallyKindOf`),
+ * which the project's rules show the person.
  */
 
 /** Where a request comes from, and what the rules need to decide it. */
@@ -84,6 +97,8 @@ export interface RequestContext {
         readonly trusted?: boolean
         readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
       }
+  /** How the session's sandbox holds its shell commands, where it has one Althar relies on (ADR-071). */
+  readonly sandbox?: Hold
 }
 
 interface Waiting {
@@ -96,6 +111,10 @@ interface Waiting {
   readonly rules: RuleContext
   /** What an "always" answer would keep, as the call offered it: the words a scope keeps are these, never others found later. */
   readonly always: Always
+  /** Whether the session's sandbox holds it, so only what the project said itself keeps it. */
+  readonly inside: boolean
+  /** What it is counted as. */
+  readonly kind: TallyKind
 }
 
 /** The rule an "always" answer by this scope keeps, where it was offered: let through, or never allowed. */
@@ -223,11 +242,17 @@ export class Permissions extends Context.Service<
         readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
         /** The rule the person's "always" answer kept. */
         readonly saved?: Remembered
+        /** What an ask or a refusal is counted as; none for what went ahead by itself. */
+        readonly kind?: TallyKind
+        /** Whether it was the person's answer to an ask. */
+        readonly asked?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const answer = answerFor(input.request.options, input.decision.decision, input.context.meanings)
           const id = yield* newId(Ids.decision)
+          // What it is counted as, where it asked or was refused (ADR-071).
+          const kind = input.asked === true || input.decision.decision === 'reject' ? (input.kind ?? 'other') : null
           yield* sql`INSERT INTO decisions ${sql.insert({
             id,
             projectId: input.context.projectId,
@@ -240,6 +265,7 @@ export class Permissions extends Context.Service<
             rule: input.cited === undefined ? null : JSON.stringify(input.cited.rules),
             policyId: input.cited?.policyId ?? null,
             actionDigest: input.digest,
+            kind,
             decidedAt: yield* timestamp,
           })}`
           yield* fact({
@@ -255,6 +281,7 @@ export class Permissions extends Context.Service<
               reason: input.decision.reason,
               ...(input.cited === undefined ? {} : { rules: input.cited.rules }),
               ...(input.saved === undefined ? {} : { saved: input.saved }),
+              ...(kind === null ? {} : { kind }),
             },
             actorId: input.actorId,
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
@@ -268,6 +295,10 @@ export class Permissions extends Context.Service<
             type: 'permission_request.decided',
             actorId: input.actorId,
           })
+          // A lead's git lets through what the person allowed of what can't be undone, which its guard would stop (pushGuard.ts).
+          const rules = input.context.rules
+          if (input.decision.decision === 'allow' && rules.role === 'task' && lasting(input.request, rules.context))
+            yield* Effect.sync(() => passGuard(input.context.sessionId))
         })
 
       const release = releaseSession
@@ -335,13 +366,14 @@ export class Permissions extends Context.Service<
         })
 
       /** A task's request as the rules decide it now, with the context they read it in and the revision they are. */
-      const byRules = (projectId: ProjectId, taskId: string | null, rules: RuleContext, request: PermissionRequest) =>
+      const byRules = (projectId: ProjectId, taskId: string | null, rules: RuleContext, request: PermissionRequest, inside = false) =>
         Effect.gen(function* () {
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
           const { policy, project } = yield* rulesNow(projectId, taskId)
           const context: RuleContext = { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) }
-          return { context, project, verdict: decide(request, context), policyId: policy.id }
+          // A command the session's sandbox holds meets only what the project said itself (ADR-071).
+          return { context, project, verdict: inside ? decideInside(request, context) : decide(request, context), policyId: policy.id }
         })
 
       /** What the rules answer, as the decision sent: refused with why, or allowed, by the allow rules that did where they did. */
@@ -395,6 +427,7 @@ export class Permissions extends Context.Service<
                 ...waiter,
                 decision: decided.decision,
                 actorId: instance.systemId,
+                asked: true,
                 ...(decided.cited === undefined ? {} : { cited: decided.cited }),
               })
               yield* release(waiter.context.sessionId)
@@ -421,7 +454,13 @@ export class Permissions extends Context.Service<
           [...waiting].filter(([, waiter]) => waiter.context.projectId === projectId),
           ([attentionId, waiter]) =>
             Effect.gen(function* () {
-              const { verdict, policyId } = yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request)
+              const { verdict, policyId } = yield* byRules(
+                waiter.context.projectId,
+                waiter.context.taskId,
+                waiter.rules,
+                waiter.request,
+                waiter.inside,
+              )
               if (settles(verdict)) yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
             }).pipe(Effect.ignore),
           { discard: true },
@@ -473,7 +512,15 @@ export class Permissions extends Context.Service<
                   reason: judgment.reason,
                   ...(judgment.decision === 'deny' ? { decidedBy: 'coordinator' as const } : {}),
                 }
-                yield* recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.coordinatorId })
+                yield* recordDecision({
+                  context: requestContext,
+                  request,
+                  requestId,
+                  digest,
+                  decision,
+                  actorId: instance.coordinatorId,
+                  kind: tallyKindOf(request, ruled.context),
+                })
                 // A denial is read on the refused call's own row, so it gets no receipt of its own.
                 if (judgment.decision === 'allow')
                   yield* addItem(requestContext, 'notice', {
@@ -536,27 +583,40 @@ export class Permissions extends Context.Service<
                 })
               }),
             )
+            // A shell command the session's sandbox holds runs there without being read (ADR-071).
+            const inside = requestContext.sandbox !== undefined && runsInside(request, requestContext.sandbox)
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
               const { offline, cwd, trusted, reads } = requestContext.rules
-              const read = decideReader(request, {
-                offline: offline === true,
-                ...(cwd === undefined ? {} : { cwd }),
-                ...(trusted === true ? { trusted } : {}),
-                ...(reads === undefined ? {} : { reads }),
-              })
+              const read = inside
+                ? decideInside(request)
+                : decideReader(request, {
+                    offline: offline === true,
+                    ...(cwd === undefined ? {} : { cwd }),
+                    ...(trusted === true ? { trusted } : {}),
+                    ...(reads === undefined ? {} : { reads }),
+                  })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
-                  ? { decision: 'allow', reason: 'This role may do this.' }
-                  : { decision: 'reject', reason: read.reason, decidedBy: 'rules' }
+                  ? { decision: 'allow', reason: inside ? 'It runs inside the sandbox.' : 'This role may do this.' }
+                  : { decision: 'reject', reason: read.verdict === 'deny' ? read.reason : '', decidedBy: 'rules' }
               yield* sql.withTransaction(
-                recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
+                recordDecision({
+                  context: requestContext,
+                  request,
+                  requestId,
+                  digest,
+                  decision,
+                  actorId: instance.systemId,
+                  kind: inside ? 'credentials' : 'reader',
+                }),
               )
               return decision
             }
             const rules = requestContext.rules.context
             // The rules first, the allow rules among them: the coordinator judges only what none of them answers.
-            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request)
+            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
+            const kind = tallyKindOf(request, ruled.context)
             let ruleContext = ruled.context
             let policyId = ruled.policyId
             let verdict: Exclude<Verdict, { readonly verdict: 'judge' }>
@@ -579,6 +639,7 @@ export class Permissions extends Context.Service<
                   digest,
                   decision,
                   actorId: instance.systemId,
+                  kind,
                   ...(cited === undefined ? {} : { cited }),
                 }),
               )
@@ -605,6 +666,8 @@ export class Permissions extends Context.Service<
                     reason: verdict.reason,
                     held: verdict.held,
                     always: alwaysPayload(always),
+                    // What it is counted as (ADR-071), beside the kind of tool call it is.
+                    counted: kind,
                   }),
                   actionDigest: digest,
                   state: 'open',
@@ -631,13 +694,15 @@ export class Permissions extends Context.Service<
               digest,
               rules,
               always,
+              inside,
+              kind,
             }
             waiting.set(attentionId, waiter)
             // The rules, or the task's switch, may have changed while the call was being made, and been decided again without it:
             // then it is decided again now.
             const now = yield* rulesNow(requestContext.projectId, requestContext.taskId)
             if (now.policy.id !== policyId || now.project.mode !== ruleContext.project?.mode) {
-              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request)
+              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
               if (settles(again.verdict)) yield* settle(attentionId, waiter, decisionOf(again.verdict, again.policyId))
             }
             if (waiting.has(attentionId))
@@ -740,7 +805,8 @@ export class Permissions extends Context.Service<
                 keep = {
                   scope: always,
                   rule,
-                  context: (yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request)).context,
+                  context: (yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request, waiter.inside))
+                    .context,
                 }
               }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
@@ -774,6 +840,7 @@ export class Permissions extends Context.Service<
                     decision: answered,
                     actorId: envelope.actorId,
                     commandId: envelope.commandId,
+                    asked: true,
                     ...(keep === undefined ? {} : { saved: keep.rule }),
                   })
                   yield* release(waiter.context.sessionId)

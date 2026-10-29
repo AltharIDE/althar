@@ -14,6 +14,7 @@ import {
   type PermissionRequest,
   type Question,
   type SessionEvent,
+  type SessionOptions,
   type StopReport,
 } from '@althar/provider-adapters'
 import {
@@ -37,7 +38,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
-import { Agents, type AgentEntry, RuntimeConfig } from './Config'
+import { Agents, type AgentEntry, RuntimeConfig, SIGNED_OUT_GIT_CONFIG } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
@@ -64,6 +65,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { guardEnv } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
@@ -1975,9 +1977,19 @@ export class Sessions extends Context.Service<
             projectId: thread.projectId,
             taskId: thread.role === 'coordinator' ? null : thread.taskId,
           })
+          // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
+          const guarded =
+            thread.role === 'task' && !reads
+              ? guardEnv({
+                  sessionId,
+                  taskBranch: thread.branch,
+                  defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
+                  count: SIGNED_OUT_GIT_CONFIG,
+                })
+              : {}
           const transport = entry.transport(
             cwdOf(thread),
-            { ...accounts.env(account), [WORK]: work },
+            { ...accounts.env(account), [WORK]: work, ...guarded },
             untrusted ? { untrusted } : undefined,
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
@@ -2034,6 +2046,16 @@ export class Sessions extends Context.Service<
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
+          const sessionOptions: SessionOptions | undefined = untrusted
+            ? { untrusted, ...(offline ? { offline } : {}) }
+            : thread.role === 'coordinator'
+              ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
+              : upFront === undefined
+                ? undefined
+                : { sandbox: upFront }
+          // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
+          const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
+          const held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
@@ -2047,7 +2069,7 @@ export class Sessions extends Context.Service<
             Effect.gen(function* () {
               const connection = yield* connect({
                 transport,
-                onPermission: (request) => permissions.decide(requestContext, request),
+                onPermission: (request) => permissions.decide(held, request),
                 permissions: definition.permissions,
                 ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
@@ -2072,18 +2094,7 @@ export class Sessions extends Context.Service<
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
-                  : {
-                      meta: definition.sessionMeta(
-                        reads ? 'reader' : 'lead',
-                        untrusted
-                          ? { untrusted, ...(offline ? { offline } : {}) }
-                          : thread.role === 'coordinator'
-                            ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
-                            : upFront === undefined
-                              ? undefined
-                              : { sandbox: upFront },
-                      ),
-                    }),
+                  : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', sessionOptions) }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               // An effort the model doesn't offer is no reason not to start.
@@ -2145,7 +2156,7 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext: held, upFront }
         })
 
       type Connected = Effect.Success<ReturnType<typeof connectSession>>

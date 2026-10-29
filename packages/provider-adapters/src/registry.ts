@@ -1,4 +1,5 @@
 import type { InAppSignIn } from './signInFlow'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
@@ -98,7 +99,18 @@ export interface PermissionMeanings {
    * `interaction_`): it goes to the person as a question, never to the rules.
    */
   readonly questions?: string
+  /**
+   * Where a refusal's reason reaches the model in the refused call's own
+   * result: sent in the answer's `_meta` (`REFUSAL_META`), which Althar's
+   * patch of claude-agent-acp hands the SDK as its deny message. Without it,
+   * a refusal by the rules or the coordinator is said at the turn's end, as
+   * a turn of its own (ADR-019).
+   */
+  readonly reasonInBand?: true
 }
+
+/** The key in a permission answer's `_meta` that carries why Althar refused, for an agent that reads it (`reasonInBand`). */
+export const REFUSAL_META = 'althar/refusal'
 
 export interface AgentDefinition {
   readonly id: AgentId
@@ -237,6 +249,18 @@ export interface AgentDefinition {
    */
   readonly upFront?: true
   /**
+   * Whether a session's shell commands run in a sandbox Althar can rely on
+   * (ADR-071): one that started, or the session doesn't, holding them to
+   * the task's worktree or the coordinator's folder. `outside`, the commands
+   * that run outside it from the start, by how they start; `unsandboxed`,
+   * whether a request may ask to run outside it
+   * (`rawInput.dangerouslyDisableSandbox`). A request it holds runs without
+   * Althar reading it; one that crosses meets the rules. None where the
+   * agent has no such sandbox, or it can't start here: then the rules read
+   * every command, as before.
+   */
+  readonly holds?: (role: 'lead' | 'reader', options?: SessionOptions) => SandboxHold | undefined
+  /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
@@ -303,6 +327,12 @@ export interface SessionOptions {
    */
   readonly contained?: Contained
   readonly sandbox?: UpFront
+}
+
+/** How a session's sandbox holds its shell commands: see `AgentDefinition.holds`. */
+export interface SandboxHold {
+  readonly outside: ReadonlyArray<string>
+  readonly unsandboxed: boolean
 }
 
 /** The coordinator's folder, and what its sandboxed commands may read: real paths. */
@@ -563,8 +593,10 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * Claude documents that this setting is broader than listening: commands may
  * also connect to any localhost port, including services outside the sandbox,
  * and listen on non-loopback addresses. The domain allowlist and writable
- * paths are unchanged. Where the sandbox can't start, commands run without
- * it and every one asks.
+ * paths are unchanged. Where the sandbox can start (`claudeSandboxStarts`),
+ * the session doesn't start without it, so a command it holds can run without
+ * Althar reading it (ADR-071); elsewhere commands run without it and every
+ * one asks, and meets the rules.
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
@@ -586,7 +618,7 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * rules would let them through anyway. Both are settings Claude Code takes
  * only from trusted sources, which these, given as the session's own, are.
  */
-const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
+const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = claudeSandboxStarts()) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
@@ -598,7 +630,7 @@ const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
           enabled: true,
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: true,
-          failIfUnavailable: false,
+          failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
           network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
         },
@@ -647,15 +679,42 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
 
 /**
  * Whether Claude Code's sandbox can start here: macOS's own, or bubblewrap
- * and socat on Linux, outside a Flatpak (no nested user namespaces there).
- * Not yet on Windows, where Althar hasn't tried it.
+ * and socat on Linux, outside a Flatpak (no nested user namespaces there),
+ * where bubblewrap starts a namespace (some distributions keep unprivileged
+ * user namespaces off). Not yet on Windows, where Althar hasn't tried it.
+ * Worked out once.
  */
-const claudeSandboxStarts = (): boolean => {
-  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
-  if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
-  const onPath = (name: string) =>
-    (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
-  return onPath('bwrap') && onPath('socat')
+let sandboxStarts: boolean | undefined
+export const claudeSandboxStarts = (): boolean => {
+  sandboxStarts ??= (() => {
+    if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
+    if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
+    const onPath = (name: string) =>
+      (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
+    if (!onPath('bwrap') || !onPath('socat')) return false
+    const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+    })
+    return tried.status === 0
+  })()
+  return sandboxStarts
+}
+
+/**
+ * What holds a Claude Code session's shell commands (ADR-071): a lead's
+ * sandbox, where it starts, but for the commands it runs outside from the
+ * start and those it asks to run outside; the coordinator's, which runs
+ * nothing outside. A review's lead, which reads someone else's code, and a
+ * session whose sandbox can't start, aren't held: the rules read every
+ * command.
+ */
+const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions = {}): SandboxHold | undefined => {
+  if (!claudeSandboxStarts()) return undefined
+  if (role === 'lead') return { outside: options.sandbox?.commands ?? [], unsandboxed: true }
+  return options.contained !== undefined && options.untrusted !== true && options.offline !== true
+    ? { outside: [], unsandboxed: false }
+    : undefined
 }
 
 /**
@@ -745,7 +804,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'claude', args: ['--version'] }),
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
-    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
+    permissions: {
+      rejectAndContinue: ['reject'],
+      rejectAndStop: [],
+      allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' },
+      reasonInBand: true,
+    },
     /*
      * Offline, a reader has WebFetch and WebSearch denied, so Claude Code
      * reaches no page itself; every shell command still asks, and meets
@@ -763,6 +827,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
           ? claudeContains(options.contained)
           : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
     upFront: true,
+    holds: claudeHolds,
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
@@ -778,7 +843,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
       'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
       "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
-      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox, and meets Althar's reader rules.",
+      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox; Althar lets it run there without reading it (ADR-071).",
+      "Its sandbox reaches the keychain's service on macOS: a credential helper git is told to use inside it could read what that helper stored.",
     ],
   },
   codex: {
