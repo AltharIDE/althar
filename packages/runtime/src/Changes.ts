@@ -542,7 +542,7 @@ export class Changes extends Context.Service<
      */
     publish(input: PublishInput): Effect.Effect<Published, unknown>
     /** The task's repositories whose last pull request merged or closed with commits after it: what a next pull request would have. */
-    unshipped(taskId: string): Effect.Effect<ReadonlyArray<Unshipped>, unknown>
+    unshipped(taskId: string, options?: { readonly kept?: boolean }): Effect.Effect<ReadonlyArray<Unshipped>, unknown>
     /**
      * Whether the task's change is in Althar's hands (ADR-040), as `handsOf`
      * says: null where it isn't; else how often its checks failed, whether
@@ -3335,6 +3335,16 @@ export class Changes extends Context.Service<
       /** Where Althar keeps, by worktree, the commit the person left out what came before (ADR-034): only what comes after counts. */
       const LEFT_OUT = 'refs/althar/left-out/'
 
+      /** The default branch's refs a worktree is read against (`notOnDefault`): as Althar fetched it, as the worktree started, and its own. */
+      const defaultsOf = (repository: { readonly baseRef: string | null; readonly defaultBase: string | null }) => {
+        const target = (repository.baseRef ?? '').replace(/^origin\//, '') || repository.defaultBase
+        return [
+          target === null || target === '' ? null : `refs/althar/base/${target}`,
+          repository.baseRef,
+          repository.defaultBase === null ? null : `refs/heads/${repository.defaultBase}`,
+        ].filter((ref): ref is string => ref !== null && ref !== '')
+      }
+
       /**
        * Of commits on a worktree's branch after `head`, those its default
        * branch doesn't have: neither the commits themselves, as a merge of the
@@ -3344,7 +3354,7 @@ export class Changes extends Context.Service<
        * this Mac has it: as Althar last fetched it for a next pull request, as
        * the worktree started from it, and its own branch, each read on its
        * own, since any may be behind the rest. All of them, where git can't
-       * say.
+       * say, and `sure` false.
        */
       const notOnDefault = (
         repository: { readonly path: string; readonly baseRef: string | null; readonly defaultBase: string | null },
@@ -3352,16 +3362,13 @@ export class Changes extends Context.Service<
         commits: ReadonlyArray<string>,
       ) =>
         Effect.gen(function* () {
-          const target = (repository.baseRef ?? '').replace(/^origin\//, '') || repository.defaultBase
-          const named = [
-            target === null || target === '' ? null : `refs/althar/base/${target}`,
-            repository.baseRef,
-            repository.defaultBase === null ? null : `refs/heads/${repository.defaultBase}`,
-          ]
+          let sure = true
           const tips: Array<string> = []
-          for (const ref of named) {
-            if (ref === null || ref === '') continue
-            const tip = (yield* gitOutcome(repository.path, 'rev-parse', '--verify', '-q', `${ref}^{commit}`)).stdout
+          for (const ref of defaultsOf(repository)) {
+            // One git doesn't have says so by 1; more is git failing.
+            const found = yield* gitOutcome(repository.path, 'rev-parse', '--verify', '-q', `${ref}^{commit}`)
+            if (found.code > 1) sure = false
+            const tip = found.stdout
             if (tip !== '' && !tips.includes(tip)) tips.push(tip)
           }
           // Each on its own, as each may be fresher than the rest: a commit counts only where none has it, by hash or by patch.
@@ -3376,11 +3383,156 @@ export class Changes extends Context.Service<
               `${tip}...HEAD`,
               `^${head}`,
             )
-            if (listed.code !== 0) continue
+            if (listed.code !== 0) {
+              sure = false
+              continue
+            }
             const lacks = new Set(listed.stdout.split('\n').filter((line) => line !== ''))
             kept = new Set([...kept].filter((commit) => lacks.has(commit)))
           }
-          return commits.filter((commit) => kept.has(commit))
+          return { commits: commits.filter((commit) => kept.has(commit)), sure }
+        })
+
+      /** A worktree of a task, as `unshippedOf` reads it from the store. */
+      type ShippingRow = {
+        workspaceId: string
+        path: string
+        branch: string
+        baseCommit: string | null
+        baseRef: string | null
+        name: string
+        slug: string
+        remotes: string
+        defaultBase: string | null
+        sent: string | null
+        changeBranch: string | null
+        linkId: string | null
+        product: Product | null
+        snapshot: string | null
+        listening: number | null
+        openedAt: string | null
+      }
+
+      const remotesOf = (repository: ShippingRow) =>
+        Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(repository.remotes), () => [])
+
+      /**
+       * One repository's commits after its last pull request (`unshippedOf`);
+       * none where it has none. `answered.sure` turns false where git failed
+       * a read it needed, as it does timed out or out of processes: what it
+       * gives then may say less than there is, so it isn't kept (`keptIn`).
+       */
+      const unshippedIn = (repository: ShippingRow, answered: { sure: boolean } = { sure: true }) =>
+        Effect.gen(function* () {
+          // A command whose exit says no by 1 (a ref or commit git doesn't have, a commit not behind another, a diff), and fails by more.
+          const outcome = (...args: ReadonlyArray<string>) =>
+            Effect.map(gitOutcome(repository.path, ...args), (outcome) => {
+              if (outcome.code > 1) answered.sure = false
+              return outcome
+            })
+          const read = (...args: ReadonlyArray<string>) =>
+            git(repository.path, ...args).pipe(
+              Effect.orElseSucceed(() => {
+                answered.sure = false
+                return ''
+              }),
+            )
+          // Whether a commit is here and on the worktree's head; one git doesn't have isn't, `merge-base` failing on it.
+          const onHeadHere = (commit: string) =>
+            Effect.gen(function* () {
+              const found = yield* outcome('rev-parse', '--verify', '-q', `${commit}^{commit}`)
+              return found.code === 0 && (yield* outcome('merge-base', '--is-ancestor', found.stdout, 'HEAD')).code === 0
+            })
+          const seen =
+            repository.snapshot === null ? undefined : Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
+          if (seen?.state === 'open') return undefined
+          let head: string | undefined
+          let moved = false
+          if (seen === undefined) {
+            // None yet: from where its branch started, where it is on a code host Althar knows; one on none merges here.
+            if ((yield* hostOfRemotes(remotesOf(repository))) === null) return undefined
+            head = repository.baseCommit ?? repository.baseRef ?? undefined
+          } else {
+            // Its head as the host has it, else as Althar pushed it: the first the branch has. A worktree on a branch of its own
+            // since, made for its next pull request that didn't open, counts from where that branch started.
+            moved = repository.branch !== repository.changeBranch
+            head = moved && repository.baseCommit !== null ? repository.baseCommit : undefined
+            for (const candidate of moved ? [] : [seen.headSha, repository.sent])
+              if (candidate !== null && head === undefined && (yield* onHeadHere(candidate))) head = candidate
+          }
+          if (head === undefined) return undefined
+          const shipped = head
+          // What the person left out after it stays out: the count starts where they did, while the branch still has it.
+          const left = (yield* outcome('rev-parse', '--verify', '-q', `${LEFT_OUT}${repository.workspaceId}^{commit}`)).stdout
+          if (
+            left !== '' &&
+            left !== head &&
+            (yield* onHeadHere(left)) &&
+            (yield* outcome('merge-base', '--is-ancestor', head, left)).code === 0
+          )
+            head = left
+          const listed = yield* read('rev-list', '--reverse', '--no-merges', `${head}..HEAD`)
+          const all = listed.split('\n').filter((line) => line !== '')
+          if (all.length === 0) return undefined
+          const against = yield* notOnDefault(repository, head, all)
+          if (!against.sure) answered.sure = false
+          const commits = against.commits
+          // Some of them in the default branch already, the diff from that head has its changes too: theirs are counted alone.
+          const whole = commits.length === all.length
+          // Commits that change nothing, all together, have nothing to ship.
+          if (commits.length === 0 || (whole && (yield* outcome('diff', '--quiet', head, 'HEAD')).code === 0)) return undefined
+          // How big they are together, as a diff from that head says: a binary file counts no lines.
+          const counted = yield* whole ? read('diff', '--numstat', head, 'HEAD') : read('show', '--numstat', '--format=', ...commits)
+          const lines = counted
+            .split('\n')
+            .map((line) => line.split('\t'))
+            .reduce((sum, [add = '', del = '']) => ({ add: sum.add + (Number(add) || 0), del: sum.del + (Number(del) || 0) }), {
+              add: 0,
+              del: 0,
+            })
+          return {
+            workspaceId: repository.workspaceId,
+            path: repository.path,
+            branch: repository.branch,
+            name: repository.name,
+            slug: repository.slug,
+            openedAt: repository.openedAt,
+            change:
+              seen === undefined || repository.linkId === null || repository.product === null
+                ? null
+                : { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
+            head,
+            shipped,
+            commits,
+            moved,
+            ...lines,
+          } satisfies Unshipped
+        })
+
+      /**
+       * Each repository's `unshippedIn` as screens read it, by its worktree,
+       * kept with all it follows from: the store's row, whether Althar knows
+       * a code host for it, and the commits its head, what the person left
+       * out and its default branch's refs name, which one git process reads.
+       * While those are the same, it is not worked out again: a coordinator's
+       * thread, a board and the home read every task's card, each time any
+       * task changes. What git couldn't answer in full is worked out again
+       * the next time, as is any read where `commitsOf` failed: a worktree
+       * always has a HEAD.
+       */
+      const unshippedKept = new Map<string, { readonly key: string; readonly value: Unshipped | undefined }>()
+      const keptIn = (repository: ShippingRow) =>
+        Effect.gen(function* () {
+          const host = repository.snapshot === null ? (yield* hostOfRemotes(remotesOf(repository))) !== null : null
+          const commits = yield* commitsOf(repository.path, ['HEAD', `${LEFT_OUT}${repository.workspaceId}`, ...defaultsOf(repository)])
+          const key = JSON.stringify([repository, host, commits])
+          const found = unshippedKept.get(repository.workspaceId)
+          if (found?.key === key) return found.value
+          const answered = { sure: true }
+          const value = yield* unshippedIn(repository, answered)
+          if (answered.sure && commits[0] !== null) unshippedKept.set(repository.workspaceId, { key, value })
+          else unshippedKept.delete(repository.workspaceId)
+          return value
         })
 
       /**
@@ -3391,29 +3543,13 @@ export class Changes extends Context.Service<
        * are commits the default branch has already, by their change too;
        * commits that change nothing together have nothing to ship, and those
        * the person left out are history. One whose worktree doesn't have its
-       * pull request's head can't tell, and has none.
+       * pull request's head can't tell, and has none. Screens read it `kept`
+       * (`keptIn`); what acts on it reads it afresh.
        */
-      const unshippedOf = (taskId: string) =>
+      const unshippedOf = (taskId: string, kept = false) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const repositories = yield* sql<{
-            workspaceId: string
-            path: string
-            branch: string
-            baseCommit: string | null
-            baseRef: string | null
-            name: string
-            slug: string
-            remotes: string
-            defaultBase: string | null
-            sent: string | null
-            changeBranch: string | null
-            linkId: string | null
-            product: Product | null
-            snapshot: string | null
-            listening: number | null
-            openedAt: string | null
-          }>`
+          const repositories = yield* sql<ShippingRow>`
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.display_name AS name, b.slug,
               b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
               l.snapshot, l.listening, l.created_at AS opened_at
@@ -3426,85 +3562,8 @@ export class Changes extends Context.Service<
           const found: Array<Unshipped> = []
           for (const repository of repositories) {
             if (!existsSync(repository.path)) continue
-            const seen =
-              repository.snapshot === null ? undefined : Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
-            if (seen?.state === 'open') continue
-            let head: string | undefined
-            let moved = false
-            if (seen === undefined) {
-              // None yet: from where its branch started, where it is on a code host Althar knows; one on none merges here.
-              const remotes = Option.getOrElse(
-                Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(repository.remotes),
-                () => [],
-              )
-              if ((yield* hostOfRemotes(remotes)) === null) continue
-              head = repository.baseCommit ?? repository.baseRef ?? undefined
-            } else {
-              // Its head as the host has it, else as Althar pushed it: the first the branch has. A worktree on a branch of its own
-              // since, made for its next pull request that didn't open, counts from where that branch started.
-              moved = repository.branch !== repository.changeBranch
-              head = moved && repository.baseCommit !== null ? repository.baseCommit : undefined
-              for (const candidate of moved ? [] : [seen.headSha, repository.sent])
-                if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
-            }
-            if (head === undefined) continue
-            const shipped = head
-            // What the person left out after it stays out: the count starts where they did, while the branch still has it.
-            const left = (yield* gitOutcome(
-              repository.path,
-              'rev-parse',
-              '--verify',
-              '-q',
-              `${LEFT_OUT}${repository.workspaceId}^{commit}`,
-            )).stdout
-            if (
-              left !== '' &&
-              left !== head &&
-              (yield* onHead(repository.path, left)) &&
-              (yield* gitOutcome(repository.path, 'merge-base', '--is-ancestor', head, left)).code === 0
-            )
-              head = left
-            const listed = yield* git(repository.path, 'rev-list', '--reverse', '--no-merges', `${head}..HEAD`).pipe(
-              Effect.orElseSucceed(() => ''),
-            )
-            const all = listed.split('\n').filter((line) => line !== '')
-            if (all.length === 0) continue
-            const commits = yield* notOnDefault(repository, head, all)
-            // Some of them in the default branch already, the diff from that head has its changes too: theirs are counted alone.
-            const whole = commits.length === all.length
-            // Commits that change nothing, all together, have nothing to ship.
-            if (commits.length === 0 || (whole && (yield* gitOutcome(repository.path, 'diff', '--quiet', head, 'HEAD')).code === 0))
-              continue
-            // How big they are together, as a diff from that head says: a binary file counts no lines.
-            const counted = yield* (
-              whole
-                ? git(repository.path, 'diff', '--numstat', head, 'HEAD')
-                : git(repository.path, 'show', '--numstat', '--format=', ...commits)
-            ).pipe(Effect.orElseSucceed(() => ''))
-            const lines = counted
-              .split('\n')
-              .map((line) => line.split('\t'))
-              .reduce((sum, [add = '', del = '']) => ({ add: sum.add + (Number(add) || 0), del: sum.del + (Number(del) || 0) }), {
-                add: 0,
-                del: 0,
-              })
-            found.push({
-              workspaceId: repository.workspaceId,
-              path: repository.path,
-              branch: repository.branch,
-              name: repository.name,
-              slug: repository.slug,
-              openedAt: repository.openedAt,
-              change:
-                seen === undefined || repository.linkId === null || repository.product === null
-                  ? null
-                  : { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
-              head,
-              shipped,
-              commits,
-              moved,
-              ...lines,
-            })
+            const one = yield* kept ? keptIn(repository) : unshippedIn(repository)
+            if (one !== undefined) found.push(one)
           }
           return found
         })
@@ -5595,7 +5654,7 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
-        unshipped: (taskId) => provide(unshippedOf(taskId)),
+        unshipped: (taskId, options) => provide(unshippedOf(taskId, options?.kept === true)),
         inHands: (taskId) => provide(handsOf(taskId)),
         fixing: (taskId) =>
           provide(
