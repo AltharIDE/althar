@@ -55,8 +55,10 @@ test('a task merged in its task view settles on the board as soon as GitHub merg
     await expect(lane('Needs you').getByText(title)).toHaveCount(0)
     await merging.screenshot({ path: 'test-results/merging-card.png', animations: 'disabled', scale: 'css' })
 
-    await expect(lane('Settled').getByText(title)).toBeVisible({ timeout: 30_000 })
+    // Put in Settled, it travels there from Running and shows when it lands (ADR-068): it is there when placed.
+    await expect(lane('Settled').getByText(title)).toBeAttached({ timeout: 30_000 })
     const settled = Date.now() - pressed
+    await expect(lane('Settled').getByText(title)).toBeVisible()
     await expect(lane('Running').getByText(title)).toHaveCount(0)
     await lane('Settled').screenshot({ path: 'test-results/merging-settled.png', animations: 'disabled', scale: 'css' })
     process.stdout.write(
