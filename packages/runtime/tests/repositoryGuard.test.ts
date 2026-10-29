@@ -36,21 +36,20 @@ const commitFiles = (cwd: string, files: Record<string, string>) => {
   return git(cwd, 'rev-parse', 'HEAD')
 }
 
+// Git quotes a path with a double quote in it; Windows names no file so, and its git quotes only what isn't ASCII.
+const odd = process.platform === 'win32' ? 'src/odd name.ts' : 'src/odd name "q".ts'
+
 describe('the paths a push would send', () => {
   it.live('reads them unquoted, with a rename as both its paths, and every path without a base', () =>
     Effect.gen(function* () {
       const root = repository()
       const base = git(root, 'rev-parse', 'HEAD')
-      commitFiles(root, { 'src/odd name "q".ts': 'x', '.claude/skills/old/SKILL.md': 'old', 'é/ü.md': 'u' })
+      commitFiles(root, { [odd]: 'x', '.claude/skills/old/SKILL.md': 'old', 'é/ü.md': 'u' })
       const before = git(root, 'rev-parse', 'HEAD')
       git(root, 'mv', '.claude/skills/old/SKILL.md', 'docs-old.md')
       git(root, 'commit', '-q', '-m', 'Move')
       const head = git(root, 'rev-parse', 'HEAD')
-      assert.deepStrictEqual((yield* pathsPushed(root, base, before)).toSorted(), [
-        '.claude/skills/old/SKILL.md',
-        'src/odd name "q".ts',
-        'é/ü.md',
-      ])
+      assert.deepStrictEqual((yield* pathsPushed(root, base, before)).toSorted(), ['.claude/skills/old/SKILL.md', odd, 'é/ü.md'])
       assert.deepStrictEqual((yield* pathsPushed(root, before, head)).toSorted(), ['.claude/skills/old/SKILL.md', 'docs-old.md'])
       // With no base recorded, from where the branch left the default branch; only then, failing that, every commit's paths.
       assert.deepStrictEqual(yield* pathsPushed(root, null, head, 'main'), [])
@@ -58,7 +57,7 @@ describe('the paths a push would send', () => {
         '.claude/skills/old/SKILL.md',
         'README.md',
         'docs-old.md',
-        'src/odd name "q".ts',
+        odd,
         'é/ü.md',
       ])
     }),
