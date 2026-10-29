@@ -1,17 +1,18 @@
-import { Button, NeedLine, Shots } from '@althar/ui'
+import { Button, NeedLine, SinceRow } from '@althar/ui'
 import { Home } from '@althar/ui/screens'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
-import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SHOT_AFTER, SHOT_BEFORE, SINCE } from '../kit/world'
+import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
 import s from './Bento.module.css'
 import { Accounts, Automations, Conflicts, type Skin, Workspaces, Worktrees } from './Drawn'
 
 /*
  * What keeps you in flow: eight tiles on a six-column grid. Three hold a
- * piece of the app in its light (screenshots a lead took, home, a review);
+ * piece of the app in its light (what happened while you were away, home, a
+ * review);
  * five hold a feature drawn as a small object in 3D (several accounts for
  * one agent, automations, conflicts settled, tasks side by side in their own
  * worktrees, workspaces side by side).
@@ -99,24 +100,26 @@ const TILES: Tile[] = [
     piece: (finish) => <Accounts skin={finish} />,
   },
   {
-    id: 'shots',
+    id: 'away',
     span: 2,
     small: true,
     title: (
       <>
-        It looks at <b>what it built.</b>
+        It keeps going <b>while you’re away.</b>
       </>
     ),
-    lead: 'A lead opens the page it changed and screenshots it, before and after, at the size that matters. You see the change without running it.',
+    lead: 'Usage limits, stalled turns, review rounds: it handles them and carries on. You only hear what needs you.',
     piece: () => (
       <Shot
-        w={460}
-        maxScale={1.1}
-        label="Two screenshots a lead took of the refunds page: before, a generic error; after, saying the refund is sent again in 12 seconds"
+        w={400}
+        maxScale={1.2}
+        label="While you were away: a pull request opened after a second review, review moved to Codex at Claude Code’s limit, two issues found and fixed, a stalled step started afresh"
         frame={s.card}
       >
-        <div className={s.pad}>
-          <Shots items={[SHOT_BEFORE, SHOT_AFTER]} />
+        <div className={s.since}>
+          {SINCE.slice(0, 4).map(({ id, ...event }) => (
+            <SinceRow key={id} {...event} />
+          ))}
         </div>
       </Shot>
     ),

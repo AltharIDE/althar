@@ -65,7 +65,7 @@ export function DesktopBody() {
             <b>Althar stays.</b>
           </>
         }
-        lead="None of the industry’s bullshit touches Althar. It isn’t a lab, and it’s open source under Apache 2.0. It runs on your computer: your projects, rules and knowledge sit in a local database you own, with no account and nothing of ours between you and the model. The work moves to whichever agent you have, and gets better every time a model does."
+        lead="Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it."
       >
         <AtWork />
       </Scene>
@@ -79,7 +79,7 @@ export function DesktopBody() {
             <b>has a manager.</b>
           </>
         }
-        lead="It’s called the coordinator. It keeps a running picture of the project, its repositories, your rules and every task so far, and runs a team of agents for it. Ask in a sentence: it plans the work, puts a lead and reviewers on each part, and drafts issues for what it finds. Like a real team, made only of agents."
+        lead="It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask."
       >
         <AskOnce />
       </Scene>

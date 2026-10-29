@@ -40,6 +40,7 @@
 .card { border-radius: 14px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line-2), 0 24px 50px rgba(40, 30, 10, 0.08); }
 .window { border-radius: 12px; background: var(--n-2); box-shadow: 0 0 0 1px var(--line-2), 0 24px 50px rgba(40, 30, 10, 0.1); }
 .pad { padding: 16px; background: var(--n-1); }
+.since { display: grid; gap: 4px; padding: 14px 16px; background: var(--n-1); }
 .home { height: 100%; background: var(--n-2); }
 
 @media (max-width: 1100px) {
