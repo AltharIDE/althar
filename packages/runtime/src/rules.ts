@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from 'node:fs'
+import { readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { posix, win32 } from 'node:path'
 
@@ -74,13 +74,16 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
  * force a branch that isn't the task's, git discarding work in another
  * checkout, deleting or moving away what's outside the task's worktree,
  * changing another checkout, and a push the rules can't read. It asks the
- * person even with everything allowed.
+ * person even with everything allowed, where the rules read it as one of
+ * those (`lastingOf`): what they can't tell goes ahead there.
  */
 interface Kept {
   readonly reason: string
   readonly rule: RuleId | 'unclear'
   readonly floor?: boolean
   readonly irreversible?: boolean
+  /** Found only reading it from a folder the rules can't tell, as the worst it could be: `cd "$DIR" && git reset --hard`. */
+  readonly blind?: boolean
 }
 
 /** How firmly a kind is kept: `floor` past the coordinator, `irreversible` past allowing everything too. */
@@ -827,9 +830,10 @@ const takesText = (words: ReadonlyArray<string>): boolean => {
  * `cat <<'EOF' | sh`, a function or script, a continued line): there the rules
  * judge it as they would have, as a command. The operator and the line it is on
  * stay; the body and its closing line go. Comments are skipped, as `# <<'EOF'`
- * opens nothing.
+ * opens nothing. `reads` says which commands leave a body unread as commands:
+ * those that take only text, unless the caller says more.
  */
-export const withoutQuotedHeredocs = (text: string): string => {
+export const withoutQuotedHeredocs = (text: string, reads: (words: ReadonlyArray<string>) => boolean = takesText): string => {
   if (!text.includes('<<')) return text
   /** The commands of a pipeline, and of what is grouped with it in parentheses: the readers a heredoc's body can reach. */
   interface Group {
@@ -1013,13 +1017,28 @@ export const withoutQuotedHeredocs = (text: string): string => {
       !chunk.closed ||
       !chunk.heredoc.quoted ||
       chunk.heredoc.shadowed ||
-      !chunk.heredoc.group.commands.every(takesText)
+      !chunk.heredoc.group.commands.every(reads)
         ? typeof chunk === 'string'
           ? chunk
           : chunk.text
         : '',
     )
     .join('')
+}
+
+/** Interpreters that read a script in their own language, not the shell's: `python3 - <<'EOF'`. */
+const SCRIPT_LANGUAGES = /^(python[\d.]*|node|ruby|perl|php|bun|deno)$/
+
+/**
+ * Whether a command takes a heredoc's body as text or as a script in a
+ * language other than the shell's, whose words aren't commands: `python3 -`,
+ * `node`. What such a script does the rules can't read either way.
+ */
+const takesScript = (words: ReadonlyArray<string>): boolean => {
+  if (takesText(words)) return true
+  if (changesNames(words)) return false
+  const program = words.find((word) => !assignment.test(word)) ?? ''
+  return SCRIPT_LANGUAGES.test(program.slice(program.lastIndexOf('/') + 1))
 }
 
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
@@ -1642,6 +1661,10 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
     if (paths.dirname(folder) === folder) return undefined
   }
 }
+
+/** Whether a path is surely not there now: its folder is, and it isn't, nor does it name others with a wildcard. */
+const missing = (where: Places, path: string) =>
+  !/[*?[]/.test(path) && where.exists(where.system.paths.dirname(path)) && !where.exists(path)
 
 const changesCheckout = (path: string) =>
   kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', 'irreversible')
@@ -2282,7 +2305,12 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
       for (const { at = context.worktree, blind: unseen } of folders)
         for (const words of readings(written)) {
           const found = kindsOf(words, at, where, context)
-          kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+          // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
+          const anywhere = unseen ? kindsOf(words, context.worktree, where, context).kinds.map((one) => JSON.stringify(one)) : []
+          const read = unseen
+            ? found.kinds.map((one) => (anywhere.includes(JSON.stringify(one)) ? one : { ...one, blind: true }))
+            : found.kinds
+          kinds.push(...read.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           if (unseen) unseenKinds.push(...found.kinds)
         }
@@ -2445,7 +2473,13 @@ const kindsOf = (
             return false
           }
         })
-      if (discards(git, isPath))
+      // In a folder that is there but in no checkout, git has no work to throw away: it fails. Not the root of the disk, which
+      // stands for a folder the rules can't tell.
+      const noCheckout =
+        elsewhere !== where.system.paths.parse(where.system.home).root &&
+        where.folder(elsewhere) &&
+        checkoutOf(where, elsewhere) === undefined
+      if (!noCheckout && discards(git, isPath))
         kinds.push(
           kept(
             `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
@@ -2475,9 +2509,12 @@ const kindsOf = (
   }
   if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
   // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
-  const gone = commandsIn(words)
+  const removed = commandsIn(words)
     .flatMap(removes)
-    .find((path) => outside(where, locate(where, cwd, path)))
+    .filter((path) => outside(where, locate(where, cwd, path)))
+  // What isn't there when it asks loses no one anything: the line made it itself, or it runs from a folder the shell never reaches.
+  const gone = removed.find((path) => !missing(where, locate(where, cwd, path)))
+  const absent = removed[0]
   const target = writes(words)
     .filter((path) => !redirects(words).includes(path))
     .find((path) => outside(where, locate(where, cwd, path)))
@@ -2492,6 +2529,8 @@ const kindsOf = (
         'irreversible',
       ),
     )
+  else if (absent !== undefined)
+    kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${absent}`, 'outside'))
   else if (replaced !== undefined) kinds.push(changesCheckout(replaced))
   else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
@@ -2695,10 +2734,63 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
 }
 
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
-const evenAllowed = (reason: string) =>
-  reason
-    .replace(/ always asks/, ' asks even with everything allowed')
-    .replace(/, so it asks\.$/, ", so it asks even with everything allowed: it could do what can't be undone.")
+const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
+
+/** How many folders a line climbs out of at most by a relative path: 2 for `cd ../.. && rm x.log`. */
+const climbs = (text: string): number =>
+  Math.max(
+    0,
+    ...[...text.matchAll(/(?<![^\s=;&|()'"<>])(?:\.\.(?:[/\\]|(?=$|[\s;&|()'"<>])))+/g)].map((match) => match[0].split('..').length - 1),
+  )
+
+/**
+ * A real folder up to `depth` folders into a worktree, the deepest there is
+ * along the first folders by name: where an agent's shell could be when a
+ * command starts, as its folder holds from one command to the next. None
+ * where the worktree has no folder in it, or can't be read.
+ */
+const folderInside = (worktree: string, depth: number, system: System): string | undefined => {
+  let at = worktree
+  for (let level = 0; level < depth; level += 1) {
+    let next: string | undefined
+    try {
+      next = readdirSync(at, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules')
+        .map((entry) => entry.name)
+        .sort()[0]
+    } catch {
+      return undefined
+    }
+    if (next === undefined) break
+    at = system.paths.join(at, next)
+  }
+  return at === worktree ? undefined : at
+}
+
+/**
+ * What can't be undone in a request with everything allowed (ADR-067's
+ * amendment): only what the rules read as that. Not what they can't tell
+ * (`Kept`'s `unclear`, or what is only the worst a folder it can't tell
+ * could be, `blind`); not the words of a script in a language other than
+ * the shell's (`python3 - <<'EOF'`); and not a relative path that leaves the
+ * worktree only from its top: an agent's shell keeps the folder it moved to
+ * from one command to the next, so `cd ../..` may as well go back up to it.
+ * Such a path counts where it leaves the worktree from a folder inside it too.
+ */
+const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
+  const lasting = (kinds: ReadonlyArray<Kept>) =>
+    kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
+  if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  const text = withoutQuotedHeredocs(commandOf(request), takesScript)
+  const found = lasting(commandKinds(text, context))
+  const depth = climbs(text)
+  if (found === undefined || depth === 0) return found
+  const inside = folderInside(context.worktree, depth, systemOf(context))
+  if (inside === undefined) return found
+  return lasting(commandKinds(text, { ...context, worktree: inside, worktrees: context.worktrees ?? [context.worktree] })) === undefined
+    ? undefined
+    : found
+}
 
 /** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */
 const BROADER_THAN_FLOOR: ReadonlyArray<Kept['rule']> = ['outside', 'unclear']
@@ -2717,9 +2809,9 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  *   the project named;
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can; and short of what can't be
- *   undone from the task (`Kept`'s `irreversible`, ADR-067), which asks the
- *   person;
+ *   refused, with how to run it so they can; and short of what the rules
+ *   read as what can't be undone from the task (`lastingOf`, ADR-067),
+ *   which asks the person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what could lose work or a secret asks the person where the project would
@@ -2765,8 +2857,9 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
         verdict: 'deny',
         reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
       }
-    // What can't be undone from the task still asks: allowing everything is for what the person could take back if it went wrong.
-    const lasting = found.find((each) => each.irreversible === true)
+    // What can't be undone from the task still asks, where the rules read it as that: allowing everything is for what the person
+    // could take back if it went wrong, and trusts the agent with what the rules can't read.
+    const lasting = lastingOf(request, context)
     return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))

@@ -839,10 +839,10 @@ describe('a project’s rules (ADR-013)', () => {
     assert.strictEqual(verdictOf('git push --tags', allow).verdict, 'allow')
     // What could lose work still asks (the floor, below).
     assert.strictEqual(verdictOf('git push --force origin main', allow).verdict, 'ask')
-    // What the rules can't read is refused, with how to spell it out, while something is never allowed; asked about when nothing is,
-    // since a push it can't read could be a force push.
+    // What the rules can't read is refused, with how to spell it out, while something is never allowed; it goes ahead when nothing
+    // is, the agent trusted with it (ADR-067's amendment).
     assert.strictEqual(verdictOf('git push --weird origin', allow).verdict, 'deny')
-    assert.strictEqual(verdictOf('git push --weird origin', { mode: 'allow' }).verdict, 'ask')
+    assert.strictEqual(verdictOf('git push --weird origin', { mode: 'allow' }).verdict, 'allow')
     assert.strictEqual(verdictOf('vercel deploy', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('rm -rf / --no-preserve-root', allow).verdict, 'deny')
     assert.strictEqual(verdictOf('gh pr create', allow).verdict, 'deny')
@@ -1388,7 +1388,6 @@ describe('what could lose work or a secret (DEV-69)', () => {
     'git push origin :old-spike',
     'git push --prune origin',
     'git push --mirror origin',
-    'git push origin $(git branch --show-current)',
     'git branch -D spike',
     'git branch -f main HEAD~3',
     'git branch -M main',
@@ -1416,6 +1415,17 @@ describe('what could lose work or a secret (DEV-69)', () => {
     'git prune',
     'cat /Users/someone/code/app/.env',
   ]
+  /** What the rules can't read, where it could be what can't be undone: it goes ahead only with everything allowed (ADR-067's amendment). */
+  const unreadable = [
+    'git push origin $(git branch --show-current)',
+    'git push origin $BRANCH',
+    'git push --tags --delete origin',
+    "printf 'delete refs/heads/main\\n' | git update-ref --stdin",
+    'echo /Users/someone/code/app | xargs rm -rf',
+    'DIR=/Users/someone/code/app; rm -rf $DIR',
+    'cd "$CHECKOUT" && git reset --hard',
+    "alias back='cd /Users/someone/code/app'; back; rm -rf src",
+  ]
 
   it('asks even with everything allowed before what can’t be undone, without holding it, and says why', () => {
     const allow = { mode: 'allow' as const }
@@ -1427,10 +1437,6 @@ describe('what could lose work or a secret (DEV-69)', () => {
     assert.strictEqual(
       reasonOf(run('git push origin main', rules(allow))),
       "A push to main asks even with everything allowed: once others have it, it can't be taken back.",
-    )
-    assert.strictEqual(
-      reasonOf(run('git push origin $(git branch --show-current)', rules(allow))),
-      "Althar can't tell what this command does until it runs, so it asks even with everything allowed: it could do what can't be undone.",
     )
     // Every card that still asks says why, in one line.
     for (const command of irreversible) {
@@ -1456,9 +1462,17 @@ describe('what could lose work or a secret (DEV-69)', () => {
     assert.strictEqual(verdictOf('cat ~/.ssh/id_rsa', { mode: 'allow' }), 'deny')
   })
 
-  it('keeps the floor in every other mode: what can be got back asks there as before', () => {
+  it('lets through with everything allowed what the rules can’t read, short of what is never allowed', () => {
+    for (const command of unreadable) assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
+    // While the project never allows something, what the rules can't read could be it: refused, with how to spell it out.
+    for (const command of unreadable.filter((each) => each.includes('$')))
+      assert.strictEqual(verdictOf(command, { mode: 'allow', never: ['deploy'] }), 'deny', command)
+  })
+
+  it('keeps the floor in every other mode: what can be got back, or can’t be read, asks there as before', () => {
     for (const mode of ['rules', 'coordinator', 'ask'] as const)
-      for (const command of [...irreversible, ...undoable]) assert.strictEqual(verdictOf(command, { mode }), 'ask', `${mode}: ${command}`)
+      for (const command of [...irreversible, ...undoable, ...unreadable])
+        assert.strictEqual(verdictOf(command, { mode }), 'ask', `${mode}: ${command}`)
     // Nor does the coordinator answer it, where nothing is on the always-ask list.
     for (const command of undoable)
       assert.deepInclude(run(command, rules({ mode: 'coordinator', ask: [] })), { verdict: 'ask', held: false }, command)
@@ -1500,9 +1514,11 @@ describe('what could lose work or a secret (DEV-69)', () => {
       const allowing = (command: string) => decide(request({ title: command }), { ...at, ...rules({ mode: 'allow' }) })
       for (const command of ['git push --tags', 'git push --tags origin', 'git push origin --tags'])
         assert.strictEqual(allowing(command).verdict, 'allow', command)
-      // `--follow-tags` pushes the checked-out branch as well, and so does naming it.
-      for (const command of ['git push --follow-tags', 'git push --tags origin HEAD', 'git push --tags --delete origin'])
-        assert.deepInclude(allowing(command), { verdict: 'ask', held: false }, command)
+      // `--follow-tags` pushes the checked-out branch as well, and so does naming it: main asks; with no branch checked out the
+      // rules can't tell which it is, and it goes ahead.
+      for (const command of ['git push --follow-tags', 'git push --tags origin HEAD'])
+        if (at === detached) assert.strictEqual(allowing(command).verdict, 'allow', command)
+        else assert.deepInclude(allowing(command), { verdict: 'ask', held: false }, command)
     }
     // Every other mode still asks before pushing tags.
     for (const mode of ['rules', 'coordinator', 'ask'] as const)
@@ -1675,14 +1691,17 @@ describe('what could lose work or a secret (DEV-69)', () => {
     // A name that is a folder there is read as one: `git checkout src` puts back what's in it.
     const elsewhere = mkdtempSync(join(tmpdir(), 'althar-checkout-'))
     mkdirSync(join(elsewhere, 'src'))
+    mkdirSync(join(elsewhere, '.git'))
     const away = { ...rules(allow), scratch: [] }
     assert.deepInclude(run(`git -C ${elsewhere} checkout src`, away), { verdict: 'ask', held: false })
     assert.strictEqual(run(`git -C ${elsewhere} checkout spike`, away).verdict, 'allow')
   })
 
   it('reads `git update-ref --stdin` as what it can’t tell, as its refs come in on its input', () => {
-    for (const command of ["printf 'delete refs/heads/main\\n' | git update-ref --stdin", 'git update-ref -z --stdin < refs.txt'])
-      assert.deepInclude(run(command, rules({ mode: 'allow' })), { verdict: 'ask', held: false }, command)
+    for (const command of ["printf 'delete refs/heads/main\\n' | git update-ref --stdin", 'git update-ref -z --stdin < refs.txt']) {
+      assert.deepInclude(run(command, rules({})), { verdict: 'ask', held: false }, command)
+      assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
+    }
   })
 
   it('follows a symlink in the worktree into where secrets are kept, to a file that isn’t there yet', () => {
@@ -1868,7 +1887,7 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
     assert.strictEqual(decide(runs('cat ~/.SSH/id_rsa'), on('linux', '/home/alice')).verdict, 'allow')
   })
 
-  it('asks even with everything allowed where what a delete or git acts on shows only when it runs', () => {
+  it('asks where what a delete or git acts on shows only when it runs; with everything allowed, only where it reads', () => {
     for (const command of [
       'echo /Users/someone/code/app | xargs rm -rf',
       'ls | xargs -I{} rm -rf {}',
@@ -1879,18 +1898,23 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
       'mv "$SRC" ./src',
       'git -C "$CHECKOUT" reset --hard',
       'git push origin $BRANCH',
+      'Remove-Item -Recurse $target',
+      'cd "$CHECKOUT" && git reset --hard',
+      'cd $DIR; cd src; rm -rf generated',
+    ]) {
+      assert.strictEqual(decide(runs(command), rules({})).verdict, 'ask', command)
+      assert.strictEqual(decide(runs(command), rules(allow)).verdict, 'allow', command)
+    }
+    assert.include(reasonOf(decide(runs('ls | xargs rm'), rules({}))), '`xargs rm`')
+    for (const command of [
       'eval rm -rf /Users/someone/code/app',
       'for dir in a b; do rm -rf /Users/someone/code/app; done',
       'if true; then rm -rf /Users/someone/code/app; fi',
       '(rm -rf /Users/someone/code/app)',
       '{ rm -rf /Users/someone/code/app; }',
       '! git branch -D spike',
-      'Remove-Item -Recurse $target',
-      'cd "$CHECKOUT" && git reset --hard',
-      'cd $DIR; cd src; rm -rf generated',
     ])
       assert.deepInclude(decide(runs(command), rules(allow)), { verdict: 'ask', held: false }, command)
-    assert.include(reasonOf(decide(runs('ls | xargs rm'), rules(allow))), '`xargs rm`')
     for (const command of [
       'rm -rf "$TMPDIR/build"',
       'rm -rf "$PWD/dist"',
@@ -2001,7 +2025,6 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
       `pushd /Users/someone/code/app; pushd ${worktree}; popd; rm -rf src`,
       // A function's `cd` happens whenever it's called; a loop's relative one, any number of times.
       `f() { cd /Users/someone/code/app; }; cd ${worktree}; f; rm -rf src`,
-      `alias back='cd /Users/someone/code/app'; back; rm -rf src`,
       `cd ${worktree}; for i in 1 2 3 4 5 6; do cd ..; done; rm -rf src`,
       // Its options aren't where it goes.
       'cd -P /Users/someone/code/app; rm -rf src',
@@ -2279,5 +2302,87 @@ describe('a quoted heredoc with a subshell beside it', () => {
   it('asks for a push in the command, not for words in the heredoc', () => {
     assert.strictEqual(run("cat <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
     assert.notStrictEqual(run("cat <<'EOF'\nhi\nEOF\n$(git push origin x)").verdict, 'allow')
+  })
+})
+
+describe('allowing everything trusts the agent with what the rules can’t read (ADR-067’s amendment)', () => {
+  const rules = (project: Partial<ProjectRuleSet>, more: Partial<RuleContext> = {}): RuleContext => ({
+    ...context,
+    ...more,
+    project: { ...MVP_RULES, ...project },
+  })
+  const allow = { mode: 'allow' as const }
+  const runs = (command: string) => request({ title: command, rawInput: { command } })
+  /** A script that edits the task's files, as leads write them: its words name `push`, its TypeScript has backticks. */
+  const script = [
+    "python3 - <<'EOF'",
+    "p='src/Changes.ts'",
+    's=open(p).read()',
+    's=s.replace("const pushed = yield* push(taskId)", "const pushed = yield* push(taskId, `${where}`)")',
+    "open(p,'w').write(s)",
+    'EOF',
+  ].join('\n')
+
+  it('lets a script in another language go ahead, whatever its words, and asks in every other mode as before', () => {
+    assert.strictEqual(decide(runs(script), rules(allow)).verdict, 'allow')
+    assert.strictEqual(
+      decide(runs(`cd ${worktree}/packages/runtime && cp $TMPDIR/keep.ts tests/a.test.ts && ${script}`), rules(allow)).verdict,
+      'allow',
+    )
+    for (const reader of ['node', 'ruby', 'perl', '/usr/bin/python3'])
+      assert.strictEqual(decide(runs(script.replace('python3 -', reader)), rules(allow)).verdict, 'allow', reader)
+    for (const mode of ['rules', 'coordinator', 'ask'] as const)
+      assert.deepInclude(decide(runs(script), rules({ mode })), { verdict: 'ask', held: false }, mode)
+  })
+
+  it('still asks before what it reads as what can’t be undone, beside such a script or in a shell’s', () => {
+    for (const command of [
+      `${script}\ngit push --force origin althar/retry`,
+      `git push origin main && ${script}`,
+      `${script}\nrm -rf ~/Documents`,
+      'cd "$DIR" && rm -rf ~/Documents',
+      "bash <<'EOF'\ngit push --force origin althar/retry\nEOF",
+      "cat <<'EOF' | sh\ngit push origin main\nEOF",
+    ]) {
+      const verdict = decide(runs(command), rules(allow))
+      assert.deepInclude(verdict, { verdict: 'ask', held: false }, command)
+      // It says why in one line.
+      assert.include('reason' in verdict ? verdict.reason : '', 'even with everything allowed:', command)
+    }
+    // Never still refuses, and keys are never read.
+    assert.strictEqual(
+      decide(runs(script), rules({ mode: 'allow', never: ['deploy'], commands: [{ pattern: 'python3', decision: 'never' }] })).verdict,
+      'deny',
+    )
+    assert.strictEqual(decide(runs("python3 - <<'EOF'\nEOF\ncat ~/.ssh/id_rsa"), rules(allow)).verdict, 'deny')
+  })
+
+  it('reads a relative path from wherever in the worktree the agent’s shell may be, and asks only where it leaves from there too', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-shell-'))
+    const tree = join(root, 'tree')
+    mkdirSync(join(tree, 'packages', 'ui'), { recursive: true })
+    writeFileSync(join(root, 'notes.md'), 'mine')
+    const here = rules(allow, { worktree: tree, scratch: [] })
+    // The shell kept `packages/ui` from the command before: `cd ../..` is the worktree again.
+    for (const command of ['cd ../.. && rm -f sb.log', 'rm -f ../../sb.log', 'cd ../.. && git checkout HEAD -- packages/ui/src'])
+      assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
+    // What leaves the worktree from any folder in it, or is named outright, still asks.
+    for (const command of ['rm -rf ../../../..', `rm -f ${join(root, 'notes.md')}`, 'cd ../.. && git push origin main'])
+      assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
+    // Every other mode reads it from the worktree's top, as before.
+    assert.strictEqual(decide(runs('cd ../.. && rm -f sb.log'), rules({ mode: 'rules' }, { worktree: tree, scratch: [] })).verdict, 'ask')
+  })
+
+  it('reads deleting what isn’t there, or git where there is no checkout, as losing nothing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-gone-'))
+    const tree = join(root, 'tree')
+    mkdirSync(tree)
+    writeFileSync(join(root, 'kept.log'), 'mine')
+    const here = rules(allow, { worktree: tree, scratch: [] })
+    for (const command of [`rm -f ${join(root, 'gone.log')}`, `git -C ${root} checkout HEAD -- src`])
+      assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
+    mkdirSync(join(root, '.git'))
+    for (const command of [`rm -f ${join(root, 'kept.log')}`, `rm -f ${join(root, '*.log')}`, `git -C ${root} checkout HEAD -- src`])
+      assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
   })
 })
