@@ -374,6 +374,9 @@ const listedOf = (pull: ListedAnswer): ListedChange => {
 /** What GitHub calls each verdict a review can post. */
 const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', request_changes: 'REQUEST_CHANGES', comment: 'COMMENT' }
 
+/** What GitHub answers a merge: whether it merged, and its commit. */
+const MergeAnswer = Schema.Struct({ merged: Schema.optional(Schema.Boolean), sha: Schema.optional(Schema.NullOr(Schema.String)) })
+
 const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
@@ -654,14 +657,19 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           { id: change.id },
         )
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+    // Merged, as GitHub answers, it is: read back at once, it can still say open for a moment, and reading it takes as long again.
     merge: (repository, change) =>
-      http
-        .json(Schema.Unknown, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+      Effect.gen(function* () {
+        const { conflicts: _, ...seen } = change
+        const answer = yield* http.json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
           merge_method: repository.merges[0] ?? 'merge',
           // Only the head Althar last saw: a push since then isn't merged unseen.
           ...(change.headSha === null ? {} : { sha: change.headSha }),
         })
-        .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+        if (answer.merged === true)
+          return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
+        return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
+      }),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

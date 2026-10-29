@@ -1,5 +1,6 @@
 import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 
+import { asMerging } from '../../data/merges'
 import { readyOf, standingCalls } from '../../shared/calls'
 
 /*
@@ -11,9 +12,9 @@ import { readyOf, standingCalls } from '../../shared/calls'
  * review), in the order its project's line starts; then work under way
  * paused for a usage limit or the connection; then a plan waiting to start,
  * on its countdown or held. Running: work an agent is on, or whose checks
- * Althar sees through, and at its foot what was on and stopped, which its
- * count leaves out. Needs you: a task that waits on a call of yours, once,
- * as one card that says the call; a call no task on the board waits on (the
+ * Althar sees through. Needs you: a task that waits on a call of yours, once,
+ * as one card that says the call; a task whose lead stopped with no agent on
+ * it, which waits for the person to carry on or abandon it; a call no task on the board waits on (the
  * coordinator's own question, or one for a task held up next); and work
  * ready for the person, as `needsYou` says, a task that isn't a change and
  * finished among it until they settle it. Settled: what is done, most recent
@@ -62,12 +63,14 @@ export interface Lanes {
   readonly upNext: number
   /** The line is in an order the person gave it, not the oldest first. */
   readonly reordered: boolean
-  /** Running's cards: what is under way, then what stopped. */
+  /** Running's cards: what is under way. */
   readonly running: ReadonlyArray<BoardTask>
-  /** How many have an agent on them, or checks Althar sees through: Running's count, which leaves out what stopped and what waits. */
+  /** How many have an agent on them, or checks Althar sees through: Running's count, which leaves out what waits. */
   readonly atWork: number
   /** Tasks that wait on a call of the person's, each once, with its call. */
   readonly waiting: ReadonlyArray<Waiting>
+  /** Tasks whose lead stopped with no agent on them, waiting for the person to carry on or abandon, the latest stopped first. */
+  readonly stopped: ReadonlyArray<BoardTask>
   /** Calls no task on the board waits on: the coordinator's questions, and a held plan's. */
   readonly calls: ReadonlyArray<BoardCall>
   /** Work ready for the person: the home lists these too. */
@@ -84,7 +87,7 @@ const groupOf = (task: BoardTask): Group | null => {
   if (continuesWhenFree(task)) return 'continuing'
   if (startsWhenFree(task)) return 'line'
   if (pausedUpNext(task)) return 'paused'
-  return task.phase === 'running' || task.phase === 'stopped' ? 'running' : null
+  return task.phase === 'running' ? 'running' : null
 }
 
 /** When a paused task can go on: a usage limit's reset, the soonest first; the connection, whenever it is back, after them. */
@@ -110,9 +113,8 @@ const arrange = (tasks: ReadonlyArray<BoardTask>, held: Held | null) => {
   for (const task of tasks) {
     const natural = groupOf(task)
     if (natural === null) continue
-    if (natural === 'running') {
-      if (task.phase !== 'stopped') atWork += 1
-    } else upNext += 1
+    if (natural === 'running') atWork += 1
+    else upNext += 1
     const was = held?.get(task.taskId)
     const group = was?.group ?? natural
     const kept = was !== undefined && was.group !== natural
@@ -125,7 +127,7 @@ const arrange = (tasks: ReadonlyArray<BoardTask>, held: Held | null) => {
       .toSorted((a, b) => a.at - b.at || Number(b.kept) - Number(a.kept) || a.task.createdAt.localeCompare(b.task.createdAt))
       .map((one) => one.task)
   const steady = (list: ReadonlyArray<BoardTask>) => (held === null ? list : list.toSorted((a, b) => index(a) - index(b)))
-  const stopped = (task: BoardTask) => Number(task.phase === 'stopped' || groupOf(task) !== 'running')
+  const stopped = (task: BoardTask) => Number(groupOf(task) !== 'running')
   return {
     continuing: placed(groups.continuing),
     line: placed(groups.line),
@@ -154,19 +156,22 @@ const laid = (tasks: ReadonlyArray<BoardTask>, plans: ReadonlyArray<BoardTask>, 
 
 const plansOf = (lanes: Lanes) => lanes.next.slice(lanes.continuing + lanes.free + lanes.paused)
 
-export const lanesOf = (board: BoardSnapshot): Lanes => {
-  const of = (...phases: ReadonlyArray<BoardTask['phase']>) => board.tasks.filter((task) => phases.includes(task.phase))
+/** The lanes, with each ready task in `merging` at work, merging, until it settles. */
+export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new Set()): Lanes => {
+  const tasks = asMerging(board.tasks, merging)
+  const of = (...phases: ReadonlyArray<BoardTask['phase']>) => tasks.filter((task) => phases.includes(task.phase))
   // A waiting task's calls are one, its oldest (`standingCalls`, as the home counts them too).
-  const standing = standingCalls(board.tasks, board.calls)
+  const standing = standingCalls(tasks, board.calls)
   const waiting = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
   const folded = new Set(waiting.map(({ task }) => task.taskId))
   return {
     ...laid(
-      of('running', 'stopped'),
+      of('running'),
       of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
       null,
     ),
     waiting,
+    stopped: of('stopped').toSorted((a, b) => (b.stopped?.at ?? '').localeCompare(a.stopped?.at ?? '')),
     calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
     ready: readyOf(of('ready')),
     kept: of('kept').toSorted((a, b) => (b.keptAt ?? '').localeCompare(a.keptAt ?? '')),
@@ -198,4 +203,4 @@ export const holding = (lanes: Lanes, held: Held): Lanes => {
 }
 
 /** How many cards are in Needs you: what waits on the person, each once. */
-export const yoursOf = (lanes: Lanes) => lanes.waiting.length + lanes.calls.length + lanes.ready.length
+export const yoursOf = (lanes: Lanes) => lanes.waiting.length + lanes.stopped.length + lanes.calls.length + lanes.ready.length

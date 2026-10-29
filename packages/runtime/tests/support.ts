@@ -31,6 +31,7 @@ import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
 import type { LoadOptions } from '../src/MachineLoad'
+import { WORK } from '../src/machine'
 import type { PlanUsageOptions } from '../src/PlanUsage'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
@@ -163,8 +164,14 @@ export const fakeAgents = (
     definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
     transport: (cwd, env = {}, session) => {
       launches.push({ agentId, cwd, env, options: session })
+      // As a real process, it carries whose work it is, as every agent does (machine.ts).
+      const work = env[WORK]
       return agentId === 'process'
-        ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+        ? {
+            _tag: 'Process',
+            spec: { command: 'bun', args: [fakeAgentMain], ...(work === undefined ? {} : { env: { [WORK]: work } }) },
+            cwd,
+          }
         : agentId === 'missing'
           ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
           : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
@@ -288,6 +295,9 @@ export const runtime = (
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
     readonly connectivity?: RuntimeOptions['connectivity']
+    /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
+    readonly leftFirst?: Duration.Duration
+    readonly leftEvery?: Duration.Duration
   } = {},
 ) =>
   Runtime.layer({
@@ -315,7 +325,9 @@ export const runtime = (
     ...(more.load === undefined ? {} : { load: more.load }),
     // No test reads a real sign-in: a provider's usage endpoint answers that there is none, unless a test says.
     usage: { readEndpoint: () => Promise.resolve({ kind: 'none' as const }), ...more.usage },
-    ...(more.idle === undefined ? {} : { idle: more.idle }),
+    // A round waits a moment, not two seconds, for its lead to report what it left running after its turn: the fake
+    // agents report it within the turn, but where a test says.
+    idle: { reports: Duration.millis(300), ...more.idle },
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
@@ -323,6 +335,8 @@ export const runtime = (
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
+    leftFirst: more.leftFirst ?? Duration.hours(1),
+    ...(more.leftEvery === undefined ? {} : { leftEvery: more.leftEvery }),
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */
@@ -359,6 +373,20 @@ export const task = (title = 'Retry checkout') =>
     })
     return { project, task: created }
   })
+
+/**
+ * An agent out of usage until a reset some seconds after it first says so: after another task's lead (`[lead:wait]`)
+ * takes the one place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start
+ * may fall either side on a busy machine.
+ */
+export const outUntilSoon = () => {
+  let until: number | undefined
+  return {
+    get until() {
+      return (until ??= Date.now() + 2_500)
+    },
+  }
+}
 
 /** Waits until a query returns a row matching the check, reading the store every few milliseconds. */
 export const until = <A, R = SqlClient.SqlClient>(
@@ -435,23 +463,31 @@ export const listTools = (access: ToolAccess) =>
     })
   })
 
-/** The tools an agent with this access is offered, each with the description it reads. */
-export const toolDescriptions = (access: ToolAccess) =>
+/** The tools an agent with this access is offered, as it reads them: each one's name, description and input. */
+export const toolsOf = (access: ToolAccess) =>
   Effect.gen(function* () {
     const granted = yield* (yield* ToolServer).grant(access)
     const server = granted.server
-    if (server.type !== 'http') return {} as Record<string, string>
+    if (server.type !== 'http') return []
     return yield* Effect.promise(async () => {
       const client = new Client({ name: 'test', version: '1.0.0' })
       const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
       await client.connect(transport as Parameters<typeof client.connect>[0])
       try {
-        return Object.fromEntries((await client.listTools()).tools.map((tool) => [tool.name, tool.description ?? '']))
+        return (await client.listTools()).tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description ?? '',
+          properties: Object.keys(tool.inputSchema.properties ?? {}),
+        }))
       } finally {
         await client.close()
       }
     })
   })
+
+/** The tools an agent with this access is offered, each with the description it reads. */
+export const toolDescriptions = (access: ToolAccess) =>
+  Effect.map(toolsOf(access), (tools): Record<string, string> => Object.fromEntries(tools.map((tool) => [tool.name, tool.description])))
 
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>

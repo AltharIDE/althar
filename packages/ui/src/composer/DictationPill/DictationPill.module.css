@@ -9,6 +9,15 @@
     var(--lift-card);
   color: var(--t-2);
   font-size: 12px;
+  /* carried to the window's foot, it grows from there with a fade, never from nothing */
+  transform-origin: 50% 100%;
+  animation: carried var(--enter) var(--ease-out);
+}
+@keyframes carried {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
+  }
 }
 
 .pill {

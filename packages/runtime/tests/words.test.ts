@@ -90,7 +90,7 @@ describe('what Althar writes about a pull request', () => {
   })
 
   it('describes it as the lead wrote it, else from what the task built, and never with the review or its evidence', () => {
-    const credit = '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>'
+    const credit = 'Opened by [Althar](https://github.com/AltharIDE/althar).'
     assert.strictEqual(bodyOf({ lead: null, issue: null }), credit)
     // Althar's credit turned off, it doesn't sign the description either.
     assert.strictEqual(bodyOf({ lead: 'Adds a retry.', issue: null, credit: false }), 'Adds a retry.')

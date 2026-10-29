@@ -3,11 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BoardTask, ConnectionList, ProductOption, ProjectRepository } from '@althar/contracts'
 import { Brand } from '@althar/ui'
 
-import { lanesOf } from '../src/renderer/features/board/lanes'
 import {
   connectedAs,
   hostMarksOf,
-  lastSettledOf,
   partsOf,
   rulesLineOf,
   trackersOf,
@@ -15,15 +13,12 @@ import {
   trackersWithBinding,
   trackerUrlOf,
 } from '../src/renderer/features/project/front'
-import { card, change, connectionList, githubConnection, projectRules } from './fixtures'
+import { card, connectionList, githubConnection, projectRules } from './fixtures'
 
 /*
- * What a project's front page says, from what the window read: what settled
- * last, what it is made of, the hosts its repositories are on, the tracker
+ * What a project's header says, from what the window read: what it is made of, the hosts its repositories are on, the tracker
  * its tasks name, and its rules in a line.
  */
-
-const NOW = new Date('2026-10-01T12:00:00.000Z')
 
 const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...card(),
@@ -35,8 +30,6 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   here: [],
   ...overrides,
 })
-
-const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
 
@@ -69,25 +62,7 @@ const GITLAB: ProductOption = {
   keyChecks: [],
 }
 
-describe('a project’s front page', () => {
-  it('says what settled last: its pull request merged or closed, or the task done or abandoned, and when', () => {
-    expect(lastSettledOf(settled(), NOW)).toBeUndefined()
-    expect(lastSettledOf(settled(task({ change: change({ state: 'merged', number: 1184 }) })), NOW)).toBe('PR 1184 merged 3h ago')
-    expect(lastSettledOf(settled(task({ change: change({ state: 'closed', number: 9 }) })), NOW)).toBe('PR 9 closed 3h ago')
-    expect(lastSettledOf(settled(task({ title: 'Log the partner id' })), NOW)).toBe('Log the partner id, done 3h ago')
-    expect(lastSettledOf(settled(task({ title: 'Cold start', state: 'abandoned', settledAt: null })), NOW)).toBe('Cold start, abandoned')
-    // The most recent of them.
-    expect(
-      lastSettledOf(
-        settled(
-          task({ title: 'Older', settledAt: '2026-10-01T08:00:00.000Z' }),
-          task({ title: 'Newer', settledAt: '2026-10-01T11:30:00.000Z' }),
-        ),
-        NOW,
-      ),
-    ).toBe('Newer, done 30m ago')
-  })
-
+describe('a project’s header', () => {
   it('says what it is made of: each repository with its host’s mark, then the trackers its tasks name, each opening where it lives', () => {
     const open = vi.fn()
     const parts = partsOf({

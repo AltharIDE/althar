@@ -112,7 +112,8 @@ describe('a pinned download that isn’t what it should hold', () => {
 describe('where an agent’s command is', () => {
   const opencode = agents.opencode
 
-  it('finds the program a level or two down in its release, as archives nest it', async () => {
+  // Not on Windows: the program found is a shell script, which Althar runs to see it works, and Windows can't.
+  it.skipIf(process.platform === 'win32')('finds the program a level or two down in its release, as archives nest it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'althar-release-'))
     mkdirSync(join(dir, 'release', 'bin'), { recursive: true })
     writeFileSync(join(dir, 'release', 'README'), 'OpenCode\n')

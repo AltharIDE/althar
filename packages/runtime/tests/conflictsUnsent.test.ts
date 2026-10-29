@@ -280,8 +280,10 @@ describe('a conflict whose last round ended as Althar stopped', () => {
       })}`
       yield* taskSays(taskId, null)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      // Pushed, the round waits for the checks on the merge, which pass once they are read.
+      const settled = yield* until(rounds(taskId), (all) => all.at(-1)?.state !== 'checking')
       assert.deepStrictEqual(
-        (yield* rounds(taskId)).map((round) => round.state),
+        settled.map((round) => round.state),
         ['failed', 'resolved'],
       )
     }).pipe(Effect.provide(runtimeWith({ github })))

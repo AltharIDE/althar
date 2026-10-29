@@ -72,7 +72,7 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
-import { filesForTurn, type InputFile, keptId } from './sentFiles'
+import { filesForTurn, type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
@@ -98,6 +98,7 @@ import {
 } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
+import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -351,6 +352,9 @@ const PORTS_EVERY = 4
 /** The longest a turn waits to read what the agent's tree listens on before it begins. */
 const BASELINE_WITHIN = Duration.seconds(5)
 
+/** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
+const LEFT_STOPS_WITHIN = Duration.seconds(15)
+
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
   if (event._tag === 'ContextUsage') running.context = { used: event.used, size: event.size }
@@ -517,6 +521,37 @@ export const promptFor = (
   const said = news === null ? parts : [news, ...parts]
   if (brief === undefined) return said.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
+}
+
+/** What a lead's brief says of the images and files the person sent with what they asked for: that they come with it, or that some couldn't. */
+export const sentWithWords = (sent: {
+  readonly images: ReadonlyArray<unknown>
+  readonly files: ReadonlyArray<unknown>
+  readonly withheld: number
+  readonly gone: number
+}) => {
+  const count = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
+  const given = [
+    ...(sent.images.length === 0 ? [] : [count(sent.images.length, 'an image', 'images')]),
+    ...(sent.files.length === 0 ? [] : [count(sent.files.length, 'a file', 'files')]),
+  ]
+  return [
+    ...(given.length === 0
+      ? []
+      : [
+          `The person sent ${given.join(' and ')} with what they asked for: ${sent.images.length + sent.files.length === 1 ? 'it comes' : 'they come'} with this message.`,
+        ]),
+    ...(sent.withheld === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.withheld, 'an image', 'images')} with what they asked for, which Althar couldn't pass on to you.)`,
+        ]),
+    ...(sent.gone === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.gone, 'a file', 'files')} with what they asked for whose copy isn't there any more. Ask for it if you need it.)`,
+        ]),
+  ].join('\n\n')
 }
 
 const PASSED_ON = 'The coordinator passes this on:\n\n'
@@ -822,6 +857,20 @@ export class Sessions extends Context.Service<
                 ),
             })
 
+      /** The processes a command it left running runs as, with all they started, while it runs (stopping.ts). */
+      const treeOfLeft = (running: Running, left: LeftRunning) =>
+        left.ended === null ? treeOfCommand(left.outputPath, running.connection.process?.pid) : Effect.succeed([])
+
+      /** Stops what commands it left running run as; logs what wouldn't stop. */
+      const stopTrees = (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) =>
+        Effect.gen(function* () {
+          const outlived = yield* stopProcesses(trees.flat())
+          if (outlived.length > 0)
+            yield* Effect.logWarning('What an agent left running would not stop', { pids: outlived }).pipe(
+              Effect.annotateLogs({ thread: running.thread.threadId }),
+            )
+        })
+
       /**
        * The port one listens on, found from the processes it started: those
        * holding the file its output goes to (Claude Code), whose tree is its
@@ -1123,6 +1172,24 @@ export class Sessions extends Context.Service<
         })
 
       /**
+       * The images and files the person sent with what a task was asked for,
+       * in their messages to the coordinator, for the turn that gives its lead
+       * its brief: the images as `imagesFor` reads them, the files copied
+       * where the lead reads; and how many of each it doesn't get.
+       */
+      const sentWithRequest = (thread: TaskThread, takes: boolean) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const ids = (yield* sql<{ userInputId: string }>`
+            SELECT user_input_id FROM task_request_inputs WHERE task_id = ${thread.taskId} ORDER BY position`).map((row) => row.userInputId)
+          const sent = yield* imagesFor(ids, takes)
+          const images = ids.flatMap((id) => sent.images.get(id) ?? [])
+          const withheld = ids.reduce((sum, id) => sum + (sent.withheld.get(id) ?? 0), 0)
+          const { files, gone } = yield* requestFilesForTurn(thread.threadId, thread.taskId)
+          return { images, files, withheld, gone }
+        })
+
+      /**
        * The thread shows what a turn gives the agent where the agent reads it,
        * in the order it reads it: once the turn before has ended, not where
        * it was sent. What the person said moves to the end of the thread,
@@ -1260,7 +1327,17 @@ export class Sessions extends Context.Service<
           const brief = briefOf
           // The lead is told how its worktrees were set up, in its brief.
           const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
-          const briefed = brief === undefined || setUp === null ? brief : { ...brief, text: `${brief.text}\n\n${setUp}` }
+          // And sent the images and files the person sent with what they asked for, with the brief, as with a message of theirs.
+          const asked =
+            thread.role === 'task' && brief !== undefined
+              ? yield* sentWithRequest(thread, running.connection.info.images).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logWarning('Could not read what the person sent with what they asked for', cause), null),
+                  ),
+                )
+              : null
+          const added = [setUp, asked === null ? null : sentWithWords(asked)].filter((said) => said !== null && said !== '')
+          const briefed = brief === undefined || added.length === 0 ? brief : { ...brief, text: [brief.text, ...added].join('\n\n') }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
             thread.role === 'coordinator'
@@ -1373,7 +1450,7 @@ export class Sessions extends Context.Service<
           running.begun = undefined
           if (begun !== undefined) yield* begun
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
-          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
+          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), asked?.withheld ?? 0)
           if (withheld > 0)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
@@ -1472,7 +1549,12 @@ export class Sessions extends Context.Service<
             )
           })
           // Each input's images, then its files, in the order the inputs are said.
-          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
+          // What came with the person's request first, with the brief.
+          const parts = [
+            ...(asked?.images ?? []),
+            ...(asked?.files ?? []),
+            ...inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])]),
+          ]
           yield* notingListening(running)
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
@@ -1554,7 +1636,11 @@ export class Sessions extends Context.Service<
               {
                 source: 'agent',
                 severity: 'error',
-                title: `${running.entry.definition.name} couldn't answer.`,
+                // Signed out, the agent's own words ("Authentication required") stay as its detail, under a headline that says it plainly.
+                title:
+                  errorClass === 'auth_required'
+                    ? `${running.entry.definition.name} is signed out.`
+                    : `${running.entry.definition.name} couldn't answer.`,
                 ...(typeof said === 'string' && said !== '' ? { description: said } : {}),
                 failure: errorClass,
               },
@@ -2163,6 +2249,14 @@ export class Sessions extends Context.Service<
             atBreak: false,
           }
           threads.set(thread.threadId, running)
+          // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.gen(function* () {
+              const open = [...running.background.values()].filter((left) => left.ended === null)
+              yield* stopTrees(running, yield* Effect.forEach(open, (left) => treeOfLeft(running, left), { concurrency: 'unbounded' }))
+            }).pipe(Effect.timeout(LEFT_STOPS_WITHIN), Effect.ignore),
+          )
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
           const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
@@ -2683,6 +2777,8 @@ export class Sessions extends Context.Service<
           const [quick] = yield* sql<{
             quick: number
           }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
+          // Settled, its lead was stopped as it settled (LeftBehind.ts): started again, it is told so, so it answers rather than redo it.
+          const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${thread.taskId}`
           const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
           const [plainFirst] = unbranched
           const [first] = thread.repositories
@@ -2699,6 +2795,11 @@ export class Sessions extends Context.Service<
                 ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...(why.kind === 'start' && standing?.state === 'done'
+              ? [
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                ]
+              : []),
             ...askedFor(thread),
             ...(yield* alongside(thread.taskId)),
             several
@@ -2733,14 +2834,16 @@ export class Sessions extends Context.Service<
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them; Althar's screenshot tool takes one of a page served on this computer); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
             // Each screenshot shows once, with its caption.
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
+            // Pictures the person asks to see show in the thread at any time, not as file names (show_pictures).
+            "When the person asks to see something, at any time, a step open or not, show it in the thread with Althar's show_pictures tool, each picture with a caption, rather than naming the files: they can't open those. What shows a step's work still goes in finish_step's evidence when you finish it.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // The pull request's description is the lead's too, for a reviewer on the code host: not the person's summary again.
             "Where the task ends in a pull request, write its description as you finish, in finish_step's `descriptions`, in the repository's pull request template where it has one. Your summary and `built` are for the person in Althar; the description is for whoever reviews the pull request on the code host, who hasn't seen your work: why the change exists, what it does, how you went about it and how it was checked, in plain prose, with nothing of the review, your evidence or Althar's workings. finish_step's `descriptions` says more.",
             // Althar reaches the code host for the task (ADR-011).
-            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
+            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks, which push_to_pull_request pushes at once. Where checks fail for a reason that isn't the change's, broken on the default branch already (read_default_branch_checks shows its checks), change nothing to work around it: hand_checks_to_person brings it to the person, with a line on why. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
-            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person's one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
+            'Draft an issue with draft_issue only when the person asks you to track something ("file these follow-ups", "make an issue for that"), never on your own: check find_issues first, so you don\'t draft what is already tracked. Something out of this task\'s scope that you find goes in your report (finish_step or the summary) in a line, so the person or the coordinator can decide; a bug your brief covers is fixed in the task, never handed off as an issue. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person\'s one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don\'t draft for ordinary work of the task, or for something you can fix within it.',
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue proposes a change to it, such as its status (In Review), its priority, labels, assignee or title, which waits on the person's card unless the project lets changes through. Only that issue: for any other, tell the person what it needs. Set a drafted issue's priority and labels with draft_issue, never in its description.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
@@ -2758,6 +2861,8 @@ export class Sessions extends Context.Service<
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of a page served on this computer, drawn by Althar, so you needn't start a browser. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
+            // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-066).
+            "You carry no sign-in to the code host, so a `git fetch` or `git pull` that needs one fails, in your sandbox or out of it. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
@@ -2787,7 +2892,7 @@ export class Sessions extends Context.Service<
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
             '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
             '- screenshot, to see a page served on this computer, such as what run_project runs or Storybook: Althar draws it headless and gives it back to you as a picture, at a viewport you choose, the whole page or one element.',
-            "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built; its default, or with run another of the things it runs. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
+            "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: a task's lead can't fetch it, and the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
             "- rename_task, when a task's work became a change (a task started with start_task whose lead began changing the repository, which your news says) and its title no longer says what it does: give it one that does, in a few words. What the person asked stays in its thread.",
             '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
@@ -3139,7 +3244,11 @@ export class Sessions extends Context.Service<
             const left = running?.background.get(id)
             if (running === undefined || left === undefined) return
             // Ended by itself, there is nothing to stop. Gone already as the agent tells it, it goes from the list all the same.
-            if (left.ended === null) yield* running.agent.stopBackground(id)
+            // Stopped through the agent, which ends its shell only: what the shell started is stopped after it (stopping.ts).
+            if (left.ended === null) {
+              const tree = yield* treeOfLeft(running, left)
+              yield* running.agent.stopBackground(id).pipe(Effect.ensuring(stopTrees(running, [tree])))
+            }
             running.background.delete(id)
             yield* toldBackground(running)
           }),

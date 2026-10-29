@@ -80,6 +80,14 @@ export const openFirstProject = async (electronApp: ElectronApplication, page: P
   await page.getByRole('button', { name: /Make the project/ }).click()
 }
 
+/**
+ * Text on show. The window keeps the screens of the places the person was on
+ * in the page, hidden (`KeptScreens`), and getByText finds text there too: a
+ * board's card behind its task, the coordinator's thread behind a lead's.
+ */
+export const shown = (page: Page, text: string | RegExp, options?: { readonly exact?: boolean }) =>
+  page.getByText(text, options).filter({ visible: true })
+
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
   // A click waits until the window takes input, as it doesn't while the launch plays over it; typing alone wouldn't.
@@ -105,7 +113,7 @@ export const startTask = async (page: Page, title: string, lead = '[lead:finish]
   await page.getByRole('button', { name: 'Start now' }).last().click()
 }
 
-/** A section of the project's settings: Settings, the last of its views in the window's bar, then the section down the side. */
+/** A section of the project's settings: Settings, the last of its views in its header, then the section down the side. */
 export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Rules' | 'Running' | 'Notes') => {
   await page
     .getByRole('radiogroup', { name: 'View' })

@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -17,6 +18,7 @@ import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BoardLane, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
+import { ListMotion } from '../../lib/ListMotion'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
@@ -160,7 +162,11 @@ interface Folding {
 const FoldingContext = createContext<Folding | null>(null)
 
 export interface BoardProps {
-  /** Its lanes: BoardLane elements. */
+  /**
+   * Its lanes: BoardLane elements. A card or row given its task's key as
+   * `data-move` slides when its place changes, travels when it changes
+   * lanes, comes in and fades out (ListMotion).
+   */
   children: ReactNode
   /** What the board is, for assistive technology. */
   label: string
@@ -192,6 +198,13 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
     pointed.current = lane
     onPointerLane?.(lane)
   }
+  // Hidden with the pointer on it, as a kept screen is, nothing says the pointer left: back, it is told the lane anew.
+  useEffect(
+    () => () => {
+      pointed.current = null
+    },
+    [],
+  )
   const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
     isValidElement<BoardColumnProps>(child) && child.type === BoardColumn
@@ -220,7 +233,7 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
       <FoldingContext.Provider
         value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
       >
-        {children}
+        <ListMotion within={ref}>{children}</ListMotion>
       </FoldingContext.Provider>
     </section>
   )
@@ -426,7 +439,11 @@ export function BoardList({ children }: { children: ReactNode }) {
 export function BoardDivider({ children, end }: { children: ReactNode; end?: ReactNode }) {
   return (
     <p className={s.divider}>
-      {children}
+      <span className={s.dividerLead}>
+        <span className={s.dividerLabel} {...(typeof children === 'string' ? { title: children } : {})}>
+          {children}
+        </span>
+      </span>
       {end !== undefined && end !== null && <span className={s.dividerEnd}>{end}</span>}
     </p>
   )

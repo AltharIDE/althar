@@ -63,6 +63,7 @@ import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
+import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
@@ -200,8 +201,10 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
-  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
+  // Ready, but its lead couldn't resolve a conflict with its default branch, or brought its failing checks to the person (ADR-070):
+  // it needs the person before it can be accepted.
+  if (phase === 'ready' && (snapshot.task.handedBack != null || snapshot.task.checksBack != null))
+    return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
@@ -309,12 +312,18 @@ export function TaskView({
   model,
   onBack,
   onRules,
+  onSignIn,
+  onConnections,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
   /** Opens its project's rules, from a card the project always asks about. */
   onRules?: () => void
+  /** Opens Settings at an agent's sign-in, started, for a lead that is signed out. */
+  onSignIn?: (agentId: string) => void
+  /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
+  onConnections?: () => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -419,6 +428,13 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
+  // Hidden while its screen is kept (`KeptScreens`), it opens again as it shows: a commit made meanwhile with nothing to say so shows.
+  useEffect(
+    () => () => {
+      showed.current = { task: false, outputs: false, changes: false }
+    },
+    [],
+  )
   // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const open = changes.open || abandoning || attaching !== null
   const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0
@@ -500,6 +516,8 @@ export function TaskView({
   const graph = taskGraphOf(snapshot, named, now)
   const shown: Face = face === null || (face === 'graph' && graph === null) ? 'talk' : face
   const busy = session?.turnRunning ?? false
+  // A step that waits on the person: its call, not the thread, has the ways on.
+  const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
@@ -511,19 +529,22 @@ export function TaskView({
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
-    ...(snapshot.task.request === null || snapshot.earlier
+    // Sent with no words, the images and files they sent are what they asked for.
+    ...((snapshot.task.request === null && snapshot.task.requestPictures === undefined && snapshot.task.requestFiles === undefined) ||
+    snapshot.earlier
       ? []
       : [
           {
             kind: 'you' as const,
             id: REQUEST,
-            text: snapshot.task.request,
+            text: snapshot.task.request ?? '',
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
             // A review's thread opens with the pull request it reviews, under what the person asked.
             links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
-            pictures: [],
-            files: [],
+            // With the images and files they sent with it, as the coordinator's chat shows them.
+            pictures: snapshot.task.requestPictures ?? [],
+            files: snapshot.task.requestFiles ?? [],
           },
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
@@ -775,7 +796,11 @@ export function TaskView({
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
-                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                  {model.error}{' '}
+                  {model.hostSignedOut && onConnections !== undefined && (
+                    <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
+                  )}{' '}
+                  <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
                 </div>
               )}
               {conflict !== null && (
@@ -846,6 +871,8 @@ export function TaskView({
         agents={model.agents}
         agentName={agentName}
         onAnswer={model.answerStuck}
+        {...(onSignIn === undefined ? {} : { onSignIn })}
+        {...(onConnections === undefined ? {} : { onConnect: onConnections })}
         {...(reportProblem === undefined
           ? {}
           : {
@@ -1033,6 +1060,9 @@ export function TaskView({
                 {...(openFile === undefined ? {} : { openFile })}
                 session={session}
                 project={snapshot.project.name}
+                // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                 onPassOn={(words) => void model.send(words)}
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}

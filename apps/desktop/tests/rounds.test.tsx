@@ -17,8 +17,8 @@ import { withServices } from './render'
  * housekeeping with the work, and its news a line of its own.
  */
 
-function Task() {
-  return <TaskView model={useTask('th1')} onBack={vi.fn()} />
+function Task({ onSignIn }: { onSignIn?: (agentId: string) => void }) {
+  return <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onSignIn === undefined ? {} : { onSignIn })} />
 }
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 9, 15, 12, minutes)).toISOString()
@@ -276,7 +276,7 @@ describe('a task’s thread in rounds', () => {
         items.notice({ title: 'Claude Code couldn’t answer.', severity: 'error' }),
       ]),
     )
-    expect(round?.failed).toBe('Claude Code couldn’t answer.')
+    expect(round?.failed?.text).toBe('Claude Code couldn’t answer.')
     expect(round?.work?.steps.at(-1)).toMatchObject({ kind: 'aside', text: 'Context is filling up' })
   })
 
@@ -299,6 +299,29 @@ describe('a task’s thread in rounds', () => {
     expect(shorter('Conflicts, in one/file.ts. Asked.')).toBe('Conflicts, in one/file.ts. Asked.')
   })
 
+  it('keeps pictures the lead showed open in its round, where it showed them, never in its work', () => {
+    const light = { caption: 'Settings, light', picture: picture('a'.repeat(64), 'light.png') }
+    const dark = { caption: 'Settings, dark', picture: picture('b'.repeat(64), 'dark.png') }
+    // With no step open, after its plan: shown, then said.
+    const before = roundOf(
+      read([
+        when(items.you('Can I see more screenshots?'), 0),
+        when(items.tool({ title: 'npx playwright test', toolKind: 'execute' }), 1),
+        when(items.tool({ title: 'show_pictures', toolKind: 'other' }), 2),
+        when(items.shows([light, dark]), 2),
+        when(items.says('Those are the six states.'), 3),
+      ]),
+    )
+    expect(before?.shown.before.map((shown) => shown.pictures.map((one) => one.caption))).toEqual([['Settings, light', 'Settings, dark']])
+    expect(before?.shown.after).toEqual([])
+    expect(before?.work?.steps.map((step) => step.kind)).toEqual(['tool', 'tool'])
+    // Said, then shown: after what it said.
+    const after = roundOf(read([when(items.you('Show me'), 0), when(items.says('Here they are:'), 1), when(items.shows([light]), 2)]))
+    expect(after?.result?.text).toBe('Here they are:')
+    expect(after?.shown.before).toEqual([])
+    expect(after?.shown.after.map((shown) => shown.pictures.length)).toEqual([1])
+  })
+
   it('drops a table of the shots shown under a message, with the line that brings it in, and keeps any other table', () => {
     const listed = [
       'Here it is.',
@@ -317,6 +340,58 @@ describe('a task’s thread in rounds', () => {
     expect(withoutShotList(real, new Set(['A1']))).toBe(real)
     expect(withoutShotList(listed, new Set())).toBe(listed)
     expect(withoutShotList('Shots below:\n| A1 | x |\n|---|---|\n| A1 | y |', new Set(['A1']))).toBe('')
+  })
+})
+
+describe('a task’s lead that is signed out', () => {
+  const signedOut = items.notice({
+    severity: 'error',
+    title: 'Claude Code is signed out.',
+    description: 'Authentication required',
+    failure: 'auth_required',
+  })
+  const show = (overrides: Partial<ThreadSnapshot> = {}) => {
+    const onSignIn = vi.fn()
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.you('Go'), signedOut], ...overrides })) })
+    withServices(<Task onSignIn={onSignIn} />, client)
+    return { client, onSignIn }
+  }
+
+  it('says so plainly, with the agent’s words under it, and offers Sign in again first, for that agent', async () => {
+    const { onSignIn } = show()
+    expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()
+    expect(screen.getByText('Authentication required')).toBeTruthy()
+    const [first, second] = within(screen.getByText('Sign in again').closest('p') as HTMLElement).getAllByRole('button')
+    expect(first?.textContent).toBe('Sign in again')
+    expect(second?.textContent).toBe('Try again')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+  })
+
+  it('tries the turn again, once signed in, from Try again', async () => {
+    const { client } = show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    expect(client.tryAgain).toHaveBeenCalledWith('th1')
+  })
+
+  it('leaves the ways on to its step’s call, where the step waits on the person', async () => {
+    show({
+      attention: [
+        {
+          id: 'att1',
+          kind: 'stuck',
+          title: 'Implement',
+          reason: '',
+          command: null,
+          stuck: { step: 'implement', why: 'signed_out', detail: null, agentId: 'claude-code', round: 0, open: 0 },
+          createdAt: at(1),
+        } as never,
+      ],
+    })
+    expect(await screen.findByText(/Claude Code is signed out\. Sign in again, then try again/)).toBeTruthy()
+    // One Sign in again, the card's own, first; Try again is the card's too.
+    expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
   })
 })
 
@@ -368,6 +443,27 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(screen.getByText(/It also retook/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'View A1 · Quiet, from the switcher full size' }).textContent).toBe('A1')
     expect(screen.queryByRole('columnheader', { name: 'Caption' })).toBeNull()
+  })
+
+  it('shows pictures the lead showed with no step open, captioned, in order, each opening in the lightbox with the set a key away', async () => {
+    const user = userEvent.setup()
+    show([
+      items.you('Can I see more screenshots?'),
+      items.tool({ title: 'show_pictures', toolKind: 'other' }),
+      items.shows([
+        { caption: 'Settings, light', picture: picture('a'.repeat(64), 'light.png') },
+        { caption: 'Settings, dark', picture: picture('b'.repeat(64), 'dark.png') },
+      ]),
+      items.says('Those are both themes.'),
+    ])
+    const light = await screen.findByRole('button', { name: 'View Settings, light full size' })
+    const captions = screen.getAllByRole('figure').map((figure) => within(figure).getByText(/^Settings/).textContent)
+    expect(captions).toEqual(['Settings, light', 'Settings, dark'])
+    await user.click(light)
+    const dialog = await screen.findByRole('dialog', { name: 'light.png' })
+    expect(within(dialog).getByRole('img', { name: 'Settings, light' }).getAttribute('src')).toBe(`althar-picture://shot/${'a'.repeat(64)}`)
+    await user.keyboard('{ArrowRight}')
+    expect(await screen.findByRole('dialog', { name: 'dark.png' })).toBeTruthy()
   })
 
   it('says Althar’s news by name, a pull request it opened, and an error a round ended with', async () => {

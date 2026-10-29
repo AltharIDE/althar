@@ -43,7 +43,7 @@ export function Turn({ model, voice, at, children, meta, copy, onQuote, bare, cl
   const t = { ...turnText, ...text }
   const name = model ? model.name : voice
   return (
-    <article className={cx(s.turn, className)} aria-label={name} {...rest}>
+    <article className={cx(s.turn, className)} aria-label={name} data-arrivals="" {...rest}>
       {!bare && (
         <header className={s.head}>
           {model ? <Model model={model} strong className={s.agent} /> : <span className={s.who}>{voice}</span>}

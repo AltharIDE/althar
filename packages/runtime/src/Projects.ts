@@ -323,6 +323,8 @@ export class Projects extends Context.Service<
       readonly repositories?: ReadonlyArray<string>
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
       readonly request?: string
+      /** The person's messages to the coordinator the request was made from: the images and files they sent with them are the task's too. */
+      readonly requestInputs?: ReadonlyArray<string>
       /** A plain task's, started with no plan: its worktrees have no branch until its lead changes the repository. */
       readonly plain?: boolean
       /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
@@ -569,6 +571,7 @@ export class Projects extends Context.Service<
         readonly issueKey?: string
         readonly repositories?: ReadonlyArray<string>
         readonly request?: string
+        readonly requestInputs?: ReadonlyArray<string>
         readonly plain?: boolean
         readonly occurrence?: string
       }) =>
@@ -637,6 +640,9 @@ export class Projects extends Context.Service<
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
+              // The messages it was asked in, whose images and files it opens with, referred to where they are kept, whether or not they said anything.
+              for (const [index, userInputId] of (input.requestInputs ?? []).entries())
+                yield* sql`INSERT INTO task_request_inputs ${sql.insert({ projectId: first.projectId, taskId, position: index + 1, userInputId })}`
               const threadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
               // Planned by the rule, else Althar's own until the repository's docs are read.

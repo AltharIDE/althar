@@ -156,8 +156,13 @@ describe('a project that is a folder of a larger repository', () => {
       git(root, 'commit', '-q', '-m', 'Add the web app')
       const { projectId } = yield* open(app)
       const threadId = yield* (yield* Coordinator).thread(projectId)
-      // It waits a moment after it prints, so what it printed is read before it ends.
-      yield* launches.keep({ projectId, run: { command: 'pwd && sleep 0.3', setup: null }, actorId: instance.personId })
+      // It waits a moment after it prints, so what it printed is read before it ends: in Node, which a POSIX shell and
+      // cmd.exe both run, so it prints the folder as this system writes it.
+      yield* launches.keep({
+        projectId,
+        run: { command: 'node -e "console.log(process.cwd()); setTimeout(() => {}, 300)"', setup: null },
+        actorId: instance.personId,
+      })
       const started = yield* launches.start({ projectId, taskId: null, threadId })
       const [card] = yield* until(cardsIn({ projectId }), (all) => all[0]?.ended != null)
       assert.strictEqual(card?.launchId, started.id)
@@ -224,21 +229,30 @@ describe('a run that ends at once', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('says how one killed by a signal ended, with no exit code, and one that printed nothing, with no last line', () =>
+  // Not on Windows, which ends a process by no signal.
+  it.live.skipIf(process.platform === 'win32')('says how one killed by a signal ended, with no exit code', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
       const instance = yield* Instance
-      const projects = yield* Projects
       const { projectId } = yield* open(repository())
       yield* launches.keep({ projectId, run: { command: 'kill -9 $$', setup: null }, actorId: instance.personId })
       assert.match(
         yield* callTool(access('coordinator', projectId), 'run_project', {}),
         /^`kill -9 \$\$` in a fresh copy of the default branch ended at once\. Its last lines:\n\n\(nothing\)\n/,
       )
-      for (const ended of yield* launches.ofProject(projectId)) yield* launches.clear(ended.id)
-      // In a task's thread, its card says it ended by itself, with nothing printed to show.
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says how one that printed nothing ended, with no last line', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const instance = yield* Instance
+      const projects = yield* Projects
+      const { projectId } = yield* open(repository())
+      // In a task's thread, its card says it ended by itself, with nothing printed to show: `exit 0`, as both a POSIX shell
+      // and cmd.exe read it.
       const task = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Quiet' })
-      yield* launches.keep({ projectId, run: { command: 'true', setup: null }, actorId: instance.personId })
+      yield* launches.keep({ projectId, run: { command: 'exit 0', setup: null }, actorId: instance.personId })
       yield* launches.start({ projectId, taskId: task.taskId, threadId: task.threadId })
       const [card] = yield* until(cardsIn({ threadId: task.threadId }), (all) => all[0]?.ended != null)
       assert.deepInclude(card?.ended as object, { code: 0, stopped: false, last: null })

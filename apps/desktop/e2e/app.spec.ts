@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -83,12 +83,12 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     // A deploy is kept for the person: it waits in the thread as a call until it is answered.
     await say(page, 'command-choices')
-    await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
-    await expect(page.getByText('Needs your permission')).toBeVisible()
+    await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
     await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
-    await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
+    await expect(shown(page, 'Needs you', { exact: true })).toHaveCount(0)
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
@@ -158,12 +158,13 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
     await box.press('Enter')
 
-    // The plan, with the time it starts on its own; held, it waits.
-    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
+    // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('It knows the code.')).toBeVisible()
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.
@@ -203,7 +204,9 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
+    await page.getByRole('button', { name: 'Made of' }).click()
+    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.keyboard.press('Escape')
     await projectSettings(page, 'Code and issues')
     const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github).toContainText('Not connected')

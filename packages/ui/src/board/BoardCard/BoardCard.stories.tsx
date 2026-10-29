@@ -183,6 +183,36 @@ export const ReadyChecksFailedNarrow: Story = {
     await noStrayDots(canvasElement)
   },
 }
+/**
+ * Failing checks its lead brought to the person rather than fixing (ADR-070): only the check that fails, its lead's line being in
+ * its task; nothing to ask of the lead, which said what would fix it.
+ */
+export const ReadyChecksBroughtBackNarrow: Story = {
+  render: () => (
+    <div style={{ width: 260 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Not ready to accept"
+        kind={TaskKind.Change}
+        at="31m"
+        title="Drop any file or folder onto the composer"
+        object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
+        foot={
+          <FactLine>
+            <Fact icon="close" tone="danger">
+              runtime (windows) failed
+            </Fact>
+          </FactLine>
+        }
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('[class*="factLine"]')?.textContent).toBe('runtime (windows) failed')
+    await expect(within(canvasElement).queryByRole('button', { name: /fix/i })).not.toBeInTheDocument()
+    await noStrayDots(canvasElement)
+  },
+}
 /** Everything fine: one fact, green, nothing to push. */
 export const ReadyAllGreen: Story = {
   ...readyFoot(260, true, [{ words: 'All 12 checks passed', icon: 'check', tone: 'ok' }], 'Accept and merge'),
@@ -212,6 +242,18 @@ export const ReadyFactsOnOneLine: Story = {
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */
 export const MergeConflict: Story = { args: CHANGE_CONFLICT }
+/** Files by name, three at most; a long unbroken word still wraps inside the card at its narrowest. */
+export const MergeConflictLongNote: Story = {
+  args: {
+    ...CHANGE_CONFLICT,
+    why: 'The lead couldn’t resolve the conflict with main in accounts.test.ts, heldKept.test.ts, packages/runtime/tests/aVeryLongFileNameThatHasNoPlaceToBreakAtAll.test.ts and 3 more. origin/main isn’t merged into the branch.',
+  },
+  decorators: [(Story) => <div style={{ width: 232 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const why = canvasElement.querySelector('[class*="why"]') as HTMLElement
+    await expect(why.scrollWidth).toBeLessThanOrEqual(why.clientWidth)
+  },
+}
 /**
  * A conflict Althar didn't ask its lead to resolve, though its rules say to:
  * why, in one line, and Resolve now, which asks the lead anyway (ADR-030).

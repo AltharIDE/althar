@@ -1,5 +1,6 @@
 import { RunCard } from '@althar/ui'
 
+import type { RunRef } from '../data/client'
 import { runCardOf } from './running'
 import type { RunContent } from './thread'
 
@@ -10,6 +11,10 @@ import type { RunContent } from './thread'
  * changes it, and stays once the run is gone.
  */
 
+/** What a card asked for, as a run is asked for it again. */
+const refOf = (ref: { readonly kind: 'branch' | 'pull_request'; readonly which: string }): RunRef =>
+  ref.kind === 'branch' ? { branch: ref.which } : { pullRequest: ref.which }
+
 export function RunOf({
   run,
   now,
@@ -19,8 +24,8 @@ export function RunOf({
   run: RunContent
   now: string
   onStop: (launchId: string) => void
-  /** Runs it again, where it ran: the task's, and which of the project's runnables, where the card says. */
-  onRunAgain: (taskId: string | null, runnableId: string | null) => void
+  /** Runs it again, where it ran: the task's, which of the project's runnables, and the branch or pull request, fetched afresh, where the card says. */
+  onRunAgain: (taskId: string | null, runnableId: string | null, ref?: RunRef) => void
 }) {
   const url = run.url
   return (
@@ -29,7 +34,7 @@ export function RunOf({
       {...(url === null ? {} : { onOpen: () => void window.open(url, '_blank') })}
       {...(run.ended === null
         ? { onStop: () => onStop(run.launchId) }
-        : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null) })}
+        : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null, ...(run.ref == null ? [] : [refOf(run.ref)])) })}
     />
   )
 }

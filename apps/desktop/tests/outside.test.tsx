@@ -913,7 +913,11 @@ describe('a task waiting in its project’s line', () => {
     const holders = [{ taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] }]
     let place = 2
     const { client, emit } = fakeClient({
-      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, place, queued: { busy: 1, atOnce: 1, holders } } })),
+      // Behind another of its project's tasks while 2nd, as the runtime says it (`front`), and so able to go first.
+      getThread: vi.fn(async () => ({
+        ...thread,
+        task: { ...thread.task, place, ...(place > 1 ? { front: true } : {}), queued: { busy: 1, atOnce: 1, holders } },
+      })),
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Waiting for a place, 2nd in Up next' }))

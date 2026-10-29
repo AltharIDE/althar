@@ -3,7 +3,7 @@
   inset: 0;
   z-index: var(--z-dialog);
   background: var(--scrim);
-  animation: fade var(--fast) var(--ease);
+  animation: fade var(--enter) var(--ease-out);
 }
 .dialog {
   position: fixed;
@@ -20,7 +20,9 @@
   border-radius: 14px;
   box-shadow: var(--lift-dialog);
   overflow-y: auto;
-  animation: in var(--base) var(--ease);
+  /* it grows from its middle; it closes at once, as its consumer takes it away */
+  transform-origin: 50% 50%;
+  animation: in var(--enter) var(--ease-out);
 }
 /* a form longer than a question: higher, and more of the window, its buttons kept in sight as it scrolls */
 .tall {
@@ -80,7 +82,7 @@
 @keyframes in {
   from {
     opacity: 0;
-    transform: translate(-50%, 4px);
+    transform: translateX(-50%) scale(var(--scale-pop));
   }
 }
 @keyframes fade {

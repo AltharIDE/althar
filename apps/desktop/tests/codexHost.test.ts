@@ -59,6 +59,8 @@ printf 'GLAB_CONFIG_DIR=%s\\n' "\${GLAB_CONFIG_DIR-<unset>}"
 printf 'GIT_CONFIG_COUNT=%s\\n' "\${GIT_CONFIG_COUNT-<unset>}"
 printf 'GIT_CONFIG_KEY_0=%s\\n' "\${GIT_CONFIG_KEY_0-<unset>}"
 printf 'GIT_CONFIG_VALUE_0=%s\\n' "\${GIT_CONFIG_VALUE_0-<unset>}"
+printf 'GIT_CONFIG_KEY_1=%s\\n' "\${GIT_CONFIG_KEY_1-<unset>}"
+printf 'GIT_CONFIG_VALUE_1=%s\\n' "\${GIT_CONFIG_VALUE_1-<unset>}"
 printf 'GIT_TERMINAL_PROMPT=%s\\n' "\${GIT_TERMINAL_PROMPT-<unset>}"
 printf 'GIT_DIR=%s\\n' "\${GIT_DIR-<unset>}"
 printf 'GIT_WORK_TREE=%s\\n' "\${GIT_WORK_TREE-<unset>}"
@@ -113,9 +115,11 @@ const device = ({ codex = 'bins', deny = false }: At = {}) => {
     CODEX_CONFIG: codexConfig,
     GH_CONFIG_DIR: ghConfig,
     GLAB_CONFIG_DIR: glabConfig,
-    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'credential.helper',
     GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
+    GIT_CONFIG_VALUE_1: 'false',
     GIT_TERMINAL_PROMPT: gitPrompt,
     OPENCODE_CONFIG_CONTENT: '{"mcp":{}}',
     SSH_AUTH_SOCK: join(sandboxHome, 'agent'),
@@ -155,8 +159,11 @@ describe.skipIf(process.platform === 'win32')('the Codex host bridge', () => {
     expect(output).toContain(`GH_CONFIG_DIR=${at.ghConfig}`)
     expect(output).toContain(`GLAB_CONFIG_DIR=${at.glabConfig}`)
     expect(output).toContain(`GIT_TERMINAL_PROMPT=${at.gitPrompt}`)
-    expect(output).toContain('GIT_CONFIG_COUNT=1')
+    expect(output).toContain('GIT_CONFIG_COUNT=2')
     expect(output).toContain('GIT_CONFIG_KEY_0=credential.helper')
+    // Each setting the count names crosses, or git refuses to start.
+    expect(output).toContain('GIT_CONFIG_KEY_1=branch.autoSetupMerge')
+    expect(output).toContain('GIT_CONFIG_VALUE_1=false')
     // An empty value is a value: it is what unsets git's credential helper, and a git that misses it refuses to start.
     expect(output).toContain('GIT_CONFIG_VALUE_0=\n')
     expect(output).toContain('GIT_DIR=/run/user/' + uid + '/doc/abc123/repo/.git/worktrees/task')

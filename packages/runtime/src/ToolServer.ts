@@ -150,7 +150,14 @@ export class ToolServer extends Context.Service<
       yield* Effect.callback<void>((resume) => {
         http.listen(0, '127.0.0.1', () => resume(Effect.void))
       })
-      yield* Effect.addFinalizer(() => Effect.callback<void>((resume) => void http.close(() => resume(Effect.void))))
+      // By now every session has stopped, so a connection still open is one an agent kept alive for its next call, which
+      // would hold quitting up until it timed out (five seconds): it is cut, as the agents' own ends were.
+      yield* Effect.addFinalizer(() =>
+        Effect.callback<void>((resume) => {
+          http.close(() => resume(Effect.void))
+          http.closeAllConnections()
+        }),
+      )
       const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`
 
       return ToolServer.of({

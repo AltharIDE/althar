@@ -1,9 +1,12 @@
-import type { Launch, RepositoryScript, Runnable } from '@althar/contracts'
+import type { Launch, OfferedRefs, RepositoryScript, Runnable } from '@althar/contracts'
 import {
   AddRunnable,
   type AddWay,
+  type BranchChoice,
+  choiceKey,
   EditRunnable,
   type ListedRunnable,
+  RunBranch,
   RunButton,
   runButtonText,
   Runnables,
@@ -11,8 +14,9 @@ import {
   type RunTargetRun,
 } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { messageOf, type RunRef } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { addressOf } from '../../shared/running'
@@ -23,7 +27,9 @@ import { type RunsModel, useRuns } from './useRuns'
  * What a project runs, from the top of its screen or a task's bar (ADR-044):
  * the Run button, whose one press runs the default and whose list starts and
  * stops the rest, here (in the task's worktree, or a copy of the default
- * branch); and, opened from it or from the project's settings, adding
+ * branch); on the project, running a branch or a pull request, picked from
+ * what its remote has now, in a copy of its own (ADR-066); and, opened from
+ * it or from the project's settings, adding
  * something to run, the whole list, and changing one. Running and stopping
  * are the screen's, which says what went wrong over its composer; each
  * dialog says what went wrong in it.
@@ -42,6 +48,9 @@ const runOf = (launch: Launch, now: string): RunTargetRun =>
         ? { state: 'starting' }
         : { state: 'running', since: running(launch.startedAt, now) }
 
+/** It runs the default branch here, or the task's: not a branch's copy, which the pill shows on its own. */
+const ofHere = (launch: Launch, taskId: string | null) => launch.taskId === taskId && launch.branch == null
+
 /** Its run here: the one still going, else the last; on the project, a task's going is said as elsewhere. */
 export const targetsOf = (
   runnables: ReadonlyArray<Runnable>,
@@ -50,11 +59,11 @@ export const targetsOf = (
   now: string,
 ): ReadonlyArray<RunTarget> =>
   runnables.map((one) => {
-    const mine = launches.filter((launch) => launch.runnableId === one.id && launch.taskId === taskId)
+    const mine = launches.filter((launch) => launch.runnableId === one.id && ofHere(launch, taskId))
     const here = mine.find((launch) => launch.ended === null) ?? mine.at(-1)
     const elsewhere =
       taskId === null && (here === undefined || here.ended !== null)
-        ? launches.find((launch) => launch.runnableId === one.id && launch.taskId !== null && launch.ended === null)
+        ? launches.find((launch) => launch.runnableId === one.id && !ofHere(launch, null) && launch.ended === null)
         : undefined
     return {
       id: one.id,
@@ -207,6 +216,111 @@ export const listedOf = (one: Runnable): ListedRunnable => ({
   about: `${one.repository} · ${runButtonText.from[one.from]}`,
 })
 
+/** What the repositories offer, as the picker lists it: each one's pull requests, then its branches, saying which repository where there are several. */
+export const choicesOf = (offered: ReadonlyArray<OfferedRefs>): BranchChoice[] => {
+  const several = offered.length > 1
+  const of = (repository: string) => (several ? { repository } : {})
+  return [
+    ...offered.flatMap((one) =>
+      one.pullRequests.map((pull): BranchChoice => ({
+        kind: 'pull',
+        number: pull.number,
+        name: pull.name,
+        title: pull.title,
+        branch: pull.branch,
+        ...(pull.author === null ? {} : { author: pull.author }),
+        draft: pull.draft,
+        fork: pull.fork,
+        ...of(one.repository),
+      })),
+    ),
+    ...offered.flatMap((one) => one.branches.map((branch): BranchChoice => ({ kind: 'branch', branch, ...of(one.repository) }))),
+  ]
+}
+
+/** A choice, as a run of it is asked for. */
+const refOf = (choice: BranchChoice): RunRef => ({
+  ...(choice.kind === 'pull' ? { pullRequest: String(choice.number) } : { branch: choice.branch }),
+  ...(choice.repository === undefined ? {} : { repository: choice.repository }),
+})
+
+/** Words worth searching the host for: a few letters, not a number, which runs that pull request as it is. */
+const searchable = (words: string) => words.length >= 2 && !/^[#!]?\d+$/.test(words)
+
+/**
+ * The picker of a branch or a pull request to run: what the remotes have,
+ * asked as it opens, so it's fresh; where a host has more open pull requests
+ * than it listed, what is typed searched there a moment after, and those it
+ * finds added; the one picked fetching until it runs, then closed; what went
+ * wrong said in it.
+ */
+function RunABranch({
+  projectId,
+  onRun,
+  onClose,
+}: {
+  readonly projectId: string
+  readonly onRun: (ref: RunRef) => Promise<void>
+  readonly onClose: () => void
+}) {
+  const { client } = useServices()
+  // Never from the cache: a branch pushed a moment ago is what the person came for.
+  const offered = useQuery({
+    queryKey: ['runnable-refs', projectId],
+    queryFn: () => client.getRunnableRefs(projectId),
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  })
+  const [query, setQuery] = useState('')
+  const [words, setWords] = useState('')
+  useEffect(() => {
+    const later = setTimeout(() => setWords(query.trim()), 250)
+    return () => clearTimeout(later)
+  }, [query])
+  const more = offered.data?.some((one) => one.more) ?? false
+  const searched = useQuery({
+    queryKey: ['runnable-refs', projectId, words],
+    queryFn: () => client.getRunnableRefs(projectId, words),
+    enabled: more && searchable(words),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  })
+  const searching = more && searchable(query.trim()) && (query.trim() !== words || searched.isFetching)
+  const [starting, setStarting] = useState<string | null>(null)
+  const [error, setError] = useState<string>()
+  const note = offered.isError ? messageOf(offered.error) : offered.data?.find((one) => one.note !== null)?.note
+  const listed = offered.data === undefined ? [] : choicesOf(offered.data)
+  const found = more && searchable(words) && searched.data !== undefined ? choicesOf(searched.data) : []
+  const keys = new Set(listed.map(choiceKey))
+  return (
+    <RunBranch
+      choices={
+        offered.isError ? [] : offered.data === undefined ? null : [...listed, ...found.filter((choice) => !keys.has(choiceKey(choice)))]
+      }
+      query={query}
+      onQueryChange={setQuery}
+      searching={searching}
+      {...(note == null ? {} : { note })}
+      starting={starting}
+      {...(error === undefined ? {} : { error })}
+      onRun={async (choice) => {
+        setError(undefined)
+        setStarting(choiceKey(choice))
+        try {
+          await onRun(refOf(choice))
+          onClose()
+        } catch (failure) {
+          setError(messageOf(failure))
+        } finally {
+          setStarting(null)
+        }
+      }}
+      onClose={onClose}
+    />
+  )
+}
+
 export function Runs({
   projectId,
   project,
@@ -216,6 +330,7 @@ export function Runs({
   now,
   onRun,
   onStop,
+  onRunBranch,
 }: {
   readonly projectId: string
   /** The project's name, for the list's title. */
@@ -231,10 +346,13 @@ export function Runs({
   readonly onRun: (runnableId: string) => void
   /** Stops a run, as the screen stops it. */
   readonly onStop: (launchId: string) => void
+  /** Runs a branch or a pull request, in a copy of its own; throws what went wrong. Without it, the list doesn't offer one. */
+  readonly onRunBranch?: (ref: RunRef) => Promise<void>
 }) {
   const dialogs = useRunDialogs(projectId)
+  const [picking, setPicking] = useState(false)
   const live = (runnableId: string) =>
-    launches.find((launch) => launch.runnableId === runnableId && launch.taskId === taskId && launch.ended === null)
+    launches.find((launch) => launch.runnableId === runnableId && ofHere(launch, taskId) && launch.ended === null)
 
   return (
     <>
@@ -251,7 +369,9 @@ export function Runs({
         }}
         onAdd={(way) => dialogs.show({ kind: 'add', way })}
         onEdit={() => dialogs.show({ kind: 'list' })}
+        {...(onRunBranch === undefined ? {} : { onRunBranch: () => setPicking(true) })}
       />
+      {picking && onRunBranch !== undefined && <RunABranch projectId={projectId} onRun={onRunBranch} onClose={() => setPicking(false)} />}
       <RunDialogs projectId={projectId} project={project} runnables={runnables} dialogs={dialogs} afterEdit={{ kind: 'list' }} />
     </>
   )
