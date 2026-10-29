@@ -13,6 +13,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
+import { thisDevice } from '../src/device'
 import { callTool, repository, runtime, task, turns, until } from './support'
 
 /*
@@ -76,7 +77,7 @@ describe('an agent taking a thread over', () => {
         assert.include(told, 'You are taking over a task, in the same worktree. Its record so far is below.')
         assert.include(
           told,
-          `Writing in the repository is fine: its work is on a branch of its own, ${created.branch}, which stays on this computer. Commit there as on any task.`,
+          `Writing in the repository is fine: its work is on a branch of its own, ${created.branch}, which stays on ${thisDevice()}. Commit there as on any task.`,
         )
       }).pipe(Effect.provide(runtime())),
   )

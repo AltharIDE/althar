@@ -20,6 +20,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { thisDevice } from '../src/device'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -182,7 +183,7 @@ describe('a lead’s pull request tools, at their edges', () => {
       rmSync(worktree, { recursive: true, force: true })
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
-        "The task's worktree isn't on this computer, so Althar can't see what is on its branch. Tell the person.",
+        `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })

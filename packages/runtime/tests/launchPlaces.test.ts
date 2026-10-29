@@ -14,6 +14,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { thisDevice } from '../src/device'
 import { callTool, repository, runtime, until } from './support'
 
 /*
@@ -137,7 +138,7 @@ describe('a project of several repositories', () => {
       // Of the default branch, with another repository named, the same.
       assert.deepInclude(
         yield* Effect.flip(launches.start({ projectId, taskId: null, runnableId: tests.id, repository: 'web', threadId: null })),
-        { why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' },
+        { why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` },
       )
     }).pipe(Effect.provide(withQueries())),
   )
@@ -186,18 +187,18 @@ describe('a project whose repositories are not on this computer', () => {
       yield* sql`DELETE FROM repository_locations WHERE project_id = ${projectId}`
       assert.deepInclude(yield* Effect.flip(launches.start({ projectId, taskId: null, threadId: null })), {
         why: 'elsewhere',
-        message: 'The project has no repository on this computer to run.',
+        message: `The project has no repository on ${thisDevice()} to run.`,
       })
       assert.deepInclude(
         yield* Effect.flip(launches.keep({ projectId, run: { command: 'make', setup: null }, actorId: instance.personId })),
         {
           why: 'elsewhere',
-          message: 'The project has no repository on this computer to keep a way to run.',
+          message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
         },
       )
       assert.deepInclude(
         yield* Effect.flip(launches.keepRunnable({ projectId, name: 'Docs', command: 'make docs', actorId: instance.personId })),
-        { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' },
+        { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` },
       )
       assert.lengthOf(yield* launches.runnables(projectId, null), 0)
       assert.strictEqual(

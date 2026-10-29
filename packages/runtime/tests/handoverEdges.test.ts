@@ -12,6 +12,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
+import { thisDevice } from '../src/device'
 import { repository, runtime, until } from './support'
 
 /*
@@ -38,7 +39,7 @@ describe('the project, as a handover brief gives it', () => {
       execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Web'], { cwd: root })
       const { projectId } = yield* open(join(root, 'apps', 'web'))
       const overview = yield* projectOverview(projectId)
-      assert.match(overview, /\(main\), on this computer at .*; the project is its folder apps\/web$/m)
+      assert.match(overview, new RegExp(`\\(main\\), on ${thisDevice()} at .*; the project is its folder apps/web$`, 'm'))
       assert.include(overview, 'Tasks: 0 open, 0 planned and not yet started.')
     }).pipe(Effect.provide(runtime())),
   )

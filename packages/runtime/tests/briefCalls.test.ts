@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { projectOverview } from '../src/handover'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { thisDevice } from '../src/device'
 import { repository, runtime } from './support'
 
 /*
@@ -21,7 +22,7 @@ describe('a handover brief', () => {
       const projects = yield* Projects
       const { projectId } = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       yield* sql`UPDATE repository_bindings SET default_base_ref = NULL WHERE project_id = ${projectId as ProjectId}`
-      assert.match(yield* projectOverview(projectId), /^- .+ \(main\), on this computer at /m)
+      assert.match(yield* projectOverview(projectId), new RegExp(`^- .+ \\(main\\), on ${thisDevice()} at `, 'm'))
     }).pipe(Effect.provide(runtime())),
   )
 })
