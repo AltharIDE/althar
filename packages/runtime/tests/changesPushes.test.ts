@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -699,6 +699,41 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
       assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('wait for the person, saying why, where its host can’t be reached as the turn ends, until they push', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // Offline as the lead's turn ends: every read of the pull request fails until the card says so.
+      let offline = true
+      const failing = yield* Effect.forkChild(
+        Effect.whileLoop({
+          while: () => offline,
+          body: () =>
+            Effect.andThen(
+              Effect.sync(() => github.failNext('change', 'unreachable')),
+              Effect.sleep(Duration.millis(5)),
+            ),
+          step: () => undefined,
+        }),
+      )
+      yield* say(task.threadId, 'tidy pls')
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null, Duration.seconds(20))
+      offline = false
+      yield* Fiber.join(failing)
+      // Not said to be on its way: the person's Push, with why, and nothing went up.
+      assert.strictEqual(card?.change?.pushing?.held, "Althar couldn't reach PR #1")
+      assert.strictEqual(card?.change?.unpushed, 1)
+      assert.notInclude(git(bare, 'log', '--format=%s', task.branch).split('\n'), 'Tidy up')
+      // Back online, their Push takes it up, and nothing is held any more.
+      yield* (yield* Changes).push(card?.taskId ?? '', card?.change?.localHead ?? '')
+      const [after] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
+      assert.deepStrictEqual(after?.change?.pushing, { held: null })
+      assert.include(git(bare, 'log', '--format=%s', task.branch).split('\n'), 'Tidy up')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

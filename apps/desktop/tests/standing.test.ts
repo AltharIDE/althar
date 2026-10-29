@@ -51,14 +51,14 @@ describe('what stands in a change’s way', () => {
   })
 
   it('offers no Push for commits that go up on their own, and says why where Althar held them (ADR-071)', () => {
-    // Going up as the lead's turn ends: nothing for the person to push, and the next thing is what comes after.
+    // Going up as the lead's turn ends: nothing for the person to push, and nothing accepted until they're on it.
     const going = change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: checks() })
-    expect(standingOf(going)).toEqual({ blockers: [], next: { kind: 'merge' } })
+    expect(standingOf(going)).toEqual({ blockers: [{ kind: 'going', commits: 1 }], next: null })
+    expect(factsOf(going).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([['1 commit going up to the PR', 'up', 'live']])
+    expect(isBlocked(standingOf(going))).toBe(false)
     const failing = checks({ outcome: 'failed', passed: 1, failed: 1, failing: ['test'] })
-    expect(standingOf(change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: failing })).next).toEqual({
-      kind: 'fix',
-      failing: ['test'],
-    })
+    // Failing as they go up, the checks run again on them: nothing to ask of the lead until they're on it.
+    expect(standingOf(change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: failing })).next).toBeNull()
     // Held: the person's Push, with why it didn't go up beside it.
     const held = change({ localHead: 'def456', unpushed: 1, pushing: { held: 'Someone else pushed to PR #1' }, checks: checks() })
     expect(standingOf(held).next).toEqual({ kind: 'push', commits: 1 })

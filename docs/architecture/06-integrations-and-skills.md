@@ -265,7 +265,10 @@ service's model.
   It waits for the person instead, the card's Push saying why, where the
   pull request's branch isn't where Althar last pushed it (someone pushed
   there outside Althar), where the person stopped or interrupted the lead
-  since, where the push would need forcing, or where it failed.
+  since, where the push would need forcing, or where it, or asking the host
+  before it, failed; a fix for failing checks doesn't go past such a hold.
+  Until they're on the pull request, commits going up offer no Push and no
+  Accept: the card says they're going up.
 - **Where the project leaves pushing to the person, it is theirs after the
   first push.** What the lead commits waits on the task's branch until the
   person has looked at it and pushes it: the task

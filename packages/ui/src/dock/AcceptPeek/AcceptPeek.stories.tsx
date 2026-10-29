@@ -63,6 +63,17 @@ export const Unpushed: Story = {
   },
 }
 
+/** The lead's later commits go up on their own (ADR-071): nothing to press, and nothing accepted until they're on it. */
+export const Going: Story = {
+  args: { going: 1 },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('One commit is going up to the pull request')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Push' })).toBeNull()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -75,6 +86,7 @@ export const AllStates: Story = {
         { state: 'sending back', node: <AcceptPeek {...args} sendingBack /> },
         { state: 'a commit to push', node: <AcceptPeek {...args} unpushed={1} onPush={() => {}} /> },
         { state: 'pushing', node: <AcceptPeek {...args} unpushed={2} onPush={() => {}} pushing /> },
+        { state: 'a commit going up', node: <AcceptPeek {...args} going={1} /> },
         { state: 'accept failed', node: <AcceptPeek {...args} error="GitHub refused the merge: the branch is behind main." /> },
       ]}
     />

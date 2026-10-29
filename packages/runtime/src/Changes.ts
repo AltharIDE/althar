@@ -4913,7 +4913,7 @@ export class Changes extends Context.Service<
        * here is looked at first, so a pull request with nothing new asks
        * nothing of its host.
        */
-      const pushLeftOn = (taskId: string, link: LinkRow) =>
+      const pushLeftOn = (taskId: string, link: LinkRow, late: boolean) =>
         Effect.gen(function* () {
           const seen = yield* decodeSnapshot(link.snapshot)
           if (seen.state !== 'open') return
@@ -4922,6 +4922,32 @@ export class Changes extends Context.Service<
           const sent = yield* sentTo(link.projectId, seen.url)
           const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
           if (here.kind === 'ahead' && here.count === 0) return
+          // Its host gone from the project, nothing can ask it; where asking it fails, as when offline, the person's Push waits
+          // with why, not a card that says they're on their way, until the next turn ends, the person pushes, or Althar starts.
+          if (link.connectionId === null) return yield* holdPush(link, here.head, `${nameOf(seen)}'s host isn't connected`)
+          // Still at work long after its turn ended, as on tests it left running, it may yet commit: what it has waits for the person.
+          if (late) return yield* holdPush(link, here.head, 'The lead was still at work after its turn')
+          yield* pushLeftTo(taskId, link, workspace, sent).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : Effect.andThen(
+                    Effect.logWarning('Could not push what the lead committed: it waits for the person', cause),
+                    holdPush(link, here.head, `Althar couldn't reach ${nameOf(seen)}`),
+                  ),
+            ),
+          )
+        })
+
+      /** What `pushLeftOn` does once it knows there is something to push: asks the host, then pushes or holds. */
+      const pushLeftTo = (
+        taskId: string,
+        link: LinkRow,
+        workspace: { readonly path: string; readonly branch: string },
+        sent: string | null,
+      ) =>
+        Effect.gen(function* () {
+          const seen = yield* decodeSnapshot(link.snapshot)
           const { snapshot, host, repository } = yield* current(taskId, seen.url)
           // As its host has it now: one merged since Althar last asked takes nothing more (ADR-034).
           if ((yield* host.change(repository, snapshot.number)).state !== 'open') return
@@ -4936,15 +4962,14 @@ export class Changes extends Context.Service<
           if (pushed._tag === 'Success')
             return yield* sayOn(link, `Pushed ${commitsWord(ahead.count)} to ${nameOf(snapshot)} as the lead's turn ended.`)
           yield* Effect.logWarning('Could not push what the lead committed: it waits for the person', pushed.cause)
-          const failed = Option.getOrUndefined(Cause.findErrorOption(pushed.cause))
-          yield* holdPush(
-            link,
-            ahead.head,
-            failed instanceof ChangedSinceSeen
-              ? 'The branch moved as Althar pushed'
-              : `Althar couldn't push: ${gitSaid(pushed.cause).replace(/\.$/, '')}`,
-          )
+          yield* holdPush(link, ahead.head, pushFailed(pushed.cause))
         })
+
+      /** Why a push Althar made on its own didn't go through, for the card beside the person's Push (ADR-071). */
+      const pushFailed = (cause: Cause.Cause<unknown>) =>
+        Option.getOrUndefined(Cause.findErrorOption(cause)) instanceof ChangedSinceSeen
+          ? 'The branch moved as Althar pushed'
+          : `Althar couldn't push: ${gitSaid(cause).replace(/\.$/, '')}`
 
       /**
        * Pushes what a task's lead committed to each of its open pull
@@ -4952,7 +4977,7 @@ export class Changes extends Context.Service<
        * once its turn has ended: not while it is in one, nor while its plan
        * publishes or a conflict round is under way, which push themselves.
        */
-      const pushLeft = (taskId: string) =>
+      const pushLeft = (taskId: string, late = false) =>
         Effect.gen(function* () {
           if (!(yield* pushesFor(taskId))) return
           if ((yield* publishing(taskId)) || (yield* roundUnderWay(taskId))) return
@@ -4962,8 +4987,8 @@ export class Changes extends Context.Service<
           const lead = yield* sessions.running(thread.id)
           if (Option.isSome(lead) && lead.value.turnRunning) return
           for (const link of yield* linksOf(taskId)) {
-            if (link.listening !== 1 || link.connectionId === null) continue
-            yield* pushLeftOn(taskId, link).pipe(
+            if (link.listening !== 1) continue
+            yield* pushLeftOn(taskId, link, late).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not push what the lead committed', cause)),
             )
           }
@@ -4992,7 +5017,7 @@ export class Changes extends Context.Service<
             Effect.sleep(reportsWithin).pipe(
               Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
               Effect.ensuring(Effect.sync(() => holdingCommits.delete(event.threadId))),
-              Effect.flatMap((done) => (done === 'late' ? Effect.void : locked(thread.taskId)(pushLeft(thread.taskId)))),
+              Effect.flatMap((done) => locked(thread.taskId)(pushLeft(thread.taskId, done === 'late'))),
               Effect.catchCause((cause) => Effect.logWarning('Could not push what the lead committed after its turn', cause)),
               provide,
             ),
@@ -5825,8 +5850,10 @@ export class Changes extends Context.Service<
                 const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
                 // Where the project's rules push the lead's commits on their own, they go up now, as at the end of its turn (ADR-071),
                 // unless something holds them for the person: then they are asked, with why.
-                const held = (yield* pushesFor(taskId)) ? yield* heldOf(taskId, link, snapshot, path, branch, ahead) : undefined
-                if (held === null) {
+                // What holds them is the last word: the fix for failing checks below doesn't go up past it.
+                const pushes = yield* pushesFor(taskId)
+                let held = pushes ? yield* heldOf(taskId, link, snapshot, path, branch, ahead) : null
+                if (pushes && held === null) {
                   const pushed = yield* Effect.exit(push(taskId, ahead.head, snapshot.url, 'althar'))
                   if (pushed._tag === 'Success')
                     return [
@@ -5834,13 +5861,14 @@ export class Changes extends Context.Service<
                       ...unpushed,
                     ].join(' ')
                   yield* Effect.logWarning('Could not push the lead’s commits by itself: the person is asked instead', pushed.cause)
+                  held = pushFailed(pushed.cause)
                 }
-                if (typeof held === 'string') yield* holdPush(link, ahead.head, held)
-                // Checks that failed are the lead's to see through, whether or not the person has looked: its fix goes up at once
-                // (ADR-040, ADR-070), unless the person said something on the task since those checks came, when what it committed may
-                // be for that, or the branch had commits not pushed yet when the lead was told, which the fix would take up with it.
-                // Anything else waits for the person, as ever.
-                const fixing = yield* fixingOn(link)
+                if (held !== null) yield* holdPush(link, ahead.head, held)
+                // Where every push is the person's, checks that failed are still the lead's to see through, whether or not the person
+                // has looked: its fix goes up at once (ADR-040, ADR-070), unless the person said something on the task since those
+                // checks came, when what it committed may be for that, or the branch had commits not pushed yet when the lead was told,
+                // which the fix would take up with it. Anything else waits for the person, as ever.
+                const fixing = pushes ? null : yield* fixingOn(link)
                 const earlier =
                   fixing !== null && fixing.open && fixing.failing && !fixing.spoken
                     ? yield* pendingAtFailure(link, snapshot.headSha, path, ahead.from)
@@ -5879,7 +5907,7 @@ export class Changes extends Context.Service<
                   ...(earlier === true
                     ? ["The branch had commits that weren't pushed yet when its checks failed, so the fix waits for the person with them."]
                     : []),
-                  ...(typeof held === 'string' ? [`It doesn't go up by itself: ${held}.`] : []),
+                  ...(held !== null ? [`It doesn't go up by itself: ${held}.`] : []),
                   ...unpushed,
                 ].join(' ')
               }),

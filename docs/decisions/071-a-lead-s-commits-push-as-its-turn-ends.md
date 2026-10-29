@@ -38,14 +38,25 @@
     pushed there outside Althar, from this checkout or another, and the
     lead's commits wait for the person rather than go on top unseen. So do
     they where the person stopped or interrupted the lead since anything last
-    went up or was said to it, and where a push failed.
+    went up or was said to it, and where the push, or asking the host before
+    it, failed, the pull request's host isn't connected, or the lead was
+    still at work long after its turn. A hold is the last word: a fix for
+    failing checks doesn't go up past it, as ADR-070's would.
+  - **Whatever stops it, the person has Push.** Nothing that ends an
+    automatic push leaves commits that are neither going up nor theirs to
+    push: Althar doesn't try again on its own until the lead's next turn
+    ends, the rule is turned on again, or it starts, so a hold, with why, is
+    how the person gets them up meanwhile.
   - **The card shows Push only where a push is held, and why.** Each hold is
     kept (`push_held`, with why) until anything next goes up; the change's
     summary carries it (`pushing.held`), and the card shows Push with that
     line, "Someone else pushed to PR #402". Commits going up on their own
-    are no Push and no fact: while the lead works, the task is running.
+    are no Push, but no Accept either: the card and the dock say "1 commit
+    going up to the PR" until they're on it, so the pull request is never
+    merged at the head before them, leaving them behind.
   - **Off, nothing changes from before:** every push but a fix for failing
-    checks (ADR-070) is the person's.
+    checks (ADR-070) is the person's. On, ADR-070's fix push gives way to
+    this one, which takes the fix up with the rest.
   - The lead is told which holds in its brief, and `push_to_pull_request`
     says what it did.
 - **Alternatives considered:**

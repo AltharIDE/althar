@@ -14,7 +14,8 @@ import type { IconName } from '@althar/ui'
  * (push, merge) right there; the lead's (resolve, fix) the card leaves to its
  * task. Where the project's rules push the lead's commits on their own
  * (ADR-071), commits here are the person's to push only where Althar held
- * them, and the card says why.
+ * them, and the card says why; the others are on their way, and nothing is
+ * accepted until they're on it.
  */
 
 export type Blocker =
@@ -22,6 +23,8 @@ export type Blocker =
   | { readonly kind: 'parted' }
   /** `held`: why they didn't go up on their own, where the project's rules push them so. */
   | { readonly kind: 'unpushed'; readonly commits: number; readonly held: string | null }
+  /** Going up on their own as the lead's turn ends (ADR-071): not the person's to push, but not on it to accept yet either. */
+  | { readonly kind: 'going'; readonly commits: number }
   | { readonly kind: 'conflict'; readonly target: string | null }
   | { readonly kind: 'failed'; readonly failing: ReadonlyArray<string>; readonly failed: number }
   | { readonly kind: 'running'; readonly passed: number; readonly total: number }
@@ -44,6 +47,7 @@ export const standingText = {
   commits: (n: number) => (n === 1 ? '1 commit' : `${n} commits`),
   parted: (short: string) => `Branch and ${short} have parted`,
   unpushed: (n: number, short: string) => `${standingText.commits(n)} not on the ${short}`,
+  going: (n: number, short: string) => `${standingText.commits(n)} going up to the ${short}`,
   /** Commits to push that bring the branch up to date with the one the pull request conflicts with: pushing them clears the conflict. */
   pushResolves: (target: string | null) => `The push should resolve the conflict${target === null ? '' : ` with ${target}`}`,
   conflict: (target: string | null) => (target === null ? 'Has a merge conflict' : `Conflicts with ${target}`),
@@ -92,10 +96,14 @@ export const personPushes = (change: Pick<ChangeSummary, 'pushing'>): boolean =>
 export const standingOf = (change: ChangeSummary): Standing => {
   const checks = change.checks
   const blockers: Blocker[] = []
-  // Commits here count only once the branch's head here is known, as the task's own Push does; going up on their own, they don't.
+  // Commits here count only once the branch's head here is known, as the task's own Push does; going up on their own, they wait.
   if (change.diverged !== null) blockers.push({ kind: 'parted' })
-  else if (change.localHead !== null && change.unpushed > 0 && personPushes(change))
-    blockers.push({ kind: 'unpushed', commits: change.unpushed, held: change.pushing?.held ?? null })
+  else if (change.localHead !== null && change.unpushed > 0)
+    blockers.push(
+      personPushes(change)
+        ? { kind: 'unpushed', commits: change.unpushed, held: change.pushing?.held ?? null }
+        : { kind: 'going', commits: change.unpushed },
+    )
   if (change.conflicts === true) blockers.push({ kind: 'conflict', target: change.target ?? null })
   // The checks say one thing: one failed, or they're still running, or, once done, one was cancelled.
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
@@ -115,8 +123,9 @@ const nextOf = (first: Blocker | undefined): Next | null => {
       return { kind: 'resolve' }
     case 'failed':
       return { kind: 'fix', failing: first.failing }
-    // Parted, it is sorted out in the task; running, there's nothing to do but wait; cancelled, they're run again on the host.
+    // Parted, it is sorted out in the task; going up or running, there's nothing to do but wait; cancelled, they're run again on the host.
     case 'parted':
+    case 'going':
     case 'running':
     case 'cancelled':
       return null
@@ -137,6 +146,8 @@ export const saidOf = (blocker: Blocker, change: Pick<ChangeSummary, 'short'>): 
       return { words: t.parted(change.short), icon: 'branch', tone: 'warm' }
     case 'unpushed':
       return { words: blocker.held ?? t.unpushed(blocker.commits, change.short), icon: 'up', tone: 'warm' }
+    case 'going':
+      return { words: t.going(blocker.commits, change.short), icon: 'up', tone: 'live' }
     case 'conflict':
       return { words: t.conflict(blocker.target), icon: 'branch', tone: 'warm' }
     case 'failed':
@@ -165,14 +176,17 @@ export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
  * content from here, so any commits beside a conflict are taken to be that.
  */
 export const pushResolves = (standing: Standing): boolean =>
-  standing.blockers.some((one) => one.kind === 'conflict') && standing.blockers.some((one) => one.kind === 'unpushed')
+  standing.blockers.some((one) => one.kind === 'conflict') &&
+  standing.blockers.some((one) => one.kind === 'unpushed' || one.kind === 'going')
 
 /** Whether the change is not ready to accept as it stands, and pushing won't make it so: a conflict nothing here resolves, a failed or cancelled check, a branch that parted. */
 export const isBlocked = (standing: Standing): boolean =>
-  standing.blockers.some((one) => (one.kind === 'conflict' ? !pushResolves(standing) : one.kind !== 'unpushed' && one.kind !== 'running'))
+  standing.blockers.some((one) =>
+    one.kind === 'conflict' ? !pushResolves(standing) : one.kind !== 'unpushed' && one.kind !== 'going' && one.kind !== 'running',
+  )
 
 /** How facts read, top to bottom: what blocks, then what to do, then what is fine or on its way. */
-const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, failed: 0, cancelled: 0, unpushed: 1, running: 2 }
+const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, failed: 0, cancelled: 0, unpushed: 1, going: 2, running: 2 }
 
 /**
  * What stands, as facts: what blocks first (a conflict, failed checks), then
