@@ -99,23 +99,56 @@
   mix-blend-mode: screen;
   background: radial-gradient(ellipse 80% 90% at 50% 30%, rgba(255, 128, 40, 0.75), rgba(255, 90, 30, 0.35) 45%, rgba(255, 70, 20, 0) 80%);
 }
-.daylit {
-  mix-blend-mode: soft-light;
-  background: radial-gradient(ellipse 85% 90% at 50% 30%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
+.daylit { mix-blend-mode: soft-light; }
+/* The light itself, a little larger than the cabin, so it can move across it under the cabin's mask. */
+.daylit::before {
+  content: '';
+  position: absolute;
+  inset: -8%;
+  background: radial-gradient(ellipse 73% 78% at 50% 32.8%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
 }
 
 /* The cabin's light and the flash change every frame until it is at rest, so each is given its own layer until then. */
 .dim, .firelit, .daylit, .flash { will-change: opacity; }
 .hero[data-settled] :is(.dim, .firelit, .daylit, .flash) { will-change: auto; }
 
-/* What still moves at rest, slowly, by the browser alone: the sky easing on as the capsule sinks, the camera afloat, an ember now and then. */
+/*
+ * What still moves at rest, by the browser alone: the sky swinging past as
+ * the capsule sways under it, the camera afloat and now and then buffeted by
+ * the air, the daylight turning across the cabin, an ember now and then. The
+ * buffets run on two clocks that never line up, so they never fall into a beat.
+ */
 @media (prefers-reduced-motion: no-preference) {
-  .hero[data-settled] .sky { animation: sky 40s ease-in-out infinite alternate; }
-  .hero[data-settled] .camera { animation: afloat 17s ease-in-out infinite; }
+  .hero[data-settled] .sky { animation: sky 23s ease-in-out infinite alternate; }
+  .hero[data-settled] .camera { animation: afloat 17s ease-in-out infinite, buffet 9.7s linear 3s infinite, jolt 6.3s linear 1.2s infinite; }
+  .hero[data-settled] .daylit { animation: daylight 13s ease-in-out infinite alternate; }
+  .hero[data-settled] .daylit::before { animation: sunround 13s ease-in-out infinite alternate; }
   .hero[data-settled] .embers i { animation: ember var(--d) linear var(--delay) infinite; }
-  .hero[data-away] :is(.sky, .camera, .embers i, .grain) { animation-play-state: paused; }
+  .hero[data-away] :is(.sky, .camera, .daylit, .embers i, .grain),
+  .hero[data-away] .daylit::before { animation-play-state: paused; }
 }
 @keyframes sky { to { transform: translate3d(1.2%, 0, 0) scale(1.045); } }
+/* A gust: a few quick knocks, dying away, then still until the next. */
+@keyframes buffet {
+  0%, 62%, 100% { translate: 0 0; }
+  63% { translate: 1.8px -1.3px; }
+  64% { translate: -2.4px 1.1px; }
+  65.2% { translate: 1.9px 1.5px; }
+  66.6% { translate: -1.4px -1px; }
+  68.2% { translate: 0.9px 0.6px; }
+  70% { translate: -0.4px -0.2px; }
+  72% { translate: 0 0; }
+}
+@keyframes jolt {
+  0%, 78%, 100% { rotate: 0deg; }
+  79.5% { rotate: 0.07deg; }
+  81.5% { rotate: -0.06deg; }
+  84% { rotate: 0.03deg; }
+  87% { rotate: 0deg; }
+}
+/* The sun coming round the cabin as the capsule turns: brighter, and moving across. */
+@keyframes daylight { from { opacity: 0.75; } to { opacity: 0.95; } }
+@keyframes sunround { to { transform: translate3d(5%, 2%, 0); } }
 @keyframes afloat {
   0%, 100% { transform: none; }
   25% { transform: translate3d(3px, -2px, 0) rotate(0.08deg); }

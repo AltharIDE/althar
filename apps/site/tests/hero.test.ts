@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { altitudeAt, AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt, velocityAt } from '../src/home/hero/journey'
+import {
+  altitudeAfter,
+  altitudeAt,
+  AT,
+  brokenAt,
+  driftAt,
+  flowAt,
+  heatAt,
+  shakeAt,
+  speedAt,
+  swayAt,
+  velocityAfter,
+  velocityAt,
+} from '../src/home/hero/journey'
 import { TALL, WIDE } from '../src/home/hero/plate'
 
 describe('the first screen’s clock', () => {
@@ -47,6 +60,23 @@ describe('the first screen’s clock', () => {
     expect(velocityAt(AT.settled)).toBeLessThan(0.5)
     expect(velocityAt(AT.settled)).toBe(velocityAt(AT.settled + 60))
     expect(altitudeAt(AT.settled)).toBe(altitudeAt(AT.settled + 60))
+  })
+
+  it('goes on reading at rest: from where the journey left off, sinking slowly and never jumping', () => {
+    expect(velocityAfter(0)).toBe(velocityAt(AT.settled))
+    expect(altitudeAfter(0)).toBe(altitudeAt(AT.settled))
+    // A reading a quarter of a second after the last is never far from it.
+    for (let s = 0.25; s < 1200; s += 0.25) {
+      expect(Math.abs(velocityAfter(s) - velocityAfter(s - 0.25))).toBeLessThan(0.005)
+      expect(Math.abs(altitudeAfter(s) - altitudeAfter(s - 0.25))).toBeLessThan(0.01)
+      expect(velocityAfter(s)).toBeGreaterThan(0.18)
+      expect(velocityAfter(s)).toBeLessThan(0.25)
+      expect(altitudeAfter(s)).toBeGreaterThan(33)
+    }
+    // Falling, slower each minute, and still moving after a long while.
+    expect(altitudeAfter(60)).toBeLessThan(altitudeAfter(0))
+    expect(altitudeAfter(600)).toBeLessThan(altitudeAfter(60))
+    expect(altitudeAfter(60) - altitudeAfter(120)).toBeGreaterThan(altitudeAfter(600) - altitudeAfter(660))
   })
 
   it('never drifts the sky past the edge of its picture, on either photograph', () => {

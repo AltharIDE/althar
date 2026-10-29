@@ -65,7 +65,7 @@ export function DesktopBody() {
             <b>Althar stays.</b>
           </>
         }
-        lead="Althar isn’t a lab, so none of that touches it. Your projects, rules and knowledge stay put, and the work moves to whichever agent you have. It gets better every time a model does."
+        lead="None of the industry’s bullshit touches Althar. It isn’t a lab, and it’s open source under Apache 2.0. It runs on your computer: your projects, rules and knowledge sit in a local database you own, with no account and nothing of ours between you and the model. The work moves to whichever agent you have, and gets better every time a model does."
       >
         <AtWork />
       </Scene>

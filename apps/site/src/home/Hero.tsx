@@ -15,7 +15,20 @@ import { LightUnder } from '../shared/lightUnder'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
 import { type Fire, makeFire } from './hero/fire'
-import { altitudeAt, AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt, velocityAt } from './hero/journey'
+import {
+  altitudeAfter,
+  altitudeAt,
+  AT,
+  brokenAt,
+  driftAt,
+  flowAt,
+  heatAt,
+  shakeAt,
+  speedAt,
+  swayAt,
+  velocityAfter,
+  velocityAt,
+} from './hero/journey'
 import { clamp, flare, inOut, ring, smooth, wobble } from './hero/motion'
 import { PHONE, type Plate, TALL, WIDE } from './hero/plate'
 import plasmaUrl from './hero/plate/plasma.webp'
@@ -147,11 +160,17 @@ const put = (el: HTMLElement | null, name: string, value: string) => {
   if (el && el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value)
 }
 
-/** The flight deck's readouts at second `t`, as they read. */
+/** The flight deck's readouts, as they read: at the journey's second `t`, and `s` seconds after rest. */
+const km = (n: number, places: number, unit: string) => `${n.toFixed(places)} ${unit}`
 const READ = {
-  velocity: (t: number) => `${velocityAt(t).toFixed(2)} km/s`,
-  altitude: (t: number) => `${Math.round(altitudeAt(t))} km`,
+  velocity: (t: number) => km(velocityAt(t), 3, 'km/s'),
+  altitude: (t: number) => km(altitudeAt(t), 2, 'km'),
+  velocityAfter: (s: number) => km(velocityAfter(s), 3, 'km/s'),
+  altitudeAfter: (s: number) => km(altitudeAfter(s), 2, 'km'),
 }
+
+/** How often the instruments read at rest, in ms. */
+const READING = 250
 
 /** Writes a readout only when it changes. */
 const say = (el: HTMLElement | null, text: string) => {
@@ -300,18 +319,31 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
      * just as the page's own copy of it shows it, so that takes its place
      * (data-settled), and the canvas and its memory are let go. From then on
      * what moves is the browser's to move: the sky easing, the camera floating
-     * and now and then an ember (Hero.module.css).
+     * and buffeted, the daylight turning, now and then an ember
+     * (Hero.module.css); and the readouts, read a few times a second.
      */
     const rest = () => {
       el.dataset.settled = ''
       fire?.dispose()
       fire = null
     }
+    // At rest the readouts go on reading, a few times a second while on screen: the capsule still sinking, the air jostling it.
+    let after = 0
+    let reading = 0
+    const read = () => {
+      reading = window.setInterval(() => {
+        if (!seen) return
+        after += READING / 1000
+        say(velocity.current, READ.velocityAfter(after))
+        say(altitude.current, READ.altitudeAfter(after))
+      }, READING)
+    }
     const settle = () => {
       settled = true
       cancelAnimationFrame(frame)
       draw(AT.settled)
       rest()
+      read()
     }
     const tick = () => {
       const t = now()
@@ -398,6 +430,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       cancelAnimationFrame(frame)
       clearTimeout(timer)
       clearTimeout(waited)
+      clearInterval(reading)
       io.disconnect()
       ro.disconnect()
       runs.forEach((run) => run.cancel())

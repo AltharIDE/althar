@@ -1,4 +1,4 @@
-import { clamp, out, smooth } from './motion'
+import { clamp, out, smooth, wobble } from './motion'
 
 /*
  * The re-entry's clock. The capsule comes in out of the dark, a faint glow
@@ -73,3 +73,22 @@ export const velocityAt = (t: number) => 7.8 - 1.2 * smooth(AT.ignite, AT.peak, 
 
 /** Its height in km: from where the air begins, falling all the way to rest. */
 export const altitudeAt = (t: number) => 122 - 84 * smooth(AT.open, AT.settled, t)
+
+/*
+ * At rest the instruments still read: the capsule goes on sinking under the
+ * sky, slowing and falling less each minute, and the air it falls through
+ * jostles both figures a little. `s` is the seconds since rest. Both start
+ * exactly where the journey left them, so nothing jumps.
+ */
+
+/** How far into its slow sink the capsule is, 0 at rest to 1 after many minutes. */
+const sinking = (s: number) => 1 - Math.exp(-Math.max(0, s) / 300)
+
+/** The air's unevenness as the instruments feel it: none at rest's first moment, then a slight jitter that never repeats. */
+const air = (s: number, seed: number) => smooth(0, 4, s) * (wobble(s * 0.8, seed) * 0.7 + wobble(s * 3.1, seed + 5) * 0.3)
+
+/** The speed in km/s, `s` seconds after rest: easing down a little, and never quite steady. */
+export const velocityAfter = (s: number) => velocityAt(AT.settled) - 0.04 * sinking(s) + 0.004 * air(s, 2)
+
+/** The height in km, `s` seconds after rest: falling, slower each minute, and wavering a few metres. */
+export const altitudeAfter = (s: number) => altitudeAt(AT.settled) - 4.5 * sinking(s) + 0.005 * air(s, 11)
