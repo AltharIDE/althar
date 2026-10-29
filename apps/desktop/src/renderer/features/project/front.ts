@@ -181,8 +181,16 @@ export const partsOf = (input: {
     product === null || url === null || !/^https?:\/\//i.test(url)
       ? {}
       : { openLabel: text.openOn(productName(product)), onOpen: () => input.open(url) }
-  const shown = input.trackers.slice(0, TRACKERS_SHOWN)
-  const more = input.trackers.length - shown.length
+  // The header names a tracker once: a learned one that reads the same as the bound (Trello's cards, whose board they don't name) folds into it.
+  const named = input.trackers.filter(
+    (tracker) =>
+      tracker.bound === true ||
+      !input.trackers.some(
+        (each) => each.bound === true && each.product === tracker.product && each.url === tracker.url && each.key === tracker.key,
+      ),
+  )
+  const shown = named.slice(0, TRACKERS_SHOWN)
+  const more = named.length - shown.length
   return [
     ...(input.repositories === null
       ? input.names.map((name) => ({ id: name, name, ...(input.host === null ? {} : { brand: productBrand(input.host.product) }) }))

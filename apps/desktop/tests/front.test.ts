@@ -258,6 +258,9 @@ describe('a project’s front page', () => {
     // Real Trello has no workspace: the two share product, host, link and no key, yet are told apart, so rows never share a React key.
     const rows = trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello)
     expect(new Set(rows.map(trackerIdOf)).size).toBe(2)
+    // The header names them once.
+    const parts = partsOf({ repositories: [], names: [], host: null, trackers: rows, open: () => {} })
+    expect(parts.filter((part) => part.id.startsWith('tracker:'))).toHaveLength(1)
     // Two workspaces with the same team key are two trackers, and the bound link is its own.
     const issue = (connectionId: string, workspace: string) =>
       ({
