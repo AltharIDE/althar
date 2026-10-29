@@ -7,9 +7,8 @@ import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
+import { Bento } from './Bento'
 import s from './DesktopBody.module.css'
-import { Flow } from './Flow'
-import { Trio } from './Trio'
 
 /*
  * Desktop: the product, shown, after the first screen's "fast": first that
@@ -17,9 +16,9 @@ import { Trio } from './Trio'
  * end the craft and the freedom of open source, by the download. One claim
  * a screen, in the first screen's type, each over a large picture of the
  * app drawn by its own components: the board at work on a panel as dark and
- * warm as the first screen's cabin, then its windows and single pieces up
- * close in Althar's light. Pictures of the app framed as pictures, so
- * nothing looks like it is part of this page.
+ * warm as the first screen's cabin, then the coordinator, a bento of what
+ * keeps you in flow, and the notch. Pictures of the app framed as pictures,
+ * so nothing looks like it is part of this page.
  */
 
 function Scene({
@@ -85,7 +84,17 @@ export function DesktopBody() {
         <AskOnce />
       </Scene>
 
-      <Trio />
+      <Scene
+        id="flow"
+        title={
+          <>
+            Designed to keep you <b>in flow.</b>
+          </>
+        }
+        lead="What breaks your stride when you work with agents, taken out of the way."
+      >
+        <Bento />
+      </Scene>
 
       <Scene
         id="edge"
@@ -98,18 +107,6 @@ export function DesktopBody() {
         lead="Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on."
       >
         <EdgeTour />
-      </Scene>
-
-      <Scene
-        id="connections"
-        title={
-          <>
-            From your tracker. <b>To your host.</b>
-          </>
-        }
-        lead="Hand Althar an issue from Linear, Jira or Trello. It comes back as a pull request on GitHub, GitLab or Bitbucket, self-hosted ones included, reviewed and with its checks run."
-      >
-        <Flow />
       </Scene>
 
       <section className={s.end} aria-label="Download Althar">

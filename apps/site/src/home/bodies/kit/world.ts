@@ -1,6 +1,7 @@
 import { createElement, isValidElement } from 'react'
 
 import * as board from '../../../../../../packages/ui/src/fixtures/board'
+import * as chrome from '../../../../../../packages/ui/src/fixtures/chrome'
 import * as coordinator from '../../../../../../packages/ui/src/fixtures/coordinator'
 import * as edge from '../../../../../../packages/ui/src/fixtures/edge'
 import * as home from '../../../../../../packages/ui/src/fixtures/home'
@@ -37,9 +38,10 @@ export function renamed<T>(x: T): T {
 }
 
 export const { CALLS, NEXT, READY_TWO_REPOS, SETTLED } = renamed({ ...board })
+export const { NOTES_KEPT, NOTES_SEEN } = renamed({ ...chrome })
 export const { DRAFT_LINEAR, FROM_231, PLAN_432 } = renamed({ ...coordinator })
 export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
-export const { HALYARD, MERIDIAN: TALLY } = renamed({ ...home })
+export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
 export const { FINDINGS, PROJECT, reviewDoc, STEPS } = renamed({ ...review })
