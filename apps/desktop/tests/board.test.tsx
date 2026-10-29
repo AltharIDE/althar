@@ -967,6 +967,25 @@ describe('the board', () => {
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
     })
 
+    it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
+      const queued = board({
+        tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: change({ queued: true }) } : one)),
+      })
+      const getBoard = vi.fn(async () => queued)
+      const { client, emit } = fakeClient({ getBoard })
+      withServices(<Project />, client)
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      // Read so, as after a restart, with nothing pressed in this window: at work, and saying where.
+      expect(await lane('Running').findByText('In the merge queue')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The queue took it out: it is the person's to merge again.
+      getBoard.mockImplementation(async () => board())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('In the merge queue')).toBeNull()
+    })
+
     it('is the person’s again once its pull request merged and another of its own is open', async () => {
       const merge = vi.fn(async () => undefined)
       const next = change({ number: 13, url: 'https://github.com/meridian/api/pull/13', head: 'def456', draft: false })

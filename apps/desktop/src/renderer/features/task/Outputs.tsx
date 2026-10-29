@@ -7,6 +7,7 @@ import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
+import { inMergeQueue } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
@@ -227,7 +228,9 @@ export function Outputs({
             ? ChangeState.Merged
             : open.some((one) => one.state === 'open' && one.draft)
               ? ChangeState.Draft
-              : ChangeState.Ready
+              : inMergeQueue(open)
+                ? ChangeState.Queued
+                : ChangeState.Ready
           const brand = productBrand(first.product)
           const prs: PullRequest[] = open.map((one) => ({
             repo: one.repository,
