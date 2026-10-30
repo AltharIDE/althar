@@ -169,6 +169,8 @@ export class PlanUsage extends Context.Service<
 
         const held = new Map<string, Held>()
         const asked = new Map<string, number>()
+        /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
+        const sayings = new Map<string, number>()
         let hydrated = false
 
         /* What the store kept of the accounts' last readings, once. */
@@ -280,6 +282,7 @@ export class PlanUsage extends Context.Service<
                 const variable = definition.home.variable
                 const named = env[variable] ?? process.env[variable]
                 const version = yield* versionOf(definition)
+                const said = sayings.get(account.id) ?? 0
                 const got = yield* Effect.promise(() =>
                   readEndpoint(
                     sourceId,
@@ -300,6 +303,8 @@ export class PlanUsage extends Context.Service<
                 // Kept one at a time with what sessions say, and against what is held by then: a session may have said its windows meanwhile.
                 yield* hearing.withPermits(1)(
                   Effect.gen(function* () {
+                    // One did while the endpoint was asked: what it said is fresher than the answer, which may yet come with a later time.
+                    if ((sayings.get(account.id) ?? 0) !== said) return
                     if (got.kind === 'usage') {
                       // An answer no newer than what is held, as the reader's own from before it was asked to wait, leaves that as it is.
                       const last = held.get(account.id)
@@ -471,6 +476,7 @@ export class PlanUsage extends Context.Service<
               .withPermits(1)(
                 Effect.gen(function* () {
                   yield* hydrate
+                  sayings.set(accountId, (sayings.get(accountId) ?? 0) + 1)
                   const before = held.get(accountId)
                   const at = yield* timestamp
                   // Each window said replaces its own, and the others stay as last said.

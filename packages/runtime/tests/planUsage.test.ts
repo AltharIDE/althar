@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { agents as registry } from '@althar/provider-adapters'
-import { Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -316,6 +316,40 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
         yield* TestClock.adjust(Duration.minutes(5))
         assert.deepStrictEqual([asked, accountOf(yield* usage.now(true), 'claude-code').source], [1, 'acp_extension'])
       }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('keeps what a session said while the endpoint was asked, though the endpoint answers after it', () =>
+    Effect.gen(function* () {
+      const answers: ReadonlyArray<EndpointRead> = [
+        { kind: 'usage', stale: false, usage: { windows: [used(10)], source: 'endpoint', observedAt: new Date(1000).toISOString() } },
+        { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+      ]
+      for (const answer of answers) {
+        let called!: () => void
+        const asking = new Promise<void>((resolve) => (called = resolve))
+        let reply!: (read: EndpointRead) => void
+        const answered = new Promise<EndpointRead>((resolve) => (reply = resolve))
+        const layer = withUsage({
+          readEndpoint: async (sourceId) => (sourceId === 'claude-oauth' ? (called(), answered) : { kind: 'none' }),
+        })
+        yield* Effect.gen(function* () {
+          const usage = yield* PlanUsage
+          const [account] = yield* (yield* Accounts).of('claude-code')
+          const reading = yield* Effect.forkChild(usage.now(true))
+          yield* Effect.promise(() => asking)
+          // A session says its windows while the endpoint is asked, and the endpoint answers a second later.
+          yield* usage.heard(account!.id, 'claude-code', [used(35)])
+          yield* TestClock.adjust(Duration.seconds(1))
+          reply(answer)
+          const view = accountOf(yield* Fiber.join(reading), 'claude-code')
+          assert.deepStrictEqual(
+            [view.source, view.windows.map((window) => window.usedPercent), view.fault],
+            ['acp_extension', [35], null],
+            answer.kind,
+          )
+        }).pipe(Effect.provide(layer))
+      }
     }),
   )
 

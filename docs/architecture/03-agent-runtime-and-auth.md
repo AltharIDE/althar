@@ -492,9 +492,11 @@ type AccountStatus = {
 With the windows, the scheduler moves or holds new work before the limit is
 reached rather than after ([05](05-workflow-engine.md), Usage limits): an
 account's room is its tightest window left, as last read (a window past its
-reset has started again; a model's own window counts for that model; money
-spent past the plan doesn't), and under 5% it is nearly out. Warnings fire at
-50, 25, 10 and 5% remaining (once per account, window and reset).
+reset is unknown until it is read again, and left out, as the window's gauge
+and pickers leave it out by their own clock; a model's own window counts for
+that model; money spent past the plan doesn't), and under 5% it is nearly out.
+Warnings fire at 50, 25, 10 and 5% remaining (once per account, window and
+reset).
 
 ## Provider session lifecycle
 
