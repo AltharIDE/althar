@@ -90,16 +90,17 @@
 .plate { padding: 7px 13px 6px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.14); font: 500 10.5px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 248, 240, 0.82); white-space: nowrap; }
 
 /* The newest release, shown: when it went out, what it gives you, why, and the picture. */
-.lead { display: grid; justify-items: center; gap: 16px; max-width: 860px; margin-top: 64px; text-align: center; }
+.lead { display: grid; justify-items: center; gap: 16px; max-width: 1100px; margin-top: 60px; text-align: center; }
 .leadStamp { display: flex; gap: 14px; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 248, 240, 0.55); }
 .leadStamp .met { color: var(--lit); }
-.headline { font-family: 'Inter Display', var(--display); font-size: clamp(34px, 4.5vw, 64px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+.headline { font-family: 'Inter Display', var(--display); font-size: clamp(32px, 4vw, 58px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
 .why { max-width: 40em; font-size: 16.5px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
 .more { color: var(--lit); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.more { font-size: 15px; }
 .more::after { content: ' ↓'; }
 .more:hover { color: #fff; }
 /* The picture stands on the planet's lit edge, on the window's own ground. */
-.heroPic { width: min(940px, 100%); margin-top: 44px; }
+.heroPic { width: min(940px, 100%); margin-top: 22px; }
 .heroPic > [role='img'] { background: none; box-shadow: none; }
 .heroPic > [role='img']::before { display: none; }
 
@@ -219,6 +220,8 @@ a.v:hover { color: var(--lit); }
 .fold[open] summary svg { transform: rotate(180deg); }
 .fold:not([open]) .opened, .fold[open] .closed { display: none; }
 .fold > .runs { margin-top: 26px; }
+.tail .fold { margin-top: 18px; }
+.tail .fold > .lines { margin-top: 12px; }
 
 /* ---- what's next: a course on a chart ---- */
 

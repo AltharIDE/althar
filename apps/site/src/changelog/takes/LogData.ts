@@ -50,30 +50,30 @@ export interface Highlight {
 export const HIGHLIGHT: Record<string, Highlight> = {
   '0.5.0': {
     title: 'Now on Windows, with seven more agents.',
-    why: 'An installer for x64 that updates itself, with no administrator’s prompt. And seven more agents, each joining only where Althar can keep it asking before it acts.',
+    why: 'An x64 installer that updates itself, with no administrator’s prompt. And seven more agents, each kept asking before it acts.',
     picture: 'windows',
     covers: [],
   },
   '0.4.1': {
-    title: 'Pull requests written for the person reviewing them',
+    title: 'A pull request that explains itself',
     why: 'Each one Althar opens says why, what changed and how it was checked, in your repository’s template where it has one.',
     picture: 'reviewer',
     covers: [2],
   },
   '0.4.0': {
-    title: 'Report a problem from anywhere',
+    title: 'Say what happened. The screenshot and logs go with it.',
     why: 'From the app’s menu, quick settings or a stuck step. What you write goes with a screenshot and Althar’s logs, with folders, names and keys taken out.',
     picture: 'report',
     covers: [0],
   },
   '0.3.0': {
-    title: 'Run everything a project needs',
+    title: 'The app, the API and the worker, from one button',
     why: 'Run is split: a press starts the first thing, and its list starts or stops any of them, each with where it answers.',
     picture: 'run',
     covers: [0],
   },
   '0.2.0': {
-    title: 'Finished tasks show their evidence',
+    title: 'Screenshots and test runs, with every finished task',
     why: 'What it built, the screenshots and test runs its lead showed, and anything it couldn’t check. The reviewer reads the evidence too.',
     picture: 'evidence',
     covers: [0],

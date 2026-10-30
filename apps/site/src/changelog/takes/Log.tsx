@@ -5,6 +5,7 @@ import {
   type Change,
   KIND_WORD,
   type Kind,
+  type Merged,
   ON_MAIN,
   pullUrl,
   type Release,
@@ -45,6 +46,9 @@ import { LogPicture } from './LogPictures'
  */
 
 addDisplay()
+
+/** How many of main's latest merges show before the rest fold. */
+const TAIL = 5
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
@@ -226,12 +230,10 @@ function Window() {
               <span>{dated(LATEST.date)}</span>
             </p>
             <h2 className={s.headline}>{lead.title}</h2>
-            <p className={s.why}>
-              {lead.why}{' '}
-              <a className={s.more} href={`#v${LATEST.version}`}>
-                Everything in {LATEST.version}
-              </a>
-            </p>
+            <p className={s.why}>{lead.why}</p>
+            <a className={s.more} href={`#v${LATEST.version}`}>
+              Everything in {LATEST.version}
+            </a>
           </div>
           <div className={s.heroPic}>
             <LogPicture picture={lead.picture} />
@@ -263,6 +265,19 @@ function Shown({ highlight, note, children }: { highlight: Highlight; note?: Rea
 function Tail() {
   const newest = ON_MAIN[0]!
   const merges = ON_MAIN.filter((m) => m.pr !== COMING.pr)
+  const line = (m: Merged, i: number, all: readonly Merged[]) => (
+    <li key={m.pr} className={cx(s.merged, m === newest && s.newest)}>
+      <span className={cx(s.label, i > 0 && all[i - 1]!.date === m.date && s.again)}>{dated(m.date, false)}</span>
+      <span className={s.text}>
+        <span>{m.text}</span>
+        <a className={s.pr} href={pullUrl(m.pr)} aria-label={`Pull request ${m.pr}`}>
+          #{m.pr}
+        </a>
+      </span>
+    </li>
+  )
+  const recent = merges.slice(0, TAIL)
+  const older = merges.slice(TAIL)
   return (
     <li className={cx(s.entry, s.tail)} id="on-main">
       <span className={s.node} aria-hidden="true" />
@@ -277,23 +292,29 @@ function Tail() {
           #{COMING.pr}
         </a>
       </Shown>
-      <ul className={s.lines}>
-        {merges.map((m, i) => {
-          const day = i === 0 || merges[i - 1]!.date !== m.date
-          return (
-            <li key={m.pr} className={cx(s.merged, m === newest && s.newest)}>
-              <span className={cx(s.label, !day && s.again)}>{dated(m.date, false)}</span>
-              <span className={s.text}>
-                <span>{m.text}</span>
-                <a className={s.pr} href={pullUrl(m.pr)} aria-label={`Pull request ${m.pr}`}>
-                  #{m.pr}
-                </a>
-              </span>
-            </li>
-          )
-        })}
-      </ul>
+      <ul className={s.lines}>{recent.map(line)}</ul>
+      {older.length > 0 && (
+        <Fold count={older.length}>
+          <ul className={s.lines}>{older.map(line)}</ul>
+        </Fold>
+      )}
     </li>
+  )
+}
+
+/** What is folded until asked for: `count` more, opening in place. Find in page opens it too. */
+function Fold({ count, children }: { count: number; children: ReactNode }) {
+  return (
+    <details className={s.fold}>
+      <summary>
+        <span className={s.closed}>{count} more</span>
+        <span className={s.opened}>Fewer</span>
+        <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
+          <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        </svg>
+      </summary>
+      {children}
+    </details>
   )
 }
 
@@ -349,20 +370,13 @@ function Entry({ release }: { release: Release }) {
           <Run key={i} {...run} />
         ))}
         {more > 0 && (
-          <details className={s.fold}>
-            <summary>
-              <span className={s.closed}>{more} more</span>
-              <span className={s.opened}>Fewer</span>
-              <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-                <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-              </svg>
-            </summary>
+          <Fold count={more}>
             <div className={s.runs}>
               {folded.map((run, i) => (
                 <Run key={i} {...run} />
               ))}
             </div>
-          </details>
+          </Fold>
         )}
       </div>
     </li>

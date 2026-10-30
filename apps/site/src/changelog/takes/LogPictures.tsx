@@ -158,7 +158,7 @@ function Reviewer() {
   return (
     <Frame
       label="A pull request Althar opened, its description written for a reviewer: why, what changed, and how it was checked"
-      w={60}
+      w={56}
       n={30}
       foot
     >
@@ -219,7 +219,7 @@ const SENT = [
   ['Version', 'Althar 0.4.0'],
   ['System', 'macOS 15.1, Apple silicon'],
   ['Logs', 'The last 500 lines of each'],
-  ['Folders, names, keys', 'Taken out'],
+  ['Folders and keys', 'Taken out'],
 ] as const
 
 function Switch() {
@@ -235,7 +235,7 @@ function Report() {
   return (
     <Frame
       label="Report a problem: what happened, in your words, with a screenshot of the window and Althar’s logs, and a list of everything that goes with it"
-      w={60}
+      w={52}
       n={30}
       className={p.dim}
     >
@@ -312,7 +312,7 @@ function Run() {
   return (
     <Frame
       label="Run, split: a press runs web, and its list starts or stops each thing the project runs: web and the API running, the worker and Storybook not"
-      w={60}
+      w={50}
       n={30}
       foot
     >
@@ -410,20 +410,30 @@ function Evidence() {
           <span className={p.shot}>
             <span className={p.shotPic}>
               <span className={p.rows}>
-                <i />
-                <i className={p.rowOn} />
-                <i />
+                <b>Refunds · Acme</b>
+                <span className={p.rowOn}>
+                  <code>re_8Hk2…</code>
+                  <span>€42.00</span>
+                  <span>Refunded</span>
+                </span>
+                <span>
+                  <code>re_3Pq9…</code>
+                  <span>€18.50</span>
+                  <span>Refunded</span>
+                </span>
               </span>
             </span>
             <span className={p.caption}>Partner dashboard: one refund</span>
           </span>
           <span className={cx(p.shot, p.term)}>
             <span className={p.shotPic}>
-              <code>
-                <span className={p.prompt}>$</span> pnpm test refunds
-              </code>
-              <code className={p.pass}>✓ 48 passed</code>
-              <code className={p.faint}>3 new · 2.1s</code>
+              <span className={p.out}>
+                <code>
+                  <span className={p.prompt}>$</span> pnpm test refunds
+                </code>
+                <code className={p.pass}>✓ 48 passed</code>
+                <code className={p.faint}>3 new · 2.1s</code>
+              </span>
             </span>
             <span className={p.caption}>Test run</span>
           </span>

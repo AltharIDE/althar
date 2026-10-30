@@ -280,10 +280,13 @@
 .req code { color: #45454c; }
 .req b { font-size: 1.15em; color: #c4402f; }
 .req .json { overflow: hidden; padding: 0.35em 0.45em; border-radius: 0.3em; background: #f0ede6; white-space: nowrap; text-overflow: ellipsis; font-size: 0.85em; }
-.rows { display: grid; gap: 0.45em; }
-.rows i { height: 1.4em; border-radius: 0.3em; background: #ece9e2; }
-.rows .rowOn { background: rgba(43, 59, 255, 0.12); box-shadow: inset 0 0 0 1px rgba(43, 59, 255, 0.4); }
-.term .shotPic { background: #121110; color: #e8e6df; font-size: 0.82em; align-content: start; }
+.rows { display: grid; gap: 0.35em; font-size: 0.78em; }
+.rows b { margin-bottom: 0.2em; font-size: 1.05em; }
+.rows > span { display: grid; grid-template-columns: 1fr auto auto; gap: 0.7em; padding: 0.4em 0.5em; border-radius: 0.3em; background: #f0ede6; color: #45454c; }
+.rows code { font-size: 0.95em; }
+.rows .rowOn { background: rgba(43, 59, 255, 0.1); box-shadow: inset 0 0 0 1px rgba(43, 59, 255, 0.4); color: #141417; }
+.term .shotPic { background: #121110; color: #e8e6df; align-content: start; }
+.out { display: grid; gap: 0.3em; font-size: 0.82em; }
 .term code { display: block; }
 .prompt { color: var(--t4); }
 .pass { color: var(--ok); }
@@ -317,13 +320,12 @@
 .roles > span { display: inline-flex; align-items: center; gap: 0.4em; }
 .roles i { font-style: normal; color: var(--t4); margin-right: 0.15em; }
 .roles .mk svg { width: 1.15em; height: 1.15em; }
-.thread .actions { margin: 0.2em 0 0 2.75em; justify-content: flex-start; flex-direction: row-reverse; }
+.thread .actions { margin-top: 0.2em; }
 
 @container (max-width: 560px) {
   .planned { margin-left: 0; }
   .planned li { grid-template-columns: 1.8em minmax(0, 1fr); row-gap: 0.4em; }
   .roles { grid-column: 2; gap: 0.9em; }
-  .thread .actions { margin-left: 0; }
 }
 
 /* ---- on main: the homepage's drawing of automations ---- */
