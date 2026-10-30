@@ -317,62 +317,59 @@ describe('what the boundary refuses itself', () => {
 })
 
 describe('a lead whose sandbox Althar holds', () => {
-  it.live(
-    'runs today’s commands without a card, asks before a push to main that crosses, and counts each ask and refusal',
-    () =>
-      Effect.gen(function* () {
-        const { requestContext, project, sql, sessionId } = yield* held()
-        const permissions = yield* Permissions
-        for (const line of Object.values(TODAY))
-          assert.strictEqual((yield* permissions.decide(requestContext, command(line))).decision, 'allow', line)
-        // What the project never allows is refused inside too, and counted by its kind.
-        const forced = yield* permissions.decide(requestContext, command('git push --force origin althar/retry'))
-        assert.deepStrictEqual(forced, {
-          decision: 'reject',
-          reason: "The project's rules never allow force pushes.",
-          decidedBy: 'rules',
-        })
-        // A push to main asked to run outside the sandbox: a card, which the person allows.
-        const asking = yield* Effect.forkChild(
-          permissions.decide(requestContext, command('git push origin HEAD:main', { dangerouslyDisableSandbox: true })),
-        )
-        const [card] = yield* until(
-          sql<{ id: string; counted: string | null; reason: string }>`
+  it.live('runs today’s commands without a card, asks before a push to main that crosses, and counts each ask and refusal', () =>
+    Effect.gen(function* () {
+      const { requestContext, project, sql, sessionId } = yield* held()
+      const permissions = yield* Permissions
+      for (const line of Object.values(TODAY))
+        assert.strictEqual((yield* permissions.decide(requestContext, command(line))).decision, 'allow', line)
+      // What the project never allows is refused inside too, and counted by its kind.
+      const forced = yield* permissions.decide(requestContext, command('git push --force origin althar/retry'))
+      assert.deepStrictEqual(forced, {
+        decision: 'reject',
+        reason: "The project's rules never allow force pushes.",
+        decidedBy: 'rules',
+      })
+      // A push to main asked to run outside the sandbox: a card, which the person allows.
+      const asking = yield* Effect.forkChild(
+        permissions.decide(requestContext, command('git push origin HEAD:main', { dangerouslyDisableSandbox: true })),
+      )
+      const [card] = yield* until(
+        sql<{ id: string; counted: string | null; reason: string }>`
           SELECT id, json_extract(payload, '$.counted') AS counted, json_extract(payload, '$.reason') AS reason
           FROM attention_requests WHERE project_id = ${project.projectId} AND state = 'open'`,
-          (rows) => rows.length === 1,
-        )
-        assert.strictEqual(card?.counted, 'default-branch')
-        assert.include(card?.reason ?? '', 'even with everything allowed')
-        const attentionId = card?.id ?? ''
-        yield* permissions.answer({
-          envelope: yield* Runtime.envelope('attention.answer', { attentionId, decision: 'allow' }),
-          attentionId,
-          decision: 'allow',
-        })
-        assert.strictEqual((yield* Fiber.join(asking)).decision, 'allow')
-        // The lead's git lets that push through for a while: its guard has the session's pass.
-        assert.isTrue(existsSync(join(guard().passes, sessionId)))
-        // Only the ask and the refusal were counted: what ran inside the sandbox wasn't.
-        const kinds = yield* sql<{ kind: string | null; outcome: string }>`
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(card?.counted, 'default-branch')
+      assert.include(card?.reason ?? '', 'even with everything allowed')
+      const attentionId = card?.id ?? ''
+      yield* permissions.answer({
+        envelope: yield* Runtime.envelope('attention.answer', { attentionId, decision: 'allow' }),
+        attentionId,
+        decision: 'allow',
+      })
+      assert.strictEqual((yield* Fiber.join(asking)).decision, 'allow')
+      // The lead's git lets that push through for a while: its guard has the session's pass.
+      assert.isTrue(existsSync(join(guard().passes, sessionId)))
+      // Only the ask and the refusal were counted: what ran inside the sandbox wasn't.
+      const kinds = yield* sql<{ kind: string | null; outcome: string }>`
         SELECT kind, outcome FROM decisions WHERE project_id = ${project.projectId} ORDER BY decided_at`
-        assert.deepStrictEqual(
-          kinds.filter((row) => row.kind !== null),
-          [
-            { kind: 'force-push', outcome: 'reject' },
-            { kind: 'default-branch', outcome: 'allow' },
-          ],
-        )
-        const tally = yield* tallyOf(project.projectId)
-        assert.deepStrictEqual(
-          [...tally].sort((a, b) => a.kind.localeCompare(b.kind)),
-          [
-            { kind: 'default-branch', asked: 1, allowed: 1, refused: 0, workedAround: 0 },
-            { kind: 'force-push', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
-          ],
-        )
-      }).pipe(Effect.provide(runtime())),
-    60_000,
+      assert.deepStrictEqual(
+        kinds.filter((row) => row.kind !== null),
+        [
+          { kind: 'force-push', outcome: 'reject' },
+          { kind: 'default-branch', outcome: 'allow' },
+        ],
+      )
+      const tally = yield* tallyOf(project.projectId)
+      assert.deepStrictEqual(
+        [...tally].sort((a, b) => a.kind.localeCompare(b.kind)),
+        [
+          { kind: 'default-branch', asked: 1, allowed: 1, refused: 0, workedAround: 0 },
+          { kind: 'force-push', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
+        ],
+      )
+    }).pipe(Effect.provide(runtime())),
   )
 
   it.live(
@@ -395,6 +392,5 @@ describe('a lead whose sandbox Althar holds', () => {
         }
       }).pipe(Effect.provide(runtime())),
     // Seven seconds alone; more while other tests share the machine.
-    60_000,
   )
 })

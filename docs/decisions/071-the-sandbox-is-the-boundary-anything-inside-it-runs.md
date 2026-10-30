@@ -123,7 +123,9 @@
     they can't start a namespace, for Codex (which asks only to go beyond
     its own sandbox already), OpenCode and the rest, and for a review's
     lead, which reads someone else's code. Git's guard holds for every
-    lead, everywhere.
+    lead but on Windows (`guardHolds`): Git for Windows' `ps` can't show
+    git's own words, so a pass would never let through what the person
+    allowed, and the rules there ask before what it stops already.
 - **Alternatives considered:**
   - **Reading more of the shell** (#410, the coordinator's loops, and #411,
     allow-everything going ahead with what it can't read, both on

@@ -66,7 +66,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
-import { guardEnv } from './pushGuard'
+import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
@@ -1981,7 +1981,7 @@ export class Sessions extends Context.Service<
           })
           // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
           const guarded =
-            thread.role === 'task' && !reads
+            thread.role === 'task' && !reads && guardHolds
               ? guardEnv({
                   sessionId,
                   taskBranch: thread.branch,

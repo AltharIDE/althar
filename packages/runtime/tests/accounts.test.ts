@@ -458,7 +458,11 @@ describe('accounts', () => {
         ['codex', work.id],
       ])
       // Codex's last launch, its second account's session, is in that account's home, with whose work it is beside it.
-      assert.deepStrictEqual(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env, {
+      // Beside what git's guard adds to a lead's (pushGuard.ts).
+      const launched = Object.entries(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}).filter(
+        ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
+      )
+      assert.deepStrictEqual(Object.fromEntries(launched), {
         FAKE_HOME: workFolder,
         ALTHAR_WORK: `task:${ran.taskId}`,
       })

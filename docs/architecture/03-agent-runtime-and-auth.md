@@ -930,7 +930,8 @@ saying to run it inside (`decideLeaving`). Where nothing holds a session (Window
 Codex, OpenCode, a review's lead), every request meets the rules below.
 
 **Git stops what can't be undone, wherever it comes from.** Every lead's
-git takes its hooks from a folder of Althar's, by the environment
+git but on Windows, where the rules ask first and `ps` can't show git's
+words for a pass (`guardHolds`), takes its hooks from a folder of Althar's, by the environment
 (`core.hooksPath`, `pushGuard.ts`): `pre-push` stops a push to a default
 branch, a push over commits the remote has that this one doesn't, and
 deleting a branch that isn't the task's; `reference-transaction` stops

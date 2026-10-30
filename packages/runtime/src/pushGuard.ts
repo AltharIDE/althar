@@ -209,6 +209,14 @@ export const guard = (root: string = tmpdir()): Guard => {
 const passOf = (sessionId: string, at: Guard) => join(at.passes, sessionId.replace(/[^\w-]/g, '_'))
 
 /**
+ * Whether a lead's git runs the guard here. Not on Windows: there is no
+ * sandbox there, so the project's rules ask before what the guard stops, as
+ * they always have, and Git for Windows' `ps` can't show git's own words, so
+ * a pass would never let through what the person allowed.
+ */
+export const guardHolds = process.platform !== 'win32'
+
+/**
  * What a lead's environment adds so its git runs Althar's hooks: git's
  * config by the environment, after the `count` entries already there
  * (`withoutSignIns`'), and what the guard reads.

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { guard, guardEnv, guardStopIn, passGuard } from '../src/pushGuard'
+import { guard, guardEnv, guardHolds, guardStopIn, passGuard } from '../src/pushGuard'
 import { gitRunsOf } from '../src/rules'
 
 /*
@@ -117,7 +117,8 @@ describe("a lead's git", () => {
     assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', 'althar/retry').said), undefined)
   })
 
-  it('lets through the one git the person allowed, once, and nothing else on its pass', () => {
+  // No guard on Windows, where Git for Windows' `ps` can't show git's own words (guardHolds).
+  it.skipIf(!guardHolds)('lets through the one git the person allowed, once, and nothing else on its pass', () => {
     const { work } = repository()
     const allowed = 'git push -q origin althar/retry:main'
     passGuard(sessionId, runsOf(`${allowed} 2>&1`, work), at)
@@ -139,7 +140,7 @@ describe("a lead's git", () => {
     assert.include(again.said, 'a push to main, the default branch')
   })
 
-  it('lets through what was allowed only in its repository, and only to where its remote pointed then', () => {
+  it.skipIf(!guardHolds)('lets through what was allowed only in its repository, and only to where its remote pointed then', () => {
     const one = repository()
     const two = repository()
     const allowed = 'git push -q origin althar/retry:main'
@@ -156,7 +157,7 @@ describe("a lead's git", () => {
     const moved = run(one.work, 'git', ...allowed.split(' ').slice(1))
     assert.notStrictEqual(moved.status, 0, 'the push to a remote pointed elsewhere')
     // A line that goes into the other repository first is allowed there, and only there.
-    passGuard(sessionId, runsOf(`cd ${two.work} && ${allowed}`, one.work), at)
+    passGuard(sessionId, runsOf(`cd '${two.work}' && ${allowed}`, one.work), at)
     assert.notStrictEqual(run(one.work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'where it didn’t go')
     assert.strictEqual(run(two.work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'where it went')
   })
@@ -175,7 +176,7 @@ describe('the git commands a pass names', () => {
     assert.deepStrictEqual(runsOf('git push origin HEAD:main', work), [
       { words: 'git push origin HEAD:main', folder: work, push: { remote: 'origin' } },
     ])
-    assert.strictEqual(runsOf(`cd ${home} && git -C work branch -D feature/other`, work)[0]?.folder, work)
+    assert.strictEqual(runsOf(`cd '${home}' && git -C work branch -D feature/other`, work)[0]?.folder, work)
     assert.deepStrictEqual(runsOf('git push --repo=upstream -f', work)[0]?.push, { remote: 'upstream' })
     assert.deepStrictEqual(runsOf('git push', work)[0]?.push, { remote: undefined })
     // Where Althar can't tell the folder, the pass names none, and the guard lets nothing through on it.
