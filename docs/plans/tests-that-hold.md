@@ -260,11 +260,37 @@ fixed where it is.
   jobs per entry (the Linux packages in one job) and three entries at a time
   would keep the queue moving.
 
+## Where it stands (30 October)
+
+- **Done:**
+  - **Phases 0 and 1:** retry, flaky issues, sizes, budgets and one way to wait (#409).
+  - **Phase 2:** end-to-end waits (#423).
+  - **Phase 3:** one clock, a lint rule, 21 timer tests on TestClock and four duration checks (#424).
+  - **Phase 5:** stress and nightly runs (#419).
+  - **Phase 6:** the end-to-end run in the queue, fewer jobs, three entries built at a time (#419).
+  - **The five order races,** and three more the flaky issues found (#418).
+  - **Phase 4, in part:**
+    - free ports, and `gh`'s deadline from the budget (#420);
+    - the fake agent's git asynchronous;
+    - testing-library's waits from the budget (#418).
+- **Found on the way, and fixed:**
+  - two catalog reads at once started every agent twice (#418);
+  - a test that depended on the machine having `~/Documents` (#411);
+  - a board class name colliding with the Up next lane's, which broke dragging in Up next (#403);
+  - three tests and a spec that kept state between runs (#402, #411, #418).
+- **Left, none of it a flake the census or the first day of stress and flaky issues saw:**
+  - **Phase 4's git, process and port lookups as services with fakes.** Git has 167 call sites; once phase 3's budget is in, this is about speed on Windows more than flakes. `folderCleanup`'s two flakes were slow git there.
+  - **The fake agent's `[lead:wait]` cap** (5 s) and other timed holds.
+  - **45 tests that pass short real-time timer options** (`listenEvery: 100 ms`).
+  - **Four performance checks among the unit tests** (`diagnostics`, connectors `jiraText`, ui `Code` and `Terminal`), for a performance run that doesn't gate.
+  - **The fake host's 3 s merge,** better as a gate.
+  - **`process.env` writes in eleven runtime test files.** Vitest runs each file in a worker of its own, so they can't reach another file, and each test puts back what it changed.
+
 ## Phases
 
 Each is one pull request, through the queue.
 
-0. **Retry and flaky issues** (#409, with #404's index fix). In the queue.
+0. **Retry and flaky issues** (#409, with #404's index fix).
 1. **Waits and budgets (B, C), in the unit tests.** `@althar/testing` gets
    the sizes, the budget and the scale; one `until` and one `waitFor` replace
    the others; the 87 test times, 419 wait times and the loops that gave up
