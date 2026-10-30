@@ -432,7 +432,7 @@ describe('a task that ends in a pull request', () => {
       return Effect.gen(function* () {
         yield* connect('github', HOST)
         const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
         const taskId = ready?.taskId ?? ''
         const number = ready?.change?.number ?? 0
         const changes = yield* Changes
@@ -453,7 +453,7 @@ describe('a task that ends in a pull request', () => {
         // The queue takes it out, its checks failed there: the thread says so, and it is the person's to merge again.
         github.dequeue(number, 'checks')
         yield* changes.refresh(taskId)
-        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true, Duration.seconds(8))
+        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
         assert.strictEqual(back?.change?.state, 'open')
         assert.include(yield* said, "The merge queue took PR #1 out: its checks failed there. It's back in Needs you, to merge again.")
         // Accepted again at the same head, it goes in again: another merge, not the first one's answer kept.
@@ -475,7 +475,7 @@ describe('a task that ends in a pull request', () => {
         // The queue merges it, and it settles.
         github.mergeByHand(number)
         yield* changes.refresh(taskId)
-        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(8))
+        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
         assert.strictEqual(settled?.change?.state, 'merged')
         assert.lengthOf(
           (yield* said).filter((title) => title.includes('merge queue took')),
