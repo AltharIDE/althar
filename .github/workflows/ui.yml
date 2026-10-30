@@ -1,11 +1,25 @@
 name: ui
 
-# On a pull request, checks, unit tests and the Storybook build. The coverage gate runs after merge, in post-merge.yml.
+# On a pull request, and for its entry in the merge queue: the checks and the unit tests its change reaches
+# (packages/testing/src/select.ts), and the Storybook build. The coverage gate runs after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
   pull_request:
-    paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/ui.yml']
+    paths:
+      [
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.bun-version',
+        '.node-version',
+        'lint/**',
+        'patches/**',
+        'packages/testing/**',
+        '.github/actions/flaky/**',
+        '.github/workflows/ui.yml',
+      ]
 
 permissions:
   contents: read
@@ -36,10 +50,28 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: bun run check
+      # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
+      # group's head merges the whole group when it passes, and so must cover every entry in it.
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+        working-directory: .
+        run: |
+          if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
+            git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
+          else
+            echo '*' > "$RUNNER_TEMP/changed"
+          fi
+      - id: plan
+        working-directory: .
+        run: bun packages/testing/src/select.ts plan ui "$RUNNER_TEMP/changed"
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
-      - uses: ./.github/actions/flaky/quarantine
-      - run: bun run test
+      - if: steps.plan.outputs.any == 'true'
+        uses: ./.github/actions/flaky/quarantine
+      - if: steps.plan.outputs.any == 'true'
+        working-directory: .
+        env:
+          PLAN: ${{ steps.plan.outputs.jobs }}
+        run: bun packages/testing/src/select.ts run
       - run: bun run build
       - uses: actions/upload-artifact@v6
         with:
