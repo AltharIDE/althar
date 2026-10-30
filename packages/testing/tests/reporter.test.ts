@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from 'vite-plus/test'
 import { startVitest } from 'vite-plus/test/node'
 
+import { fromRoot } from '../src/flaky'
 import FlakyReporter from '../src/reporter'
 
 test('reports a test that failed, then passed on its retry, and no other', async () => {
@@ -25,6 +26,7 @@ test('reports a test that failed, then passed on its retry, and no other', async
   }
   const lines = readFileSync(report, 'utf8').trim().split('\n')
   expect(lines.map((line) => JSON.parse(line))).toEqual([
-    { runner: 'vitest', file: 'tests/fixtures/once.fixture.ts', name: 'passes the second time' },
+    // Named from the repository's root in CI, where GITHUB_WORKSPACE says where that is.
+    { runner: 'vitest', file: fromRoot(join(import.meta.dirname, 'fixtures/once.fixture.ts')), name: 'passes the second time' },
   ])
 })
