@@ -11,6 +11,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { thisDevice } from '../src/device'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -20,7 +21,6 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { thisDevice } from '../src/device'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*

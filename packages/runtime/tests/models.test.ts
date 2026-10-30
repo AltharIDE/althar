@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -60,6 +60,8 @@ const withAgents = (
   fake: FakeAgentOptions = {},
   /** Anything else the runtime takes, such as where the models probe may start. */
   extra: Partial<Runtime.RuntimeLayerOptions> = {},
+  /** Told the folder each agent is started in, as it is started. */
+  starting: (cwd: string) => void = () => undefined,
 ) =>
   Runtime.layer({
     database: ':memory:',
@@ -72,12 +74,14 @@ const withAgents = (
       Agents.from(
         ids.map((agentId): AgentEntry => ({
           definition: define(agentId),
-          transport: (cwd) =>
-            agentId === 'process'
+          transport: (cwd) => {
+            starting(cwd)
+            return agentId === 'process'
               ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
               : agentId === 'missing'
                 ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
-                : { _tag: 'InProcess', agent: fakeAgent(fake) },
+                : { _tag: 'InProcess', agent: fakeAgent(fake) }
+          },
         })),
       ),
     ),
@@ -362,6 +366,43 @@ describe('the models each agent offers', () => {
       // A default is for an agent Althar has.
       assert.instanceOf(yield* Effect.flip(models.setDefaultEffort({ agentId: 'cursor', model: 'm', effort: 'high' })), UnknownAgent)
     }).pipe(Effect.provide(withAgents(['process', 'missing'], (agentId) => definition(agentId)))),
+  )
+
+  // Windows holds the folder an agent ran in a moment after it has gone; here, the first folder keeps something it can't remove.
+  it.live.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'are asked once all the same where the folder asking ran in can’t be removed yet, and keep what it found',
+    () => {
+      const probeRoot = mkdtempSync(join(tmpdir(), 'althar-probe-'))
+      const held: Array<string> = []
+      const hold = (cwd: string) => {
+        if (held.length > 0) return
+        const locked = join(cwd, 'held')
+        mkdirSync(locked)
+        writeFileSync(join(locked, 'open'), '')
+        chmodSync(locked, 0o555)
+        held.push(locked)
+      }
+      return Effect.gen(function* () {
+        const models = yield* Models
+        const sql = yield* SqlClient.SqlClient
+        yield* models.catalog
+        const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+        assert.deepStrictEqual(asked?.models.map((model) => model.id).toSorted(), ['large', 'small'])
+        const processes = yield* sql<{ purpose: string; state: string }>`SELECT purpose, state FROM processes`
+        assert.deepStrictEqual(
+          processes.map((process) => [process.purpose, process.state]),
+          [['probe', 'exited']],
+        )
+      }).pipe(
+        Effect.provide(withAgents(['process'], (agentId) => definition(agentId), {}, { probeRoot }, hold)),
+        Effect.ensuring(
+          Effect.sync(() => {
+            for (const locked of held) chmodSync(locked, 0o755)
+            rmSync(probeRoot, { recursive: true, force: true })
+          }),
+        ),
+      )
+    },
   )
 
   it('read settings kept before they had names, by their values', () => {

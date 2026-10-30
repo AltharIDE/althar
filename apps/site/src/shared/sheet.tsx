@@ -1,5 +1,5 @@
 import { STAGE_WORD } from '../content/facts'
-import { STORY } from '../content/meridian'
+import { STORY } from '../content/tally'
 import { DEFINITION, REVISIONS } from '../content/sheet'
 import { cx } from '../lib/cx'
 import s from './sheet.module.css'

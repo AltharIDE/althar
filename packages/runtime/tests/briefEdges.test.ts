@@ -8,12 +8,12 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { thisDevice } from '../src/device'
 import { DICTATED, Sessions } from '../src/Sessions'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
-import { thisDevice } from '../src/device'
 import { callTool, repository, runtime, task, turns, until } from './support'
 
 /*

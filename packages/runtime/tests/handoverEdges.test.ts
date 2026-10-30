@@ -8,11 +8,11 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { openTasks, projectOverview } from '../src/handover'
+import { thisDevice } from '../src/device'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
-import { thisDevice } from '../src/device'
 import { repository, runtime, until } from './support'
 
 /*

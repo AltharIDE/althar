@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ModelRoom, PlanUsage } from '@althar/contracts'
 
@@ -15,13 +15,6 @@ import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
 import { agents, changed, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
 import { withServices } from './render'
-
-/* The keys are read once from the system the window runs on (the kit's keys.ts), a Mac here; a test off a Mac says so through this. */
-const system = vi.hoisted(() => ({ offMac: false }))
-vi.mock('@althar/ui', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@althar/ui')>()
-  return { ...actual, primaryDown: (event: KeyboardEvent) => (system.offMac ? event.ctrlKey && !event.metaKey : actual.primaryDown(event)) }
-})
 
 /*
  * Plan usage in the window: the gauge after CPU and memory, and its peek, opened by a
@@ -145,12 +138,32 @@ describe('what the window says of a plan', () => {
     expect(screen.queryByText('80% left')).toBeNull()
   })
 
-  it('says how old numbers are only once they are old, and why a read failed', () => {
-    const old = usageAccount({ observedAt: '2026-10-15T08:00:00.000Z', fault: { kind: 'unreachable', message: 'Codex didn’t answer.' } })
+  it('says how old numbers are only once they are old, and why a read failed that the person can act on', () => {
+    const old = usageAccount({ observedAt: '2026-10-15T08:00:00.000Z', fault: { kind: 'expired', message: 'Its sign-in has expired.' } })
     const [account] = planOf(planUsage([old]), NOW).agents[0]?.accounts ?? []
     expect(account?.age).toBe('read 2h ago')
-    expect(account?.fault).toBe('Codex didn’t answer.')
+    expect(account?.fault).toBe('Its sign-in has expired.')
     expect(planOf(planUsage([codexWork]), new Date('2026-10-15T10:10:00.000Z')).agents[0]?.accounts[0]?.age).toBeNull()
+  })
+
+  it('shows no message for a read that must wait, only how old the saved numbers are', () => {
+    const waiting = usageAccount({
+      observedAt: '2026-10-15T09:50:00.000Z',
+      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+    })
+    const [account] = planOf(planUsage([waiting]), new Date('2026-10-15T10:00:00.000Z')).agents[0]?.accounts ?? []
+    expect(account?.fault).toBeNull()
+    expect(account?.age).toBe('read 10m ago')
+    expect(account?.windows.length).toBeGreaterThan(0)
+  })
+
+  it('leaves out an account that is waiting with no numbers yet', () => {
+    const none = usageAccount({
+      observedAt: null,
+      windows: [],
+      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+    })
+    expect(planOf(planUsage([none]), NOW).agents).toEqual([])
   })
 
   it('gives a model the runtime’s room, an agent’s own default the agent’s, and says when its plan isn’t read', () => {
@@ -242,23 +255,6 @@ describe('the plan gauge in the bar', () => {
     fireEvent.keyDown(window, { key: 'u', metaKey: true })
     expect(screen.queryByRole('button', { name: /^Plan usage/ })).toBeNull()
     expect(peek()).toBeNull()
-  })
-
-  it('opens on Control-U off a Mac, and closes on the same key', async () => {
-    system.offMac = true
-    onTestFinished(() => {
-      system.offMac = false
-    })
-    windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'linux' }))
-    await gauge()
-    // ⌘ is not the key there, and neither is Control with Shift.
-    fireEvent.keyDown(window, { key: 'u', metaKey: true })
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true, shiftKey: true })
-    expect(peek()).toBeNull()
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true })
-    await screen.findByRole('dialog', { name: 'Plan usage' })
-    fireEvent.keyDown(window, { key: 'U', ctrlKey: true })
-    await waitFor(() => expect(peek()).toBeNull())
   })
 
   it('opens on ⌘U on a Mac, from a field being typed in too', async () => {

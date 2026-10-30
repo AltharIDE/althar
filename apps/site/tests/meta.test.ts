@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vite-plus/test'
 
 import { NOT_FOUND, PAGE_META, pageMeta } from '../src/content/pages'
 import { withMeta } from '../src/lib/meta'
+import sharp from 'sharp'
 
 const HTML = `<!doctype html>
 <html lang="en">
@@ -21,7 +22,7 @@ describe('page meta', () => {
   const pages = Object.values(PAGE_META)
 
   it('has a page for the root and each route, keyed by its own path', () => {
-    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/docs', '/enterprise', '/shifts', '/thesis', '/wallpaper'])
+    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/changelog', '/docs', '/enterprise', '/shifts', '/thesis', '/wallpaper'])
     for (const [path, meta] of Object.entries(PAGE_META)) expect(meta.path).toBe(path)
   })
 
@@ -33,16 +34,15 @@ describe('page meta', () => {
       expect(p.title.length).toBeLessThanOrEqual(60)
       expect(p.description.length).toBeLessThanOrEqual(160)
       expect(p.description.endsWith('.')).toBe(true)
-      expect(p.image).toMatch(/^\/og\/[a-z]+\.png$/)
+      expect(p.image).toMatch(/^\/og\/[a-z]+\.(jpg|png)$/)
     }
   })
 
-  it('has its preview image in public/og, a PNG at 1200×630', () => {
+  it('has its preview image in public/og, a JPEG or PNG at 1200×630', async () => {
     for (const p of pages) {
-      const png = readFileSync(resolve(import.meta.dirname, `../public${p.image}`))
-      // The PNG signature, then the header chunk's width and height.
-      expect(png.subarray(1, 4).toString()).toBe('PNG')
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630])
+      const { format, width, height } = await sharp(readFileSync(resolve(import.meta.dirname, `../public${p.image}`))).metadata()
+      expect(format).toBe(p.image.endsWith('.jpg') ? 'jpeg' : 'png')
+      expect([width, height]).toEqual([1200, 630])
     }
   })
 

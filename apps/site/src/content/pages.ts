@@ -23,10 +23,10 @@ export const PAGE_META = {
   '/': {
     path: '/',
     name: 'Althar',
-    title: 'Althar · every coding agent you pay for, in one app',
+    title: 'Althar · an open-source IDE for building with AI agents',
     description:
-      'An open-source desktop app that runs Claude Code, Codex and OpenCode side by side, on the plans you already pay for. Other models review every task.',
-    image: '/og/home.png',
+      'An open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
+    image: '/og/home.jpg',
     index: true,
   },
   '/shifts': {
@@ -35,7 +35,15 @@ export const PAGE_META = {
     title: 'Shifts · Althar',
     description:
       'New models, limits, owners and terms for people who code with agents, since August 2026. Each one dated, with its source.',
-    image: '/og/shifts.png',
+    image: '/og/shifts.jpg',
+    index: true,
+  },
+  '/changelog': {
+    path: '/changelog',
+    name: 'Changelog',
+    title: 'Changelog · Althar',
+    description: 'What changed in Althar, release by release since the first, and what’s next.',
+    image: '/og/changelog.jpg',
     index: true,
   },
   '/thesis': {
@@ -43,7 +51,7 @@ export const PAGE_META = {
     name: 'The Fourth Age of Software Engineering',
     title: 'The Fourth Age of Software Engineering · Althar',
     description: 'The hypothesis Althar comes out of: how software engineering changes once coding agents are abundant.',
-    image: '/og/thesis.png',
+    image: '/og/thesis.jpg',
     index: true,
     type: 'article',
   },
@@ -60,7 +68,7 @@ export const PAGE_META = {
     name: 'Docs',
     title: 'Docs · Althar',
     description: 'Althar’s documentation is being written. Until it’s published: the README, the thesis and the issues on GitHub.',
-    image: '/og/home.png',
+    image: '/og/home.jpg',
     index: false,
   },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
@@ -69,7 +77,7 @@ export const PAGE_META = {
     name: 'Althar for companies',
     title: 'Althar · agents come and go, the project stays',
     description: 'The earlier Althar page: a project that keeps its rules, notes, decisions and history while agents come and go.',
-    image: '/og/home.png',
+    image: '/og/home.jpg',
     index: false,
   },
 } as const satisfies Record<string, PageMeta>
@@ -82,7 +90,7 @@ export const NOT_FOUND: PageMeta = {
   name: 'No such page',
   title: 'No such page · Althar',
   description: 'There is no page at this address on Althar’s site.',
-  image: '/og/home.png',
+  image: '/og/home.jpg',
   index: false,
 }
 

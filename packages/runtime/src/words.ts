@@ -368,7 +368,6 @@ const cantMerge = {
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {
   working: () => "The task's work isn't done yet. Its pull request opens when it is.",
-  stopped: () => 'The task’s work stopped before it was done, so it has no pull request to open.',
   settled: () => 'The task is settled, so its branch stays as it is.',
   opened: () => 'The task already has its pull request.',
   nothing: () => 'Every commit on the task’s branch is in a pull request already, so there’s nothing new to open one for.',

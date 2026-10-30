@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -146,6 +147,19 @@ const walk = (definition: AgentDefinition, session: AgentSession, images: boolea
     return { ...offered, models: offered.models.map((model): OfferedModel => read.get(model.id) ?? model) }
   })
 
+/**
+ * Removes the folder an agent was asked in. Windows can still hold it a
+ * moment after the agent has gone, as the agent's tree goes only once its
+ * keeper has and a scanner may be reading it, so it is tried again over a
+ * second or so, and one that stays is left in the temporary folder. It never
+ * fails: what asking found is kept all the same, where a throw here would
+ * lose it, and have the agent asked again at the next read of the catalog.
+ */
+const removeFolder = (folder: string) =>
+  Effect.tryPromise(() => rm(folder, { recursive: true, force: true, maxRetries: 5 })).pipe(
+    Effect.catch((error) => Effect.logWarning(`Could not remove ${folder}, where an agent was asked its models`, error)),
+  )
+
 const settingsIn = (config: string): ReadonlyArray<ConfigOption> => {
   try {
     const parsed: unknown = JSON.parse(config)
@@ -219,7 +233,8 @@ export class Models extends Context.Service<
        */
       const probe = (entry: AgentEntry, reservation: symbol) =>
         Effect.acquireUseRelease(
-          Effect.sync(() => {
+          // A folder it can't make fails the asking, as a throw would have it asked again at every read.
+          Effect.try(() => {
             mkdirSync(probeBase, { recursive: true })
             return mkdtempSync(join(probeBase, 'althar-models-'))
           }),
@@ -277,7 +292,7 @@ export class Models extends Context.Service<
               yield* Effect.logWarning(`Could not read ${definition.name}'s models`, read.cause)
               return null
             }),
-          (folder) => Effect.sync(() => rmSync(folder, { recursive: true, force: true })),
+          removeFolder,
         ).pipe(
           Effect.orElseSucceed(() => null),
           Effect.tap((found) => Effect.sync(() => ownsProbe(entry.definition.id, reservation) && probed.set(entry.definition.id, found))),

@@ -1,8 +1,9 @@
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
+import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import * as acp from '@agentclientprotocol/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -11,6 +12,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
 import { recorded } from './recorded'
+
+/** A program run to its end, as `git` is, without stopping whatever else runs in this process meanwhile. */
+const run = promisify(execFile)
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -649,53 +653,51 @@ export const DESCRIBED =
 export const BUILT_FIXED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
 
+/**
+ * Git as the fake runs it: as its own author, and asynchronously, so a fake running in the runtime's process doesn't
+ * stop it while git runs, as an agent's own git never would.
+ */
+const gitIn = async (cwd: string, ...args: Array<string>) =>
+  (await run('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })).stdout
+
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
-const commitIn = (cwd: string, file: string, message: string) => {
+const commitIn = async (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
-  const git = (...args: Array<string>) =>
-    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
-  git('add', '-A')
-  git('commit', '-q', '-m', message)
+  await gitIn(cwd, 'add', '-A')
+  await gitIn(cwd, 'commit', '-q', '-m', message)
+}
+
+/** Keeps both sides of each conflict git left in the worktree: its markers' lines go, what was between them stays. */
+const keepBoth = async (cwd: string) => {
+  for (const file of (await gitIn(cwd, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter((line) => line !== '')) {
+    const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+    writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+  }
 }
 
 /** Merges a branch into the worktree's, keeping both sides of each conflict, and commits the merge. */
-const resolveIn = (cwd: string, ref: string) => {
-  const git = (...args: Array<string>) =>
-    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+const resolveIn = async (cwd: string, ref: string) => {
   try {
-    git('merge', '-q', '--no-edit', ref)
+    await gitIn(cwd, 'merge', '-q', '--no-edit', ref)
   } catch {
-    for (const file of git('diff', '--name-only', '--diff-filter=U')
-      .split('\n')
-      .filter((line) => line !== '')) {
-      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
-      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
-    }
-    git('add', '-A')
-    git('commit', '-q', '--no-edit')
+    await keepBoth(cwd)
+    await gitIn(cwd, 'add', '-A')
+    await gitIn(cwd, 'commit', '-q', '--no-edit')
   }
 }
 
 /** Merges a branch into the worktree's and settles each conflict as `resolveIn` does, but leaves the merge uncommitted: staged, with the merge under way. */
-const settleIn = (cwd: string, ref: string) => {
-  const git = (...args: Array<string>) =>
-    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+const settleIn = async (cwd: string, ref: string) => {
   try {
-    git('merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
+    await gitIn(cwd, 'merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
   } catch {
-    for (const file of git('diff', '--name-only', '--diff-filter=U')
-      .split('\n')
-      .filter((line) => line !== '')) {
-      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
-      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
-    }
+    await keepBoth(cwd)
   }
-  git('add', '-A')
+  await gitIn(cwd, 'add', '-A')
 }
 
 /** Commits the merge settled under way. */
-const commitMergeIn = (cwd: string) =>
-  execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '--no-edit'], { cwd, stdio: 'pipe' })
+const commitMergeIn = (cwd: string) => gitIn(cwd, 'commit', '-q', '--no-edit')
 
 /**
  * Leaves the full tests running in the background, as Claude Code reports a
@@ -712,7 +714,7 @@ const leaveTests = async (
   client: acp.AgentContext,
   plan: {
     readonly lasts?: number
-    readonly commits?: () => void
+    readonly commits?: () => Promise<void>
     readonly reportsAfter?: number
     readonly wakesAfter?: number
     readonly prints?: string
@@ -778,7 +780,7 @@ const leaveTests = async (
           status: 'in_progress',
           rawInput: { command: 'git commit' },
         })
-        plan.commits()
+        await plan.commits()
         await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
         await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
       })()
@@ -805,7 +807,7 @@ const playRole = async (
   serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
-    readonly commits?: () => void
+    readonly commits?: () => Promise<void>
     readonly reportsAfter?: number
     readonly wakesAfter?: number
     readonly prints?: string
@@ -867,7 +869,7 @@ const playRole = async (
       if (session.markers.has('[lead:review-approve]'))
         return await call('draft_review', { verdict: 'approve', summary: 'It does what it says.', comments: [] })
       const base = /`git diff ([0-9a-f]{7,64})`/.exec(text)?.[1] ?? 'HEAD~1'
-      const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd }).toString()
+      const diff = (await run('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd })).stdout
       const lines: Array<{ path: string; line: number }> = []
       let path = ''
       for (const row of diff.split('\n')) {
@@ -900,7 +902,7 @@ const playRole = async (
       const commits = text.includes('[lead:commit]')
       const sketches = text.includes('[lead:sketch]')
       if (writes) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
-      if (commits) commitIn(session.cwd, 'change.txt', 'Change it')
+      if (commits) await commitIn(session.cwd, 'change.txt', 'Change it')
       if (sketches) {
         mkdirSync(join(session.cwd, '.althar', 'scratch'), { recursive: true })
         writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
@@ -935,7 +937,7 @@ const playRole = async (
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
-        if (!aside) commitIn(session.cwd, 'settled.txt', 'Settle the review')
+        if (!aside) await commitIn(session.cwd, 'settled.txt', 'Settle the review')
         // What became of each finding, by the ids Althar gave them.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
@@ -1012,7 +1014,7 @@ const playRole = async (
         })
       }
       if (session.markers.has('[lead:fix-push]') && /(^|\n\n)Checks failed on /.test(text)) {
-        commitIn(session.cwd, `fixed-${Date.now()}.txt`, 'Fix the failing check')
+        await commitIn(session.cwd, `fixed-${Date.now()}.txt`, 'Fix the failing check')
         await call('push_to_pull_request', {})
         await call('finish_step', { summary: 'Fixed the failing check, and pushed it.', built: BUILT_FIXED })
         return 'Fixed the failing check, and pushed it.'
@@ -1020,7 +1022,7 @@ const playRole = async (
       // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
       const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
       if (!resolving && (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]')))) {
-        if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
+        if (session.markers.has('[lead:edit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
         const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT })
@@ -1030,7 +1032,7 @@ const playRole = async (
       }
       // Asked to push, it commits and asks the person to, as a lead does: it never pushes itself.
       if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
-        commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
+        await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
       // What people said on the task's pull request, and its checks.
@@ -1053,33 +1055,33 @@ const playRole = async (
       const fix = session.markers.has('[lead:resolve-fix]')
       const hold = session.markers.has('[lead:resolve-hold]')
       if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
-        resolveIn(session.cwd, merging)
+        await resolveIn(session.cwd, merging)
         if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (fix) {
-          commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
+          await commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
           return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
         }
         if (!more) return 'Merged it, settled the conflict, and committed the merge.'
-        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
-        commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
+        await commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        await commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
       }
       // Settled, but not committed: forgotten at first, committed once told that is all that is left.
       const commitIt = /resolved but not committed: commit/.test(text)
       if (session.markers.has('[lead:resolve-forgets]')) {
         if (merging !== undefined) {
-          settleIn(session.cwd, merging)
+          await settleIn(session.cwd, merging)
           return 'Merged it and settled the conflict.'
         }
         if (commitIt) {
-          commitMergeIn(session.cwd)
+          await commitMergeIn(session.cwd)
           return 'Committed the merge.'
         }
       }
       // Settled, with the full tests left running: the merge is committed once they end, by the agent they wake.
       if (session.markers.has('[lead:resolve-tests-hang]')) {
         if (merging !== undefined) {
-          settleIn(session.cwd, merging)
+          await settleIn(session.cwd, merging)
           await tests({})
           return "Merged it and settled the conflict. I'll wait for the tests."
         }
@@ -1094,7 +1096,7 @@ const playRole = async (
         session.markers.has('[lead:resolve-tests-output]') ||
         session.markers.has('[lead:resolve-tests-again]')
       if (merging !== undefined && woken) {
-        settleIn(session.cwd, merging)
+        await settleIn(session.cwd, merging)
         const fixes = session.markers.has('[lead:resolve-tests-fix]')
         const cwd = session.cwd
         await tests({
@@ -1106,9 +1108,9 @@ const playRole = async (
           ...(session.markers.has('[lead:resolve-tests-url]')
             ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }
             : {}),
-          commits: () => {
-            commitMergeIn(cwd)
-            if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
+          commits: async () => {
+            await commitMergeIn(cwd)
+            if (fixes) await commitIn(cwd, 'tests.txt', 'Fix what the tests found')
           },
         })
         return "Merged it and settled the conflict. I'll wait for the notification that the tests are done."
@@ -1123,11 +1125,11 @@ const playRole = async (
         return "I'll wait for the tests, then commit the fix."
       }
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
-        commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        await commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
         await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
         if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
-        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        await commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.

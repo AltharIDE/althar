@@ -108,9 +108,9 @@ export const startText: StartText = {
   agentsLabel: `Agents on ${device.this}`,
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
-  noneHere: 'None is on this Mac yet. Download one below, or install one yourself.',
-  away: 'Not on this Mac',
-  awayLabel: 'Agents not on this Mac',
+  noneHere: `None is on ${device.this} yet. Download one below, or install one yourself.`,
+  away: `Not on ${device.this}`,
+  awayLabel: `Agents not on ${device.this}`,
   downloadNamed: (name, size) => `Download ${name}, ${size}`,
   downloadFrom: (pinned) =>
     pinned === undefined

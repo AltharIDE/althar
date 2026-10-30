@@ -939,6 +939,31 @@ export class Runs extends Context.Service<
        * next (ADR-034), whatever another repository's pull request is doing;
        * a merged task with such commits is open again for it.
        */
+      /**
+       * Whether an agent is at work on a task, or on its way to it, as the
+       * task's card counts it under way: a turn of its lead or reviewer
+       * running, a session starting, a step admitted, or what carries on by
+       * itself: a step held for a place, a reset or the connection, its lead
+       * about to be asked about a conflict, an answer kept for a place, or a
+       * thread waiting for one.
+       */
+      const atWork = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ coming: number }>`
+            SELECT (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND s.state = 'starting')
+              + (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND r.state = 'running' AND a.state IN ('admitted', 'held'))
+              + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = ${taskId} AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+              + (SELECT count(*) FROM attention_requests x WHERE x.task_id = ${taskId} AND x.kind = 'question' AND x.state = 'answered'
+                AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL)
+              + (SELECT count(*) FROM threads h WHERE h.task_id = ${taskId} AND h.waits_for_place IS NOT NULL) AS coming`
+          if ((row?.coming ?? 0) > 0) return true
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          const live = yield* Effect.forEach(threads, (thread) => sessions.running(thread.id))
+          return live.some((session) => Option.exists(session, (one) => one.turnRunning))
+        })
+
       const publish = (taskId: string) =>
         changes.exclusive(
           taskId,
@@ -958,9 +983,14 @@ export class Runs extends Context.Service<
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
             JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
             WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-            if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
+            // Work under way opens its pull request as it ends; work that stopped short, stopped or failed, opens it now, as a draft:
+            // so does a run whose lead's turn was cut short, as the person interrupting it leaves it, with no agent at work on it.
+            if (
+              last === undefined ||
+              !['succeeded', 'suspended', 'failed', 'cancelled', 'running'].includes(last.state) ||
+              (last.state === 'running' && (yield* atWork(taskId)))
+            )
               return yield* new NoChangeToOpen({ taskId, why: 'working' })
-            if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
             if (opened.length > 0 && after.length === 0)
               return yield* new NoChangeToOpen({ taskId, why: opened.some((change) => change.state === 'open') ? 'opened' : 'nothing' })
             // Its new work going out, a merged task is open again, until that merges too: before it goes, so a try that opens

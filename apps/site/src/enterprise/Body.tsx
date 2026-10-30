@@ -114,8 +114,8 @@ export function Body() {
             One lab writes it. Another checks it, until it passes.
           </h2>
           <p className={cx(s.lede, s.wideOnly)}>
-            Task 418, a stale-permissions bug in Meridian, from ticket to note. The lead runs each step and settles what it finds. Review
-            and repair go round until the review passes, and only the one call that needs a person comes to you.
+            Task 418, a stale-permissions bug in Tally, from ticket to note. The lead runs each step and settles what it finds. Review and
+            repair go round until the review passes, and only the one call that needs a person comes to you.
           </p>
         </div>
         <figure className={s.sheet}>

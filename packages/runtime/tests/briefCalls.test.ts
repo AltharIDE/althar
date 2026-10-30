@@ -4,9 +4,9 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { projectOverview } from '../src/handover'
+import { thisDevice } from '../src/device'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { thisDevice } from '../src/device'
 import { repository, runtime } from './support'
 
 /*

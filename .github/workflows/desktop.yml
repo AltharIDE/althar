@@ -1,8 +1,8 @@
 name: desktop
 
-# On a pull request, the fast part: checks and unit tests, on Linux and on Windows, and on Windows one end-to-end smoke
-# test, since nothing else runs the app there. The coverage gate, the end-to-end run and the packages run after merge,
-# in post-merge.yml.
+# On a pull request: checks and unit tests, on Linux and on Windows, on Windows one end-to-end smoke test, since nothing
+# else runs the app there, and the app's whole end-to-end run (e2e.yml). The coverage gate and the packages run after
+# merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -58,6 +58,8 @@ jobs:
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - run: bun run test
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
@@ -122,6 +124,8 @@ jobs:
           key: windows-bun-${{ hashFiles('bun.lock') }}
           restore-keys: windows-bun-
       - run: bun install --frozen-lockfile
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       # Each package's checks and tests, every one run even when one before it fails, so a run says all that broke.
       - env:
           PACKAGES: ${{ matrix.packages }}
@@ -166,6 +170,8 @@ jobs:
           restore-keys: windows-bun-
       - run: bun install --frozen-lockfile
         working-directory: .
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - run: bun run test:e2e e2e/smoke.spec.ts
       - uses: actions/upload-artifact@v6
         if: failure()
@@ -176,3 +182,10 @@ jobs:
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
+
+  # The app's whole end-to-end run, in four parts, on the pull request itself: a change that breaks a spec it didn't
+  # touch fails here, where it was made, not first in the merge queue, where the pull requests queued behind it fail
+  # with it. In the queue, queue.yml runs it once more, on main as it will be.
+  e2e:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/e2e.yml

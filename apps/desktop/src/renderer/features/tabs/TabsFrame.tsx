@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
-import { commandDown, LoadMeter, Offline, primaryDown, modKey, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -162,7 +162,6 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
-  const { host } = useServices()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // The plan gauge's peek, from any screen with the bar.

@@ -8,6 +8,11 @@
    sits on the same line as the sections instead of in an empty field. */
 .sheet { display: grid; grid-template-columns: 220px minmax(0, 680px); justify-content: center; column-gap: clamp(48px, 7vw, 96px); row-gap: 28px; max-width: var(--max); margin: 0 auto; padding: 72px var(--gut) 120px; }
 .head { margin-bottom: 24px; }
+/* The window keeps to its title: the planet's edge close under it. */
+.window { padding-bottom: 196px; }
+@media (max-width: 640px) {
+  .window { padding-bottom: 150px; }
+}
 .lede { margin-top: 0; font-size: 16.5px; line-height: 1.5; color: var(--t-3); }
 .openClaim { margin-top: 12px; }
 .openClaim .claim { margin: 0; font-size: 27px; line-height: 1.24; }
