@@ -46,8 +46,8 @@ test('a merged task goes back to work when the person writes to its lead, and sh
 
     // Its plan runs, and its draft pull request opens; marked ready and accepted, GitHub merges it, squashed into main.
     await say(page, 'Add a retry to the checkout call. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
@@ -55,13 +55,13 @@ test('a merged task goes back to work when the person writes to its lead, and sh
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
-    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 merged')).toBeVisible()
 
     // The person goes back to it and asks its lead for more: it runs again, a follow-up, on the board and in the task.
     await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await toConversation(page)
     await say(page, 'Add the slider we agreed on. [lead:slowly] [lead:finish]')
-    await expect(page.getByText('Following up', { exact: true })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Following up', { exact: true })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-running-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Back to meridian' }).click()
@@ -70,7 +70,7 @@ test('a merged task goes back to work when the person writes to its lead, and sh
     await page.screenshot({ path: 'test-results/rounds-running-board.png', animations: 'disabled' })
 
     // Done, it is ready again: its commit is in no pull request, and a new one opens from the task.
-    await expect(work.getByText('Ready for a new pull request')).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Ready for a new pull request')).toBeVisible()
     await page.screenshot({ path: 'test-results/rounds-ready-board.png', animations: 'disabled' })
     await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await page
@@ -82,7 +82,7 @@ test('a merged task goes back to work when the person writes to its lead, and sh
     await page.getByRole('button', { name: 'Open a new pull request' }).click()
 
     // The task has both: the new draft, on a branch of its own from main, and the merged one before it.
-    await expect(page.getByText('Before this: PR #1, merged on GitHub.')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('Before this: PR #1, merged on GitHub.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark ready for review' })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-two-pull-requests.png', animations: 'disabled' })
@@ -152,33 +152,33 @@ test('a task of two repositories: one’s pull request open beside the other’s
 
     // Its plan changes api alone: api's pull request opens, and web has none. Accepted, it merges, squashed.
     await say(page, 'Share the retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish]')
-    await expect(page.getByRole('button', { name: 'Start now' })).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('button', { name: 'Start now' })).toBeVisible()
     await expect.poll(() => worktreeOf(home, 'share-the-retry', 'web')).not.toBe('')
     const api = worktreeOf(home, 'share-the-retry', 'api')
     const web = worktreeOf(home, 'share-the-retry', 'web')
     commitIn(api, 'Retry api')
     await page.getByRole('button', { name: 'Start now' }).click()
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: /^Mark (api )?ready for review$/ }).click()
     await page.getByRole('button', { name: /^Accept and merge/ }).click()
     squashMerge(remotes.api ?? '', branch)
     await page.getByRole('button', { name: 'Back to api' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
-    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 merged')).toBeVisible()
 
     // Its lead changes web for the first time: web's first pull request opens from the task.
     commitIn(web, 'Web first')
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
-    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
     await page.getByRole('button', { name: 'Open a new pull request' }).click()
-    await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
 
     // Then more in api: web's pull request open, to mark ready and accept, beside api's next, to open.
     commitIn(api, 'More for api')
     await again()
-    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open a new pull request' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
     await page.mouse.move(1400, 300)
@@ -194,20 +194,20 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await page.getByRole('button', { name: 'Mark web ready for review' }).click()
     await page.getByRole('button', { name: /^Accept and merge/ }).click()
     squashMerge(remotes.web ?? '', branch)
-    await expect(page.getByRole('button', { name: /^Accept and merge/ })).toHaveCount(0, { timeout: 10_000 })
+    await expect(page.getByRole('button', { name: /^Accept and merge/ })).toHaveCount(0)
     commitIn(api, 'Again for api')
     commitIn(web, 'More for web')
     const refuse = join(remotes.web ?? '', 'hooks', 'pre-receive')
     writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
     await again()
-    await expect(page.getByText('3 commits aren’t in a pull request yet.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('3 commits aren’t in a pull request yet.')).toBeVisible()
     await page.getByRole('button', { name: 'Open a new pull request' }).click()
-    await expect(page.getByRole('alert')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('alert')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark api ready for review' })).toBeEnabled()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-partial-try.png', animations: 'disabled' })
     await again()
-    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
     await expect(page.getByText('Before this: api PR #1, merged on GitHub.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open a new pull request' })).toBeVisible()
     await page.mouse.move(1400, 300)
@@ -222,7 +222,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
     await page.getByRole('button', { name: 'Open a new pull request' }).click()
-    await expect(page.getByRole('button', { name: 'Open a new pull request' })).toHaveCount(0, { timeout: 20_000 })
+    await expect(page.getByRole('button', { name: 'Open a new pull request' })).toHaveCount(0)
     expect(
       execFileSync('git', ['--git-dir', remotes.web ?? '', 'log', '-1', '--format=%s', `${branch}-2`], { encoding: 'utf8' }).trim(),
     ).toBe('More for web')

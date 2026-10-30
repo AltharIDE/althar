@@ -1,0 +1,180 @@
+name: nightly
+
+# Every night, main's whole unit suite in a shuffled order, on Linux once and on Windows five times over: what a pull
+# request's checks and the merge queue can miss by running each test once, in the same order. A test that fails, then
+# passes on its retry, is filed as flaky (.github/actions/flaky); one that fails both times opens or adds to the issue
+# "Nightly tests failed", which closes when a night passes. The seed in each part's log runs its order again
+# (`--sequence.seed`).
+on:
+  schedule:
+    # 03:00 UTC, when no one is merging.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: linux (${{ matrix.part }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: runtime 1/4
+            packages: packages/runtime
+            shard: 1/4
+          - part: runtime 2/4
+            packages: packages/runtime
+            shard: 2/4
+          - part: runtime 3/4
+            packages: packages/runtime
+            shard: 3/4
+          - part: runtime 4/4
+            packages: packages/runtime
+            shard: 4/4
+          - part: packages
+            packages: apps/desktop packages/ui packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite apps/cli apps/site apps/report
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - env:
+          PACKAGES: ${{ matrix.packages }}
+          SHARD: ${{ matrix.shard }}
+          SEED: ${{ github.run_id }}
+        run: |
+          echo "Shuffled with seed $SEED."
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run test --sequence.shuffle --sequence.seed="$SEED" ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed:$failed"
+            exit 1
+          fi
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  # As desktop.yml's Windows parts, each test run five times over: where most flakes have been.
+  windows:
+    name: windows (${{ matrix.part }})
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: desktop
+            packages: apps/desktop
+          - part: runtime 1/4
+            packages: packages/runtime
+            shard: 1/4
+          - part: runtime 2/4
+            packages: packages/runtime
+            shard: 2/4
+          - part: runtime 3/4
+            packages: packages/runtime
+            shard: 3/4
+          - part: runtime 4/4
+            packages: packages/runtime
+            shard: 4/4
+          - part: packages
+            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
+    defaults:
+      run:
+        shell: bash
+    env:
+      # As in desktop.yml: the repositories the tests make write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      # As in desktop.yml: a temporary folder with no short name.
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+      - env:
+          PACKAGES: ${{ matrix.packages }}
+          SHARD: ${{ matrix.shard }}
+          SEED: ${{ github.run_id }}
+        run: |
+          echo "Shuffled with seed $SEED, each test five times."
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run test --repeats=4 --sequence.shuffle --sequence.seed="$SEED" ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed on Windows:$failed"
+            exit 1
+          fi
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  # The night's result as one open issue: opened (or added to) when a night fails, closed when one passes.
+  report:
+    needs: [linux, windows]
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      FAILED: ${{ contains(needs.*.result, 'failure') }}
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open, add to or close "Nightly tests failed"
+        run: |
+          title="Nightly tests failed"
+          open="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          short="${GITHUB_SHA::8}"
+          if [ "$FAILED" = true ]; then
+            body="A test failed twice in a row on main at $short, shuffled or run over: $RUN"
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "$body"
+            else
+              gh issue create --title "$title" --body "$body"$'\n\n'"A test that fails only in another order leans on one before it; one that fails only when run over races something. The seed in the failing part's log runs the same order again. This closes itself when a night passes."
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "The night passed on $short: $RUN"
+          fi

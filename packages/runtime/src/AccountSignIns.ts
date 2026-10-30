@@ -1,5 +1,5 @@
 import { type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Clock, Context, Effect, Layer, Schema } from 'effect'
 import type { SqlError } from 'effect/sql'
 
 import { Accounts } from './Accounts'
@@ -90,7 +90,9 @@ export class AccountSignIns extends Context.Service<
             yield* accounts.prepare(account)
             // One at a time per agent: a new one stops the one before.
             for (const [id, flow] of flows) if (flow.agentId === account.agentId) stop(id)
-            const flowId = `signin_${Date.now().toString(36)}_${(made += 1)}`
+            // The clock as the flow's events come, outside any effect: Effect's, so a test's clock is the one they read.
+            const clock = yield* Clock.Clock
+            const flowId = `signin_${clock.currentTimeMillisUnsafe().toString(36)}_${(made += 1)}`
             const holder: { flow?: Flow } = {}
             const handle = startSignInFlow(
               entry.definition,
@@ -109,7 +111,7 @@ export class AccountSignIns extends Context.Service<
                       state: 'device',
                       code: event.code,
                       page: event.page,
-                      expiresAt: new Date(Date.now() + event.minutes * 60_000).toISOString(),
+                      expiresAt: new Date(clock.currentTimeMillisUnsafe() + event.minutes * 60_000).toISOString(),
                     }
                     return
                   case 'failed':

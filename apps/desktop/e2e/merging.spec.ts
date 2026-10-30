@@ -11,12 +11,15 @@ import { connectGitHub, launch, openFirstProject, say } from './support'
 /*
  * Merged in its task, and Back pressed at once, a task's card is out of
  * Needs you on the board, saying Merging, while GitHub merges it (three
- * seconds here, as the real one takes), and in Settled as soon as GitHub
- * says it merged: not after Althar listens to the pull request again. It
- * logs how long each took; the screenshots are this change's evidence
- * (test-results/merging-*.png).
+ * seconds here, as the real one takes), and in Settled once GitHub says it
+ * merged. That GitHub's answer settles it, not Althar listening to the pull
+ * request again, is the runtime's to show, where a test says when a read
+ * comes (changes.test.ts: though reading it back still says open); here the
+ * window shows what the runtime says. The screenshots are this change's
+ * evidence (test-results/merging-*.png).
  */
 
+/** How long the fake GitHub takes to merge, as the real one does: time for the board to show it merging. */
 const MERGE_TAKES = 3_000
 
 test('a task merged in its task view settles on the board as soon as GitHub merges it, merging meanwhile', async () => {
@@ -38,32 +41,26 @@ test('a task merged in its task view settles on the board as soon as GitHub merg
     await connectGitHub(page)
 
     await say(page, `${title}. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]`)
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
 
     // Merge, then Back at once, to the board.
-    const pressed = Date.now()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
     const lane = (name: string) => page.getByRole('region', { name })
     const merging = lane('Running').getByRole('article').filter({ hasText: title })
     await expect(merging.getByText('Merging')).toBeVisible()
-    const shown = Date.now() - pressed
     await expect(lane('Needs you').getByText(title)).toHaveCount(0)
     await merging.screenshot({ path: 'test-results/merging-card.png', animations: 'disabled', scale: 'css' })
 
-    await expect(lane('Settled').getByText(title)).toBeVisible({ timeout: 30_000 })
-    const settled = Date.now() - pressed
+    // Put in Settled, it travels there from Running and shows when it lands (ADR-068): it is there when placed.
+    await expect(lane('Settled').getByText(title)).toBeAttached()
+    await expect(lane('Settled').getByText(title)).toBeVisible()
     await expect(lane('Running').getByText(title)).toHaveCount(0)
     await lane('Settled').screenshot({ path: 'test-results/merging-settled.png', animations: 'disabled', scale: 'css' })
-    process.stdout.write(
-      `Merging shown ${shown} ms after Merge; settled on the board ${settled} ms after, ${settled - MERGE_TAKES} ms after GitHub's ${MERGE_TAKES} ms merge\n`,
-    )
-    // GitHub's own time, and a second at most besides.
-    expect(settled).toBeLessThan(MERGE_TAKES + 1_000)
   } finally {
     await electronApp.close()
   }

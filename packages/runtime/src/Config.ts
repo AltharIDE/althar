@@ -149,8 +149,6 @@ export interface RuntimeOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface AutomationOptions {
-  /** The time now, in epoch milliseconds: the wall clock's. */
-  readonly now?: () => number
   /** The zone the computer is in now: its clock's. */
   readonly zone?: () => string
   /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
@@ -401,7 +399,12 @@ export type CliTool = 'gh' | 'glab'
  * say, timed out or never started, fails. Only the runtime reads it; it goes
  * to Althar's own keychain and never to an agent.
  */
-export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null, CliUnanswered> =>
+export const cliToken = (
+  tool: CliTool,
+  host: string,
+  /** How long it has to answer: ten seconds, or longer where it starts slowly, as on a machine running tests. */
+  within = 10_000,
+): Effect.Effect<string | null, CliUnanswered> =>
   Effect.callback<string | null, CliUnanswered>((resume) => {
     const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
     // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
@@ -411,7 +414,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout: within, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))

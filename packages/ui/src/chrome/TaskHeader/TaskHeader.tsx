@@ -48,8 +48,8 @@ export interface TaskHeaderProps<F extends string> {
   /** Which task, for a screen reader: the bar shows it beside the way back. */
   title: string
   status: TaskStatus
-  /** Where it stands, in words: Reviewing, Ready for you. */
-  state: string
+  /** Where it stands, in words: Reviewing, Ready for you; or a way into it that says them (a bare WorkStatus). Without it, no chip, as while it is still read. */
+  state?: ReactNode
   /** Its plan's steps, each with who does it: bars inside where it stands while it runs, and the card of who does each. */
   steps?: readonly TaskHeaderStep[]
   /** How long the step it is on has run: 4m. */
@@ -94,17 +94,19 @@ export function TaskHeader<F extends string>({
   )
   return (
     <header className={cx(s.header, className)} aria-label={title}>
-      <span className={cx(s.chip, (plan !== null || beside != null) && s.parted)} data-status={status}>
-        {plan === null ? (
-          said
-        ) : (
-          <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
-            {said}
-          </HoverCard>
-        )}
-        {plan !== null && <StepTrack steps={plan} status={status} className={s.track} />}
-        {beside}
-      </span>
+      {state != null && (
+        <span className={cx(s.chip, (plan !== null || beside != null) && s.parted)} data-status={status}>
+          {plan === null ? (
+            said
+          ) : (
+            <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
+              {said}
+            </HoverCard>
+          )}
+          {plan !== null && <StepTrack steps={plan} status={status} className={s.track} />}
+          {beside}
+        </span>
+      )}
       {faces && faces.length > 1 && face !== undefined && onFace && (
         <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
       )}

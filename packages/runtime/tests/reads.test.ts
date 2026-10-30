@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { commitsOf, indexStamp } from '../src/git'
@@ -76,7 +76,6 @@ const ready = Effect.gen(function* () {
   yield* until(
     Effect.map(queries.board(project.projectId), (board) => board.tasks),
     (tasks) => tasks[0]?.phase === 'ready',
-    Duration.seconds(20),
   )
   const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
   return { projectId: project.projectId, taskId: task.taskId, threadId: task.threadId, worktree: workspace?.path ?? '', root }

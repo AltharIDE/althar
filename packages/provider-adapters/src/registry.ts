@@ -230,6 +230,13 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
+   * Whether, here, `sessionMeta` holds a reader given `contained` to a
+   * sandbox it never runs a command outside of, in its folder and off the
+   * network (ADR-058). Where it is, what a command writes stays in that
+   * folder, whatever Althar's rules let it ask for.
+   */
+  readonly contains?: () => boolean
+  /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
    * it reaches without asking. Without it, none are worked out for its
@@ -796,6 +803,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
           ? claudeContains(options.contained)
           : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
+    contains: claudeSandboxStarts,
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
     skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },

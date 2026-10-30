@@ -1001,6 +1001,20 @@ describe('a task', () => {
     expect(screen.queryByRole('button', { name: 'Ask for changes' })).toBeNull()
   })
 
+  it('shows a pull request accepted into its merge queue as there, in its header and on its card, with nothing to accept', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        task: { ...base.task, phase: 'ready' as const, changes: [change({ draft: false, queued: true })], commits: 2 },
+      })),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findAllByText('In the merge queue')).toHaveLength(2)
+    expect(screen.queryByText('Ready for you')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+  })
+
   it('counts what is left to push as soon as a push ends, its button busy until the card read since is shown', async () => {
     const base = thread()
     const url = 'https://github.com/meridian/api/pull/12'
@@ -2625,7 +2639,7 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     expect(await screen.findByText('No other model is free now.')).toBeTruthy()
-    expect(await screen.findByRole('button', { name: /^Continue with/ }, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Continue with/ })).toBeTruthy()
   })
 
   it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {

@@ -72,7 +72,7 @@ export const ByKeyboard: Story = {
   },
 }
 
-/** Where the count starts a line, as on a project's front page, what it counts lines up with its start. */
+/** Where the count starts a line, as at the start of a line, what it counts lines up with its start. */
 export const AtTheStart: Story = {
   args: { running: 0, needs, align: 'start' },
   play: async ({ canvasElement }) => {
