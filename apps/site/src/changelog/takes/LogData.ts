@@ -1,9 +1,9 @@
 /*
  * What the flight log adds to the changelog's content (src/content/changelog.ts),
  * kept here so that file stays the one the release notes are copied into:
- * when each release went out and when main last moved, to the second, from
- * GitHub; and each release's highlight, the change it leads with, in the
- * notes' own facts, with the picture that shows it.
+ * when each release went out, to the second, from GitHub; and each
+ * release's highlights, the changes it leads with, in the notes' own facts,
+ * with the pictures that show them.
  */
 
 /** When each release was published on GitHub, UTC. The mission's clock starts at 0.1.0's. */
@@ -17,9 +17,6 @@ export const PUBLISHED: Record<string, string> = {
   '0.2.0': '2026-10-13T23:24:37Z',
   '0.1.0': '2026-10-12T23:36:51Z',
 }
-
-/** When each pull request on main since the last release was merged, UTC, by its number: filled as they merge. */
-export const MERGED: Record<number, string> = {}
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
 export type Picture = 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
@@ -102,6 +99,3 @@ export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
     },
   ],
 }
-
-/** What main is bringing to the next release, shown at its tail, with the pull request it came in; none between releases. */
-export const COMING: (Highlight & { pr: number }) | null = null

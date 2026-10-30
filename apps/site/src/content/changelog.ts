@@ -1,8 +1,8 @@
 /*
  * What changed in Althar, release by release, from the release notes on
- * GitHub; what has merged on main since the last release; and what's next,
- * from the plans in docs/plans. Each line in the releases' own words, except
- * that the site shows no ⌘-only shortcuts and no internal labels.
+ * GitHub, and what's next, from the plans in docs/plans. Each line in the
+ * releases' own words, except that the site shows no ⌘-only shortcuts and
+ * no internal labels.
  */
 
 export type Kind = 'new' | 'improved' | 'fixed'
@@ -26,7 +26,6 @@ export interface Release {
 
 const REPO = 'https://github.com/AltharIDE/althar'
 export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}`
-export const pullUrl = (no: number) => `${REPO}/pull/${no}`
 
 /** The releases, newest first. */
 export const RELEASES: readonly Release[] = [
@@ -266,15 +265,6 @@ export const RELEASES: readonly Release[] = [
     ],
   },
 ]
-
-export interface Merged {
-  date: string
-  text: string
-  pr: number
-}
-
-/** Merged on main since the last release, newest first: what the next one will carry. */
-export const ON_MAIN: readonly Merged[] = []
 
 export type Stage = 'now' | 'next' | 'later'
 

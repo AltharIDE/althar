@@ -69,40 +69,36 @@
 }
 .grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.55; mix-blend-mode: overlay; }
 
-/* The instruments along the top: the clock and the launch at the left, what's next and what's current at the right. */
-.deck { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px; width: 100%; }
-.pair { display: flex; gap: 44px; }
-.pair.end { justify-content: flex-end; }
+/* The instruments along the top: the clock at the left, the launch in the middle, the version at the right. */
+.deck { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 24px; width: 100%; }
 
 /* A readout, as the first screen's flight deck reads: a small label over the figure. */
 .readout { display: grid; justify-items: start; align-content: start; gap: 9px; color: inherit; text-decoration: none; }
+.readout.mid { justify-items: center; text-align: center; }
 .readout.end { justify-items: end; text-align: right; }
 .readout i { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.6); white-space: nowrap; }
-.readout b { display: flex; align-items: center; gap: 10px; font: 500 16px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: #fff; white-space: nowrap; }
+.readout b { font: 500 16px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: #fff; white-space: nowrap; }
 .readout:hover i { color: rgba(255, 248, 240, 0.9); }
 /* The clock keeps its width as it counts. */
 .clock { min-width: 15ch; }
-/* One mark for each change aboard, lit. */
-.meter { display: flex; gap: 3px; }
-.meter span { width: 2px; height: 11px; border-radius: 1px; background: var(--lit); box-shadow: 0 0 6px rgba(70, 86, 255, 0.8); }
 
 /* The page's name, for assistive technology and search: the nav shows it. */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* The newest release, shown: when it went out, what it gives you, why, and the picture. */
-.lead { display: grid; justify-items: center; gap: 14px; max-width: 1100px; margin-top: 40px; text-align: center; }
-.leadStamp { display: flex; gap: 14px; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 248, 240, 0.55); }
-.leadStamp .met { color: var(--lit); }
-.headline { font-family: 'Inter Display', var(--display); font-size: clamp(32px, 4vw, 58px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
-.why { max-width: 40em; font-size: 16.5px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
-.more { color: var(--lit); font-weight: 500; text-decoration: none; white-space: nowrap; }
-.more { font-size: 15px; }
-.more::after { content: ' ↓'; }
-.more:hover { color: #fff; }
-/* The picture stands on the planet's lit edge, on the window's own ground. */
-.heroPic { width: min(940px, 100%); margin-top: 22px; }
-.heroPic > figure { background: none; box-shadow: none; }
-.heroPic > figure::before { display: none; }
+/* The newest release's head: its stamp across, then its version and its title, large. */
+.lead { display: grid; justify-items: center; gap: 30px; width: min(1180px, 100%); margin-top: 52px; text-align: center; scroll-margin-top: 88px; }
+.lead .stamp { width: 100%; }
+.release { display: grid; justify-items: center; gap: 14px; }
+.leadV { font: 500 20px/1 var(--mono); letter-spacing: -0.01em; color: var(--lit); text-shadow: 0 0 18px rgba(60, 76, 255, 0.7); }
+.headline { font-family: 'Inter Display', var(--display); font-size: clamp(34px, 4.4vw, 64px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+
+/* Its lead, shown: the feature and why beside its picture, the picture standing on the planet's lit edge. */
+.spot { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 800px); justify-content: center; align-items: center; gap: 56px; width: min(1180px, 100%); margin-top: 46px; padding-bottom: 56px; }
+.spotWords { display: grid; gap: 12px; text-align: left; }
+.spotTitle { font-family: 'Inter Display', var(--display); font-size: 30px; font-weight: 600; line-height: 1.1; letter-spacing: -0.03em; color: #fff; }
+.why { font-size: 16px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
+.heroPic { min-width: 0; }
+.heroPic > figure { box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12), 0 30px 80px -30px rgba(0, 0, 0, 0.9), 0 0 120px -40px rgba(60, 76, 255, 0.6); }
 
 /* ---- the log ---- */
 
@@ -114,9 +110,9 @@
 .launch { padding-bottom: 0; }
 .launch::before { display: none; }
 .node { position: absolute; left: 0; top: 1px; width: 11px; height: 11px; border-radius: 50%; background: #0e0b09; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.42); }
-/* The tail: lit, the rail under it carrying the light down to the last release. */
-.tail::before { background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 50%, var(--hair-2)); }
-.tail .node { background: var(--lit); box-shadow: 0 0 0 4px rgba(60, 76, 255, 0.2), 0 0 14px var(--glow); }
+/* The newest release, going on from the window: lit, the rail under it carrying the light down to the one before. */
+.current::before { top: 20px; background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 50%, var(--hair-2)); }
+.current .node { top: 9px; background: var(--lit); box-shadow: 0 0 0 4px rgba(60, 76, 255, 0.2), 0 0 14px var(--glow); }
 /* The launch: where the log begins. */
 .launch .node { background: radial-gradient(circle, var(--ink) 0 2px, transparent 2.5px); box-shadow: inset 0 0 0 1.5px var(--ink); }
 
@@ -148,7 +144,7 @@ a.v:hover { color: var(--lit); }
 
 /* Its changes, a run of each kind under its word. */
 .runs { display: grid; gap: 26px; }
-.run, .merged { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: baseline; }
+.run { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: baseline; }
 .label { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-3); }
 .run[data-kind='new'] > .label { color: var(--lit); }
 .run[data-kind='improved'] > .label { color: #d8d0c4; }
@@ -160,42 +156,13 @@ a.v:hover { color: var(--lit); }
 .run[data-kind='new'] .lines li::before { background: var(--lit); opacity: 0.6; }
 .code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 244, 232, 0.07); font: 0.86em var(--mono); color: #fff; white-space: pre-wrap; }
 
-/* The tail: each merge a line, its day once, its pull request at the end. */
-.tail .lines { gap: 0; }
-.merged { padding: 9px 0; border-top: 1px solid var(--hair); }
-.merged:last-child { border-bottom: 1px solid var(--hair); }
-.again { visibility: hidden; }
-.text { display: flex; align-items: baseline; gap: 24px; }
-.text > span { flex: 1; min-width: 0; }
-.pr { font: 500 12px/1 var(--mono); color: var(--ink-3); text-decoration: none; font-variant-numeric: tabular-nums; }
-.pr:hover { color: #fff; }
-.newest .text > span { color: #fff; }
-/* The newest line, still being written: a cobalt caret after it. */
-.newest .text > span::after {
-  content: '';
-  display: inline-block;
-  width: 0.5em;
-  height: 1.05em;
-  margin-left: 5px;
-  vertical-align: -0.17em;
-  border-radius: 1px;
-  background: var(--lit);
-  box-shadow: 0 0 10px var(--glow);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .newest .text > span::after { animation: caret 1.1s steps(1, end) infinite; }
-}
-@keyframes caret { 50% { opacity: 0; } }
 
 /* ---- a highlight: what it gives you, why, and the picture ---- */
 
 .shown { display: grid; gap: 10px; margin-bottom: 40px; }
-.coming { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--lit); margin-bottom: 4px; }
 .hl { font-family: 'Inter Display', var(--display); font-size: 23px; font-weight: 550; line-height: 1.2; letter-spacing: -0.025em; color: #fff; text-wrap: balance; }
 .hlWhy { max-width: 40em; font-size: 15.5px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 .hlPic { margin-top: 14px; }
-.prIn { font: 500 12px/1 var(--mono); color: var(--ink-3); text-decoration: none; }
-.prIn:hover { color: #fff; }
 
 /* What was improved and fixed, folded until asked for, opening in place. */
 .fold summary {
@@ -220,8 +187,6 @@ a.v:hover { color: var(--lit); }
 .fold[open] summary svg { transform: rotate(180deg); }
 .fold:not([open]) .opened, .fold[open] .closed { display: none; }
 .fold > .runs { margin-top: 26px; }
-.tail .fold { margin-top: 18px; }
-.tail .fold > .lines { margin-top: 12px; }
 
 /* ---- what's next: a course on a chart ---- */
 
@@ -339,19 +304,27 @@ a.v:hover { color: var(--lit); }
   .plot { margin-top: 28px; padding-left: 6px; }
 }
 
+@media (max-width: 1100px) {
+  /* The feature and why over the picture, centred. */
+  .spot { grid-template-columns: minmax(0, 820px); gap: 26px; }
+  .spotWords { justify-items: center; max-width: 36em; margin: 0 auto; text-align: center; }
+}
+
 @media (max-width: 640px) {
   .main { --in: 26px; padding-top: 72px; border-radius: 0 0 24px 24px; }
   .window { margin: 0 10px; padding: 18px 16px 0; border-radius: 24px; }
   .limb { top: calc(100% - 110px); left: -90%; right: -90%; }
-  .deck { gap: 18px 12px; }
-  .pair { flex-direction: column; gap: 16px; }
-  .pair.end { align-items: flex-end; }
-  .readout b { font-size: 14px; }
-  .lead { gap: 12px; margin-top: 34px; }
-  .leadStamp { gap: 10px; letter-spacing: 0.1em; }
-  .headline { font-size: 32px; }
+  .deck { gap: 10px; }
+  .readout { gap: 8px; }
+  .readout i { font-size: 9px; letter-spacing: 0.1em; }
+  .readout b { font-size: 13px; }
+  .clock { min-width: 0; }
+  .lead { gap: 20px; margin-top: 30px; }
+  .leadV { font-size: 16px; }
+  .headline { font-size: 34px; }
+  .spot { gap: 18px; margin-top: 26px; padding-bottom: 36px; }
+  .spotTitle { font-size: 24px; }
   .why { font-size: 15px; }
-  .heroPic { margin-top: 26px; }
   .shown { margin-bottom: 32px; }
   .hl { font-size: 20px; }
   .hlWhy { font-size: 15px; }
@@ -366,9 +339,6 @@ a.v:hover { color: var(--lit); }
   .run { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .run .lines li::before { left: -13px; width: 6px; }
   .lines { font-size: 15px; }
-  .merged { grid-template-columns: 56px minmax(0, 1fr); padding: 10px 0; }
-  .text { display: block; }
-  .pr { margin-left: 8px; white-space: nowrap; }
   .ahead { width: auto; margin: 88px 10px 0; padding: 24px 20px 32px; border-radius: 24px; }
   .endRow { flex-direction: column; align-items: stretch; margin-top: 88px; padding-bottom: 96px; }
   .ways { display: grid; gap: 10px; }

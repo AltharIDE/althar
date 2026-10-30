@@ -5,9 +5,6 @@ import {
   type Change,
   KIND_WORD,
   type Kind,
-  type Merged,
-  ON_MAIN,
-  pullUrl,
   type Release,
   releaseUrl,
   RELEASES,
@@ -23,7 +20,7 @@ import { seeded } from '../../shared/footer/random'
 import { LightUnder } from '../../shared/lightUnder'
 import { OS_NAME, OsMark } from '../../shared/OsMark'
 import s from './Log.module.css'
-import { COMING, type Highlight, HIGHLIGHTS, MERGED, PUBLISHED } from './LogData'
+import { type Highlight, HIGHLIGHTS, PUBLISHED } from './LogData'
 import { LogPicture } from './LogPictures'
 
 /*
@@ -46,9 +43,6 @@ import { LogPicture } from './LogPictures'
  */
 
 addDisplay()
-
-/** How many of main's latest merges show before the rest fold. */
-const TAIL = 5
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
@@ -109,10 +103,20 @@ const OUT = (
   </svg>
 )
 
-/** An instrument: what it reads, and the reading; a way into the log. */
-function Readout({ label, href, end, children }: { label: string; href: string; end?: boolean; children: ReactNode }) {
+/** An instrument: what it reads, and the reading; a way into the log. Set at the strip's start, middle or end. */
+function Readout({
+  label,
+  href,
+  at = 'start',
+  children,
+}: {
+  label: string
+  href: string
+  at?: 'start' | 'mid' | 'end'
+  children: ReactNode
+}) {
   return (
-    <a className={cx(s.readout, end && s.end)} href={href}>
+    <a className={cx(s.readout, at === 'mid' && s.mid, at === 'end' && s.end)} href={href}>
       <i>{label}</i>
       {children}
     </a>
@@ -197,134 +201,58 @@ function Window() {
         <div ref={grain} className={s.grain} />
       </div>
       <div className={s.deck}>
-        <div className={s.pair}>
-          <Readout label="Mission elapsed" href={`#v${FIRST.version}`}>
-            <Clock />
-          </Readout>
-          <Readout label="Launch" href={`#v${FIRST.version}`}>
-            <b>{dated(FIRST.date)}</b>
-          </Readout>
-        </div>
-        <div className={cx(s.pair, s.end)}>
-          <Readout label="Next release" href="#on-main">
-            <b>
-              {ON_MAIN.length} merged
-              {ON_MAIN.length > 0 && (
-                <span className={s.meter} aria-hidden="true">
-                  {ON_MAIN.map((m) => (
-                    <span key={m.pr} />
-                  ))}
-                </span>
-              )}
-            </b>
-          </Readout>
-          <Readout label="Current version" href={`#v${LATEST.version}`} end>
-            <b>{LATEST.version}</b>
-          </Readout>
-        </div>
+        <Readout label="Mission elapsed" href={`#v${FIRST.version}`}>
+          <Clock />
+        </Readout>
+        <Readout label="Launch" href={`#v${FIRST.version}`} at="mid">
+          <b>{dated(FIRST.date)}</b>
+        </Readout>
+        <Readout label="Current version" href="#changes" at="end">
+          <b>{LATEST.version}</b>
+        </Readout>
+      </div>
+      {/* The newest release, its head: when it went out, its version and title; then its lead, shown. */}
+      <div className={s.lead} id={`v${LATEST.version}`}>
+        <Stamp
+          at={wentOut(LATEST)}
+          date={dated(LATEST.date)}
+          link={
+            <a className={s.out} href={releaseUrl(LATEST.version)}>
+              On GitHub
+              {OUT}
+            </a>
+          }
+        />
+        <h2 className={s.release}>
+          <span className={s.leadV}>{LATEST.version}</span>
+          <span className={s.headline}>{LATEST.title}</span>
+        </h2>
       </div>
       {lead && (
-        <>
-          <div className={s.lead}>
-            <p className={s.leadStamp}>
-              <span className={s.met}>{wentOut(LATEST)}</span>
-              <span>{LATEST.version}</span>
-              <span>{dated(LATEST.date)}</span>
-            </p>
-            <h2 className={s.headline}>{lead.title}</h2>
+        <div className={s.spot}>
+          <div className={s.spotWords}>
+            <h3 className={s.spotTitle}>{lead.title}</h3>
             <p className={s.why}>{lead.why}</p>
-            <a className={s.more} href={`#v${LATEST.version}`}>
-              Everything in {LATEST.version}
-            </a>
           </div>
           <div className={s.heroPic}>
             <LogPicture picture={lead.picture} />
           </div>
-        </>
+        </div>
       )}
     </header>
   )
 }
 
 /** A highlight: what it gives you, why it matters, and the picture that shows it. */
-function Shown({ highlight, note, children }: { highlight: Highlight; note?: ReactNode; children?: ReactNode }) {
+function Shown({ highlight }: { highlight: Highlight }) {
   return (
     <div className={s.shown}>
-      {note && <p className={s.coming}>{note}</p>}
       <h3 className={s.hl}>{highlight.title}</h3>
-      <p className={s.hlWhy}>
-        {highlight.why}
-        {children}
-      </p>
+      <p className={s.hlWhy}>{highlight.why}</p>
       <div className={s.hlPic}>
         <LogPicture picture={highlight.picture} />
       </div>
     </div>
-  )
-}
-
-/**
- * What has merged on main since the last release: the log's live tail, what
- * it brings first, then each merge, newest first, its caret blinking. With
- * nothing merged yet, the tail waits for the first, its caret still blinking.
- */
-function Tail() {
-  const newest = ON_MAIN[0]
-  // What main brings next, shown while its pull request is among the merges.
-  const next = COMING
-  const coming = next && ON_MAIN.some((m) => m.pr === next.pr) ? next : null
-  const merges = ON_MAIN.filter((m) => m.pr !== coming?.pr)
-  const line = (m: Merged, i: number, all: readonly Merged[]) => (
-    <li key={m.pr} className={cx(s.merged, m === newest && s.newest)}>
-      <span className={cx(s.label, i > 0 && all[i - 1]!.date === m.date && s.again)}>{dated(m.date, false)}</span>
-      <span className={s.text}>
-        <span>{m.text}</span>
-        <a className={s.pr} href={pullUrl(m.pr)} aria-label={`Pull request ${m.pr}`}>
-          #{m.pr}
-        </a>
-      </span>
-    </li>
-  )
-  const recent = merges.slice(0, TAIL)
-  const older = merges.slice(TAIL)
-  // Main last moved with its newest merge, or, with none since, with the release.
-  const moved = newest
-    ? Date.parse(MERGED[newest.pr] ?? `${newest.date}T12:00:00Z`)
-    : Date.parse(PUBLISHED[LATEST.version] ?? `${LATEST.date}T12:00:00Z`)
-  return (
-    <li className={cx(s.entry, s.tail)} id="on-main">
-      <span className={s.node} aria-hidden="true" />
-      <Stamp at={elapsed(moved, false)} date={dated(newest?.date ?? LATEST.date)} note="On main" />
-      <h2 className={s.head}>
-        <span className={s.v}>main</span>
-        <span className={s.title}>{newest ? `Since ${LATEST.version}, for the next release` : `Nothing new since ${LATEST.version}`}</span>
-      </h2>
-      {coming && (
-        <Shown highlight={coming} note="Coming in the next release">
-          {' '}
-          <a className={s.prIn} href={pullUrl(coming.pr)}>
-            #{coming.pr}
-          </a>
-        </Shown>
-      )}
-      {newest ? (
-        <ul className={s.lines}>{recent.map(line)}</ul>
-      ) : (
-        <ul className={s.lines}>
-          <li className={cx(s.merged, s.newest, s.waiting)}>
-            <span className={s.label}>Next</span>
-            <span className={s.text}>
-              <span>What merges next lands here, on its way to the next release.</span>
-            </span>
-          </li>
-        </ul>
-      )}
-      {older.length > 0 && (
-        <Fold count={older.length}>
-          <ul className={s.lines}>{older.map(line)}</ul>
-        </Fold>
-      )}
-    </li>
   )
 }
 
@@ -363,8 +291,9 @@ function Run({ kind, lines }: { kind: Kind; lines: readonly string[] }) {
 /** A release: its stamp, its version and title, its highlight, what's new, and what was improved and fixed, folded. */
 function Entry({ release }: { release: Release }) {
   const first = release === FIRST
-  // The newest release's lead opens the page: here it shows the rest, and keeps the lead's lines.
-  const highlights = (HIGHLIGHTS[release.version] ?? []).slice(release === LATEST ? 1 : 0)
+  // The newest release's head and lead open the page, in the window: here it goes on with the rest, keeping the lead's lines.
+  const current = release === LATEST
+  const highlights = (HIGHLIGHTS[release.version] ?? []).slice(current ? 1 : 0)
   const all = runs(
     release.changes,
     highlights.flatMap((h) => h.covers),
@@ -373,26 +302,30 @@ function Entry({ release }: { release: Release }) {
   const folded = all.filter((run) => run.kind !== 'new')
   const more = folded.reduce((n, run) => n + run.lines.length, 0)
   return (
-    <li className={cx(s.entry, first && s.launch)} id={`v${release.version}`}>
+    <li className={cx(s.entry, first && s.launch, current && s.current)} id={current ? 'changes' : `v${release.version}`}>
       <span className={s.node} aria-hidden="true" />
-      <Stamp
-        at={wentOut(release)}
-        date={dated(release.date)}
-        note={first ? 'Launch' : undefined}
-        link={
-          <a className={s.out} href={releaseUrl(release.version)}>
-            On GitHub
-            {OUT}
-          </a>
-        }
-      />
-      <h2 className={s.head}>
-        {/* The version links to its own entry, to share. */}
-        <a className={s.v} href={`#v${release.version}`}>
-          {release.version}
-        </a>
-        <span className={s.title}>{release.title}</span>
-      </h2>
+      {!current && (
+        <>
+          <Stamp
+            at={wentOut(release)}
+            date={dated(release.date)}
+            note={first ? 'Launch' : undefined}
+            link={
+              <a className={s.out} href={releaseUrl(release.version)}>
+                On GitHub
+                {OUT}
+              </a>
+            }
+          />
+          <h2 className={s.head}>
+            {/* The version links to its own entry, to share. */}
+            <a className={s.v} href={`#v${release.version}`}>
+              {release.version}
+            </a>
+            <span className={s.title}>{release.title}</span>
+          </h2>
+        </>
+      )}
       {highlights.map((highlight) => (
         <Shown key={highlight.title} highlight={highlight} />
       ))}
@@ -516,7 +449,6 @@ export function Log() {
       <LightUnder tone="ink" className={s.under} />
       <Window />
       <ol className={s.log} aria-label="Log">
-        <Tail />
         {RELEASES.map((release) => (
           <Entry key={release.version} release={release} />
         ))}
