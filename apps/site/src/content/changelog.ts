@@ -31,6 +31,73 @@ export const pullUrl = (no: number) => `${REPO}/pull/${no}`
 /** The releases, newest first. */
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.6.0',
+    /** The day v0.6.0 is tagged (#370): set it when it is. */
+    date: '2026-10-31',
+    title: 'The hours you aren’t watching',
+    changes: [
+      {
+        kind: 'new',
+        text: 'Automations: work that starts by itself on a schedule, like a nightly dependency check, a Monday look at open pull requests or a morning triage of new issues. Each run is an ordinary task you can open, on your plans, one at a time, while Althar is open.',
+      },
+      {
+        kind: 'new',
+        text: 'How much of your plans is left: a gauge in the window’s bar, and each agent’s windows and when they reset. New work starts on the account with the most room.',
+      },
+      { kind: 'new', text: 'Dark mode: a warm dark, made from Althar’s own paper. Light, dark, or follow your computer.' },
+      { kind: 'new', text: 'Drop in any file or folder, not only images: a PDF, a log, a CSV, a zip, a whole folder.' },
+      { kind: 'new', text: 'A task as a graph: each agent gets a lane, each step a card saying how long it took and what it came to.' },
+      {
+        kind: 'new',
+        text: 'Open the code an agent talks about: a file, a line or a function in a thread becomes a chip that opens it beside the conversation.',
+      },
+      {
+        kind: 'new',
+        text: 'Leads and the coordinator can change issues on your trackers, not only draft new ones: move, close, assign, relabel. Each change is a card to apply or discard.',
+      },
+      { kind: 'new', text: 'Run any branch or pull request, in a copy of its own. Your checkout isn’t touched.' },
+      { kind: 'new', text: 'Leads show you pictures whenever you ask: screenshots of what they built, in the thread.' },
+      { kind: 'new', text: 'Merge through GitHub’s merge queue, with the task saying “In the merge queue” until it lands.' },
+      { kind: 'new', text: 'Several Linear workspaces, each bound to its own projects.' },
+      { kind: 'new', text: 'Send now on a queued message: it interrupts the agent and goes first.' },
+      {
+        kind: 'improved',
+        text: 'Failing checks go back to the lead, even after you’ve looked: it fixes what its change broke, reruns what failed by chance, and tells you what’s broken on the default branch too.',
+      },
+      { kind: 'improved', text: 'A finished task stops what it started: its agents, the servers they left running and its runs.' },
+      {
+        kind: 'improved',
+        text: 'Finished tasks’ folders are removed after a while, sooner when the disk is nearly full. The branch stays, and the folder comes back when the task needs it.',
+      },
+      { kind: 'improved', text: 'Reviews start from a plan you can change, with the model and effort to review with.' },
+      { kind: 'improved', text: 'Every error has a way out: Sign in again, Compact, or Connect, right where it happened.' },
+      { kind: 'improved', text: 'Things move where they come from: menus grow from what opened them, cards slide from lane to lane.' },
+      {
+        kind: 'improved',
+        text: 'Switching project tabs is instant, busy threads open faster, and Althar is far lighter on memory over a long day.',
+      },
+      {
+        kind: 'improved',
+        text: 'Resolve conflicts automatically, dependably: Althar checks each task’s branch itself, every couple of minutes.',
+      },
+      {
+        kind: 'improved',
+        text: 'What can’t be undone always asks, even where a project allows everything; with everything allowed, a lead’s ordinary work no longer stops for a card.',
+      },
+      { kind: 'improved', text: 'Leads lose fewer turns to their sandbox: each project works out what runs outside it from the start.' },
+      { kind: 'improved', text: 'Running means running: the board counts only the tasks an agent is working on right now.' },
+      { kind: 'improved', text: 'Linux and Windows have their own words and keys.' },
+      {
+        kind: 'fixed',
+        text: 'A dropped connection no longer leaves a step Stuck: it waits for the connection and carries on by itself.',
+      },
+      { kind: 'fixed', text: 'Folder sizes you can trust: what a folder shows is what removing it frees.' },
+      { kind: 'fixed', text: 'A stopped task with a conflict shows as stopped, and Carry on picks it up again.' },
+      { kind: 'fixed', text: 'The load meter counts all of Althar’s work, not as little as a fifth of it.' },
+      { kind: 'fixed', text: 'A sign-in you cancel stops there.' },
+    ],
+  },
+  {
     version: '0.5.0',
     date: '2026-10-20',
     title: 'Windows, and seven more agents',
