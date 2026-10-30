@@ -1,88 +1,43 @@
 <style>
 .s-d-review {
-  /* Dark tone (default). Every colour lives here; the light tone below overrides them. */
   --ink: #efebe4;
   --ink2: #a39d93;
   --ink3: #6f695f;
-  --warm: #d8933f;
+  --warm: #e39c4a;
   --green: #62c47e;
+  --rose: #e0796a;
   --accent: #c3c8ff;
   --accent-dot: #8a93ff;
-  --accent-glow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
-  --bg: #0e0b09;
+  --violet: #c4a8ff;
   --ground:
     radial-gradient(ellipse 60% 50% at 50% 38%, rgba(255, 226, 196, 0.045), transparent 70%),
     radial-gradient(ellipse 100% 85% at 50% 38%, #1a1511 0%, #13100d 50%, #0c0a08 100%);
   --dot: rgba(255, 238, 220, 0.15);
-  --dots-o: 0.7;
-  --card-bg: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-bg: linear-gradient(180deg, #1f1b17 0%, #181410 60%, #15120f 100%);
+  --diff-bg: linear-gradient(180deg, #1d1915 0%, #171310 100%);
   --card-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8), 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
   --card-edge: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
-  --card-edge-on: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
-  --card-lit: radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%);
-  --chip-bg: linear-gradient(180deg, #1f1b17, #171410);
-  --chip-edge: rgba(255, 244, 232, 0.12);
+  --card-edge-on: linear-gradient(180deg, rgba(160, 168, 255, 0.5), rgba(118, 84, 246, 0.18) 45%, rgba(255, 244, 232, 0.05));
+  --card-lit: radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.16), rgba(86, 98, 255, 0) 70%);
   --hair: rgba(255, 244, 232, 0.08);
-  --mk: rgba(240, 236, 229, 0.9);
-  --chip-glow: 0 0 2.4cqw rgba(76, 90, 255, 0.26);
-  --you-bg: radial-gradient(circle at 50% 25%, #2c2620 0%, #1a1612 60%, #110e0b 100%);
-  --you-ring: rgba(255, 244, 232, 0.22);
-  --grain-o: 0.065;
-  --grain-blend: overlay;
-  --vig: radial-gradient(ellipse 82% 80% at 50% 46%, rgba(6, 5, 4, 0) 60%, rgba(6, 5, 4, 0.5) 100%);
+  --mk: rgba(240, 236, 229, 0.92);
 
-  --fs-s: max(8px, 1.45cqw);
-  --fs-m: max(9px, 1.62cqw);
-  --fs-l: max(10px, 2.3cqw);
-  --fs-loop: max(8px, 1.55cqw);
+  --fs-xs: max(7.5px, 1.08cqw);
+  --fs-s: max(8px, 1.3cqw);
+  --fs-m: max(9px, 1.45cqw);
+  --fs-l: max(10.5px, 2.15cqw);
+  --fs-code: max(7px, 1.42cqw);
+  --head: 4.6cqw;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
   --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: var(--bg);
   color: var(--ink);
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   user-select: none;
-}
-[data-tone='light'] .s-d-review {
-  --ink: #141417;
-  --ink2: #45454c;
-  --ink3: #6f6f77;
-  --warm: #c9822f;
-  --green: #2e8c46;
-  --accent: #2b3bff;
-  --accent-dot: #2b3bff;
-  --accent-glow: 0 0 0 0.2em rgba(43, 59, 255, 0.13), 0 0 0.6em rgba(43, 59, 255, 0.45);
-  --bg: #f4f2ec;
-  --ground:
-    radial-gradient(ellipse 60% 50% at 50% 36%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 70%),
-    radial-gradient(ellipse 100% 90% at 50% 36%, #fcfbf8 0%, #f8f6f1 52%, #f4f2ec 100%);
-  --dot: rgba(20, 20, 28, 0.15);
-  --dots-o: 0.65;
-  --card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.93) 100%);
-  --card-shadow:
-    inset 0 1px 0 #ffffff,
-    0 0.1cqw 0.25cqw rgba(64, 44, 20, 0.06),
-    0 0.6cqw 1.3cqw -0.3cqw rgba(64, 44, 20, 0.08),
-    0 1.8cqw 3.4cqw -1.4cqw rgba(64, 44, 20, 0.16);
-  --card-edge: linear-gradient(180deg, rgba(20, 20, 28, 0.065), rgba(20, 20, 28, 0.1) 35%, rgba(20, 20, 28, 0.12));
-  --card-edge-on: linear-gradient(180deg, rgba(43, 59, 255, 0.5), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.06));
-  --card-lit: radial-gradient(90% 60% at 50% 0%, rgba(43, 59, 255, 0.055), rgba(43, 59, 255, 0) 70%);
-  --chip-bg: linear-gradient(180deg, #ffffff, #fbfaf7);
-  --chip-edge: rgba(20, 20, 28, 0.1);
-  --hair: rgba(20, 20, 28, 0.09);
-  --mk: #141417;
-  --chip-glow: 0 0 2.2cqw rgba(43, 59, 255, 0.14);
-  --you-bg: radial-gradient(circle at 50% 25%, #ffffff 0%, #fbfaf7 60%, #f1eee8 100%);
-  --you-ring: rgba(20, 20, 28, 0.14);
-  --grain-o: 0.025;
-  --grain-blend: multiply;
-  --vig: radial-gradient(ellipse 84% 82% at 50% 46%, rgba(120, 96, 60, 0) 62%, rgba(120, 96, 60, 0.07) 100%);
-  -webkit-font-smoothing: auto;
 }
 .s-d-review * { box-sizing: border-box; }
 .s-d-review .s-d-review__ground { position: absolute; inset: 0; background: var(--ground); }
@@ -94,27 +49,41 @@
   background-position: 50% 0.6cqw;
   -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 42%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
   mask-image: radial-gradient(ellipse 62% 70% at 50% 42%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
-  opacity: var(--dots-o);
+  opacity: 0.6;
 }
+/* The light the change sits in: cobalt while it's worked on, green once it's clean. */
+.s-d-review .s-d-review__bloom {
+  position: absolute;
+  left: 50%;
+  top: 39%;
+  width: 78cqw;
+  height: 52cqw;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  transition: opacity 1.4s var(--ease);
+  pointer-events: none;
+}
+.s-d-review .s-d-review__bloom--c { background: radial-gradient(closest-side, rgba(70, 86, 255, 0.2), rgba(122, 63, 240, 0.08) 55%, transparent); }
+.s-d-review .s-d-review__bloom--g { background: radial-gradient(closest-side, rgba(98, 196, 126, 0.15), rgba(98, 196, 126, 0.05) 55%, transparent); opacity: 0; }
+.s-d-review[data-ph='clean'] .s-d-review__bloom--c { opacity: 0.35; }
+.s-d-review[data-ph='clean'] .s-d-review__bloom--g { opacity: 1; }
 
-/* The two agents. */
+/* The agents. */
 .s-d-review .s-d-review__card {
   position: absolute;
-  top: 16.5cqw;
-  width: 23cqw;
-  height: 16cqw;
-  padding: 2.1cqw 2.2cqw;
-  border-radius: 1.6cqw;
+  width: 17.5cqw;
+  padding: 1.4cqw 1.5cqw 1.3cqw;
+  border-radius: 1.4cqw;
   background: var(--card-bg);
   box-shadow: var(--card-shadow);
-  display: flex;
-  flex-direction: column;
   z-index: 3;
 }
-.s-d-review .s-d-review__lead { left: 5cqw; }
-.s-d-review .s-d-review__rev { left: 72cqw; }
+.s-d-review .s-d-review__lead { left: 5cqw; top: 19cqw; }
+.s-d-review .s-d-review__rev { left: 77.5cqw; top: 10.2cqw; }
+.s-d-review .s-d-review__rev + .s-d-review__rev { top: 26.8cqw; }
 .s-d-review .s-d-review__card::before,
-.s-d-review .s-d-review__card::after {
+.s-d-review .s-d-review__card::after,
+.s-d-review .s-d-review__diff::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -125,116 +94,238 @@
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
   pointer-events: none;
 }
-.s-d-review .s-d-review__card::before { background: var(--card-edge); }
-.s-d-review .s-d-review__card::after { background: var(--card-edge-on); opacity: 0; transition: opacity 0.8s var(--ease); }
-.s-d-review .s-d-review__card[data-on="1"]::after { opacity: 1; }
+.s-d-review .s-d-review__card::before,
+.s-d-review .s-d-review__diff::before { background: var(--card-edge); }
+.s-d-review .s-d-review__card::after { background: var(--card-edge-on); opacity: 0; transition: opacity 0.7s var(--ease); }
+.s-d-review .s-d-review__card[data-on='1']::after { opacity: 1; }
 .s-d-review .s-d-review__lit {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background: var(--card-lit);
   opacity: 0;
-  transition: opacity 0.9s var(--ease);
+  transition: opacity 0.8s var(--ease);
   pointer-events: none;
 }
-.s-d-review .s-d-review__card[data-on="1"] .s-d-review__lit { opacity: 1; }
-.s-d-review .s-d-review__mk { position: relative; display: block; flex: none; fill: currentColor; color: var(--mk); width: max(12px, 2.7cqw); height: max(12px, 2.7cqw); }
-.s-d-review .s-d-review__name { position: relative; margin-top: auto; font-size: var(--fs-l); font-weight: 600; letter-spacing: -0.015em; line-height: 1.15; white-space: nowrap; }
-.s-d-review .s-d-review__lab { position: relative; margin-top: 0.5cqw; font-size: var(--fs-m); color: var(--ink2); white-space: nowrap; }
-/* Who does what, in the card's top corner across from its mark: the lead in the light's colour. */
-.s-d-review .s-d-review__role { position: absolute; top: 2.15cqw; right: 2.2cqw; z-index: 1; font: 500 var(--fs-s)/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink2); }
+.s-d-review .s-d-review__card[data-on='1'] .s-d-review__lit { opacity: 1; }
+.s-d-review .s-d-review__top { position: relative; display: flex; align-items: center; justify-content: space-between; height: max(11px, 2.2cqw); }
+.s-d-review .s-d-review__mk { display: block; flex: none; fill: currentColor; color: var(--mk); width: max(11px, 2.2cqw); height: max(11px, 2.2cqw); }
+.s-d-review .s-d-review__role { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3); }
 .s-d-review .s-d-review__role--lead { color: var(--accent); }
-
-/* Inside the loop: the round, what came back, and Clean. */
-.s-d-review .s-d-review__x { position: absolute; left: 0; top: 0; white-space: nowrap; opacity: 0; transform: translateY(0.35em); transition: opacity 0.5s ease, transform 0.8s var(--ease); }
-.s-d-review .s-d-review__round {
+.s-d-review .s-d-review__name { position: relative; margin-top: 1.25cqw; font-size: var(--fs-l); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
+.s-d-review .s-d-review__lab { position: relative; margin-top: 0.45cqw; display: flex; align-items: center; gap: 0.5em; font-size: var(--fs-m); line-height: 1.3; color: var(--ink2); white-space: nowrap; }
+/* Open weights: the one tag in the light's violet. */
+.s-d-review .s-d-review__ow {
+  padding: 0.3em 0.5em 0.25em;
+  border-radius: 99px;
+  font: 600 var(--fs-xs)/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--violet);
+  background: rgba(122, 63, 240, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(160, 120, 255, 0.36);
+}
+/* What each agent is doing, one line under a hairline. */
+.s-d-review .s-d-review__st { position: relative; margin-top: 1.05cqw; height: calc(1cqw + 1.45em); font-size: var(--fs-s); }
+.s-d-review .s-d-review__st::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--hair); }
+.s-d-review .s-d-review__st > span {
   position: absolute;
-  left: 50cqw;
-  top: 15.6cqw;
-  transform: translateX(-50%);
+  left: 0;
+  top: 1cqw;
   display: flex;
   align-items: center;
   gap: 0.55em;
-  font-size: var(--fs-loop);
+  line-height: 1.45;
+  white-space: nowrap;
   color: var(--ink2);
-  z-index: 4;
-}
-.s-d-review .s-d-review__round > i { width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--accent-dot); box-shadow: var(--accent-glow); }
-.s-d-review .s-d-review__round > span { position: relative; height: 1.3em; line-height: 1.3em; }
-.s-d-review .s-d-review__round > span > span:first-child { position: relative; visibility: hidden; }
-.s-d-review .s-d-review__round[data-r="1"] .s-d-review__x--r1,
-.s-d-review .s-d-review__round[data-r="2"] .s-d-review__x--r2 { opacity: 1; transform: none; }
-.s-d-review .s-d-review__found {
-  position: absolute;
-  left: 50cqw;
-  top: 20.4cqw;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 1cqw;
-  z-index: 4;
-}
-.s-d-review .s-d-review__ln {
-  display: flex;
-  align-items: center;
-  gap: 0.8cqw;
-  font-size: var(--fs-loop);
-  transition: opacity 0.6s ease, transform 0.9s var(--ease);
-}
-.s-d-review .s-d-review__ln[data-st="off"] { opacity: 0; transform: translateY(1.6cqw); }
-.s-d-review .s-d-review__ic { position: relative; flex: none; width: 1.1em; height: 1.1em; }
-.s-d-review .s-d-review__ic i,
-.s-d-review .s-d-review__ic svg { position: absolute; inset: 0; margin: auto; transition: opacity 0.5s ease, transform 0.7s var(--ease); }
-.s-d-review .s-d-review__ic i { width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--warm); }
-.s-d-review .s-d-review__ic svg { width: 1.1em; height: 1.1em; fill: none; stroke: var(--ink2); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transform: scale(0.6); }
-.s-d-review .s-d-review__ln[data-st="fixed"] .s-d-review__ic i { opacity: 0; transform: scale(0.4); }
-.s-d-review .s-d-review__ln[data-st="fixed"] .s-d-review__ic svg { opacity: 1; transform: none; }
-.s-d-review .s-d-review__lb { display: flex; align-items: baseline; gap: 1.1cqw; }
-.s-d-review .s-d-review__file { flex: none; width: 16.5ch; font: 400 var(--fs-loop)/1.3 var(--mono); font-size: 0.94em; color: var(--ink2); letter-spacing: -0.02em; }
-.s-d-review .s-d-review__say { display: grid; line-height: 1.3; }
-.s-d-review .s-d-review__say > span { grid-area: 1 / 1; white-space: nowrap; }
-.s-d-review .s-d-review__say > span:first-child { max-width: 24em; overflow: hidden; transition: opacity 0.45s ease, max-width 0.9s var(--ease) 0.25s; }
-.s-d-review .s-d-review__ln[data-st="fixed"] .s-d-review__say > span:first-child { opacity: 0; max-width: 0; }
-.s-d-review .s-d-review__say .s-d-review__x { position: relative; color: var(--ink2); }
-.s-d-review .s-d-review__ln[data-st="fixed"] .s-d-review__say .s-d-review__x { opacity: 1; transform: none; }
-.s-d-review .s-d-review__clean {
-  position: absolute;
-  left: 50cqw;
-  top: 30.2cqw;
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  font-size: max(9.5px, 1.85cqw);
-  font-weight: 600;
-  color: var(--green);
-  z-index: 4;
-  transform: translate(-50%, 1.4cqw);
   opacity: 0;
-  transition: opacity 0.6s ease, transform 0.9s var(--ease);
+  transform: translateY(0.45em);
+  transition: opacity 0.3s ease, transform 0.6s var(--ease);
 }
-.s-d-review .s-d-review__clean[data-st="on"] { opacity: 1; transform: translate(-50%, 0); }
-.s-d-review svg.s-d-review__tick { width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__st > span[data-on='1'] { opacity: 1; transform: none; transition-delay: 0.12s; }
+.s-d-review .s-d-review__st i { flex: none; width: 0.5em; height: 0.5em; border-radius: 50%; }
+.s-d-review .s-d-review__st .s-d-review__work { background: var(--accent-dot); box-shadow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9); }
+.s-d-review .s-d-review__st .s-d-review__wait { background: var(--ink3); }
+.s-d-review .s-d-review__st .s-d-review__hot { background: var(--warm); box-shadow: 0 0 0 0.2em rgba(227, 156, 74, 0.18), 0 0 0.7em rgba(227, 156, 74, 0.7); }
+.s-d-review .s-d-review__st > span[data-k='work'],
+.s-d-review .s-d-review__st > span[data-k='found'] { color: var(--ink); }
+.s-d-review .s-d-review__st > span[data-k='done'],
+.s-d-review .s-d-review__st > span[data-k='clean'] { color: var(--green); font-weight: 500; }
+.s-d-review svg.s-d-review__tick { flex: none; width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Travelling chips: the change, and the pull request. */
-.s-d-review .s-d-review__chip {
+/* The change. */
+.s-d-review .s-d-review__diff {
+  position: absolute;
+  left: 25.5cqw;
+  top: 10.2cqw;
+  width: 49cqw;
+  border-radius: 1.5cqw;
+  background: var(--diff-bg);
+  box-shadow: var(--card-shadow), 0 0 6cqw -1cqw rgba(70, 86, 255, 0.18);
+  z-index: 2;
+  overflow: hidden;
+}
+.s-d-review .s-d-review__head {
+  position: relative;
+  height: var(--head);
+  display: flex;
+  align-items: center;
+  gap: 0.9cqw;
+  padding: 0 1.3cqw 0 1.6cqw;
+  background: rgba(255, 244, 232, 0.025);
+  border-bottom: 1px solid var(--hair);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+}
+.s-d-review .s-d-review__head > svg { flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: var(--ink3); stroke-width: 1.5; stroke-linejoin: round; }
+.s-d-review .s-d-review__head code { font: 500 var(--fs-s)/1 var(--mono); letter-spacing: -0.02em; }
+.s-d-review .s-d-review__head code span { color: var(--ink3); }
+.s-d-review .s-d-review__head .s-d-review__plus { font: 500 var(--fs-s)/1 var(--mono); color: var(--green); }
+.s-d-review .s-d-review__head .s-d-review__minus { font: 500 var(--fs-s)/1 var(--mono); color: var(--rose); margin-left: -0.3cqw; }
+/* Where the review stands, in the header's corner. */
+.s-d-review .s-d-review__pill {
+  position: relative;
+  margin-left: auto;
+  height: max(16px, 2.6cqw);
+  width: 12.4cqw;
+  border-radius: 99px;
+  background: rgba(255, 244, 232, 0.04);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  transition: background 0.6s ease, box-shadow 0.6s ease;
+}
+.s-d-review .s-d-review__pill[data-s='f'] { background: rgba(227, 156, 74, 0.1); box-shadow: inset 0 0 0 1px rgba(227, 156, 74, 0.32); }
+.s-d-review .s-d-review__pill[data-s='c'] { background: rgba(98, 196, 126, 0.12); box-shadow: inset 0 0 0 1px rgba(98, 196, 126, 0.38); }
+.s-d-review .s-d-review__pill > span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  font-weight: 500;
+  color: var(--ink2);
+  opacity: 0;
+  transform: translateY(0.5em);
+  transition: opacity 0.3s ease, transform 0.6s var(--ease);
+}
+.s-d-review .s-d-review__pill > span[data-on='1'] { opacity: 1; transform: none; transition-delay: 0.1s; }
+.s-d-review .s-d-review__pill > span[data-k='r1'],
+.s-d-review .s-d-review__pill > span[data-k='r2'] { color: var(--ink); }
+.s-d-review .s-d-review__pill > span[data-k='f'] { color: var(--warm); }
+.s-d-review .s-d-review__pill > span[data-k='c'] { color: var(--green); }
+.s-d-review .s-d-review__pill i { flex: none; width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--accent-dot); box-shadow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9); }
+.s-d-review .s-d-review__pill span[data-k='w'] i { background: var(--ink3); box-shadow: none; }
+.s-d-review .s-d-review__pill span[data-k='f'] i { background: var(--warm); box-shadow: 0 0 0.6em rgba(227, 156, 74, 0.7); }
+
+.s-d-review .s-d-review__code { position: relative; padding: 1.2cqw 0 1.3cqw; font: 400 var(--fs-code)/1 var(--mono); letter-spacing: -0.015em; transition: opacity 0.6s var(--ease); }
+.s-d-review .s-d-review__diff[data-done='1'] .s-d-review__code { opacity: 0.32; }
+.s-d-review[data-reset='1'] .s-d-review__code { opacity: 0; transition-duration: 0.45s; }
+.s-d-review .s-d-review__l { position: relative; display: flex; align-items: center; height: 2.4em; white-space: pre; color: #e6e0d6; }
+.s-d-review .s-d-review__l::before,
+.s-d-review .s-d-review__l::after { content: ''; position: absolute; top: 0; bottom: 0; pointer-events: none; transition: opacity 0.5s ease, background 0.5s ease; }
+.s-d-review .s-d-review__l::before { left: 0; right: 0; opacity: 0; }
+.s-d-review .s-d-review__l::after { left: 0; width: max(2px, 0.22cqw); opacity: 0; }
+.s-d-review .s-d-review__n { flex: none; width: 3.6em; padding-right: 1.1em; text-align: right; color: var(--ink3); opacity: 0.75; }
+.s-d-review .s-d-review__g { flex: none; width: 1.7em; transition: opacity 0.4s ease; }
+.s-d-review .s-d-review__t { position: relative; display: grid; justify-items: start; }
+.s-d-review .s-d-review__t > span { grid-area: 1 / 1; }
+.s-d-review .s-d-review__k { color: #c9b6ff; }
+.s-d-review .s-d-review__f { color: #aab8ff; }
+.s-d-review .s-d-review__y { color: #e3c08c; }
+.s-d-review .s-d-review__u { color: #eaa46b; }
+.s-d-review .s-d-review__p { color: var(--ink2); }
+/* Added and removed lines, and how each arrives. */
+.s-d-review .s-d-review__l[data-k='add']::before { background: rgba(98, 196, 126, 0.075); }
+.s-d-review .s-d-review__l[data-k='add'] .s-d-review__g { color: var(--green); }
+.s-d-review .s-d-review__l[data-k='del']::before { background: rgba(224, 121, 106, 0.085); }
+.s-d-review .s-d-review__l[data-k='del'] .s-d-review__g { color: var(--rose); }
+.s-d-review .s-d-review__l[data-k='del'] .s-d-review__t { color: #b9a69f; }
+.s-d-review .s-d-review__l[data-k] .s-d-review__n,
+.s-d-review .s-d-review__l[data-k] .s-d-review__g { opacity: 0; }
+.s-d-review .s-d-review__l[data-k][data-s] .s-d-review__n { opacity: 0.75; }
+.s-d-review .s-d-review__l[data-k][data-s] .s-d-review__g { opacity: 1; }
+.s-d-review .s-d-review__l[data-k][data-s]::before { opacity: 1; }
+.s-d-review .s-d-review__l[data-k='del'] .s-d-review__t { opacity: 0; transform: translateX(-0.6em); transition: opacity 0.4s ease, transform 0.6s var(--ease); }
+.s-d-review .s-d-review__l[data-k='del'][data-s] .s-d-review__t { opacity: 1; transform: none; }
+/* Typed by the script, in step with its cursor. */
+.s-d-review .s-d-review__o,
+.s-d-review .s-d-review__w { clip-path: inset(0 100% 0 0); }
+/* Flagged by a reviewer: warm, with its pin. */
+.s-d-review .s-d-review__l[data-s='flag']::before { background: rgba(227, 156, 74, 0.14); }
+.s-d-review .s-d-review__l[data-s='flag']::after { opacity: 1; background: var(--warm); box-shadow: 0 0 1cqw rgba(227, 156, 74, 0.6); }
+/* Fixed by the lead: the old line goes, the new one is typed in its place. */
+.s-d-review .s-d-review__l[data-s='fix']::before { background: rgba(98, 196, 126, 0.13); }
+.s-d-review .s-d-review__l[data-s='fix']::after { opacity: 1; background: var(--green); box-shadow: 0 0 1cqw rgba(98, 196, 126, 0.5); }
+.s-d-review .s-d-review__l[data-s='fix'] .s-d-review__o { opacity: 0; transition: opacity 0.18s ease; }
+.s-d-review .s-d-review__pin {
+  position: absolute;
+  right: 1.3cqw;
+  top: 50%;
+  width: max(14px, 2.2cqw);
+  height: max(14px, 2.2cqw);
+  margin-top: max(-7px, -1.1cqw);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--warm);
+  box-shadow: 0 0 0 0.25cqw rgba(227, 156, 74, 0.22), 0 0 1.6cqw rgba(227, 156, 74, 0.55);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.3s ease, transform 0.5s var(--ease);
+}
+.s-d-review .s-d-review__pin svg { width: 62%; height: 62%; fill: #1a1410; }
+.s-d-review .s-d-review__l[data-s='flag'] .s-d-review__pin { opacity: 1; transform: none; }
+.s-d-review[data-reset='1'] .s-d-review__l,
+.s-d-review[data-reset='1'] .s-d-review__l *,
+.s-d-review[data-reset='1'] .s-d-review__l::before,
+.s-d-review[data-reset='1'] .s-d-review__l::after { transition: none !important; }
+
+/* Clean, stamped over the change. */
+.s-d-review .s-d-review__stamp {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + var(--head) / 2);
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.38em 0.8em 0.38em 0.6em;
+  border-radius: 99px;
+  font-size: max(13px, 3.3cqw);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  color: var(--green);
+  background: rgb(19, 24, 18);
+  box-shadow: inset 0 0 0 1px rgba(98, 196, 126, 0.45), 0 0 0 0.6cqw rgba(98, 196, 126, 0.07), 0 0 5cqw rgba(98, 196, 126, 0.32);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1.35);
+  filter: blur(0.5cqw);
+  transition: opacity 0.25s ease, transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1), filter 0.4s ease;
+  z-index: 2;
+}
+.s-d-review .s-d-review__stamp svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__stamp[data-on='1'] { opacity: 1; transform: translate(-50%, -50%); filter: blur(0); }
+.s-d-review[data-reset='1'] .s-d-review__stamp { transition: opacity 0.45s ease; }
+
+/* The pull request, and you. */
+.s-d-review .s-d-review__pr {
   position: absolute;
   left: 0;
   top: 0;
-  height: max(18px, 3.9cqw);
-  padding: 0 1.2cqw;
+  height: max(20px, 4.2cqw);
+  padding: 0 1.3cqw;
   display: flex;
   align-items: center;
-  gap: 0.8cqw;
-  border-radius: 1cqw;
-  background: var(--chip-bg);
-  box-shadow: var(--card-shadow), var(--chip-glow);
+  gap: 0.75cqw;
+  border-radius: 1.1cqw;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow), 0 0 2.6cqw rgba(76, 90, 255, 0.28);
   white-space: nowrap;
   font-size: var(--fs-s);
   z-index: 5;
   opacity: 0;
   will-change: transform, opacity;
 }
-.s-d-review .s-d-review__chip::before {
+.s-d-review .s-d-review__pr::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -245,103 +336,175 @@
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
-.s-d-review .s-d-review__chip code { font: 500 var(--fs-s)/1 var(--mono); font-size: 0.94em; letter-spacing: -0.02em; }
-.s-d-review .s-d-review__chip code span { color: var(--ink3); }
-.s-d-review .s-d-review__chip b { font-weight: 500; font-family: var(--mono); font-size: 0.94em; color: var(--accent); }
-.s-d-review .s-d-review__chip s { text-decoration: none; font-family: var(--mono); font-size: 0.94em; color: var(--ink3); }
-.s-d-review .s-d-review__chip strong { font-weight: 600; }
-.s-d-review .s-d-review__chip em { font-style: normal; color: var(--ink2); display: flex; align-items: center; gap: 0.4em; }
-.s-d-review .s-d-review__chip em svg { color: var(--green); }
-.s-d-review .s-d-review__chip > svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__pr > svg { flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__pr strong { font-weight: 600; }
+.s-d-review .s-d-review__pr em { font-style: normal; display: flex; align-items: center; gap: 0.4em; color: var(--green); }
 .s-d-review .s-d-review__sep { width: 1px; height: 1.3em; background: var(--hair); }
-
-/* You. */
-.s-d-review .s-d-review__you { position: absolute; left: 47.6cqw; top: 49.6cqw; display: flex; align-items: center; gap: 1.2cqw; z-index: 4; }
+.s-d-review .s-d-review__you { position: absolute; left: 47.7cqw; top: 53.4cqw; display: flex; align-items: center; gap: 1.1cqw; z-index: 5; }
 .s-d-review .s-d-review__yn {
   position: relative;
   flex: none;
-  width: 4.8cqw;
-  height: 4.8cqw;
+  width: 4.6cqw;
+  height: 4.6cqw;
   border-radius: 50%;
-  background: var(--you-bg);
-  box-shadow: var(--card-shadow), inset 0 0 0 1px var(--you-ring);
+  background: radial-gradient(circle at 50% 25%, #2c2620 0%, #1a1612 60%, #110e0b 100%);
+  box-shadow: var(--card-shadow), inset 0 0 0 1px rgba(255, 244, 232, 0.22);
 }
 .s-d-review .s-d-review__yn::after {
   content: '';
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 1.3cqw;
-  height: 1.3cqw;
-  margin: -0.65cqw 0 0 -0.65cqw;
+  width: 1.25cqw;
+  height: 1.25cqw;
+  margin: -0.625cqw 0 0 -0.625cqw;
   border-radius: 50%;
   background: var(--ink3);
-  transition: background 0.6s var(--ease), transform 0.8s var(--ease);
+  transition: background 0.6s var(--ease), transform 0.8s var(--ease), box-shadow 0.8s var(--ease);
 }
-.s-d-review .s-d-review__you[data-st="ready"] .s-d-review__yn::after { background: var(--green); transform: scale(1.15); }
+.s-d-review .s-d-review__you[data-st='ready'] .s-d-review__yn::after { background: var(--green); transform: scale(1.2); box-shadow: 0 0 1.2cqw rgba(98, 196, 126, 0.8); }
 .s-d-review .s-d-review__yl { display: flex; flex-direction: column; gap: 0.3cqw; }
 .s-d-review .s-d-review__yl b { font-size: var(--fs-m); font-weight: 600; }
-.s-d-review .s-d-review__yl > span { position: relative; height: 1.35em; font-size: var(--fs-s); line-height: 1.35em; }
-.s-d-review .s-d-review__yl .s-d-review__x { color: var(--green); }
-.s-d-review .s-d-review__you[data-st="ready"] .s-d-review__yl .s-d-review__x { opacity: 1; transform: none; }
+.s-d-review .s-d-review__yl > span { height: 1.35em; font-size: var(--fs-s); line-height: 1.35em; color: var(--green); opacity: 0; transform: translateY(0.4em); transition: opacity 0.4s ease, transform 0.7s var(--ease); }
+.s-d-review .s-d-review__you[data-st='ready'] .s-d-review__yl > span { opacity: 1; transform: none; }
 
 .s-d-review .s-d-review__fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; }
-.s-d-review .s-d-review__grain { position: absolute; inset: 0; background-size: 64px 64px; opacity: var(--grain-o); mix-blend-mode: var(--grain-blend); z-index: 6; pointer-events: none; }
-.s-d-review .s-d-review__vig { position: absolute; inset: 0; background: var(--vig); z-index: 7; pointer-events: none; }
+.s-d-review .s-d-review__grain { position: absolute; inset: 0; background-size: 64px 64px; opacity: 0.06; mix-blend-mode: overlay; z-index: 6; pointer-events: none; }
+.s-d-review .s-d-review__vig { position: absolute; inset: 0; background: radial-gradient(ellipse 82% 80% at 50% 46%, rgba(6, 5, 4, 0) 60%, rgba(6, 5, 4, 0.5) 100%); z-index: 7; pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .s-d-review * { transition: none !important; }
+  .s-d-review *,
+  .s-d-review *::before,
+  .s-d-review *::after { transition: none !important; }
 }
-@container (max-width: 560px) {
-  .s-d-review .s-d-review__card { padding: 1.9cqw 2cqw; }
-  .s-d-review .s-d-review__does { display: none; }
-  .s-d-review .s-d-review__round { top: 14.4cqw; }
-  .s-d-review .s-d-review__found { top: 18.3cqw; gap: 0.9cqw; }
-  .s-d-review .s-d-review__lb { flex-direction: column; gap: 0.25cqw; }
-  .s-d-review .s-d-review__ln { align-items: flex-start; }
-  .s-d-review .s-d-review__ic { margin-top: 0.1em; }
-  .s-d-review .s-d-review__file { width: auto; }
-  .s-d-review .s-d-review__clean { top: 33.2cqw; }
+
+/* A phone: the stage stands upright, and the agents sit above and below the change. */
+@container (max-width: 559px) {
+  .s-d-review {
+    --fs-xs: 2.45cqw;
+    --fs-s: 3.05cqw;
+    --fs-m: 3.15cqw;
+    --fs-l: 4.3cqw;
+    --fs-code: 2.5cqw;
+    --head: 8.4cqw;
+  }
+  .s-d-review .s-d-review__bloom { top: 37%; width: 120cqw; height: 120cqw; }
+  .s-d-review .s-d-review__card { padding: 2.9cqw 3.2cqw 2.6cqw; border-radius: 3cqw; }
+  .s-d-review .s-d-review__mk { width: 4.4cqw; height: 4.4cqw; }
+  .s-d-review .s-d-review__top { height: 4.4cqw; }
+  .s-d-review .s-d-review__name { margin-top: 2.2cqw; }
+  .s-d-review .s-d-review__lab { margin-top: 0.8cqw; }
+  .s-d-review .s-d-review__st { margin-top: 2cqw; height: calc(2cqw + 1.45em); }
+  .s-d-review .s-d-review__st > span { top: 2cqw; }
+  .s-d-review .s-d-review__lead {
+    left: 5cqw;
+    top: 7.5cqw;
+    width: 90cqw;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: 'mk name role' 'mk lab st';
+    column-gap: 3.2cqw;
+    row-gap: 0.8cqw;
+    align-items: center;
+  }
+  .s-d-review .s-d-review__lead .s-d-review__top { display: contents; }
+  .s-d-review .s-d-review__lead .s-d-review__mk { grid-area: mk; width: 7cqw; height: 7cqw; }
+  .s-d-review .s-d-review__lead .s-d-review__role { grid-area: role; justify-self: end; }
+  .s-d-review .s-d-review__lead .s-d-review__name { grid-area: name; margin: 0; }
+  .s-d-review .s-d-review__lead .s-d-review__lab { grid-area: lab; margin: 0; }
+  .s-d-review .s-d-review__lead .s-d-review__st { grid-area: st; justify-self: end; width: 34cqw; height: 1.45em; margin: 0; }
+  .s-d-review .s-d-review__lead .s-d-review__st::before { display: none; }
+  .s-d-review .s-d-review__lead .s-d-review__st > span { top: 0; left: auto; right: 0; }
+  .s-d-review .s-d-review__diff { left: 5cqw; top: 29cqw; width: 90cqw; border-radius: 3cqw; }
+  .s-d-review .s-d-review__head { gap: 1.8cqw; padding: 0 2.4cqw 0 3.2cqw; }
+  .s-d-review .s-d-review__pill { width: 24cqw; height: 5.4cqw; }
+  .s-d-review .s-d-review__code { padding: 2.2cqw 0 2.4cqw; }
+  .s-d-review .s-d-review__l { height: 2.05em; }
+  .s-d-review .s-d-review__pin { right: 2.4cqw; width: 4.4cqw; height: 4.4cqw; margin-top: -2.2cqw; }
+  .s-d-review .s-d-review__stamp { font-size: 6.4cqw; }
+  .s-d-review .s-d-review__rev { left: 5cqw; top: 80.5cqw; width: 43.5cqw; }
+  .s-d-review .s-d-review__rev + .s-d-review__rev { left: 51.5cqw; top: 80.5cqw; }
+  .s-d-review .s-d-review__pr { height: 8cqw; padding: 0 2.6cqw; gap: 1.6cqw; border-radius: 2.2cqw; }
+  .s-d-review .s-d-review__you { left: 45.5cqw; top: 124.5cqw; gap: 2.2cqw; }
+  .s-d-review .s-d-review__yn { width: 9cqw; height: 9cqw; }
+  .s-d-review .s-d-review__yn::after { width: 2.4cqw; height: 2.4cqw; margin: -1.2cqw 0 0 -1.2cqw; }
 }
 </style>
 <div class="s-d-review" aria-hidden="true">
   <div class="s-d-review__ground"></div>
+  <div class="s-d-review__bloom s-d-review__bloom--c"></div>
+  <div class="s-d-review__bloom s-d-review__bloom--g"></div>
   <div class="s-d-review__dots"></div>
 
   <div class="s-d-review__card s-d-review__lead">
     <div class="s-d-review__lit"></div>
-    <svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="claude"><path fill-rule="evenodd"/></svg>
-    <div class="s-d-review__role s-d-review__role--lead">Lead</div>
+    <div class="s-d-review__top"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="claude"><path fill-rule="evenodd"/></svg><span class="s-d-review__role s-d-review__role--lead">Lead</span></div>
     <div class="s-d-review__name">Opus 5.5</div>
-    <div class="s-d-review__lab">Anthropic<span class="s-d-review__does"> · writes it</span></div>
+    <div class="s-d-review__lab">Anthropic</div>
+    <div class="s-d-review__st">
+      <span data-k="work" data-on="1"><i class="s-d-review__work"></i>Writing</span>
+      <span data-k="wait"><i class="s-d-review__wait"></i>In review</span>
+      <span data-k="fix"><i class="s-d-review__work"></i>Fixing 2</span>
+      <span data-k="done"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>PR opened</span>
+    </div>
+  </div>
+
+  <div class="s-d-review__diff">
+    <div class="s-d-review__head">
+      <svg viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5.2h3.4"/></svg>
+      <code><span>src/refunds/</span>retry.ts</code>
+      <span class="s-d-review__plus">+2</span><span class="s-d-review__minus">−1</span>
+      <div class="s-d-review__pill">
+        <span data-k="w" data-on="1"><i></i>Writing</span>
+        <span data-k="r1"><i></i>Round 1</span>
+        <span data-k="f"><i></i>2 findings</span>
+        <span data-k="r2"><i></i>Round 2</span>
+        <span data-k="c"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Round 2</span>
+      </div>
+    </div>
+    <div class="s-d-review__code">
+      <div class="s-d-review__l"><span class="s-d-review__n">11</span><span class="s-d-review__g"> </span><span class="s-d-review__t"><span><span class="s-d-review__k">async function</span> <span class="s-d-review__f">retry</span>(job: <span class="s-d-review__y">Refund</span>) {</span></span></div>
+      <div class="s-d-review__l"><span class="s-d-review__n">12</span><span class="s-d-review__g"> </span><span class="s-d-review__t"><span>  <span class="s-d-review__k">const</span> res = <span class="s-d-review__k">await</span> psp.<span class="s-d-review__f">refund</span>(job)</span></span></div>
+      <div class="s-d-review__l"><span class="s-d-review__n">13</span><span class="s-d-review__g"> </span><span class="s-d-review__t"><span>  <span class="s-d-review__k">if</span> (res.status !== <span class="s-d-review__u">429</span>) <span class="s-d-review__k">return</span> <span class="s-d-review__f">done</span>(res)</span></span></div>
+      <div class="s-d-review__l" data-k="del"><span class="s-d-review__n"></span><span class="s-d-review__g">−</span><span class="s-d-review__t"><span>  return later(job, backoff(job))</span></span></div>
+      <div class="s-d-review__l" data-k="add"><span class="s-d-review__n">14</span><span class="s-d-review__g">+</span><span class="s-d-review__t"><span class="s-d-review__o">  <span class="s-d-review__k">const</span> wait = <span class="s-d-review__f">Number</span>(res.retryAfter) * <span class="s-d-review__u">1000</span></span><span class="s-d-review__w">  <span class="s-d-review__k">const</span> wait = <span class="s-d-review__f">retryAfter</span>(res) ?? <span class="s-d-review__f">backoff</span>(job)</span></span><span class="s-d-review__pin"><svg viewBox="0 0 24 24" data-mk="codex"><path fill-rule="evenodd"/></svg></span></div>
+      <div class="s-d-review__l" data-k="add"><span class="s-d-review__n">15</span><span class="s-d-review__g">+</span><span class="s-d-review__t"><span class="s-d-review__o">  <span class="s-d-review__k">return</span> <span class="s-d-review__f">later</span>(job, wait)</span><span class="s-d-review__w">  <span class="s-d-review__k">return</span> <span class="s-d-review__f">later</span>(job, Math.<span class="s-d-review__f">min</span>(wait, <span class="s-d-review__u">MAX_WAIT</span>))</span></span><span class="s-d-review__pin"><svg viewBox="0 0 24 24" data-mk="opencode"><path fill-rule="evenodd"/></svg></span></div>
+      <div class="s-d-review__l"><span class="s-d-review__n">16</span><span class="s-d-review__g"> </span><span class="s-d-review__t"><span>}</span></span></div>
+    </div>
+    <div class="s-d-review__stamp"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</div>
+  </div>
+
+  <div class="s-d-review__card s-d-review__rev">
+    <div class="s-d-review__lit"></div>
+    <div class="s-d-review__top"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="codex"><path fill-rule="evenodd"/></svg><span class="s-d-review__role">Reviewer</span></div>
+    <div class="s-d-review__name">GPT-6.1 Sol</div>
+    <div class="s-d-review__lab">OpenAI</div>
+    <div class="s-d-review__st">
+      <span data-k="wait" data-on="1"><i class="s-d-review__wait"></i>Waiting</span>
+      <span data-k="work"><i class="s-d-review__work"></i>Reviewing</span>
+      <span data-k="found"><i class="s-d-review__hot"></i>Header may be a date</span>
+      <span data-k="fixed"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Fixed</span>
+      <span data-k="clean"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span>
+    </div>
   </div>
   <div class="s-d-review__card s-d-review__rev">
     <div class="s-d-review__lit"></div>
-    <svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="codex"><path fill-rule="evenodd"/></svg>
-    <div class="s-d-review__role">Reviewer</div>
-    <div class="s-d-review__name">GPT-6.1 Sol</div>
-    <div class="s-d-review__lab">OpenAI<span class="s-d-review__does"> · checks it</span></div>
+    <div class="s-d-review__top"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="opencode"><path fill-rule="evenodd"/></svg><span class="s-d-review__role">Reviewer</span></div>
+    <div class="s-d-review__name">GLM-5.3</div>
+    <div class="s-d-review__lab">Z.ai <span class="s-d-review__ow">Open weights</span></div>
+    <div class="s-d-review__st">
+      <span data-k="wait" data-on="1"><i class="s-d-review__wait"></i>Waiting</span>
+      <span data-k="work"><i class="s-d-review__work"></i>Reviewing</span>
+      <span data-k="found"><i class="s-d-review__hot"></i>Wait has no cap</span>
+      <span data-k="fixed"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Fixed</span>
+      <span data-k="clean"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span>
+    </div>
   </div>
 
   <canvas class="s-d-review__fx"></canvas>
 
-  <div class="s-d-review__round" data-r="1"><i></i><span><span>Round 1</span><span class="s-d-review__x s-d-review__x--r1">Round 1</span><span class="s-d-review__x s-d-review__x--r2">Round 2</span></span></div>
-  <div class="s-d-review__found">
-    <div class="s-d-review__ln" data-st="off">
-      <span class="s-d-review__ic"><i></i><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg></span>
-      <span class="s-d-review__lb"><span class="s-d-review__file">router.ts:21</span><span class="s-d-review__say"><span>limiter runs after the lookup</span><span class="s-d-review__x">Fixed</span></span></span>
-    </div>
-    <div class="s-d-review__ln" data-st="off">
-      <span class="s-d-review__ic"><i></i><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg></span>
-      <span class="s-d-review__lb"><span class="s-d-review__file">limit.test.ts:52</span><span class="s-d-review__say"><span>test waits on the clock</span><span class="s-d-review__x">Fixed</span></span></span>
-    </div>
-  </div>
-  <div class="s-d-review__clean" data-st="off"><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</div>
-
-  <div class="s-d-review__chip s-d-review__change"><code><span>src/refunds/</span>limit.ts</code><b>+12</b><s>−4</s></div>
-  <div class="s-d-review__chip s-d-review__pr"><svg viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="12.4" r="1.7"/><path d="M4.5 5.3v5.4M11.5 10.7V6.6c0-1.2-.9-2.1-2.1-2.1H7.6"/><path d="M8.9 3.2L7.6 4.5l1.3 1.3"/></svg><strong>PR #1191</strong><span class="s-d-review__sep"></span><em><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>checks passed</em></div>
-
-  <div class="s-d-review__you" data-st="idle"><i class="s-d-review__yn"></i><div class="s-d-review__yl"><b>You</b><span><span class="s-d-review__x">Ready to accept</span></span></div></div>
+  <div class="s-d-review__pr"><svg viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="12.4" r="1.7"/><path d="M4.5 5.3v5.4M11.5 10.7V6.6c0-1.2-.9-2.1-2.1-2.1H7.6"/><path d="M8.9 3.2L7.6 4.5l1.3 1.3"/></svg><strong>#1191</strong><span>Honour Retry-After</span><span class="s-d-review__sep"></span><em><svg class="s-d-review__tick" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Checks passed</em></div>
+  <div class="s-d-review__you" data-st="idle"><i class="s-d-review__yn"></i><div class="s-d-review__yl"><b>You</b><span>Ready to accept</span></div></div>
 
   <div class="s-d-review__grain"></div>
   <div class="s-d-review__vig"></div>
@@ -353,38 +516,35 @@
   const MARKS = {
     claude: 'M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z',
     codex: 'M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z',
+    opencode: 'M16 6H8v12h8V6zm4 16H4V2h16v20z',
   }
   root.querySelectorAll('svg[data-mk]').forEach((s) => s.firstElementChild.setAttribute('d', MARKS[s.dataset.mk]))
 
-  // Tone: dark by default, light when an ancestor says so. Read once.
-  const tone = root.closest('[data-tone]')
-  const LIGHT = !!tone && tone.dataset.tone === 'light'
-  const ADD = LIGHT ? 'source-over' : 'lighter'
-  const GA = LIGHT ? 0.6 : 1
-  const PAL = LIGHT
-    ? {
-        dormant: 'rgba(20,20,28,0.12)', port: 'rgba(20,20,28,0.3)', lit: 'rgb(43,59,255)', litGlow: 0.07,
-        beamTail: [122, 63, 240], beamMid: [43, 59, 255], beamHead: [92, 108, 255],
-        cob: [43, 59, 255], vio: [122, 63, 240], hot: [255, 255, 255], green: [46, 140, 70],
-      }
-    : {
-        dormant: 'rgba(255,242,228,0.08)', port: 'rgba(255,242,228,0.24)', lit: 'rgb(132,142,255)', litGlow: 0.13,
-        beamTail: [128, 76, 244], beamMid: [78, 96, 255], beamHead: [226, 230, 255],
-        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255], green: [98, 196, 126],
-      }
+  const PAL = {
+    dormant: 'rgba(255,242,228,0.08)', port: 'rgba(255,242,228,0.24)', lit: 'rgb(132,142,255)', litWarm: 'rgb(227,156,74)',
+    cool: [[128, 76, 244], [78, 96, 255], [226, 230, 255]],
+    warm: [[170, 84, 40], [227, 156, 74], [255, 232, 200]],
+    cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255], green: [98, 196, 126], amber: [227, 156, 74], cream: [255, 236, 210],
+  }
 
   const $ = (s) => root.querySelector(s)
+  const $$ = (s) => Array.from(root.querySelectorAll(s))
   const el = {
     lead: $('.s-d-review__lead'),
-    rev: $('.s-d-review__rev'),
-    round: $('.s-d-review__round'),
-    lines: Array.from(root.querySelectorAll('.s-d-review__ln')),
-    clean: $('.s-d-review__clean'),
-    change: $('.s-d-review__change'),
+    revs: $$('.s-d-review__rev'),
+    diff: $('.s-d-review__diff'),
+    code: $('.s-d-review__code'),
+    pill: $('.s-d-review__pill'),
+    lines: $$('.s-d-review__l'),
+    stamp: $('.s-d-review__stamp'),
     pr: $('.s-d-review__pr'),
     you: $('.s-d-review__you'),
     yn: $('.s-d-review__yn'),
   }
+  const DEL = el.lines[3], FLAGGED = [el.lines[4], el.lines[5]]
+  const typed = (sel) => FLAGGED.map((ln) => ln.querySelector(sel))
+  const OLD = typed('.s-d-review__o'), NEW = typed('.s-d-review__w')
+  const sts = { lead: el.lead.querySelector('.s-d-review__st'), revs: el.revs.map((r) => r.querySelector('.s-d-review__st')) }
   const cv = $('.s-d-review__fx')
   const ctx = cv.getContext('2d')
 
@@ -416,71 +576,97 @@
     x.fillRect(0, 0, 128, 128)
     return c
   }
-  const SP_COB = sprite(PAL.cob, 0.18)
-  const SP_VIO = sprite(PAL.vio, 0.16)
-  const SP_HOT = sprite(PAL.hot, 0.12)
-  const SP_GRN = sprite(PAL.green, 0.16)
-
-  const NB = 28
-  const BEAM_COL = []
-  const BEAM_A = new Float32Array(NB)
-  const mix = (a, b, f) => a.map((v, i) => Math.round(v + (b[i] - v) * f))
-  for (let i = 0; i < NB; i++) {
-    const t = (i + 0.5) / NB
-    const c = t < 0.62 ? mix(PAL.beamTail, PAL.beamMid, t / 0.62) : mix(PAL.beamMid, PAL.beamHead, (t - 0.62) / 0.38)
-    BEAM_COL.push(`rgb(${c[0]},${c[1]},${c[2]})`)
-    BEAM_A[i] = Math.pow(t, 1.7)
+  const SP = {
+    cob: sprite(PAL.cob, 0.18), vio: sprite(PAL.vio, 0.16), hot: sprite(PAL.hot, 0.12),
+    green: sprite(PAL.green, 0.16), amber: sprite(PAL.amber, 0.16), cream: sprite(PAL.cream, 0.12),
   }
 
-  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
-  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
-  const win = (t, a, b, fi, fo) => clamp((t - a) / fi) * clamp((b - t) / fo)
+  const NB = 28
+  const mix = (a, b, f) => a.map((v, i) => Math.round(v + (b[i] - v) * f))
+  function beamCols([tail, mid, head]) {
+    const out = []
+    for (let i = 0; i < NB; i++) {
+      const t = (i + 0.5) / NB
+      const c = t < 0.62 ? mix(tail, mid, t / 0.62) : mix(mid, head, (t - 0.62) / 0.38)
+      out.push(`rgb(${c[0]},${c[1]},${c[2]})`)
+    }
+    return out
+  }
+  const COOL = { cols: beamCols(PAL.cool), tail: SP.vio, body: SP.cob, head: SP.hot, lit: PAL.lit }
+  const WARM = { cols: beamCols(PAL.warm), tail: SP.amber, body: SP.amber, head: SP.cream, lit: PAL.litWarm }
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) BEAM_A[i] = Math.pow((i + 0.5) / NB, 1.7)
 
-  // The story, in seconds. One clear motion at a time, with room between.
-  const LOOP = 19
-  const WRITE = [0.5, 1.7]                 // the lead writes the change
-  const SEND = [[1.6, 3.3], [9.4, 11.1]]   // the change travels to the reviewer, round 1 and 2
-  const REVIEW = [[3.2, 5.0], [11.0, 12.3]]
-  const BACK = [[5.0, 6.5], [5.75, 7.25]]  // the two findings come back
-  const FIX = [7.5, 9.0]                   // the lead fixes them
-  const TICK = [8.0, 8.65]
-  const ROUND2 = 9.15
-  const CLEAN = [12.3, 13.8]               // Clean comes back
-  const PR = [14.2, 15.6]                  // the pull request goes out to you
-  const RESET = 18.2
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const outCubic = (t) => 1 - Math.pow(1 - t, 3)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const win = (t, a, b, fi, fo) => clamp((t - a) / fi) * clamp((b - t) / fo)
+  const pulse = (t, at, w) => Math.exp(-Math.pow((t - at) / w, 2))
+
+  // The story, in seconds.
+  const LOOP = 16.5
+  const WRITE = [0.4, 2.3]                       // the lead writes the change
+  const LEAD_IN = [[0.45, 0.95], [5.6, 6.05], [6.5, 6.95]] // light from the lead to the change
+  const TYPE = [1.0, 1.25, 1.85]                 // the removed line, then each added one
+  const TYPE_DUR = 0.55
+  const REV1 = [2.45, 4.3]                       // round 1
+  const SCAN = [[2.8, 4.0], [8.3, 9.5]]
+  const FLAG = [[3.2, 3.62], [3.55, 3.97]]       // each reviewer's finding, out to its line
+  const FINDINGS = 4.3
+  const FIX = [5.5, 7.7]                         // the lead fixes both
+  const FIXAT = [6.05, 6.95]
+  const FIX_DUR = 0.7, FIX_DELAY = 0.2
+  const REV2 = [8.0, 9.9]                        // round 2
+  const CLEAN = 9.9
+  const PR = [10.9, 12.1]                        // the pull request goes out to you
+  const RESET = 15.6
 
   // Geometry (CSS px, relative to the root), measured on resize.
-  let W = 0, H = 0, U = 1, dpr = 1
-  const L = {}, R = {}
+  let W = 0, H = 0, U = 1, dpr = 1, tall = false
+  const D = {}, C = {}, L = {}, RV = [{}, {}]
+  const lines = [{}, {}, {}] // the two flagged lines, then the removed one
   const you = { x: 0, y: 0, r: 0 }
   const routes = {}
-  let chW = 0, chH = 0, prW = 0, prH = 0
+  let prW = 0, prH = 0
   const M = 140
 
   function rectOf(node, rb, o) {
     const b = node.getBoundingClientRect()
     o.x = b.left - rb.left; o.y = b.top - rb.top; o.w = b.width; o.h = b.height
+    o.cx = o.x + o.w / 2; o.cy = o.y + o.h / 2
     return o
   }
   function edge(o, rad) {
     o.bx = o.x + 0.5; o.by = o.y + 0.5; o.bw = o.w - 1; o.bh = o.h - 1; o.br = Math.max(1, rad - 0.5)
     o.per = 2 * (o.bw - 2 * o.br) + 2 * (o.bh - 2 * o.br) + 2 * Math.PI * o.br
   }
-  function cubic(x0, y0, x1, y1, x2, y2, x3, y3) {
-    const xs = [], ys = [], Ls = [0]
-    for (let i = 0; i <= 96; i++) {
-      const t = i / 96, m = 1 - t
-      xs.push(m * m * m * x0 + 3 * m * m * t * x1 + 3 * m * t * t * x2 + t * t * t * x3)
-      ys.push(m * m * m * y0 + 3 * m * m * t * y1 + 3 * m * t * t * y2 + t * t * t * y3)
-      if (i) Ls.push(Ls[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]))
+  // A curve leaving a along one axis and arriving at b along the same axis.
+  function curve(ax, ay, bx, by, vertical) {
+    const xs = [], ys = []
+    const dx = bx - ax, dy = by - ay
+    const x1 = vertical ? ax : ax + dx * 0.5, y1 = vertical ? ay + dy * 0.5 : ay
+    const x2 = vertical ? bx : bx - dx * 0.5, y2 = vertical ? by - dy * 0.5 : by
+    for (let i = 0; i <= 64; i++) {
+      const t = i / 64, m = 1 - t
+      xs.push(m * m * m * ax + 3 * m * m * t * x1 + 3 * m * t * t * x2 + t * t * t * bx)
+      ys.push(m * m * m * ay + 3 * m * m * t * y1 + 3 * m * t * t * y2 + t * t * t * by)
     }
-    return resample(xs, ys, Ls)
+    return { xs, ys }
   }
-  function line(x0, y0, x1, y1) {
-    return resample([x0, x1], [y0, y1], [0, Math.hypot(x1 - x0, y1 - y0)])
-  }
-  function resample(xs, ys, Ls) {
+  const seg = (ax, ay, bx, by) => ({ xs: [ax, bx], ys: [ay, by] })
+  // Joins pieces into one evenly sampled route; `edge` is where the first piece ends.
+  function route(...parts) {
+    const xs = [], ys = [], Ls = []
+    let edgeLen = 0
+    parts.forEach((p, k) => {
+      for (let i = k ? 1 : 0; i < p.xs.length; i++) {
+        const n = xs.length
+        xs.push(p.xs[i]); ys.push(p.ys[i])
+        Ls.push(n ? Ls[n - 1] + Math.hypot(xs[n] - xs[n - 1], ys[n] - ys[n - 1]) : 0)
+      }
+      if (k === 0) edgeLen = Ls[Ls.length - 1]
+    })
     const len = Ls[Ls.length - 1]
     const rx = new Float32Array(M), ry = new Float32Array(M)
     let s = 0
@@ -491,39 +677,55 @@
       rx[i] = xs[s] + (xs[s + 1] - xs[s]) * f
       ry[i] = ys[s] + (ys[s + 1] - ys[s]) * f
     }
-    return { xs: rx, ys: ry, len }
+    return { xs: rx, ys: ry, len, edge: edgeLen }
   }
 
   function measure() {
     const rb = root.getBoundingClientRect()
     W = rb.width; H = rb.height; U = W / 100
     if (!W || !H) return false
+    tall = W < 560
     dpr = Math.min(2, window.devicePixelRatio || 1)
     cv.width = Math.round(W * dpr)
     cv.height = Math.round(H * dpr)
     const rad = parseFloat(getComputedStyle(el.lead).borderTopLeftRadius) || 12
+    rectOf(el.diff, rb, D)
+    rectOf(el.code, rb, C)
     rectOf(el.lead, rb, L); edge(L, rad)
-    rectOf(el.rev, rb, R); edge(R, rad)
+    el.revs.forEach((r, i) => { rectOf(r, rb, RV[i]); edge(RV[i], rad) })
+    ;[FLAGGED[0], FLAGGED[1], DEL].forEach((ln, i) => {
+      const o = lines[i]
+      rectOf(ln, rb, o)
+      const t = ln.querySelector('.s-d-review__t').getBoundingClientRect()
+      o.tx = t.left - rb.left
+      const old = ln.querySelector('.s-d-review__o, .s-d-review__t > span')
+      const neu = ln.querySelector('.s-d-review__w')
+      o.wOld = old.getBoundingClientRect().width
+      o.wNew = neu ? neu.getBoundingClientRect().width : o.wOld
+      const pin = ln.querySelector('.s-d-review__pin')
+      if (pin) {
+        const p = pin.getBoundingClientRect()
+        o.px = p.left - rb.left + p.width / 2; o.py = p.top - rb.top + p.height / 2; o.pr = p.width / 2
+      }
+    })
     const yb = el.yn.getBoundingClientRect()
     you.x = yb.left - rb.left + yb.width / 2; you.y = yb.top - rb.top + yb.height / 2; you.r = yb.width / 2
-    chW = el.change.offsetWidth; chH = el.change.offsetHeight
     prW = el.pr.offsetWidth; prH = el.pr.offsetHeight
-    const x0 = L.x + L.w, x1 = R.x, span = x1 - x0
-    const yTop = L.y + L.h * 0.3, yBot = L.y + L.h * 0.7
-    const lift = U * 15
-    routes.top = cubic(x0, yTop, x0 + span * 0.22, yTop - lift, x1 - span * 0.22, yTop - lift, x1, yTop)
-    routes.bot = cubic(x1, yBot, x1 - span * 0.22, yBot + lift, x0 + span * 0.22, yBot + lift, x0, yBot)
-    const mid = routes.bot
-    const mx = mid.xs[(M - 1) >> 1], my = mid.ys[(M - 1) >> 1]
-    routes.mid = { x: mx, y: my }
-    routes.stem = line(mx, my, you.x, you.y - you.r)
-    // The change chip only shows on the open stretch between the cards.
-    const t = routes.top
-    let a = 0, b = M - 1
-    while (a < M - 1 && t.xs[a] - chW / 2 < x0 + U * 1.4) a++
-    while (b > 0 && t.xs[b] + chW / 2 > x1 - U * 1.4) b--
-    routes.chipA = (a / (M - 1)) * t.len
-    routes.chipB = (b / (M - 1)) * t.len
+    const A = lines[0], B = lines[1]
+    if (!tall) {
+      routes.lead = route(curve(L.x + L.w, L.cy, D.x, (A.cy + B.cy) / 2, false))
+      routes.rev = RV.map((r, i) => {
+        const ln = lines[i]
+        return route(curve(r.x, r.cy, D.x + D.w, ln.cy, false), seg(D.x + D.w, ln.cy, ln.px + ln.pr, ln.cy))
+      })
+    } else {
+      routes.lead = route(curve(L.cx, L.y + L.h, L.cx, D.y, true))
+      routes.rev = RV.map((r, i) => {
+        const ln = lines[i]
+        return route(curve(r.cx, r.y, ln.px, D.y + D.h, true), seg(ln.px, D.y + D.h, ln.px, ln.py + ln.pr))
+      })
+    }
+    routes.stem = route(seg(D.cx, D.y + D.h, you.x, you.y - you.r))
     return true
   }
 
@@ -564,18 +766,8 @@
     ctx.globalAlpha = a > 1 ? 1 : a
     ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
   }
-  function bead(x, y, r, a) {
-    if (a <= 0.003) return
-    if (!LIGHT) { glow(SP_HOT, x, y, r, a); return }
-    glow(SP_COB, x, y, r * 2.2, a * 0.22)
-    ctx.globalAlpha = a > 1 ? 1 : a
-    ctx.fillStyle = '#2b3bff'
-    ctx.beginPath(); ctx.arc(x, y, Math.max(1.6, r * 0.42), 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath(); ctx.arc(x, y, Math.max(0.7, r * 0.18), 0, Math.PI * 2); ctx.fill()
-  }
-  // A comet of light along a route (pos = at, clipped at the start) or a card border (pos = rrPoint).
-  function comet(pos, obj, s, len, a, clipStart) {
+  // A comet of light along a route (pos = at, clipped at the start) or a card's border (pos = rrPoint).
+  function comet(pos, obj, s, len, a, clipStart, pal) {
     if (a <= 0.004 || len < 1) return
     const seg = len / NB
     ctx.lineWidth = 1.6
@@ -588,34 +780,33 @@
       const ax = PT[0], ay = PT[1]
       pos(obj, s - len + (i + 1) * seg + 0.35)
       ctx.globalAlpha = a * BEAM_A[i]
-      ctx.strokeStyle = BEAM_COL[i]
+      ctx.strokeStyle = pal.cols[i]
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(PT[0], PT[1]); ctx.stroke()
     }
-    ctx.globalCompositeOperation = ADD
+    ctx.globalCompositeOperation = 'lighter'
     for (let i = 0; i < 9; i++) {
       const t = 0.25 + (i / 8) * 0.75
       const sp = s - len * (1 - t)
       if (clipStart && sp < 0) continue
       pos(obj, sp)
-      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 2.1, a * 0.2 * t * t * GA)
+      glow(t < 0.6 ? pal.tail : pal.body, PT[0], PT[1], U * 2.1, a * 0.2 * t * t)
     }
     pos(obj, s)
-    const hx = PT[0], hy = PT[1]
-    glow(SP_VIO, hx, hy, U * 5.5, a * 0.15 * GA)
-    glow(SP_COB, hx, hy, U * 3.2, a * 0.42 * GA)
-    bead(hx, hy, U * 0.95, a)
+    glow(pal.tail, PT[0], PT[1], U * 5.5, a * 0.15)
+    glow(pal.body, PT[0], PT[1], U * 3.2, a * 0.42)
+    glow(pal.head, PT[0], PT[1], U * 0.95, a)
     ctx.globalCompositeOperation = 'source-over'
   }
-  function lit(rt, s0, s1, a) {
+  function lit(rt, s0, s1, a, color) {
     if (a <= 0.004 || s1 - s0 < 0.5) return
     const i0 = Math.ceil((s0 / rt.len) * (M - 1)), i1 = Math.floor((s1 / rt.len) * (M - 1))
     ctx.beginPath()
     at(rt, s0); ctx.moveTo(PT[0], PT[1])
     for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
     at(rt, s1); ctx.lineTo(PT[0], PT[1])
-    ctx.strokeStyle = PAL.lit
-    ctx.globalCompositeOperation = ADD
-    ctx.globalAlpha = a * PAL.litGlow
+    ctx.strokeStyle = color
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.globalAlpha = a * 0.13
     ctx.lineWidth = Math.max(3, U * 0.6)
     ctx.stroke()
     ctx.globalCompositeOperation = 'source-over'
@@ -623,30 +814,67 @@
     ctx.lineWidth = 1.2
     ctx.stroke()
   }
-  function dormant(rt) {
+  function dormant(rt, upTo) {
+    const n = Math.max(1, Math.round(((upTo == null ? rt.len : upTo) / rt.len) * (M - 1)))
     ctx.beginPath()
     ctx.moveTo(rt.xs[0], rt.ys[0])
-    for (let i = 1; i < M; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
+    for (let i = 1; i <= n; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
     ctx.stroke()
   }
   function port(x, y) { ctx.beginPath(); ctx.arc(x, y, Math.max(1.3, U * 0.22), 0, Math.PI * 2); ctx.fill() }
-  function flash(x, y, f, green) {
+  function flash(x, y, f, img, r) {
     if (f <= 0.01) return
-    ctx.globalCompositeOperation = ADD
-    glow(green ? SP_GRN : SP_COB, x, y, U * 4.5, f * 0.5 * GA)
-    bead(x, y, U * 1.2, f)
+    ctx.globalCompositeOperation = 'lighter'
+    glow(img, x, y, (r || 4.5) * U, f * 0.55)
+    glow(SP.hot, x, y, U * 1.1, f * 0.9)
     ctx.globalCompositeOperation = 'source-over'
   }
   // A packet of light from t0 to t1 along a route, leaving the route softly lit behind it.
-  function travel(rt, T, t0, t1, keep) {
-    if (T < t0 || T > t1 + 1.6) return -1
+  function travel(rt, T, t0, t1, pal) {
+    if (T < t0 || T > t1 + 1.4) return
     const p = clamp((T - t0) / (t1 - t0))
     const s = iosine(p) * rt.len
-    const k = keep * (1 - clamp((T - t1) / 1.2))
-    lit(rt, 0, s, 0.5 * k)
-    if (p < 1) comet(at, rt, s, Math.min(rt.len * 0.4, U * 16), clamp((T - t0) / 0.15), true)
-    else { at(rt, rt.len); flash(PT[0], PT[1], Math.exp(-Math.pow((T - t1) / 0.2, 2)), false) }
-    return s
+    lit(rt, 0, s, 0.5 * (1 - clamp((T - t1) / 1.2)), pal.lit)
+    if (p < 1) comet(at, rt, s, Math.min(rt.len * 0.45, U * 14), clamp((T - t0) / 0.12), true, pal)
+  }
+  // The light that reads the change, top to bottom.
+  function scan(T, s0, s1) {
+    const a = win(T, s0 - 0.1, s1 + 0.15, 0.25, 0.3)
+    if (a <= 0.004) return
+    const y = C.y + C.h * 0.04 + C.h * 0.92 * io(clamp((T - s0) / (s1 - s0)))
+    const x0 = D.x + 1, w = D.w - 2
+    ctx.globalCompositeOperation = 'lighter'
+    const tr = ctx.createLinearGradient(0, y - U * 7, 0, y)
+    tr.addColorStop(0, 'rgba(70,86,255,0)')
+    tr.addColorStop(1, `rgba(70,86,255,${(0.2 * a).toFixed(3)})`)
+    ctx.globalAlpha = 1
+    ctx.fillStyle = tr
+    ctx.fillRect(x0, Math.max(C.y, y - U * 7), w, Math.min(U * 7, y - C.y))
+    ctx.globalAlpha = 0.3 * a
+    ctx.drawImage(SP.cob, x0 + w * 0.04, y - U * 2.2, w * 0.92, U * 4.4)
+    const ln = ctx.createLinearGradient(x0, 0, x0 + w, 0)
+    ln.addColorStop(0, 'rgba(190,196,255,0)')
+    ln.addColorStop(0.14, `rgba(214,218,255,${a.toFixed(3)})`)
+    ln.addColorStop(0.86, `rgba(214,218,255,${a.toFixed(3)})`)
+    ln.addColorStop(1, 'rgba(190,196,255,0)')
+    ctx.fillStyle = ln
+    ctx.fillRect(x0, y - 1, w, 2)
+    ctx.globalAlpha = 0.5 * a
+    ctx.drawImage(SP.vio, x0 + w * 0.2, y - U * 1.2, w * 0.6, U * 2.4)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  // A cursor of light along a line as it's typed.
+  function cursor(T, ln, t0, dur, width) {
+    if (T < t0 || T > t0 + dur + 0.25) return
+    const p = clamp((T - t0) / dur)
+    const a = clamp((T - t0) / 0.08) * (1 - clamp((T - t0 - dur) / 0.25))
+    const x = ln.tx + width * p
+    ctx.globalCompositeOperation = 'lighter'
+    glow(SP.cob, x, ln.cy, U * 3, 0.4 * a)
+    ctx.globalAlpha = 0.9 * a
+    ctx.fillStyle = 'rgb(214,218,255)'
+    ctx.fillRect(x, ln.cy - ln.h * 0.28, Math.max(1.2, U * 0.14), ln.h * 0.56)
+    ctx.globalCompositeOperation = 'source-over'
   }
 
   // DOM writes only when something changes.
@@ -656,48 +884,63 @@
     if (!k) { k = {}; shown.set(node, k) }
     if (k[key] === val) return
     k[key] = val
-    node.dataset[key] = val
+    if (val == null) delete node.dataset[key]
+    else node.dataset[key] = val
   }
-  const chipShown = [{ x: -1, y: -1, o: -1 }, { x: -1, y: -1, o: -1 }]
-  function place(node, i, x, y, o) {
-    const c = chipShown[i]
-    if (Math.abs(c.x - x) < 0.05 && Math.abs(c.y - y) < 0.05 && Math.abs(c.o - o) < 0.004) return
-    node.style.transform = `translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0)`
-    node.style.opacity = o.toFixed(3)
-    c.x = x; c.y = y; c.o = o
+  // Reveals a typed line up to f, a character's worth at a time.
+  const cut = new Map()
+  function reveal(node, f, steps) {
+    const v = (100 - (Math.floor(f * steps) / steps) * 100).toFixed(2)
+    if (cut.get(node) === v) return
+    cut.set(node, v)
+    node.style.clipPath = `inset(0 ${v}% 0 0)`
   }
-  // When each finding's light passes the middle of the lower path, its line rises into the loop.
-  const midTime = (t0, t1) => t0 + (t1 - t0) * 0.5
+  function say(box, k) {
+    for (const s of box.children) put(s, 'on', s.dataset.k === k ? '1' : '0')
+  }
+  const prShown = { x: -1, y: -1, o: -1 }
+  function place(x, y, o) {
+    if (Math.abs(prShown.x - x) < 0.05 && Math.abs(prShown.y - y) < 0.05 && Math.abs(prShown.o - o) < 0.004) return
+    el.pr.style.transform = `translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0)`
+    el.pr.style.opacity = o.toFixed(3)
+    prShown.x = x; prShown.y = y; prShown.o = o
+  }
 
   function render(T) {
     if (!W) return
     const reset = T >= RESET
-    const r2 = !reset && T >= ROUND2
-    put(el.round, 'r', r2 ? '2' : '1')
-    put(el.lead, 'on', !reset && (win(T, WRITE[0], WRITE[1], 0.01, 0.01) > 0 || win(T, FIX[0], FIX[1], 0.01, 0.01) > 0) ? '1' : '0')
-    put(el.rev, 'on', !reset && (win(T, REVIEW[0][0], REVIEW[0][1], 0.01, 0.01) > 0 || win(T, REVIEW[1][0], REVIEW[1][1], 0.01, 0.01) > 0) ? '1' : '0')
-    for (let i = 0; i < 2; i++) {
-      put(el.lines[i], 'st', reset || T < midTime(BACK[i][0], BACK[i][1]) ? 'off' : T < TICK[i] ? 'on' : 'fixed')
-    }
-    put(el.clean, 'st', !reset && T >= midTime(CLEAN[0], CLEAN[1]) ? 'on' : 'off')
-    put(el.you, 'st', !reset && T >= PR[1] ? 'ready' : 'idle')
+    const blank = T >= RESET + 0.55
+    put(root, 'reset', reset ? '1' : '0')
+    put(root, 'ph', T >= CLEAN && !reset ? 'clean' : 'work')
 
-    // The change chip rides the upper path, on the open stretch between the cards.
-    let chipO = 0, chipS = 0
-    for (const [t0, t1] of SEND) {
-      if (T < t0 || T > t1) continue
-      chipS = iosine(clamp((T - t0) / (t1 - t0))) * routes.top.len
-      const a = routes.chipA, b = routes.chipB, m = (b - a) * 0.18
-      chipO = clamp((chipS - a) / m) * clamp((b - chipS) / m)
-    }
-    if (chipO > 0) { at(routes.top, chipS); place(el.change, 0, PT[0] - chW / 2, PT[1] - chH / 2, chipO) }
-    else place(el.change, 0, chipShown[0].x < 0 ? 0 : chipShown[0].x, chipShown[0].y < 0 ? 0 : chipShown[0].y, 0)
-    // The pull request drops from the loop to you, and stays until the reset.
-    const st = routes.stem
+    // Who is doing what.
+    say(sts.lead, T < WRITE[1] || blank ? 'work' : T < FIX[0] ? 'wait' : T < FIX[1] ? 'fix' : T < PR[0] ? 'wait' : 'done')
+    sts.revs.forEach((box, i) => {
+      say(box, blank || T < REV1[0] ? 'wait' : T < FLAG[i][1] ? 'work' : T < FIXAT[i] + FIX_DELAY + FIX_DUR ? 'found' : T < REV2[0] ? 'fixed' : T < CLEAN ? 'work' : 'clean')
+    })
+    say(el.pill, blank || T < REV1[0] ? 'w' : T < FINDINGS ? 'r1' : T < REV2[0] ? 'f' : T < CLEAN ? 'r2' : 'c')
+    put(el.lead, 'on', !reset && (win(T, WRITE[0], WRITE[1], 0.01, 0.01) > 0 || win(T, FIX[0], FIX[1], 0.01, 0.01) > 0) ? '1' : '0')
+    el.revs.forEach((r, i) => put(r, 'on', !reset && (win(T, REV1[0], FLAG[i][1] + 0.3, 0.01, 0.01) > 0 || win(T, REV2[0], CLEAN + 0.3, 0.01, 0.01) > 0) ? '1' : '0'))
+
+    // The change: typed, flagged, rewritten.
+    put(DEL, 's', blank || T < TYPE[0] ? null : 'on')
+    FLAGGED.forEach((ln, i) => {
+      put(ln, 's', blank || T < TYPE[i + 1] ? null : T < FLAG[i][1] ? 'on' : T < FIXAT[i] ? 'flag' : 'fix')
+    })
+    FLAGGED.forEach((_, i) => {
+      reveal(OLD[i], blank ? 0 : clamp((T - TYPE[i + 1]) / TYPE_DUR), 24)
+      reveal(NEW[i], blank ? 0 : clamp((T - FIXAT[i] - FIX_DELAY) / FIX_DUR), 28)
+    })
+    put(el.diff, 'done', T >= CLEAN + 0.15 && !reset ? '1' : '0')
+    put(el.stamp, 'on', T >= CLEAN && !reset ? '1' : '0')
+    put(el.you, 'st', T >= PR[1] && !reset ? 'ready' : 'idle')
+
+    // The pull request drops from the change to you, and stays until the reset.
     const pp = io(clamp((T - PR[0]) / (PR[1] - PR[0])))
-    const prTop0 = routes.mid.y - prH * 0.15, prTop1 = you.y - you.r - U * 1.2 - prH
-    const prO = T < PR[0] ? 0 : reset ? 1 - clamp((T - RESET) / 0.5) : clamp((T - PR[0]) / 0.3)
-    place(el.pr, 1, routes.mid.x - prW / 2, prTop0 + (prTop1 - prTop0) * pp, prO)
+    const prTop1 = you.y - you.r - U * (tall ? 2.6 : 1.4) - prH
+    const prTop0 = tall ? prTop1 - U * 5 : D.y + D.h + U * 0.6
+    const prO = T < PR[0] ? 0 : reset ? 1 - clamp((T - RESET) / 0.45) : clamp((T - PR[0]) / 0.3)
+    place(D.cx - prW / 2, prTop0 + (prTop1 - prTop0) * pp, prO)
 
     // Light.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -706,37 +949,77 @@
     ctx.globalAlpha = 1
     ctx.lineWidth = 1
     ctx.strokeStyle = PAL.dormant
-    dormant(routes.top); dormant(routes.bot); dormant(st)
+    dormant(routes.lead)
+    routes.rev.forEach((rt) => dormant(rt, rt.edge))
+    dormant(routes.stem)
     ctx.fillStyle = PAL.port
-    port(routes.top.xs[0], routes.top.ys[0]); port(routes.top.xs[M - 1], routes.top.ys[M - 1])
-    port(routes.bot.xs[0], routes.bot.ys[0]); port(routes.bot.xs[M - 1], routes.bot.ys[M - 1])
-    port(routes.mid.x, routes.mid.y)
+    const ends = [routes.lead, routes.stem, ...routes.rev]
+    for (const rt of ends) port(rt.xs[0], rt.ys[0])
+    port(routes.lead.xs[M - 1], routes.lead.ys[M - 1])
+    port(routes.stem.xs[M - 1], routes.stem.ys[M - 1])
+    routes.rev.forEach((rt) => { at(rt, rt.edge); port(PT[0], PT[1]) })
 
     if (!reset) {
-      // Card beams: the lead while it writes and fixes, the reviewer while it reviews.
-      const beam = (o, a, t0) => { if (a > 0.004) comet(rrPoint, o, (o.per / 2.4) * (T - t0), Math.min(o.per * 0.3, U * 18), a, false) }
+      // Card beams: the lead while it writes and fixes, the reviewers while they review.
+      const beam = (o, a, t0) => { if (a > 0.004) comet(rrPoint, o, (o.per / 2.4) * (T - t0), Math.min(o.per * 0.3, U * 16), a, false, COOL) }
       beam(L, win(T, WRITE[0], WRITE[1], 0.3, 0.35), WRITE[0])
       beam(L, win(T, FIX[0], FIX[1], 0.3, 0.4), FIX[0])
-      beam(R, win(T, REVIEW[0][0], REVIEW[0][1], 0.3, 0.35), REVIEW[0][0])
-      beam(R, win(T, REVIEW[1][0], REVIEW[1][1], 0.3, 0.35), REVIEW[1][0])
-      // The change goes out along the top; what the reviewer found comes back along the bottom.
-      for (const [t0, t1] of SEND) travel(routes.top, T, t0, t1, 1)
-      for (const [t0, t1] of BACK) {
-        travel(routes.bot, T, t0, t1, 1)
-        const f = Math.exp(-Math.pow((T - midTime(t0, t1)) / 0.16, 2))
-        flash(routes.mid.x, routes.mid.y, f * 0.9, false)
+      RV.forEach((r, i) => {
+        beam(r, win(T, REV1[0], FLAG[i][1], 0.3, 0.3), REV1[0] + i * 0.4)
+        beam(r, win(T, REV2[0], CLEAN, 0.3, 0.3), REV2[0] + i * 0.4)
+      })
+      // The lead's light into the change, then each line typed under a cursor.
+      for (const [t0, t1] of LEAD_IN) {
+        travel(routes.lead, T, t0, t1, COOL)
+        at(routes.lead, routes.lead.len)
+        flash(PT[0], PT[1], pulse(T, t1, 0.18), SP.cob)
       }
-      travel(routes.bot, T, CLEAN[0], CLEAN[1], 1)
-      flash(routes.mid.x, routes.mid.y, Math.exp(-Math.pow((T - midTime(CLEAN[0], CLEAN[1])) / 0.2, 2)), true)
+      cursor(T, lines[2], TYPE[0], 0.3, lines[2].wOld)
+      cursor(T, lines[0], TYPE[1], TYPE_DUR, lines[0].wOld)
+      cursor(T, lines[1], TYPE[2], TYPE_DUR, lines[1].wOld)
+      FLAGGED.forEach((_, i) => cursor(T, lines[i], FIXAT[i] + FIX_DELAY, FIX_DUR, lines[i].wNew))
+      // The reviewers read it; each finding goes out to its line, warm.
+      for (const [s0, s1] of SCAN) scan(T, s0, s1)
+      FLAG.forEach(([t0, t1], i) => {
+        travel(routes.rev[i], T, t0, t1, WARM)
+        flash(lines[i].px, lines[i].py, pulse(T, t1, 0.2), SP.amber, 4)
+      })
+      // Each fix lands green on its line.
+      FIXAT.forEach((t, i) => {
+        const f = pulse(T, t + FIX_DELAY + FIX_DUR, 0.25)
+        if (f > 0.01) {
+          ctx.globalCompositeOperation = 'lighter'
+          glow(SP.green, lines[i].tx + lines[i].wNew * 0.5, lines[i].cy, lines[i].wNew * 0.55, 0.22 * f)
+          ctx.globalCompositeOperation = 'source-over'
+        }
+      })
+      // Clean: a burst over the change, and a flash where each reviewer joins it.
+      if (T >= CLEAN - 0.05) {
+        const p = clamp((T - CLEAN) / 0.9)
+        const f = pulse(T, CLEAN + 0.12, 0.35)
+        ctx.globalCompositeOperation = 'lighter'
+        glow(SP.green, C.cx, C.cy, U * 18, 0.4 * f)
+        if (p < 1) {
+          ctx.globalAlpha = 0.55 * Math.pow(1 - p, 2)
+          ctx.strokeStyle = 'rgb(140,226,164)'
+          ctx.lineWidth = 1.4
+          ctx.beginPath()
+          ctx.ellipse(C.cx, C.cy, U * (5 + 26 * outCubic(p)), U * (3 + 12 * outCubic(p)), 0, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.globalCompositeOperation = 'source-over'
+        routes.rev.forEach((rt) => flash(rt.xs[0], rt.ys[0], pulse(T, CLEAN + 0.1, 0.25), SP.green, 3.5))
+      }
     }
     // The stem to you: lit as the pull request travels it, green on arrival.
     if (T >= PR[0]) {
-      const fade = reset ? 1 - clamp((T - RESET) / 0.5) : 1
-      lit(st, 0, st.len * clamp((T - PR[0]) / (PR[1] - PR[0] - 0.1)), 0.8 * fade)
-      const arr = T >= PR[1] ? Math.exp(-Math.pow((T - PR[1] - 0.2) / 0.45, 2)) : 0
+      const fade = reset ? 1 - clamp((T - RESET) / 0.45) : 1
+      const st = routes.stem
+      lit(st, 0, st.len * clamp((T - PR[0]) / (PR[1] - PR[0] - 0.1)), 0.8 * fade, PAL.lit)
+      const arr = T >= PR[1] ? pulse(T, PR[1] + 0.2, 0.45) : 0
       const steady = T >= PR[1] ? clamp((T - PR[1]) / 0.6) : 0
-      ctx.globalCompositeOperation = ADD
-      glow(SP_GRN, you.x, you.y, U * 7, (0.42 * arr + 0.16 * steady) * fade * GA)
+      ctx.globalCompositeOperation = 'lighter'
+      glow(SP.green, you.x, you.y, U * 7, (0.45 * arr + 0.16 * steady) * fade)
       ctx.globalCompositeOperation = 'source-over'
     }
     ctx.globalAlpha = 1
@@ -745,7 +1028,7 @@
   // Loop control: only while on screen and the tab is visible.
   const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
   let T = 0.2
-  const STILL = 14.95 // round 2, Clean, both lines fixed, the PR on its way to you
+  const STILL = 13.2 // round 2 clean, both lines fixed, the pull request with you
   let raf = 0, last = 0, onScreen = false, ready = false
   function frame(now) {
     const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
@@ -760,14 +1043,17 @@
     else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
     if (ready && mq.matches) render(STILL)
   }
-  const ro = new ResizeObserver(() => {
+  function remeasure() {
     ready = measure()
     if (ready) render(mq.matches ? STILL : T)
     sync()
-  })
-  ro.observe(root)
+  }
+  new ResizeObserver(remeasure).observe(root)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(remeasure)
   new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
   document.addEventListener('visibilitychange', sync)
   if (mq.addEventListener) mq.addEventListener('change', sync)
+  // For checking a moment by hand: dispatch `s-d-review-seek` with the second as its detail.
+  root.addEventListener('s-d-review-seek', (e) => { T = e.detail; render(T) })
 })()
 </script>

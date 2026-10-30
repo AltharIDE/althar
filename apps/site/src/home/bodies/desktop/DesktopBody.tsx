@@ -97,7 +97,7 @@ export function DesktopBody() {
             No more <b>meat proxying.</b>
           </>
         }
-        lead="Every change is reviewed by a model from another lab, fixed by its lead, and reviewed again until it’s clean. Better work, and you never paste one agent’s answer into another again."
+        lead="Every change is reviewed by models from other labs, fixed by its lead, and reviewed again until it’s clean. Better work, and you never paste one agent’s answer into another again."
       >
         <Review />
       </Scene>

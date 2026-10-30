@@ -14,3 +14,8 @@
 @media (max-width: 700px) {
   .wrap { margin-top: 32px; padding: 0; }
 }
+
+/* A phone: the drawing stands upright, with the agents above and below the change. */
+@media (max-width: 559px) {
+  .stage { aspect-ratio: 5 / 7; }
+}
