@@ -220,6 +220,7 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
       resolve(read)
     }
     // Node's own timer, outside any effect: the child's time to answer, which only the process it runs in can keep.
+    // oxlint-disable-next-line althar/one-clock
     const timer = setTimeout(
       () => end({ kind: 'failed', message: `${agent.name} didn’t answer in time.` }),
       options.timeout ?? FIFTEEN_SECONDS,

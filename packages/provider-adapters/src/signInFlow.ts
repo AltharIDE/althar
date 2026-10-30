@@ -142,8 +142,10 @@ export const startSignInFlow = (
     if (child.exitCode !== null) return
     if (grace === 0) child.kill()
     // Node's own timers, outside any effect: the child's time to finish, which only the process it runs in can keep.
+    // oxlint-disable-next-line althar/one-clock
     else setTimeout(() => child.exitCode === null && child.kill(), grace).unref()
   }
+  // oxlint-disable-next-line althar/one-clock
   const timer = setTimeout(
     () => end({ kind: 'failed', message: 'The sign-in wasn’t finished in time.' }),
     options.timeout ?? FIFTEEN_MINUTES,
