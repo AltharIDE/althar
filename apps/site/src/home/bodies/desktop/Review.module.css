@@ -15,7 +15,7 @@
   .wrap { margin-top: 32px; padding: 0; }
 }
 
-/* A phone: the drawing stands upright, with the agents above and below the change. */
+/* A phone: the drawing stands upright, with the lead above the change and the reviewer below it. */
 @media (max-width: 559px) {
   .stage { aspect-ratio: 5 / 7; }
 }
