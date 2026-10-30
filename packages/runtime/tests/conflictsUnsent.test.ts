@@ -74,6 +74,17 @@ const uncheckedOf = (projectId: string) =>
     ([one]) => one !== null,
   ).pipe(Effect.map(([one]) => one))
 
+/**
+ * The task's folder no longer on this computer, as Althar has seen. Its looks at a task take turns, so once one has said
+ * so, none that began before, with the folder still here, is left to find main moved on and start a round with it.
+ */
+const goneHere = (projectId: string, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+    yield* uncheckedOf(projectId)
+  })
+
 const runIs = (taskId: string, state: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE runs SET state = ${state} WHERE task_id = ${taskId}`)
 
@@ -138,9 +149,8 @@ describe('a conflicting task Althar can’t merge here', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
     return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
-      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      yield* goneHere(projectId, taskId)
       moveHostMainOn(working, bare)
       const [why] = yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
@@ -157,9 +167,8 @@ describe('a task Althar can’t look at here, where its host says it merges clea
     const { working, bare } = hosted()
     const github = silentHost(bare, false)
     return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
-      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      yield* goneHere(projectId, taskId)
       moveHostMainOn(working, bare)
       assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       // Not said to conflict: Althar doesn't know.

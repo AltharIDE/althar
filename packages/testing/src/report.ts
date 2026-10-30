@@ -42,9 +42,10 @@ if (report !== undefined && existsSync(report)) {
     }>
     for (const [key, test] of tests) {
       const title = `Flaky: ${key}`.slice(0, 250)
+      const failed = test.error === undefined ? '' : `\n\nThe first run failed with:\n\n\`\`\`\n${test.error}\n\`\`\``
       const issue = known.find((one) => one.title === title)
-      if (issue?.state === 'OPEN') gh('issue', 'comment', String(issue.number), '--body', said)
-      else if (issue) gh('issue', 'reopen', String(issue.number), '--comment', `Flaky again.\n\n${said}`)
+      if (issue?.state === 'OPEN') gh('issue', 'comment', String(issue.number), '--body', `${said}${failed}`)
+      else if (issue) gh('issue', 'reopen', String(issue.number), '--comment', `Flaky again.\n\n${said}${failed}`)
       else
         gh(
           'issue',
@@ -54,7 +55,7 @@ if (report !== undefined && existsSync(report)) {
           '--label',
           LABEL,
           '--body',
-          `\`${test.file}\` › ${test.name} failed in CI, then passed when it ran again. The retry let the change through, but until the cause is found and fixed, this test says nothing reliable. Each comment is another time it happened; CI reopens this if it happens after it's closed.\n\n${said}`,
+          `\`${test.file}\` › ${test.name} failed in CI, then passed when it ran again. The retry let the change through, but until the cause is found and fixed, this test says nothing reliable. Each comment is another time it happened; CI reopens this if it happens after it's closed.\n\n${said}${failed}`,
         )
     }
   } catch (error) {

@@ -40,6 +40,9 @@ const rootOf = (node: Any | undefined): string | undefined => {
 const TESTS = new Set(['it', 'test', 'describe'])
 const HOOKS = new Set(['beforeAll', 'beforeEach', 'afterAll', 'afterEach'])
 const WAITS = new Set(['until', 'waitFor'])
+/* testing-library's: they give up where the test's waits do, as the desktop app's and the kit's tests/setup.ts set. */
+const FINDS = /^find(All)?By[A-Z]/
+const DOM_WAITS = new Set(['waitFor', 'waitForElementToBeRemoved'])
 
 /** Where in the file a time of its own is set, as `file:line what`. */
 const limitsIn = (file: string) => {
@@ -64,6 +67,12 @@ const limitsIn = (file: string) => {
         at(one, `a hook's time of its own: ${text(args[1])}`)
       if (callee.type === 'Identifier' && WAITS.has(callee.name as string) && args.length > 2)
         at(one, `a wait's time of its own: ${text(args[2]!)}`)
+      const method =
+        callee.type === 'MemberExpression' ? (callee.property as Any).name : callee.type === 'Identifier' ? callee.name : undefined
+      if (typeof method === 'string' && FINDS.test(method) && args[2] !== undefined && /\btimeout\b/.test(text(args[2])))
+        at(one, `a find's time of its own: ${text(args[2])}`)
+      if (typeof method === 'string' && DOM_WAITS.has(method) && args[1]?.type === 'ObjectExpression' && /\btimeout\b/.test(text(args[1])))
+        at(one, `a wait's time of its own: ${text(args[1])}`)
     }
     // A loop that tries so many times, sleeping between, is a wait with a time of its own.
     if (

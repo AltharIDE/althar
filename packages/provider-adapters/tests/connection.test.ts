@@ -416,14 +416,22 @@ describe('AgentConnection', () => {
       }),
     )
 
-    it.live("asks for the person's words sent after the runtime's reminder to report, as the fake does what they ask", () =>
-      Effect.gen(function* () {
-        const reminded = yield* turn(
-          `Your step isn't done until you call Althar's finish_step tool. Call it now.\n\n${scenarios.tool}`,
-          allow,
-        )
-        assert.strictEqual(text(reminded.events), 'chosen=allow-once')
-      }),
+    it.live(
+      "asks for the person's words sent with the runtime's reminder to report, before it or after, as the fake does what they ask",
+      () =>
+        Effect.gen(function* () {
+          const reminded = yield* turn(
+            `Your step isn't done until you call Althar's finish_step tool. Call it now.\n\n${scenarios.tool}`,
+            allow,
+          )
+          assert.strictEqual(text(reminded.events), 'chosen=allow-once')
+          // Written as the turn ended, the person's words are queued before the reminder, and come first.
+          const first = yield* turn(
+            `${scenarios.tool}\n\nYour step isn't done until you call Althar's finish_step tool. Call it now.`,
+            allow,
+          )
+          assert.strictEqual(text(first.events), 'chosen=allow-once')
+        }),
     )
 
     it.live('never allows always: with no one-time allow on offer, the request is cancelled', () =>
