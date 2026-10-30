@@ -198,11 +198,22 @@ describe('the board’s lanes', () => {
       const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
       expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
       expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
-      expect(card('Stopped n').getByText('No agent is working on it')).toBeTruthy()
+      // Where nothing says what stopped it, the word Stopped says it all.
+      expect(card('Stopped n').queryByText('No agent is working on it')).toBeNull()
+      expect(card('Stopped n').queryByText(/^Stopped (when|by)/)).toBeNull()
       expect(card('Stopped d').getByText('20h ago')).toBeTruthy()
       expect(card('Stopped d').queryByText('21h')).toBeNull()
       expect(card('Stopped r').getByText('From Nightly dependency check')).toBeTruthy()
       expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/^Stopped /)).toBeNull()
+    })
+
+    it('shows no time where nothing says when it stopped', () => {
+      const unknown = stopped('u', null, { stopped: { by: null, at: null } })
+      const lanes = lanesOf(board({ tasks: [unknown], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      const article = screen.getByRole('button', { name: 'Stopped u' }).closest('article') as HTMLElement
+      expect(within(article).getByText('Stopped')).toBeTruthy()
+      expect(article.textContent).not.toMatch(/Invalid Date|NaN|ago/)
     })
   })
 
@@ -1315,6 +1326,46 @@ describe('every state the board shows', () => {
       task({ taskId: 'i', title: 'Done nowhere', phase: 'settled', state: 'done', branch: null, settledAt: null }),
     ],
     calls: [stuck('implement', 'session_ended'), stuck('publish', 'failed_to_start'), stuck('publish', 'not_connected')],
+  })
+
+  it('never says "Invalid Date", or NaN, on any card, whatever time it has or lacks', () => {
+    const lacking = board({
+      tasks: [
+        task({ taskId: 'n1', title: 'Stopped, no time known', phase: 'stopped', startedAt: null, stopped: { by: null, at: null } }),
+        task({ taskId: 'n2', title: 'Stopped, an empty time', phase: 'stopped', startedAt: '', stopped: { by: 'althar', at: '' } }),
+        task({ taskId: 'n3', title: 'Running, an empty start', phase: 'running', step: 'implement', startedAt: '' }),
+        task({
+          taskId: 'n4',
+          title: 'Paused, an empty reset',
+          phase: 'running',
+          step: 'implement',
+          waits: { agentId: 'codex', until: '' },
+        }),
+        task({ taskId: 'n5', title: 'Settled, an empty time', phase: 'settled', state: 'done', settledAt: '' }),
+        task({ taskId: 'n6', title: 'Kept, an empty time', phase: 'kept', keptAt: '' }),
+        task({ taskId: 'n7', title: 'Setting up', phase: 'running', step: 'implement', startedAt: 'not a time', settingUp: 'install' }),
+      ],
+      calls: [{ ...permission, id: 'c-empty', createdAt: '' }],
+    })
+    withServices(<BoardView lanes={lanesOf(lacking)} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    expect(screen.getByText('Stopped, no time known')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/Invalid Date|NaN/)
+  })
+
+  it('says a task whose folder is being set up before its lead starts is under way, and why no step has begun', () => {
+    const tasks = [
+      task({ taskId: 's1', title: 'Installing', phase: 'running', step: 'implement', settingUp: 'install' }),
+      task({ taskId: 's2', title: 'Its own setup', phase: 'running', step: 'implement', settingUp: 'kept' }),
+    ]
+    const lanes = lanesOf(board({ tasks, calls: [] }))
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['s1', 's2'])
+    expect(lanes.stopped).toEqual([])
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    const running = within(screen.getByRole('region', { name: 'Running' }))
+    const of = (title: string) => within(running.getByRole('button', { name: title }).closest('article') as HTMLElement)
+    expect(of('Installing').getByText('Installing dependencies')).toBeTruthy()
+    expect(of('Its own setup').getByText('Setting up')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Needs you' })?.textContent ?? '').not.toMatch(/Installing/)
   })
 
   it('draws plans waiting, stopped and planless work, stuck calls, and what settled', () => {
