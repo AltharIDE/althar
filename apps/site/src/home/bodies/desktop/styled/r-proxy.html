@@ -1,7 +1,951 @@
 <style>
-.r-proxy { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; background: #0e0b09; font: 500 15px Inter, system-ui, sans-serif; color: rgba(255, 248, 240, 0.6); }
+.r-proxy {
+  --ink: #efebe4;
+  --ink2: #a39d93;
+  --ink3: #6f695f;
+  --warm: #e39c4a;
+  --warm-d: #c9822f;
+  --cobalt: #2b3bff;
+  --cobalt-l: #6170ff;
+  --violet: #7a3ff0;
+  --green: #62c47e;
+  --win: #17120f;
+  --bar: #1c1713;
+  --edge: rgba(239, 235, 228, 0.09);
+  --sans: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ease: cubic-bezier(0.22, 0.61, 0.24, 1);
+  --slide: cubic-bezier(0.34, 1.16, 0.64, 1);
+  --small: max(10px, 0.88em);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0e0b09;
+  color: var(--ink);
+  font: 400 max(10px, 1.2cqw) / 1.42 var(--sans);
+  letter-spacing: -0.004em;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  pointer-events: none;
+}
+/* The two lights: warm and restless behind today, cobalt and still behind Althar. */
+.r-proxy::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(38% 46% at 26% 52%, rgba(201, 130, 47, 0.085), transparent 70%),
+    radial-gradient(38% 46% at 74% 52%, rgba(43, 59, 255, 0.11), transparent 70%);
+}
+
+.r-proxy .half {
+  position: absolute;
+  z-index: 1;
+  top: 4.6cqw;
+  bottom: 4.4cqw;
+  width: 40.6cqw;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) 6.6cqw minmax(0, 1fr) auto;
+  grid-template-areas: 'hd' 'a' 'gp' 'b' 'ft';
+}
+.r-proxy .before { left: 5.6cqw; }
+.r-proxy .after { right: 5.6cqw; }
+.r-proxy .rule {
+  position: absolute;
+  left: 50%;
+  top: 9cqw;
+  bottom: 9cqw;
+  width: 1px;
+  background: linear-gradient(transparent, rgba(239, 235, 228, 0.1) 22%, rgba(239, 235, 228, 0.1) 78%, transparent);
+}
+
+.r-proxy .hd {
+  grid-area: hd;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin: 0 0 0.85em 0.1em;
+  font-size: 1.28em;
+  font-weight: 600;
+  letter-spacing: -0.014em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.r-proxy .hd svg { height: 0.92em; width: auto; flex: none; }
+.r-proxy .hd .sub { font-weight: 400; color: var(--ink3); }
+
+/* An agent's window. */
+.r-proxy .win {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.8em;
+  background: var(--win);
+  box-shadow: 0 0 0 1px var(--edge), 0 1.4em 2.8em -1.2em rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+  transition: box-shadow 0.18s, transform 0.3s var(--ease);
+}
+.r-proxy .cc { grid-area: a; }
+.r-proxy .oc { grid-area: b; }
+.r-proxy .bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em 0.8em;
+  background: var(--bar);
+  border-bottom: 1px solid rgba(239, 235, 228, 0.06);
+  white-space: nowrap;
+}
+.r-proxy .bar .mk { width: 1.05em; height: 1.05em; fill: var(--ink); flex: none; }
+.r-proxy .bar .nm { font-weight: 600; }
+.r-proxy .bar .role { margin-left: auto; font-size: var(--small); color: var(--ink3); }
+.r-proxy .bar .md { font: 500 var(--small) var(--mono); color: var(--ink2); }
+.r-proxy .before .bar .md { margin-left: auto; }
+.r-proxy .body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.r-proxy .log {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.6em 0.85em 0.55em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.42em;
+  transition: opacity 0.45s;
+}
+.r-proxy .after .log { top: 0; bottom: auto; padding-top: 0.75em; gap: 0.55em; }
+/* Scrollback runs off the top of today's windows. */
+.r-proxy .before .body::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2.2em;
+  background: linear-gradient(var(--win), rgba(23, 18, 15, 0));
+}
+.r-proxy .inp {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin: 0 0.55em 0.55em;
+  padding: 0.32em 0.6em;
+  border-radius: 0.45em;
+  box-shadow: inset 0 0 0 1px rgba(239, 235, 228, 0.09);
+  color: var(--ink3);
+  font: var(--small) / 1.4 var(--mono);
+}
+.r-proxy .inp i { width: 0.5em; height: 1.1em; background: var(--ink2); opacity: 0.55; }
+
+/* Lines in a window. */
+.r-proxy .m { display: none; position: relative; max-width: 100%; isolation: isolate; }
+.r-proxy .m.on { display: block; animation: r-proxy-in 0.4s var(--ease) both; }
+.r-proxy .h { display: block; align-self: stretch; }
+.r-proxy .h i { display: block; height: 0.5em; margin: 0.36em 0; border-radius: 0.25em; background: rgba(239, 235, 228, 0.07); }
+.r-proxy .h.y i { background: rgba(227, 156, 74, 0.13); }
+.r-proxy .ag { color: var(--ink); }
+.r-proxy .you { color: var(--ink2); }
+.r-proxy .you b { font-weight: 400; color: var(--ink3); margin-right: 0.3em; }
+.r-proxy code { font: 500 var(--small) var(--mono); color: var(--ink); }
+.r-proxy .dd { font: var(--small) var(--mono); color: var(--ink2); white-space: nowrap; }
+.r-proxy .paste {
+  font: 500 var(--small) var(--mono);
+  color: #f3c896;
+  background: rgba(227, 156, 74, 0.14);
+  border-radius: 0.3em;
+  padding: 0.04em 0.35em;
+  white-space: nowrap;
+}
+.r-proxy .think { width: 46%; height: 0.55em; margin: 0.45em 0; border-radius: 0.3em; overflow: hidden; background: rgba(239, 235, 228, 0.08); }
+.r-proxy .think::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(239, 235, 228, 0.24), transparent);
+  animation: r-proxy-shim 1.1s linear infinite;
+}
+.r-proxy .f { display: flex; align-items: baseline; gap: 0.6em; }
+.r-proxy .f i {
+  flex: none;
+  width: 0.42em;
+  height: 0.42em;
+  border-radius: 50%;
+  background: var(--warm);
+  transform: translateY(-0.12em);
+}
+.r-proxy .f.done { color: var(--ink3); text-decoration: line-through; text-decoration-color: rgba(239, 235, 228, 0.3); transition: color 0.4s; }
+.r-proxy .f.done i, .r-proxy .ok i {
+  width: 0.62em;
+  height: 0.32em;
+  border-radius: 0;
+  background: none;
+  border-left: max(1.5px, 0.14em) solid var(--green);
+  border-bottom: max(1.5px, 0.14em) solid var(--green);
+  transform: translateY(-0.28em) rotate(-45deg);
+}
+.r-proxy .ok { align-items: baseline; gap: 0.6em; color: var(--green); font-weight: 500; }
+.r-proxy .ok.on { display: flex; }
+.r-proxy .ok i { display: block; flex: none; }
+
+/* Selecting an answer: the highlight sweeps across what the cursor drags over. */
+.r-proxy .m::before {
+  content: '';
+  position: absolute;
+  inset: -0.14em -0.32em;
+  border-radius: 0.3em;
+  background: rgba(227, 156, 74, 0.3);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  z-index: -1;
+}
+.r-proxy .m.sel::before { transform: none; transition: transform 0.38s linear, background 0.15s; }
+.r-proxy .m.cp::before { background: rgba(227, 156, 74, 0.5); }
+
+/* Today: the windows sit a little askew, and focus flicks between them. */
+.r-proxy .before .cc { transform: rotate(-0.7deg) translateX(-0.25cqw); }
+.r-proxy .before .oc { transform: rotate(0.6deg) translateX(0.35cqw); }
+.r-proxy .before .win.focus {
+  z-index: 2;
+  box-shadow: 0 0 0 1px rgba(227, 156, 74, 0.55), 0 0 2.4em -0.8em rgba(227, 156, 74, 0.45), 0 1.4em 2.8em -1.2em rgba(0, 0, 0, 0.75);
+}
+.r-proxy .before .win:not(.focus) .bar { color: var(--ink2); }
+
+/* With Althar: the windows are joined, and light lands where a message arrives. */
+.r-proxy .after .win.rx {
+  box-shadow: 0 0 0 1px rgba(97, 112, 255, 0.6), 0 0 2.6em -0.6em rgba(43, 59, 255, 0.55), 0 1.4em 2.8em -1.2em rgba(0, 0, 0, 0.75);
+}
+.r-proxy .lk { grid-area: gp; position: relative; }
+.r-proxy .after .lk::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: linear-gradient(rgba(97, 112, 255, 0.7), rgba(97, 112, 255, 0.35), rgba(97, 112, 255, 0.7));
+  opacity: 0.6;
+  transition: opacity 0.4s;
+}
+.r-proxy .after .lk.live::before { opacity: 1; box-shadow: 0 0 0.6em rgba(43, 59, 255, 0.9); }
+.r-proxy .after .lk i {
+  position: absolute;
+  left: 50%;
+  width: 0.5em;
+  height: 0.5em;
+  margin: -0.25em 0 0 -0.25em;
+  border-radius: 50%;
+  background: #0e0b09;
+  box-shadow: 0 0 0 1px rgba(97, 112, 255, 0.8);
+}
+.r-proxy .after .lk i:first-child { top: 0; }
+.r-proxy .after .lk i:last-child { top: 100%; }
+
+/* The foot of each side: what you are doing. */
+.r-proxy .ft { grid-area: ft; height: 4.1em; margin-top: 1em; display: grid; place-items: center; }
+.r-proxy .ft > * { grid-area: 1 / 1; transition: opacity 0.45s; }
+.r-proxy .clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: 0.6em 1em 0.6em 0.8em;
+  border-radius: 0.75em;
+  background: rgba(227, 156, 74, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(227, 156, 74, 0.26);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+.r-proxy .clip svg { width: 1.35em; height: 1.35em; color: var(--warm); flex: none; }
+.r-proxy .clip b {
+  display: inline-block;
+  min-width: 1.3em;
+  text-align: center;
+  color: var(--warm);
+  font-weight: 700;
+  font-size: 1.2em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.r-proxy .clip.zero { background: rgba(239, 235, 228, 0.03); box-shadow: inset 0 0 0 1px rgba(239, 235, 228, 0.1); }
+.r-proxy .clip.zero svg { color: var(--ink3); }
+.r-proxy .clip.zero b { color: var(--ink); min-width: 0; margin: 0 0.1em; }
+.r-proxy .clip.zero.gone { opacity: 0; transform: translateY(0.6em); transition: opacity 0.35s, transform 0.5s var(--ease); }
+.r-proxy .pr {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.5em 0.5em 0.5em 0.85em;
+  border-radius: 0.8em;
+  background: #1a1513;
+  box-shadow: 0 0 0 1px rgba(122, 63, 240, 0.55), 0 0.8em 2.4em -0.8em rgba(122, 63, 240, 0.6);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-1.4em) scale(0.97);
+}
+.r-proxy .pr.on { opacity: 1; transform: none; transition: opacity 0.5s, transform 0.7s var(--slide), box-shadow 0.6s; }
+.r-proxy .pr.took { box-shadow: 0 0 0 1px rgba(98, 196, 126, 0.32), 0 0.8em 2.4em -1em rgba(0, 0, 0, 0.6); }
+.r-proxy .pr .pi { width: 1.3em; height: 1.3em; color: var(--ink2); flex: none; }
+.r-proxy .pr .pt { line-height: 1.35; }
+.r-proxy .pr .pt b { font-weight: 650; }
+.r-proxy .pr .ck { display: flex; align-items: center; gap: 0.35em; font-size: var(--small); color: var(--green); }
+.r-proxy .pr .ck svg, .r-proxy .acc svg { width: 1.05em; height: 1.05em; }
+.r-proxy .acc { display: grid; margin-left: 0.4em; font-weight: 600; font-size: var(--small); }
+.r-proxy .acc > span {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
+  padding: 0.5em 0.85em;
+  border-radius: 0.55em;
+}
+.r-proxy .acc .a1 { background: var(--ink); color: #17120f; transition: transform 0.12s; }
+.r-proxy .acc .a2 { background: rgba(98, 196, 126, 0.14); color: var(--green); opacity: 0; }
+.r-proxy .acc.press .a1 { transform: scale(0.94); }
+.r-proxy .acc.done .a1 { opacity: 0; transition: opacity 0.25s; }
+.r-proxy .acc.done .a2 { opacity: 1; transition: opacity 0.25s; }
+
+/* What moves on top: the chip between the joined agents, and the cursors. */
+.r-proxy .fx { position: absolute; inset: 0; z-index: 5; transition: opacity 0.45s; }
+.r-proxy.out .fx, .r-proxy.out .log, .r-proxy.out .ft > * { opacity: 0; }
+.r-proxy .chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.36em 0.8em;
+  border-radius: 99em;
+  background: #15132a;
+  box-shadow: 0 0 0 1px rgba(97, 112, 255, 0.65), 0 0 1.8em -0.2em rgba(43, 59, 255, 0.55), 0 0.6em 1.4em -0.4em rgba(0, 0, 0, 0.7);
+  color: var(--ink);
+  font-size: var(--small);
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.r-proxy .chip .dd { color: var(--ink2); }
+.r-proxy .chip .dot { width: 0.45em; height: 0.45em; border-radius: 50%; background: var(--warm); }
+.r-proxy .chip.ok { color: var(--green); }
+.r-proxy .chip .chk {
+  width: 0.6em;
+  height: 0.3em;
+  border-left: max(1.5px, 0.14em) solid var(--green);
+  border-bottom: max(1.5px, 0.14em) solid var(--green);
+  transform: translateY(-0.12em) rotate(-45deg);
+}
+.r-proxy .trails { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; fill: none; stroke-linecap: round; }
+.r-proxy .trails path { stroke: var(--warm); stroke-width: max(1.2px, 0.11em); }
+.r-proxy .trails .old { opacity: 0.13; }
+.r-proxy .trails .new { opacity: 0; }
+.r-proxy .trails .new.drawn { opacity: 0.3; transition: opacity 0.8s; }
+.r-proxy .trails .new.drawing { opacity: 0.85; stroke-width: max(1.5px, 0.14em); }
+.r-proxy .cur { position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
+.r-proxy .cur .ar {
+  position: absolute;
+  left: -0.36em;
+  top: -0.36em;
+  width: 2.4em;
+  height: 3.1em;
+  overflow: visible;
+  transform-origin: 0.36em 0.36em;
+  filter: drop-shadow(0 0.25em 0.4em rgba(0, 0, 0, 0.6));
+}
+.r-proxy .cur .ar path { fill: #fbf8f3; stroke: #0e0b09; stroke-width: 1.3; stroke-linejoin: round; }
+.r-proxy .cur.gh .ar { filter: none; }
+.r-proxy .cur.gh .ar path { fill: #fbf8f3; stroke: none; }
+.r-proxy .tag {
+  position: absolute;
+  left: 2.3em;
+  top: -0.2em;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.22em 0.6em 0.22em 0.45em;
+  border-radius: 0.45em;
+  background: var(--ink);
+  color: #17120f;
+  font-size: var(--small);
+  font-weight: 650;
+  white-space: nowrap;
+  opacity: 0;
+  transform: scale(0.7);
+  transform-origin: 0 50%;
+}
+.r-proxy .tag svg { width: 1.15em; height: 1.15em; }
+.r-proxy .tag.on { opacity: 1; transform: none; transition: opacity 0.1s, transform 0.22s var(--slide); }
+.r-proxy .carry {
+  position: absolute;
+  left: 1.9em;
+  top: -2.5em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  max-width: 13em;
+  padding: 0.3em 0.7em 0.3em 0.5em;
+  border-radius: 0.5em;
+  background: #2a1d11;
+  box-shadow: 0 0 0 1px rgba(227, 156, 74, 0.6), 0 0.7em 1.6em -0.4em rgba(0, 0, 0, 0.8);
+  color: #f6d5ae;
+  font: 500 var(--small) var(--mono);
+  white-space: nowrap;
+  opacity: 0;
+  transform-origin: 0 100%;
+}
+.r-proxy .carry svg { width: 1.15em; height: 1.15em; flex: none; color: var(--warm); }
+.r-proxy .carry span { overflow: hidden; text-overflow: ellipsis; }
+
+@keyframes r-proxy-in { from { opacity: 0; transform: translateY(0.45em); } }
+@keyframes r-proxy-shim { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* A phone: today above, Althar below, each pair side by side. */
+@container (max-width: 559px) {
+  .r-proxy { font-size: max(10px, 2.7cqw); }
+  .r-proxy .half {
+    left: 5cqw;
+    right: 5cqw;
+    width: auto;
+    grid-template-columns: minmax(0, 1fr) 7cqw minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'hd hd hd' 'a gp b' 'ft ft ft';
+  }
+  .r-proxy .before { top: 7.6cqw; bottom: auto; height: 59cqw; }
+  .r-proxy .after { top: 73.6cqw; bottom: auto; height: 59cqw; }
+  .r-proxy .rule {
+    left: 12cqw;
+    right: 12cqw;
+    top: 70.2cqw;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(239, 235, 228, 0.1) 22%, rgba(239, 235, 228, 0.1) 78%, transparent);
+  }
+  .r-proxy::before {
+    background:
+      radial-gradient(60% 26% at 50% 27%, rgba(201, 130, 47, 0.085), transparent 70%),
+      radial-gradient(60% 26% at 50% 73%, rgba(43, 59, 255, 0.11), transparent 70%);
+  }
+  .r-proxy .bar { padding: 0.45em 0.6em; gap: 0.4em; }
+  .r-proxy .bar .role { display: none; }
+  .r-proxy .after .bar .md { margin-left: auto; }
+  .r-proxy .log { padding: 0.5em 0.6em; }
+  .r-proxy .inp { margin: 0 0.4em 0.4em; }
+  .r-proxy .before .cc { transform: rotate(-0.9deg); }
+  .r-proxy .before .oc { transform: rotate(0.8deg); }
+  .r-proxy .after .lk::before {
+    left: 0;
+    right: 0;
+    top: 50%;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+    margin: -0.5px 0 0;
+    background: linear-gradient(90deg, rgba(97, 112, 255, 0.7), rgba(97, 112, 255, 0.35), rgba(97, 112, 255, 0.7));
+  }
+  .r-proxy .after .lk i { top: 50%; }
+  .r-proxy .after .lk i:first-child { left: 0; top: 50%; }
+  .r-proxy .after .lk i:last-child { left: 100%; top: 50%; }
+  .r-proxy .ft { margin-top: 0.9em; }
+  .r-proxy .dir { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .r-proxy *, .r-proxy *::before, .r-proxy *::after { animation: none !important; transition: none !important; }
+}
 </style>
-<div class="r-proxy" aria-hidden="true">This take is still being drawn.</div>
+<div class="r-proxy" aria-hidden="true">
+  <div class="half before">
+    <div class="hd">You, today</div>
+    <div class="win cc">
+      <div class="bar">
+        <svg class="mk" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg>
+        <span class="nm">Claude Code</span><span class="md">Opus 5.5</span>
+      </div>
+      <div class="body"><div class="log">
+        <div class="h"><i style="width: 74%"></i><i style="width: 90%"></i><i style="width: 52%"></i></div>
+        <div class="h y"><i style="width: 44%"></i></div>
+        <div class="h"><i style="width: 82%"></i><i style="width: 61%"></i></div>
+        <div class="h y"><i style="width: 36%"></i></div>
+        <div class="h"><i style="width: 86%"></i><i style="width: 68%"></i><i style="width: 30%"></i></div>
+        <div class="h y"><i style="width: 48%"></i></div>
+        <div class="m ag" data-t="0" data-k="lc1">Edited <code><span class="dir">src/refunds/</span>retry.ts</code> <span class="dd">+2 −1</span></div>
+        <div class="m you" data-t="5.15"><b>›</b>It says: <span class="paste">[Pasted text +2 lines]</span></div>
+        <div class="m think" data-t="5.3" data-off="5.9"></div>
+        <div class="m ag" data-t="5.9" data-k="lc3">Good catch. Fixed both.</div>
+        <div class="m you" data-t="11.15"><b>›</b>It says clean.</div>
+        <div class="m think" data-t="11.3" data-off="11.95"></div>
+        <div class="m ag" data-t="11.95">Opening a PR.</div>
+      </div></div>
+      <div class="inp"><b>›</b><i></i></div>
+    </div>
+    <div class="lk"></div>
+    <div class="win oc">
+      <div class="bar">
+        <svg class="mk" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg>
+        <span class="nm">OpenCode</span><span class="md">GLM-5.3</span>
+      </div>
+      <div class="body"><div class="log">
+        <div class="h"><i style="width: 66%"></i><i style="width: 84%"></i></div>
+        <div class="h y"><i style="width: 40%"></i></div>
+        <div class="h"><i style="width: 78%"></i><i style="width: 88%"></i><i style="width: 45%"></i></div>
+        <div class="h y"><i style="width: 52%"></i></div>
+        <div class="h"><i style="width: 70%"></i><i style="width: 34%"></i></div>
+        <div class="h y"><i style="width: 38%"></i></div>
+        <div class="h"><i style="width: 80%"></i><i style="width: 57%"></i></div>
+        <div class="m you" data-t="2.15"><b>›</b>Review this: <span class="paste">retry.ts +2 −1</span></div>
+        <div class="m think" data-t="2.3" data-off="2.9"></div>
+        <div class="m ag" data-t="2.9" data-k="lo2"><span class="f"><i></i>Retry-After may be a date</span><span class="f"><i></i>No cap on the wait</span></div>
+        <div class="m you" data-t="8.15"><b>›</b>It says it fixed both.</div>
+        <div class="m think" data-t="8.3" data-off="8.9"></div>
+        <div class="m ag ok" data-t="8.9" data-k="lo4"><i></i>Clean.</div>
+      </div></div>
+      <div class="inp"><b>›</b><i></i></div>
+    </div>
+    <div class="ft">
+      <div class="clip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 4.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-13a2 2 0 0 0-2-2h-1.5"/><rect x="8.5" y="2.5" width="7" height="4" rx="1.2"/></svg>
+        <span>Pasted <b>10</b> times today</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="half after">
+    <div class="hd">
+      <svg viewBox="4.11 5.53 15.78 13.67"><path fill="#efebe4" fill-rule="evenodd" d="M12.42 5.53A15.36 15.36 0 0 0 19.89 18.47L19.47 19.2A15.36 15.36 0 0 0 4.53 19.2L4.11 18.47A15.36 15.36 0 0 0 11.58 5.53ZM10.2 14.4a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0-3.6 0Z"/><circle fill="#5563ff" cx="12" cy="14.4" r="0.8"/></svg>
+      With Althar
+    </div>
+    <div class="win cc">
+      <div class="bar">
+        <svg class="mk" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg>
+        <span class="nm">Claude Code</span><span class="role">Lead</span><span class="md">Opus 5.5</span>
+      </div>
+      <div class="body"><div class="log">
+        <div class="m ag" data-t="0.15">Edited <code><span class="dir">src/refunds/</span>retry.ts</code> <span class="dd">+2 −1</span></div>
+        <div class="m think" data-t="4.05" data-off="4.75"></div>
+        <div class="m ag" data-t="4.75">Fixed both.</div>
+        <div class="m ag" data-t="8.25">Opening a PR.</div>
+      </div></div>
+    </div>
+    <div class="lk"><i></i><i></i></div>
+    <div class="win oc">
+      <div class="bar">
+        <svg class="mk" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg>
+        <span class="nm">OpenCode</span><span class="role">Reviewer</span><span class="md">GLM-5.3</span>
+      </div>
+      <div class="body"><div class="log">
+        <div class="m think" data-t="1.85" data-off="2.55"></div>
+        <div class="m ag" data-t="2.55"><span class="f" data-done="6.3"><i></i>Retry-After may be a date</span><span class="f" data-done="6.5"><i></i>No cap on the wait</span></div>
+        <div class="m ag ok" data-t="6.85"><i></i>Round 2: clean</div>
+      </div></div>
+    </div>
+    <div class="ft">
+      <div class="clip zero">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 4.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-13a2 2 0 0 0-2-2h-1.5"/><rect x="8.5" y="2.5" width="7" height="4" rx="1.2"/></svg>
+        <span>Pasted <b>0</b> times today</span>
+      </div>
+      <div class="pr">
+        <svg class="pi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="18.5" r="2.2"/><path d="M6.5 7.7v8.6M17.5 16.3V10a3 3 0 0 0-3-3H11m0 0 2.2-2.2M11 7l2.2 2.2"/></svg>
+        <div class="pt">
+          <div><b>#1191</b> Honour Retry-After</div>
+          <div class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Checks passed</div>
+        </div>
+        <div class="acc">
+          <span class="a1">Accept</span>
+          <span class="a2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Accepted</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fx">
+    <svg class="trails"><g class="olds"><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/><path class="old"/></g><g class="news"><path class="new" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"/><path class="new" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"/><path class="new" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"/><path class="new" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"/></g></svg>
+    <div class="chip"></div>
+    <div class="cur gh"><svg class="ar" viewBox="0 0 20 26"><path d="M2.5 2.5v17.8l4.7-4.4 3.1 7 3.4-1.5-3.1-6.9h6.5z"/></svg></div>
+    <div class="cur gh"><svg class="ar" viewBox="0 0 20 26"><path d="M2.5 2.5v17.8l4.7-4.4 3.1 7 3.4-1.5-3.1-6.9h6.5z"/></svg></div>
+    <div class="cur gh"><svg class="ar" viewBox="0 0 20 26"><path d="M2.5 2.5v17.8l4.7-4.4 3.1 7 3.4-1.5-3.1-6.9h6.5z"/></svg></div>
+    <div class="cur me">
+      <div class="carry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 4.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-13a2 2 0 0 0-2-2h-1.5"/><rect x="8.5" y="2.5" width="7" height="4" rx="1.2"/></svg><span></span></div>
+      <svg class="ar" viewBox="0 0 20 26"><path d="M2.5 2.5v17.8l4.7-4.4 3.1 7 3.4-1.5-3.1-6.9h6.5z"/></svg>
+      <div class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 4.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-13a2 2 0 0 0-2-2h-1.5"/><rect x="8.5" y="2.5" width="7" height="4" rx="1.2"/></svg><span>Copy</span></div>
+    </div>
+    <div class="cur calm"><svg class="ar" viewBox="0 0 20 26"><path d="M2.5 2.5v17.8l4.7-4.4 3.1 7 3.4-1.5-3.1-6.9h6.5z"/></svg></div>
+  </div>
+</div>
 <script>
-;(() => {})()
+(() => {
+  const root = document.currentScript.previousElementSibling;
+  const $ = (s) => root.querySelector(s);
+  const $$ = (s) => [...root.querySelectorAll(s)];
+  const LOOP = 14;
+  const OUT = 13.4;
+  const STILL = [10.8, 10.05];
+  const mq = matchMedia('(prefers-reduced-motion: reduce)');
+
+  const after = $('.after');
+  const timed = $$('[data-t]').map((el) => ({ el, t: +el.dataset.t, off: el.dataset.off ? +el.dataset.off : 1e9, r: after.contains(el) }));
+  const dones = $$('[data-done]').map((el) => ({ el, t: +el.dataset.done }));
+  const flips = $$('.before .log').map((el) => ({ el, h: -1 }));
+  const win = (w) => ({ w, body: w.querySelector('.body'), inp: w.querySelector('.inp') });
+  const L = { cc: win($('.before .cc')), oc: win($('.before .oc')), lk: $('.before .lk') };
+  const A = { cc: $('.after .cc'), oc: $('.after .oc'), lk: $('.after .lk') };
+  const msg = (k) => $(`[data-k="${k}"]`);
+
+  // Today: you carry each answer across by hand. Each drag leaves a trail; ten are already there.
+  const TRIPS = [
+    { t: 0.4, el: msg('lc1'), src: L.cc, dst: L.oc, carry: 'retry.ts +2 −1', bend: 5 },
+    { t: 3.4, el: msg('lo2'), src: L.oc, dst: L.cc, carry: 'Retry-After may be a date…', bend: -4.5 },
+    { t: 6.4, el: msg('lc3'), src: L.cc, dst: L.oc, carry: 'Good catch. Fixed both.', bend: -6 },
+    { t: 9.4, el: msg('lo4'), src: L.oc, dst: L.cc, carry: 'Clean.', bend: 4 },
+  ];
+  const PASTES = TRIPS.map((x) => x.t + 1.75);
+  const OLD = [
+    [1, 0.7, 0.6, 2.4, 6.5], [0, 0.3, 1.4, 4.2, -3.5], [1, 0.55, 0.4, 1.2, -7], [0, 0.62, 0.9, 3.4, 5.5], [1, 0.22, 1.8, 2.8, 3],
+    [0, 0.45, 0.3, 1.8, -6.5], [1, 0.8, 1.2, 4.6, -2.5], [0, 0.18, 2.2, 2.2, 7.5], [1, 0.4, 0.8, 3.6, 8], [0, 0.75, 1.6, 1.4, -4],
+  ]; // [from cc?, x in source, lines up, x in input (em), bend (em)]
+
+  // With Althar: the agents send it themselves.
+  const XD = 1.05;
+  const XFER = [
+    { t: 0.75, d: 1, h: '<code>retry.ts</code><span class="dd">+2 −1</span>', c: '' },
+    { t: 2.95, d: -1, h: '<i class="dot"></i>2 findings', c: '' },
+    { t: 5.15, d: 1, h: 'Fixed both', c: '' },
+    { t: 7.15, d: -1, h: '<i class="chk"></i>Clean', c: 'ok' },
+  ];
+  const PR_ON = 8.7;
+  const C2 = [9.2, 10.0, 10.1, 10.25]; // your cursor appears, arrives, presses, and it's accepted
+
+  const chip = $('.chip');
+  const ghosts = $$('.cur.gh');
+  const me = $('.cur.me');
+  const meAr = me.querySelector('.ar');
+  const tag = me.querySelector('.tag');
+  const tagTx = tag.querySelector('span');
+  const carry = me.querySelector('.carry');
+  const carryTx = carry.querySelector('span');
+  const calm = $('.cur.calm');
+  const calmAr = calm.querySelector('.ar');
+  const num = $('.before .clip b');
+  const zero = $('.clip.zero');
+  const pr = $('.pr');
+  const acc = $('.acc');
+  const svg = $('.trails');
+  const olds = [...svg.querySelectorAll('.old')];
+  const news = [...svg.querySelectorAll('.new')];
+
+  const cl = (k) => (k < 0 ? 0 : k > 1 ? 1 : k);
+  const io = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+  const sm = (k) => k * k * (3 - 2 * k);
+  const out3 = (k) => 1 - Math.pow(1 - k, 3);
+  const sine = (k) => -(Math.cos(Math.PI * k) - 1) / 2;
+  const mix = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  const tog = (el, c, on) => { if (el.classList.contains(c) !== on) el.classList.toggle(c, on); };
+  const ctrl = (a, b, bend) => {
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+    return { x: (a.x + b.x) / 2 - (dy / d) * bend * em, y: (a.y + b.y) / 2 + (dx / d) * bend * em };
+  };
+  const bez = (a, c, b, k) => ({
+    x: (1 - k) * (1 - k) * a.x + 2 * (1 - k) * k * c.x + k * k * b.x,
+    y: (1 - k) * (1 - k) * a.y + 2 * (1 - k) * k * c.y + k * k * b.y,
+  });
+  const dpath = (a, c, b) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${c.x.toFixed(1)} ${c.y.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+
+  let R = { left: 0, top: 0 };
+  let em = 12;
+  let padB = 6;
+  let memo = new Map();
+  const rel = (el) => {
+    let r = memo.get(el);
+    if (!r) {
+      const b = el.getBoundingClientRect();
+      r = { x: b.left - R.left, y: b.top - R.top, w: b.width, h: b.height };
+      memo.set(el, r);
+    }
+    return r;
+  };
+
+  const idle = () => {
+    const g = rel(L.lk);
+    return { x: g.x + g.w / 2 + em * 0.6, y: g.y + g.h / 2 - em * 0.5 };
+  };
+  const pasteAt = (w, dx = 2.5) => {
+    const q = rel(w.inp);
+    return { x: q.x + em * dx, y: q.y + q.h * 0.55 };
+  };
+  // A trip's ends, where they were when the answer was the newest line (it scrolls up later).
+  let ends = [];
+  const tripEnds = (k) => {
+    if (ends[k]) return ends[k];
+    const tr = TRIPS[k];
+    const m = rel(tr.el);
+    if (!m.w) return null;
+    const b = rel(tr.src.body);
+    const bot = b.y + b.h - padB;
+    const S = { x: m.x + em * 0.1, y: bot - m.h + em * 0.7 };
+    const E = { x: m.x + m.w, y: bot - em * 0.7 };
+    const P = pasteAt(tr.dst);
+    ends[k] = { S, E, P, C: ctrl(E, P, tr.bend) };
+    news[k].setAttribute('d', dpath(E, ends[k].C, P));
+    return ends[k];
+  };
+  const drawOld = () => {
+    OLD.forEach(([fromCC, fx, up, ix, bend], i) => {
+      const src = fromCC ? L.cc : L.oc;
+      const dst = fromCC ? L.oc : L.cc;
+      const b = rel(src.body);
+      const a = { x: b.x + b.w * fx, y: b.y + b.h - padB - em * (0.7 + up * 1.4) };
+      const p = pasteAt(dst, ix);
+      olds[i].setAttribute('d', dpath(a, ctrl(a, p, bend), p));
+    });
+  };
+
+  // Where your cursor is at time t, today.
+  function pose(t) {
+    const I = idle();
+    let k = -1;
+    for (let i = 0; i < TRIPS.length; i++) if (t >= TRIPS[i].t) k = i;
+    if (k < 0) return { ...I, rot: 0 };
+    const u = t - TRIPS[k].t;
+    if (u >= 2.35) {
+      const e = cl((u - 2.35) / 0.3);
+      if (k < 2) return { x: I.x + Math.sin(t * Math.PI * 2 * 5.5) * em * 0.16 * e, y: I.y, rot: 0 };
+      if (k === 2) return { x: I.x + Math.sin(t * Math.PI * 2 * 1.3) * em * 0.32 * e, y: I.y + em * 0.25 * e, rot: -10 * e };
+      const s = sm(cl((u - 2.35) / 1.2));
+      return { x: I.x - em * 0.4 * s, y: I.y + em * (1.4 * s + Math.sin(t * Math.PI * 2 * 0.45) * 0.12 * s), rot: -58 * s };
+    }
+    const e = tripEnds(k);
+    if (!e) return { ...I, rot: 0 };
+    let p;
+    if (u < 0.45) p = mix(I, e.S, io(u / 0.45));
+    else if (u < 0.85) p = mix(e.S, e.E, sm((u - 0.45) / 0.4));
+    else if (u < 1.05) p = e.E;
+    else if (u < 1.65) p = bez(e.E, e.C, e.P, io((u - 1.05) / 0.6));
+    else if (u < 1.85) p = e.P;
+    else p = mix(e.P, I, io((u - 1.85) / 0.5));
+    return { x: p.x, y: p.y, rot: 0 };
+  }
+
+  let prevT = -1;
+  let prevN = -1;
+  let chipK = -1;
+  let tripK = -2;
+  let fresh = true;
+
+  const place = (el, x, y, extra = '') => {
+    el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)${extra}`;
+  };
+
+  function render(t, tr = t, still = false) {
+    const jump = still || t < prevT || t - prevT > 0.3;
+    prevT = t;
+    R = root.getBoundingClientRect();
+    memo = new Map();
+    tog(root, 'out', !still && t >= OUT);
+
+    for (const x of timed) {
+      const tt = x.r ? tr : t;
+      tog(x.el, 'on', tt >= x.t && tt < x.off);
+    }
+    for (const d of dones) tog(d.el, 'done', tr >= d.t);
+
+    // Today's windows scroll as text piles up.
+    for (const f of flips) {
+      const h = f.el.offsetHeight;
+      if (f.h >= 0 && h !== f.h && !jump && !mq.matches) {
+        f.el.animate([{ transform: `translateY(${h - f.h}px)` }, { transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.22,.61,.24,1)' });
+      }
+      f.h = h;
+    }
+    if (fresh) {
+      fresh = false;
+      ends = [];
+      svg.setAttribute('viewBox', `0 0 ${R.width.toFixed(1)} ${R.height.toFixed(1)}`);
+      drawOld();
+    }
+
+    // Selection, focus, trails and the clipboard count.
+    let focus = L.cc.w;
+    TRIPS.forEach((x, i) => {
+      const u = t - x.t;
+      tog(x.el, 'sel', u >= 0.45 && u < 1.8);
+      tog(x.el, 'cp', u >= 0.88 && u < 1.12);
+      if (u >= 0.3) focus = x.src.w;
+      if (u >= 1.25) focus = x.dst.w;
+      const drawing = u >= 1.05 && u < 1.65;
+      const drawn = u >= 1.65;
+      const off = drawn ? '0' : drawing ? (100 * (1 - io((u - 1.05) / 0.6))).toFixed(1) : '100';
+      if (news[i].dataset.off !== off && (off === '100' || tripEnds(i))) {
+        news[i].dataset.off = off;
+        news[i].setAttribute('stroke-dashoffset', off);
+      }
+      tog(news[i], 'drawing', drawing);
+      tog(news[i], 'drawn', drawn);
+    });
+    tog(L.cc.w, 'focus', focus === L.cc.w);
+    tog(L.oc.w, 'focus', focus === L.oc.w);
+    const n = 10 + PASTES.filter((p) => t >= p).length;
+    if (n !== prevN) {
+      num.textContent = n;
+      if (!jump && n > prevN && !mq.matches) {
+        num.animate([{ transform: 'scale(1.6)', color: '#ffd9ad' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.34,1.16,.64,1)' });
+      }
+      prevN = n;
+    }
+
+    // Your cursor, today.
+    let k = -1;
+    for (let i = 0; i < TRIPS.length; i++) if (t >= TRIPS[i].t) k = i;
+    const u = k >= 0 ? t - TRIPS[k].t : -1;
+    const p = pose(t);
+    const q = pose(t - 0.025);
+    const vx = (p.x - q.x) / 0.025 / em;
+    const lean = Math.max(-14, Math.min(14, vx * 0.5));
+    place(me, p.x, p.y);
+    const press = k >= 0 && ((u >= 0.88 && u < 0.98) || (u >= 1.7 && u < 1.8));
+    meAr.style.transform = `rotate(${(p.rot + lean).toFixed(1)}deg) scale(${press ? 0.84 : 1})`;
+    const copying = k >= 0 && u >= 0.88 && u < 1.3;
+    const pasting = k >= 0 && u >= 1.68 && u < 2.15;
+    if (copying && tagTx.textContent !== 'Copy') tagTx.textContent = 'Copy';
+    if (pasting && tagTx.textContent !== 'Paste') tagTx.textContent = 'Paste';
+    tog(tag, 'on', copying || pasting);
+    if (k !== tripK) {
+      tripK = k;
+      if (k >= 0) carryTx.textContent = TRIPS[k].carry;
+    }
+    const carrying = k >= 0 && u >= 0.98 && u < 1.76;
+    carry.style.opacity = carrying ? 1 : 0;
+    carry.style.transform = carrying ? `rotate(${(Math.sin(u * 19) * 3 - lean * 0.5).toFixed(1)}deg)` : '';
+    const base = [0.3, 0.18, 0.09];
+    const selecting = k >= 0 && u >= 0.4 && u < 1.0;
+    ghosts.forEach((g, i) => {
+      const a = pose(t - 0.026 * (i + 1));
+      const b = pose(t - 0.026 * (i + 2));
+      const sp = Math.hypot(a.x - b.x, a.y - b.y) / 0.026 / em;
+      const op = still || selecting ? 0 : cl((sp - 6) / 16) * base[i];
+      g.style.opacity = op.toFixed(3);
+      if (op > 0) place(g, a.x, a.y);
+    });
+
+    // With Althar: the change, the findings, the fix and the all-clear travel by themselves.
+    let xk = -1;
+    let xu = 0;
+    XFER.forEach((x, i) => {
+      const v = (tr - x.t) / XD;
+      if (v >= 0 && v <= 1) { xk = i; xu = v; }
+    });
+    tog(A.lk, 'live', xk >= 0);
+    let rx = null;
+    for (const x of XFER) if (tr >= x.t + XD - 0.08 && tr < x.t + XD + 0.6) rx = x.d > 0 ? A.oc : A.cc;
+    tog(A.cc, 'rx', rx === A.cc);
+    tog(A.oc, 'rx', rx === A.oc);
+    if (xk >= 0) {
+      const x = XFER[xk];
+      if (chipK !== xk) {
+        chipK = xk;
+        chip.innerHTML = x.h;
+        chip.className = 'chip' + (x.c ? ' ' + x.c : '');
+      }
+      const g = rel(A.lk);
+      const cw = chip.offsetWidth;
+      const ch = chip.offsetHeight;
+      let s, e;
+      if (rel(A.oc).y > rel(A.cc).y + em) {
+        s = { x: g.x + g.w / 2, y: g.y - ch / 2 - em * 1.6 };
+        e = { x: g.x + g.w / 2, y: g.y + g.h + ch / 2 + em * 1.6 };
+      } else {
+        s = { x: g.x - cw / 2 - em * 0.6, y: g.y + g.h / 2 };
+        e = { x: g.x + g.w + cw / 2 + em * 0.6, y: g.y + g.h / 2 };
+      }
+      if (x.d < 0) [s, e] = [e, s];
+      const c = mix(s, e, sine(xu));
+      const op = cl(xu / 0.16) * cl((1 - xu) / 0.2);
+      const sc = 0.9 + 0.1 * Math.min(cl(xu / 0.2), cl((1 - xu) / 0.25));
+      chip.style.opacity = op.toFixed(3);
+      place(chip, c.x - cw / 2, c.y - ch / 2, ` scale(${sc.toFixed(3)})`);
+    } else {
+      chip.style.opacity = 0;
+    }
+
+    // The pull request drops to you, and you accept it.
+    tog(zero, 'gone', tr >= PR_ON - 0.25);
+    tog(pr, 'on', tr >= PR_ON);
+    tog(pr, 'took', tr >= C2[3]);
+    tog(acc, 'press', tr >= C2[2] && tr < C2[3]);
+    tog(acc, 'done', tr >= C2[3]);
+    if (tr >= C2[0]) {
+      const a = rel(acc);
+      const E = { x: a.x + a.w * 0.52, y: a.y + a.h * 0.6 };
+      const S = { x: E.x + em * 3.4, y: E.y + em * 3 };
+      const c = mix(S, E, out3(cl((tr - C2[0]) / (C2[1] - C2[0]))));
+      calm.style.opacity = cl((tr - C2[0]) / 0.45).toFixed(3);
+      place(calm, c.x, c.y);
+      calmAr.style.transform = tr >= C2[2] && tr < C2[3] ? 'scale(0.84)' : '';
+    } else {
+      calm.style.opacity = 0;
+    }
+  }
+
+  let T = 0;
+  let last = 0;
+  let raf = 0;
+  let seen = false;
+  const frame = (now) => {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    T = (T + dt) % LOOP;
+    render(T);
+    raf = requestAnimationFrame(frame);
+  };
+  const still = () => render(STILL[0], STILL[1], true);
+  const update = () => {
+    const go = seen && !document.hidden && !mq.matches;
+    if (go && !raf) {
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    } else if (!go && raf) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+  };
+  const measure = () => {
+    em = parseFloat(getComputedStyle(root).fontSize) || 12;
+    padB = parseFloat(getComputedStyle($('.before .log')).paddingBottom) || em * 0.55;
+    fresh = true;
+    for (const f of flips) f.h = -1;
+  };
+  measure();
+  if (mq.matches) still();
+  else render(T);
+  document.fonts?.ready.then(() => {
+    measure();
+    if (mq.matches) still();
+    else render(T);
+  });
+  new ResizeObserver(() => {
+    measure();
+    if (mq.matches) still();
+    else render(T);
+  }).observe(root);
+  new IntersectionObserver(([e]) => {
+    seen = e.isIntersecting;
+    update();
+  }).observe(root);
+  document.addEventListener('visibilitychange', update);
+  mq.addEventListener?.('change', () => {
+    if (mq.matches) still();
+    update();
+  });
+  root.addEventListener('rv-seek', (e) => {
+    T = ((+e.detail % LOOP) + LOOP) % LOOP;
+    render(T);
+  });
+})();
 </script>
