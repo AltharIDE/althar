@@ -4,6 +4,7 @@ import { Nav, NavSpace } from '../shared/Nav'
 import { RunsOn } from './bodies/RunsOn'
 import s from './Home.module.css'
 import { Hero } from './Hero'
+import { HeroLab, HeroSwitch, STYLES, useHeroAsked } from './lab/HeroLab'
 
 /*
  * The developer page: the lens for a nav, the first screen coming in from
@@ -12,10 +13,14 @@ import { Hero } from './Hero'
  */
 
 export function Home() {
+  // An experiment's style for the first screen, while they're compared (lab/HeroLab).
+  const asked = useHeroAsked()
+  const style = STYLES.find((one) => one.id === asked)?.id
   return (
     <div className={s.page} id="top">
       <Nav opening />
-      <Hero nav={<NavSpace />} />
+      {style ? <HeroLab id={style} nav={<NavSpace />} /> : <Hero nav={<NavSpace />} />}
+      {asked && <HeroSwitch current={style ?? 'photo'} />}
       <RunsOn />
       <DesktopBody />
       <Footer />
