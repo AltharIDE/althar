@@ -1991,7 +1991,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         }
         case scenarios.planUsage: {
-          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          // As the CLI sends them (SDK 0.3.312): each window it tracks, and its own window with no use of its own until one nears its limit.
+          // Resets ahead of now: one that has passed is unknown.
           const inSeconds = (seconds: number) => Math.floor(now() / 1000) + seconds
           await update({
             sessionUpdate: 'usage_update',
@@ -1999,19 +2000,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             size: 100,
             _meta: {
               '_claude/rateLimit': {
-                status: 'allowed_warning',
+                status: 'allowed',
                 rateLimitType: 'five_hour',
-                utilization: 0.82,
                 resetsAt: inSeconds(3 * 3600),
+                unifiedWindows: {
+                  five_hour: { utilization: 0.82, resetsAt: inSeconds(3 * 3600), status: 'allowed_warning' },
+                  seven_day: { utilization: 0.4, resetsAt: inSeconds(5 * 86_400), status: 'allowed' },
+                },
               },
-            },
-          })
-          await update({
-            sessionUpdate: 'usage_update',
-            used: 20,
-            size: 100,
-            _meta: {
-              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
             },
           })
           return ended()

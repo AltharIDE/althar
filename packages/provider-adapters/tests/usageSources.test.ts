@@ -361,16 +361,25 @@ describe('the usage reader', () => {
     await r.read('codex-chatgpt', codex(home))
     time += MIN_INTERVAL
     reply = { status: 429 }
-    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', fault: 'unreachable', last: { source: 'endpoint' } })
+    // Each time it is asked to wait, it says what the provider sent and when it asks again, for the log.
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      kind: 'fault',
+      fault: 'unreachable',
+      last: { source: 'endpoint' },
+      waiting: { retryAfter: null, until: new Date(time + MIN_INTERVAL * 2).toISOString() },
+    })
     time += MIN_INTERVAL + 1
     expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true })
     expect(seen).toHaveLength(2)
     time += MIN_INTERVAL * 2
     reply = { status: 429, retryAfter: '3600' }
-    await r.read('codex-chatgpt', codex(home))
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      waiting: { retryAfter: '3600', until: new Date(time + 3_600_000).toISOString() },
+    })
     expect(seen).toHaveLength(3)
     time += 59 * 60_000
-    await r.read('codex-chatgpt', codex(home))
+    // Waiting, it isn't asked: the last windows, and nothing to log.
+    expect(await r.read('codex-chatgpt', codex(home))).not.toHaveProperty('waiting')
     expect(seen).toHaveLength(3)
     time += 61_000
     reply = {}

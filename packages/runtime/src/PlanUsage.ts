@@ -34,11 +34,12 @@ import { SignIns } from './SignIns'
  * the window's plan gauge, the pickers and steering (Limits). Where the numbers come from differs by
  * agent and moves to ACP as the adapters speak it:
  *
- * - Claude Code: live, the adapter's `_meta` on its usage updates, one
- *   window per event, heard from sessions (`heard`); and for any account,
- *   idle ones too, Anthropic's usage endpoint with the account's own sign-in
- *   (the usage read, ADR-062), at most every five minutes and not while a
- *   session has just said.
+ * - Claude Code: live, the adapter's `_meta` on its usage updates, each
+ *   window the CLI tracks, as its use moves, heard from sessions (`heard`);
+ *   and where no session has said for a while, as on an idle account,
+ *   Anthropic's usage endpoint with the account's own sign-in (the usage read,
+ *   ADR-062), at most every five minutes, waiting as long as it asks. What the
+ *   endpoint answers never replaces what a session said since.
  * - Codex: its app-server, asked in the account's home; ChatGPT's usage
  *   endpoint where that can't answer.
  * - Kimi Code and Grok Build: their providers' usage endpoints, with the
@@ -49,8 +50,8 @@ import { SignIns } from './SignIns'
  *   (`usageSources.ts`). Their limits are still recognised when they hit.
  * - An API key has no plan window, and says so.
  *
- * A window whose reset has passed is shown as reset: Claude Code says nothing more until its limits change, which on a quiet
- * account can be days.
+ * A window whose reset has passed is unknown until it is read again: it has started again, but how much of it is used since
+ * no one has said. It is left out of the view, as steering leaves it out of an account's room (`tightestWindow`).
  */
 
 /** The longest a reading is kept before another is taken: a window asking within a minute hears the one before. */
@@ -59,8 +60,12 @@ const KEPT = Duration.minutes(1)
 const LEAST = Duration.seconds(5)
 /** How long a heard window waits before the view is told, so a turn's windows go out as one and the turn never waits on it. */
 const SETTLE = Duration.millis(250)
-/** While a session has said its windows this lately, Claude Code's endpoint isn't asked: what was heard is fresher. */
-const HEARD_LATELY = Duration.minutes(5)
+/**
+ * While a session has said its windows this lately, Claude Code's endpoint isn't asked: what was heard is fresher. The CLI
+ * says them again each time one's rounded percentage moves, so a session at work says them every few minutes; one quiet
+ * this long means the windows have barely moved, or no one is working. As long as the window shows numbers without their age.
+ */
+const HEARD_LATELY = Duration.minutes(15)
 
 /** What the service is built with in a test: how each source is read, and how often accounts are read on their own. */
 export interface PlanUsageOptions {
@@ -103,13 +108,16 @@ const faultOfRead = (message: string): { kind: UsageFaultKind; message: string }
 const past = (resetsAt: string | null | undefined, now: number) =>
   resetsAt !== null && resetsAt !== undefined && Date.parse(resetsAt) <= now
 
-/** A window as the view shows it: one whose reset has passed has all of its plan left, until it is heard again. */
-const shown = (window: UsageWindow, now: number) => ({
-  kind: window.kind,
-  label: window.label ?? null,
-  usedPercent: past(window.resetsAt, now) ? 0 : window.usedPercent,
-  resetsAt: past(window.resetsAt, now) ? null : (window.resetsAt ?? null),
-})
+/** The windows as the view shows them: one whose reset has passed is unknown until it is read again, so it isn't shown. */
+const shown = (windows: ReadonlyArray<UsageWindow>, now: number) =>
+  windows
+    .filter((window) => !past(window.resetsAt, now))
+    .map((window) => ({
+      kind: window.kind,
+      label: window.label ?? null,
+      usedPercent: window.usedPercent,
+      resetsAt: window.resetsAt ?? null,
+    }))
 
 type Failure = SqlError.SqlError
 
@@ -118,8 +126,8 @@ export class PlanUsage extends Context.Service<
   {
     /** Every account's plan usage; `refresh` asks the sources again first. */
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
-    /** A window Claude Code's adapter reported on a session of the account. */
-    readonly heard: (accountId: string, agentId: string, window: UsageWindow) => Effect.Effect<void, never>
+    /** The windows Claude Code's adapter reported on a session of the account, from one event. */
+    readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
   }
 >()('@althar/runtime/PlanUsage') {
   static readonly layer: Layer.Layer<PlanUsage, never, SqlClient.SqlClient | Agents | Accounts | SignIns | Live | RuntimeConfig> =
@@ -218,14 +226,18 @@ export class PlanUsage extends Context.Service<
             const check = yield* signIns.account(account)
             const before = held.get(account.id)
             const env = accounts.env(account)
-            const fault = (kind: UsageFaultKind, message: string): Held => ({
-              agentId: definition.id,
-              source: before?.source ?? null,
-              plan: before?.plan ?? null,
-              windows: before?.windows ?? [],
-              observedAt: before?.observedAt ?? null,
-              fault: { kind, message },
-            })
+            /* A fault, with the reading held when it is kept: one a session said while the source was asked stays. */
+            const fault = (kind: UsageFaultKind, message: string): Held => {
+              const last = held.get(account.id)
+              return {
+                agentId: definition.id,
+                source: last?.source ?? null,
+                plan: last?.plan ?? null,
+                windows: last?.windows ?? [],
+                observedAt: last?.observedAt ?? null,
+                fault: { kind, message },
+              }
+            }
             const key: Held = {
               agentId: definition.id,
               source: null,
@@ -281,13 +293,28 @@ export class PlanUsage extends Context.Service<
                     nowAsDate,
                   ).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
                 )
-                if (got.kind === 'usage') return yield* read(got.usage)
-                if (got.kind === 'none') return yield* keep(account.id, none)
-                yield* keep(
-                  account.id,
-                  got.fault === 'expired'
-                    ? fault('expired', `Its sign-in has expired. ${definition.name} renews it the next time it runs on this account.`)
-                    : fault(got.fault, got.message),
+                if (got.kind === 'fault' && got.waiting !== undefined)
+                  yield* Effect.logInfo('A usage endpoint asked Althar to wait').pipe(
+                    Effect.annotateLogs({ agent: definition.id, retryAfter: got.waiting.retryAfter ?? 'none', until: got.waiting.until }),
+                  )
+                // Kept one at a time with what sessions say, and against what is held by then: a session may have said its windows meanwhile.
+                yield* hearing.withPermits(1)(
+                  Effect.gen(function* () {
+                    if (got.kind === 'usage') {
+                      // An answer no newer than what is held, as the reader's own from before it was asked to wait, leaves that as it is.
+                      const last = held.get(account.id)
+                      if (last?.observedAt != null && Date.parse(got.usage.observedAt) <= Date.parse(last.observedAt))
+                        return yield* keep(account.id, { ...last, fault: null })
+                      return yield* read(got.usage)
+                    }
+                    if (got.kind === 'none') return yield* keep(account.id, none)
+                    yield* keep(
+                      account.id,
+                      got.fault === 'expired'
+                        ? fault('expired', `Its sign-in has expired. ${definition.name} renews it the next time it runs on this account.`)
+                        : fault(got.fault, got.message),
+                    )
+                  }),
                 )
               })
             if (check.status === 'signed_out')
@@ -391,7 +418,7 @@ export class PlanUsage extends Context.Service<
                 source: mine?.source ?? null,
                 observedAt: mine?.observedAt ?? null,
                 plan: mine?.plan ?? null,
-                windows: (key ? [] : (mine?.windows ?? [])).map((window) => shown(window, now)),
+                windows: shown(key ? [] : (mine?.windows ?? []), now),
                 fault,
                 noReading,
               })
@@ -438,16 +465,17 @@ export class PlanUsage extends Context.Service<
                   ),
                   view,
                 ),
-          // One window at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
-          heard: (accountId, agentId, window) =>
+          // One event at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
+          heard: (accountId, agentId, said) =>
             hearing
               .withPermits(1)(
                 Effect.gen(function* () {
                   yield* hydrate
                   const before = held.get(accountId)
                   const at = yield* timestamp
-                  // One window per event: it replaces its own, and the others stay as last said.
-                  const windows = [...(before?.windows ?? []).filter((each) => keyOf(each) !== keyOf(window)), window]
+                  // Each window said replaces its own, and the others stay as last said.
+                  const named = new Set(said.map(keyOf))
+                  const windows = [...(before?.windows ?? []).filter((each) => !named.has(keyOf(each))), ...said]
                   yield* keep(accountId, {
                     agentId,
                     source: 'acp_extension',

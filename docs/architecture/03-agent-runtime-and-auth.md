@@ -453,13 +453,17 @@ in two layers:
       ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
 
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
-   - Claude Code: live, `claude-agent-acp` forwards one window per event in
-     `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
-     `rate_limit_event`), and drops it if it arrives before a turn's first
-     usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
+   - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
+     `rate_limit_event` in `usage_update` `_meta["_claude/rateLimit"]`, and
+     drops it if it arrives before a turn's first usage figure
+     ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
      so Althar carries a patch for that (`patches/`, on the pinned version).
-     Any account, idle ones too: Anthropic's `/api/oauth/usage`, at most
-     every five minutes, and not while a session has just said.
+     The event's own window has a use only near its limit; each window the
+     CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
+     percentage moves. Where no session has said for a quarter of an hour, as
+     on an idle account: Anthropic's `/api/oauth/usage`, at most every five
+     minutes, waiting as long as it asks, and never over what a session said
+     since.
    - Codex: app-server's `account/rateLimits/read` and
      `account/rateLimits/updated` (`usage.ts`), started in the account's
      home; ChatGPT's `wham/usage` where it can't answer.

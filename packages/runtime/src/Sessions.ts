@@ -799,15 +799,15 @@ export class Sessions extends Context.Service<
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
       /*
-       * Claude Code's adapter says a plan window with the usage it streams:
+       * Claude Code's adapter says the plan's windows with the usage it streams:
        * kept for the account the session runs on, in a fiber of its own, so
        * the stream never waits on the store or the view.
        */
       const heardPlan = (running: Running, event: SessionEvent) => {
-        const window = event._tag === 'PlanWindow' ? event.window : event._tag === 'ContextUsage' ? event.planWindow : undefined
-        return window === undefined
+        const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
+        return windows === undefined
           ? Effect.void
-          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, window), sessionsScope))
+          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope))
       }
       const toolServer = yield* ToolServer
       const setups = yield* Setups

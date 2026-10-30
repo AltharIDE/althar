@@ -30,7 +30,14 @@ export type EndpointRead =
   | { readonly kind: 'usage'; readonly usage: AccountUsage; readonly stale: boolean }
   /** The account has no plan sign-in for this read: it is paid another way (a key), or not signed in this way. */
   | { readonly kind: 'none' }
-  | { readonly kind: 'fault'; readonly fault: UsageFault; readonly message: string; readonly last?: AccountUsage }
+  | {
+      readonly kind: 'fault'
+      readonly fault: UsageFault
+      readonly message: string
+      readonly last?: AccountUsage
+      /** Where the provider has just asked Althar to wait: its Retry-After as sent, and when Althar asks again (ISO 8601). */
+      readonly waiting?: { readonly retryAfter: string | null; readonly until: string }
+    }
 
 /** The account a read is for: bound to its agent and provider, so a source is only used for its own pair. */
 export interface UsageAccount {
@@ -73,7 +80,7 @@ export interface UsagePolicy {
 export const MIN_INTERVAL = 60_000
 export const MAX_BACKOFF = 24 * 60 * 60_000
 
-const fault = (kind: UsageFault, message: string, last?: AccountUsage): EndpointRead => ({
+const fault = (kind: UsageFault, message: string, last?: AccountUsage): Extract<EndpointRead, { kind: 'fault' }> => ({
   kind: 'fault',
   fault: kind,
   message,
@@ -167,13 +174,12 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
     if (status === 401 || status === 403) return failed('expired', 'Its sign-in has expired.')
     if (status === 429) {
       const strikes = (before?.strikes ?? 0) + 1
-      const asked = retryAfter(answer.headers?.get('retry-after'), at)
-      return failed(
-        'unreachable',
-        'The provider asked Althar to wait before reading again.',
-        strikes,
-        Math.min(MAX_BACKOFF, Math.max(every, asked ?? Math.min(15 * 60_000, MIN_INTERVAL * 2 ** strikes))),
-      )
+      const header = answer.headers?.get('retry-after') ?? null
+      const wait = Math.min(MAX_BACKOFF, Math.max(every, retryAfter(header, at) ?? Math.min(15 * 60_000, MIN_INTERVAL * 2 ** strikes)))
+      return {
+        ...failed('unreachable', 'The provider asked Althar to wait before reading again.', strikes, wait),
+        waiting: { retryAfter: header, until: new Date(at + wait).toISOString() },
+      }
     }
     if (status >= 300 && status < 400) return failed('source_changed', 'The usage address has moved.')
     if (status < 200 || status >= 300) return failed('unreachable', 'The provider answered with an error.')
