@@ -11,7 +11,7 @@ import { Queries } from '../src/Queries'
 import { planWaits, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { outUntilSoon, repository, runtime, until } from './support'
+import { atReset, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * Held steps as the store keeps them, read back however an earlier Althar
@@ -91,11 +91,13 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
  * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
  * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
  */
-const reviewBehind = (projectId: ProjectId, taskId: string) =>
+const reviewBehind = (projectId: ProjectId, taskId: string, back: number) =>
   Effect.gen(function* () {
     yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
     const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
     yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
+    // The reset comes once the other has the place.
+    yield* atReset(back)
     return { other, review: yield* heldFor(taskId, 'machine_busy') }
   })
 
@@ -119,8 +121,9 @@ const ranOn = (threadId: string) =>
   })
 
 describe('a step waiting for a place, as an earlier Althar kept it', () => {
-  it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () =>
-    Effect.gen(function* () {
+  it.effect('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () => {
+    const back = later()
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const policies = yield* Policies
@@ -131,7 +134,7 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { other, review } = yield* reviewBehind(projectId, task.taskId)
+      const { other, review } = yield* reviewBehind(projectId, task.taskId, back)
       // Kept as the step after its lead's, with no reviewer named.
       const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({ place: { how: 'next' }, since })} WHERE id = ${review.id}`
@@ -141,11 +144,12 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.strictEqual(reviewer?.agentId, 'codex')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: outUntilSoon() } } }))),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
+  })
 
-  it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () =>
-    Effect.gen(function* () {
+  it.effect('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () => {
+    const back = later()
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
       const instance = yield* Instance
@@ -155,15 +159,15 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { review } = yield* reviewBehind(projectId, task.taskId)
+      const { review } = yield* reviewBehind(projectId, task.taskId, back)
       const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({
         place: { how: 'resume', lead: { agentId: 'claude-code', model: null, effort: null } },
         since,
       })} WHERE id = ${review.id}`
       yield* readyIs(projectId, task.taskId)
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: outUntilSoon() } } }))),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
+  })
 
   it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () =>
     Effect.gen(function* () {
@@ -184,8 +188,8 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
 })
 
 describe('a step held for a usage limit, as an earlier Althar kept it', () => {
-  it.live('carries on at its reset, as its agent picks, where its hold names no account or model', () => {
-    const back = Date.now() + 3_000
+  it.effect('carries on at its reset, as its agent picks, where its hold names no account or model', () => {
+    const back = later()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
@@ -195,9 +199,10 @@ describe('a step held for a usage limit, as an earlier Althar kept it', () => {
       const task = yield* started(projectId, 'Out', 'Do it. [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
       const held = yield* heldFor(task.taskId, 'usage_limit')
       yield* sql`UPDATE node_attempts SET output = json_remove(output, '$.account', '$.model') WHERE id = ${held.id}`
+      yield* atReset(back)
       yield* readyIs(projectId, task.taskId)
       assert.deepStrictEqual(yield* ranOn(task.threadId), ['claude-code'])
-    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })), onTestClock)
   })
 
   it.live('is handed on as the person picks, though its hold can’t be read', () => {

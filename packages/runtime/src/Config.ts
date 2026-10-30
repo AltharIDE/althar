@@ -141,8 +141,6 @@ export interface RuntimeOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface AutomationOptions {
-  /** The time now, in epoch milliseconds: the wall clock's. */
-  readonly now?: () => number
   /** The zone the computer is in now: its clock's. */
   readonly zone?: () => string
   /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */

@@ -20,7 +20,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { items, outUntilSoon, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
@@ -361,8 +361,8 @@ describe('an answer kept for a place, as answers once were', () => {
 })
 
 describe('a review that waits for a place of its own', () => {
-  it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
-    const back = outUntilSoon()
+  it.effect('is gone on without when the person skips it, and its reviewer never starts again', () => {
+    const back = later()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
@@ -376,8 +376,10 @@ describe('a review that waits for a place of its own', () => {
       ])
       // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
       yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
-      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
       // At the reset there is none: the review waits for a place of its own.
+      yield* atReset(back)
       yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy')
       const reviewers = sql`SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       const before = (yield* reviewers).length
@@ -393,6 +395,6 @@ describe('a review that waits for a place of its own', () => {
       )
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* reviewers, before)
-    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: back } } })))
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
   })
 })
