@@ -30,6 +30,12 @@ vi.hoisted(() => {
   ;(window as { althar?: { platform?: string } }).althar = { platform: 'linux' }
 })
 
+vi.mock('@althar/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@althar/ui')>()
+  const { keysFor } = await import('./mockKeys')
+  return { ...actual, ...keysFor('linux') }
+})
+
 vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
   return { ...actual, platform: 'linux', device: actual.deviceWords('linux') }
