@@ -288,7 +288,7 @@ describe('accounts', () => {
       assert.isTrue(lstatSync(join(home, 'mise')).isSymbolicLink())
       assert.isFalse(existsSync(join(home, 'auth.json')))
       // What came to the usual folder since is linked as a session starts.
-      mkdirSync(join(usualFolder, 'pnpm'))
+      mkdirSync(join(usualFolder, 'pnpm'), { recursive: true })
       yield* accounts.prepare(own)
       yield* accounts.prepare(own)
       assert.strictEqual(readlinkSync(join(home, 'pnpm')), join(usualFolder, 'pnpm'))
