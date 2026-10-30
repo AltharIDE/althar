@@ -73,6 +73,7 @@ export function Select<V extends string>({
   text,
 }: SelectProps<V>) {
   const name = useControlName(label)
+  const [shown, setShown] = useState(defaultOpen ?? false)
   if (searchable)
     return (
       <Searchable
@@ -103,7 +104,10 @@ export function Select<V extends string>({
       disabled={disabled}
       open={open}
       defaultOpen={defaultOpen}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => {
+        setShown(next)
+        onOpenChange?.(next)
+      }}
     >
       <S.Trigger id={id} {...name} className={cx(s.trigger, s[variant], className)} style={width ? { width } : undefined}>
         <S.Value placeholder={placeholder} />
@@ -120,6 +124,8 @@ export function Select<V extends string>({
           onCloseAutoFocus={(event) => {
             if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
           }}
+          /* Going, it is inert, so the pointer leaving an option can't focus it again (as Menu says). */
+          inert={!(open ?? shown)}
         >
           <S.Viewport>
             {options.map((o) => (
