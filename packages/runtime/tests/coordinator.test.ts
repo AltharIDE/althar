@@ -90,7 +90,7 @@ describe('the coordinator loop', () => {
       // The task keeps what the person said it from, in their words, for its thread to open with and its lead to read.
       const [kept] = yield* sql<{ request: string | null }>`SELECT request FROM tasks`
       assert.strictEqual(kept?.request, 'Add a retry. [coordinator:plan] [lead:finish] [review:findings]')
-      const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       const [briefed] = yield* sql<{ prompt: string }>`
         SELECT d.prompt FROM turn_deliveries d WHERE d.thread_id = ${ready?.threadId ?? ''} ORDER BY d.requested_at LIMIT 1`
       assert.include(briefed?.prompt, 'What the person asked for, in their words:\n\nAdd a retry. [coordinator:plan]')
@@ -282,7 +282,7 @@ describe('the coordinator loop', () => {
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       // Out of rounds, with settled changes no review has seen: it needs the person, with the findings still open.
-      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting', Duration.seconds(60))
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
       const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
       assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
         step: 'review',
@@ -296,7 +296,7 @@ describe('the coordinator loop', () => {
         attentionId: call?.id ?? '',
         answer: { kind: 'abandon' },
       })
-      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(10))
+      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(first?.taskId, waiting?.taskId)
       assert.deepStrictEqual(
         (yield* results(first?.threadId ?? '')).map((step) => [step.step, step.verdict ?? null]),
@@ -312,11 +312,7 @@ describe('the coordinator loop', () => {
       )
       // The lead sets the findings aside: nothing changed, so there's nothing new to review.
       yield* say(threadId, 'Rename a file. [coordinator:plan] [lead:finish] [review:findings] [lead:set-aside]')
-      const [second] = yield* until(
-        cardsOf(projectId),
-        (cards) => cards.length === 2 && cards.every((card) => card.phase === 'ready'),
-        Duration.seconds(60),
-      )
+      const [second] = yield* until(cardsOf(projectId), (cards) => cards.length === 2 && cards.every((card) => card.phase === 'ready'))
       const later = (yield* cardsOf(projectId)).find((card) => card.taskId !== first?.taskId) ?? second
       assert.deepStrictEqual(
         (yield* results(later?.threadId ?? '')).map((step) => step.step),
@@ -467,7 +463,7 @@ describe('the coordinator loop', () => {
         }),
         /^Althar has your review\. The lead settles/,
       )
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual(
         (yield* results(card?.threadId ?? '')).map((step) => step.step),
         ['implement', 'review', 'settle', 'review'],
@@ -1181,7 +1177,7 @@ describe("the coordinator's tools", () => {
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Try the double jump. [coordinator:start]')
-      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(10))
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running')
       assert.strictEqual(card?.title, 'Try the double jump')
       assert.isNull(card?.plan?.startsAt)
       assert.lengthOf(card?.plan?.steps ?? [], 1)
@@ -1324,7 +1320,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
   it.live("starts afresh a lead that doesn't stop its turn when asked, and it finishes", () =>
     Effect.gen(function* () {
       const { projectId, task } = yield* planned('Wedged', '[lead:wedge-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
-      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(15))
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         "Fake codex didn't stop its turn when asked, so Althar started it afresh.",

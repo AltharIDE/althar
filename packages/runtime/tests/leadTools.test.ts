@@ -61,7 +61,7 @@ const withPullRequest = (working: string, opened = false) =>
     const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
       snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
     )
-    const [ready] = yield* until(cards, (all) => (opened || all[0]?.phase === 'ready') && all[0]?.change != null, Duration.seconds(20))
+    const [ready] = yield* until(cards, (all) => (opened || all[0]?.phase === 'ready') && all[0]?.change != null)
     const taskId = ready?.taskId ?? ''
     const lead: ToolAccess = {
       role: 'lead',
@@ -262,7 +262,7 @@ describe('a task’s pull request across a restart', () => {
       github.commentAs(1, 'dana', 'Is it seconds?')
       yield* Effect.gen(function* () {
         const arrivals = Effect.map(items(lead.threadId), (all) => all.filter((item) => item.kind === 'arrival'))
-        const [heard] = yield* until(arrivals, (all) => all.length > 0, Duration.seconds(10))
+        const [heard] = yield* until(arrivals, (all) => all.length > 0)
         assert.deepInclude(heard?.content, { kind: 'comment', from: 'dana' })
       }).pipe(Effect.provide(launch(Duration.millis(100))))
     })
@@ -350,10 +350,10 @@ describe('rerun_check, on the task’s own pull request', () => {
     return Effect.gen(function* () {
       const { lead } = yield* withPullRequest(working, true)
       // Failed, run again once by Althar, failed again: two arrivals.
-      yield* until(failures(lead.threadId), (heard) => heard.length === 2 && github.reruns.length === 1, Duration.seconds(30))
+      yield* until(failures(lead.threadId), (heard) => heard.length === 2 && github.reruns.length === 1)
       assert.match(yield* callTool(lead, 'rerun_check', { check: 'test' }), /^Running test on PR #1 again\./)
       // Run again by the lead, it shows running, then fails: heard again, as its own.
-      yield* until(failures(lead.threadId), (heard) => heard.length === 3, Duration.seconds(30))
+      yield* until(failures(lead.threadId), (heard) => heard.length === 3)
       assert.lengthOf(github.reruns, 2)
     }).pipe(Effect.provide(runtimeWith(github, Duration.millis(100))))
   })

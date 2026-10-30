@@ -142,8 +142,7 @@ const workspacesOf = (taskId: string) =>
   })
 
 /** Waits until each of a task's worktrees has been set up. */
-const setUp = (taskId: string, limit?: Duration.Duration) =>
-  until(workspacesOf(taskId), (rows) => rows.length > 0 && rows.every((row) => row.setup !== null), limit)
+const setUp = (taskId: string) => until(workspacesOf(taskId), (rows) => rows.length > 0 && rows.every((row) => row.setup !== null))
 
 /** The setup items in a thread, as their content. */
 const setupItems = (threadId: string) =>
@@ -325,7 +324,7 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const path = withPackages()
       const { task } = yield* taskIn(path)
-      const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
+      const [workspace] = yield* setUp(task.taskId)
       // Installed in the worktree, by Bun, with the lockfile as it was.
       assert.isTrue(existsSync(join(task.worktree, 'node_modules', 'greet', 'index.js')))
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
@@ -346,7 +345,7 @@ describe('setting up a task’s worktree', () => {
   it.live('installs a monorepo whose root names only its workspaces', () =>
     Effect.gen(function* () {
       const { task } = yield* taskIn(withWorkspaces())
-      const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
+      const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0 }, workspace?.setup?.last ?? '')
       assert.isTrue(existsSync(join(task.worktree, 'packages', 'app', 'node_modules', 'greet', 'index.js')))
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
@@ -357,7 +356,7 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { task } = yield* taskIn(withPackages())
-      yield* setUp(task.taskId, Duration.seconds(60))
+      yield* setUp(task.taskId)
       // As Althar quitting while Bun installs leaves it: the folder made, the package not yet in it, and nothing kept.
       rmSync(join(task.worktree, 'node_modules', 'greet'), { recursive: true, force: true })
       assert.isTrue(existsSync(join(task.worktree, 'node_modules')))

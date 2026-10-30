@@ -233,88 +233,69 @@ const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
   })
 
 describe('a lead’s session', () => {
-  it.live(
-    'runs the project’s known commands outside its sandbox, and reaches its code host, registry and tracker without asking',
-    () =>
-      Effect.gen(function* () {
-        const sandbox = yield* leading({ permissions: 'rules' })
-        // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
-        assert.deepStrictEqual(sandbox?.commands, [
-          'bunx playwright',
-          'bunx electron',
-          'bunx vitest',
-          'node scripts/e2e.ts',
-          'ps',
-          'env -i',
-        ])
-        // Not GitHub's release downloads: the rules read `release-assets` as publishing, which always asks here.
-        assert.deepStrictEqual(sandbox?.hosts, [
-          'github.com',
-          'api.github.com',
-          'codeload.github.com',
-          'raw.githubusercontent.com',
-          'objects.githubusercontent.com',
-          'registry.npmjs.org',
-          'cdn.playwright.dev',
-          'playwright.download.prss.microsoft.com',
-          'playwright.azureedge.net',
-          'linear.app',
-          'api.linear.app',
-          'uploads.linear.app',
-        ])
-      }).pipe(Effect.provide(runtime())),
-    20_000,
+  it.live('runs the project’s known commands outside its sandbox, and reaches its code host, registry and tracker without asking', () =>
+    Effect.gen(function* () {
+      const sandbox = yield* leading({ permissions: 'rules' })
+      // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
+      assert.deepStrictEqual(sandbox?.commands, ['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', 'ps', 'env -i'])
+      // Not GitHub's release downloads: the rules read `release-assets` as publishing, which always asks here.
+      assert.deepStrictEqual(sandbox?.hosts, [
+        'github.com',
+        'api.github.com',
+        'codeload.github.com',
+        'raw.githubusercontent.com',
+        'objects.githubusercontent.com',
+        'registry.npmjs.org',
+        'cdn.playwright.dev',
+        'playwright.download.prss.microsoft.com',
+        'playwright.azureedge.net',
+        'linear.app',
+        'api.linear.app',
+        'uploads.linear.app',
+      ])
+    }).pipe(Effect.provide(runtime())),
   )
 
-  it.live(
-    'is given the person’s edits, and no host while the rest asks the person, though its commands still run outside',
-    () =>
-      Effect.gen(function* () {
-        const sandbox = yield* leading({
-          permissions: 'ask',
-          sandbox: {
-            commands: { added: ['make  e2e *', 'bun run test:e2e'], removed: ['env -i'] },
-            hosts: { added: ['https://Pkgs.Acme.dev:8443/simple'], removed: [] },
-          },
-        })
-        assert.deepStrictEqual(sandbox?.commands, [
-          'bunx playwright',
-          'bunx electron',
-          'bunx vitest',
-          'node scripts/e2e.ts',
-          'ps',
-          'make e2e',
-        ])
-        assert.deepStrictEqual(sandbox?.hosts, [])
-      }).pipe(Effect.provide(runtime())),
-    20_000,
+  it.live('is given the person’s edits, and no host while the rest asks the person, though its commands still run outside', () =>
+    Effect.gen(function* () {
+      const sandbox = yield* leading({
+        permissions: 'ask',
+        sandbox: {
+          commands: { added: ['make  e2e *', 'bun run test:e2e'], removed: ['env -i'] },
+          hosts: { added: ['https://Pkgs.Acme.dev:8443/simple'], removed: [] },
+        },
+      })
+      assert.deepStrictEqual(sandbox?.commands, [
+        'bunx playwright',
+        'bunx electron',
+        'bunx vitest',
+        'node scripts/e2e.ts',
+        'ps',
+        'make e2e',
+      ])
+      assert.deepStrictEqual(sandbox?.hosts, [])
+    }).pipe(Effect.provide(runtime())),
   )
 
-  it.live(
-    'reaches every host with everything allowed, but one the project never lets a command name',
-    () =>
-      Effect.gen(function* () {
-        const sandbox = yield* leading({ allowEverything: true, commands: [{ pattern: 'uploads.linear.app', decision: 'never' }] })
-        assert.include(sandbox?.hosts ?? [], 'registry.npmjs.org')
-        assert.notInclude(sandbox?.hosts ?? [], 'uploads.linear.app')
-      }).pipe(Effect.provide(runtime())),
-    20_000,
+  it.live('reaches every host with everything allowed, but one the project never lets a command name', () =>
+    Effect.gen(function* () {
+      const sandbox = yield* leading({ allowEverything: true, commands: [{ pattern: 'uploads.linear.app', decision: 'never' }] })
+      assert.include(sandbox?.hosts ?? [], 'registry.npmjs.org')
+      assert.notInclude(sandbox?.hosts ?? [], 'uploads.linear.app')
+    }).pipe(Effect.provide(runtime())),
   )
 
-  it.live(
-    'never reaches every host under a name, which would pass one the project never allows',
-    () =>
-      Effect.gen(function* () {
-        // The rules allow `*.example.com` as written, and refuse `private.example.com`, which it would let through.
-        const sandbox = yield* leading({
-          permissions: 'rules',
-          commands: [{ pattern: 'private.example.com', decision: 'never' }],
-          sandbox: { hosts: { added: ['*.example.com', 'pkgs.example.com'], removed: [] } },
-        })
-        assert.include(sandbox?.hosts ?? [], 'pkgs.example.com')
-        assert.notInclude(sandbox?.hosts ?? [], '*.example.com')
-      }).pipe(Effect.provide(runtime())),
-    20_000,
+  it.live('never reaches every host under a name, which would pass one the project never allows', () =>
+    Effect.gen(function* () {
+      // The rules allow `*.example.com` as written, and refuse `private.example.com`, which it would let through.
+      const sandbox = yield* leading({
+        permissions: 'rules',
+        commands: [{ pattern: 'private.example.com', decision: 'never' }],
+        sandbox: { hosts: { added: ['*.example.com', 'pkgs.example.com'], removed: [] } },
+      })
+      assert.include(sandbox?.hosts ?? [], 'pkgs.example.com')
+      assert.notInclude(sandbox?.hosts ?? [], '*.example.com')
+    }).pipe(Effect.provide(runtime())),
   )
 })
 

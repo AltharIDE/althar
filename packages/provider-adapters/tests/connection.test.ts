@@ -416,6 +416,16 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live("asks for the person's words sent after the runtime's reminder to report, as the fake does what they ask", () =>
+      Effect.gen(function* () {
+        const reminded = yield* turn(
+          `Your step isn't done until you call Althar's finish_step tool. Call it now.\n\n${scenarios.tool}`,
+          allow,
+        )
+        assert.strictEqual(text(reminded.events), 'chosen=allow-once')
+      }),
+    )
+
     it.live('never allows always: with no one-time allow on offer, the request is cancelled', () =>
       Effect.gen(function* () {
         const { events, permissions } = yield* turn(scenarios.toolAlwaysOnly, allow)

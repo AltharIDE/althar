@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -72,7 +72,6 @@ const uncheckedOf = (projectId: string) =>
   until(
     Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
     ([one]) => one !== null,
-    Duration.seconds(20),
   ).pipe(Effect.map(([one]) => one))
 
 const runIs = (taskId: string, state: string) =>
@@ -122,7 +121,6 @@ describe('a conflicting task whose run didn’t succeed', () => {
       const [why] = yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
-        Duration.seconds(20),
       )
       assert.strictEqual(why, 'You stopped it, so Althar doesn’t start its lead for a conflict.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
@@ -147,7 +145,6 @@ describe('a conflicting task Althar can’t merge here', () => {
       const [why] = yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
-        Duration.seconds(20),
       )
       assert.strictEqual(why, 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
@@ -185,7 +182,7 @@ describe('a task Althar can’t look at here, where its host says it merges clea
       url = bare
       yield* (yield* Changes).resolveNow({ taskId }, true)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      yield* until(cards(projectId), ([card]) => card?.conflictUnchecked == null, Duration.seconds(20))
+      yield* until(cards(projectId), ([card]) => card?.conflictUnchecked == null)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -214,10 +211,10 @@ describe('a conflict its lead couldn’t resolve', () => {
     return Effect.gen(function* () {
       const { projectId, taskId } = yield* opened(working, '[lead:resolve-fails]')
       moveHostMainOn(working, bare)
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed', Duration.seconds(30))
-      yield* until(cards(projectId), (all) => all[0]?.handedBack != null, Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed')
+      yield* until(cards(projectId), (all) => all[0]?.handedBack != null)
       yield* (yield* Changes).resolveNow({ taskId }, true)
-      const all = yield* until(rounds(taskId), (now) => now.length === 2, Duration.seconds(20))
+      const all = yield* until(rounds(taskId), (now) => now.length === 2)
       // The same conflict, against the same main, asked again.
       assert.strictEqual(all[0]?.state, 'failed')
       assert.strictEqual(all[1]?.attempt, 1)
@@ -230,13 +227,13 @@ describe('a conflict its lead couldn’t resolve', () => {
     return Effect.gen(function* () {
       const { projectId, taskId } = yield* opened(working, '[lead:resolve-fails]')
       moveHostMainOn(working, bare)
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed', Duration.seconds(30))
-      yield* until(cards(projectId), (all) => all[0]?.handedBack != null, Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed')
+      yield* until(cards(projectId), (all) => all[0]?.handedBack != null)
       // Looked at a few turns over, it stays the person's: nothing new to try.
       yield* Effect.sleep('1500 millis')
       assert.strictEqual((yield* rounds(taskId)).length, 1)
       moveHostMainOn(working, bare, 'rate limits, again\n')
-      const all = yield* until(rounds(taskId), (now) => now.length === 2, Duration.seconds(20))
+      const all = yield* until(rounds(taskId), (now) => now.length === 2)
       assert.strictEqual(all[0]?.state, 'failed')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -299,7 +296,7 @@ describe('a branch merging here, with no pull request', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       moveMainOn(working)
       yield* titled(task?.threadId ?? '', 'The lead resolved the conflict with main, in change.txt')
       assert.deepStrictEqual(
@@ -317,7 +314,7 @@ describe('a branch merging here, with no pull request', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         false,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       moveMainOn(working)
       yield* Effect.sleep('1500 millis')
       assert.deepStrictEqual(yield* rounds(task?.taskId ?? ''), [])
@@ -337,14 +334,13 @@ describe('a branch merging here, with no pull request', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       yield* runIs(taskId, 'suspended')
       moveMainOn(working)
       yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one === 'You stopped it, so Althar doesn’t start its lead for a conflict.',
-        Duration.seconds(20),
       )
       // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
       rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })
@@ -363,7 +359,7 @@ describe('a branch merging here, with no pull request', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const { path } = yield* worktreeOf(taskId)
       const kept = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'folder')
@@ -378,7 +374,6 @@ describe('a branch merging here, with no pull request', () => {
       yield* until(
         Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
         ([one]) => one === 'Git couldn’t merge main with the branch here.',
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(yield* rounds(taskId), [])
     }).pipe(Effect.provide(runtimeWith()))

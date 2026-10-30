@@ -293,7 +293,7 @@ describe('connecting GitLab', () => {
     expect(open).toHaveBeenLastCalledWith('https://gitlab.com/oauth/device?user_code=WXYZ-0000', '_blank')
     expect(await within(panel).findByText('The code expired.', {}, { timeout: 4000 })).toBeTruthy()
     expect(client.startSignIn).toHaveBeenCalledWith('gitlab', 'https://gitlab.com', undefined)
-  }, 10_000)
+  })
 
   it('says each thing it asks GitLab while GitLab is asked, with who the token is', async () => {
     const { panel, press, heading } = await walk('gitlab', {
@@ -521,7 +521,7 @@ describe('connecting Linear', () => {
     expect(within(panel).getByText('Reads your workspace’s issues')).toBeTruthy()
     expect(within(panel).getByText('Moves an issue’s status')).toBeTruthy()
     expect(within(panel).getByText('Through Althar’s Linear app, which renews its own sign-in.')).toBeTruthy()
-  }, 10_000)
+  })
 
   it('takes a personal key, and says when Linear doesn’t take it, with a new one made or another pasted', async () => {
     const { client, panel, press, heading } = await walk('linear', {
@@ -1081,7 +1081,7 @@ describe('connecting GitHub', () => {
     expect(await within(panel).findByText('That sign-in isn’t there any more.', {}, { timeout: 4000 })).toBeTruthy()
     await press('Try again')
     expect(client.startSignIn).toHaveBeenCalledTimes(2)
-  }, 10_000)
+  })
 
   it('says GitHub didn’t answer a check, and connects as it is', async () => {
     const { panel, closed, press, heading } = await walk('github', {

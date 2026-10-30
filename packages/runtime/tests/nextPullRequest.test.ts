@@ -72,11 +72,7 @@ const merged = (working: string, bare: string, github: FakeService) =>
     const threadId = yield* coordinator.thread(project.projectId)
     const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-    const [ready] = yield* until(
-      cards(project.projectId),
-      (all) => all[0]?.phase === 'ready' && all[0].change !== null,
-      Duration.seconds(30),
-    )
+    const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null)
     const card = ready ?? assert.fail('no card')
     // The host squashes it into main: one commit with the branch's change, the branch left as it was.
     const clone = mkdtempSync(join(tmpdir(), 'althar-merge-'))
@@ -86,73 +82,59 @@ const merged = (working: string, bare: string, github: FakeService) =>
     git(clone, 'push', '-q', 'origin', 'main')
     github.mergeByHand(1)
     yield* (yield* Changes).refresh(card.taskId)
-    yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+    yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled')
     const sql = yield* SqlClient.SqlClient
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${card.taskId}`
     return { projectId: project.projectId, taskId: card.taskId, path: workspace?.path ?? '' }
   })
 
 describe('a task whose pull request merges with commits after it', () => {
-  it.live(
-    'isn’t done yet, and says how many commits aren’t in a pull request',
-    () => {
-      const { working, github } = onGitHub()
-      return Effect.gen(function* () {
-        const connections = yield* Connections
-        const instance = yield* Instance
-        yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-        const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
-        const coordinator = yield* Coordinator
-        const threadId = yield* coordinator.thread(project.projectId)
-        const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
-        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-        const [ready] = yield* until(
-          cards(project.projectId),
-          (all) => all[0]?.phase === 'ready' && all[0].change !== null,
-          Duration.seconds(30),
-        )
-        const sql = yield* SqlClient.SqlClient
-        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
-        // Two more commits on the task's branch, then the host merges what it had.
-        commitIn(workspace?.path ?? '', 'slider.txt', 'Slider')
-        commitIn(workspace?.path ?? '', 'slider.txt', 'Slider, warmer')
-        github.mergeByHand(1)
-        yield* (yield* Changes).refresh(ready?.taskId ?? '')
-        const said = yield* until(
-          notices(ready?.threadId ?? ''),
-          (all) => all.some((notice) => notice.title?.startsWith('Not done yet') === true),
-          Duration.seconds(10),
-        )
-        const notDone = said.find((notice) => notice.title?.startsWith('Not done yet') === true)
-        assert.strictEqual(notDone?.title, "Not done yet: 2 commits after PR #1 aren't in a pull request.")
-        assert.strictEqual(notDone?.description, 'Open a new pull request for them from the task.')
-        const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${ready?.taskId ?? ''}`
-        assert.strictEqual(task?.state, 'open')
-      }).pipe(Effect.provide(runtimeWith(github)))
-    },
-    60_000,
-  )
+  it.live('isn’t done yet, and says how many commits aren’t in a pull request', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const coordinator = yield* Coordinator
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null)
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      // Two more commits on the task's branch, then the host merges what it had.
+      commitIn(workspace?.path ?? '', 'slider.txt', 'Slider')
+      commitIn(workspace?.path ?? '', 'slider.txt', 'Slider, warmer')
+      github.mergeByHand(1)
+      yield* (yield* Changes).refresh(ready?.taskId ?? '')
+      const said = yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice.title?.startsWith('Not done yet') === true),
+      )
+      const notDone = said.find((notice) => notice.title?.startsWith('Not done yet') === true)
+      assert.strictEqual(notDone?.title, "Not done yet: 2 commits after PR #1 aren't in a pull request.")
+      assert.strictEqual(notDone?.description, 'Open a new pull request for them from the task.')
+      const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${ready?.taskId ?? ''}`
+      assert.strictEqual(task?.state, 'open')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 })
 
 describe('a task’s next pull request, from its worktree as it is', () => {
-  it.live(
-    'isn’t opened while what the lead changed isn’t committed, and its branch stays as it was',
-    () => {
-      const { working, bare, github } = onGitHub()
-      return Effect.gen(function* () {
-        const task = yield* merged(working, bare, github)
-        const head = commitIn(task.path, 'slider.txt', 'Slider')
-        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-        appendFileSync(join(task.path, 'slider.txt'), 'Warmer, not committed\n')
-        const refused = (yield* Effect.flip((yield* Runs).publish(task.taskId))) as NoChangeToOpen
-        assert.deepStrictEqual([refused._tag, refused.why, refused.detail], ['NoChangeToOpen', 'uncommitted', 'slider.txt'])
-        assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
-        assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), head)
-        assert.lengthOf(github.changes, 1)
-      }).pipe(Effect.provide(runtimeWith(github)))
-    },
-    60_000,
-  )
+  it.live('isn’t opened while what the lead changed isn’t committed, and its branch stays as it was', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* merged(working, bare, github)
+      const head = commitIn(task.path, 'slider.txt', 'Slider')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      appendFileSync(join(task.path, 'slider.txt'), 'Warmer, not committed\n')
+      const refused = (yield* Effect.flip((yield* Runs).publish(task.taskId))) as NoChangeToOpen
+      assert.deepStrictEqual([refused._tag, refused.why, refused.detail], ['NoChangeToOpen', 'uncommitted', 'slider.txt'])
+      assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), head)
+      assert.lengthOf(github.changes, 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 
   it.live(
     'goes on a branch from the task’s own, by the next free name, where the lead brought what merged in already, and counts a binary file as no lines',
@@ -182,49 +164,40 @@ describe('a task’s next pull request, from its worktree as it is', () => {
         assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-3')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
-    60_000,
   )
 
-  it.live(
-    'is nothing to open once its worktree is gone',
-    () => {
-      const { working, bare, github } = onGitHub()
-      return Effect.gen(function* () {
-        const task = yield* merged(working, bare, github)
-        commitIn(task.path, 'slider.txt', 'Slider')
-        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-        assert.lengthOf(yield* (yield* Changes).unshipped(task.taskId), 1)
-        rmSync(task.path, { recursive: true, force: true })
-        assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
-      }).pipe(Effect.provide(runtimeWith(github)))
-    },
-    60_000,
-  )
+  it.live('is nothing to open once its worktree is gone', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* merged(working, bare, github)
+      commitIn(task.path, 'slider.txt', 'Slider')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      assert.lengthOf(yield* (yield* Changes).unshipped(task.taskId), 1)
+      rmSync(task.path, { recursive: true, force: true })
+      assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 
-  it.live(
-    'opens nothing where main has taken the commit after it meanwhile, its change picked there by someone else',
-    () => {
-      const { working, bare, github } = onGitHub()
-      return Effect.gen(function* () {
-        const task = yield* merged(working, bare, github)
-        const mine = commitIn(task.path, 'slider.txt', 'Slider')
-        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-        // Someone picks the same change onto main on the host, after Althar last fetched it.
-        const clone = mkdtempSync(join(tmpdir(), 'althar-other-'))
-        execFileSync('git', ['clone', '-q', bare, clone])
-        git(clone, 'fetch', '-q', task.path, mine)
-        git(clone, 'cherry-pick', 'FETCH_HEAD')
-        git(clone, 'push', '-q', 'origin', 'main')
-        const main = git(clone, 'rev-parse', 'HEAD')
-        yield* (yield* Runs).publish(task.taskId)
-        // Nothing new for a pull request: none opens, and the commit stays on the task's first branch.
-        assert.lengthOf(github.changes, 1)
-        assert.strictEqual(git(task.path, 'rev-parse', 'althar/add-a-retry'), mine)
-        assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), main)
-      }).pipe(Effect.provide(runtimeWith(github)))
-    },
-    60_000,
-  )
+  it.live('opens nothing where main has taken the commit after it meanwhile, its change picked there by someone else', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* merged(working, bare, github)
+      const mine = commitIn(task.path, 'slider.txt', 'Slider')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      // Someone picks the same change onto main on the host, after Althar last fetched it.
+      const clone = mkdtempSync(join(tmpdir(), 'althar-other-'))
+      execFileSync('git', ['clone', '-q', bare, clone])
+      git(clone, 'fetch', '-q', task.path, mine)
+      git(clone, 'cherry-pick', 'FETCH_HEAD')
+      git(clone, 'push', '-q', 'origin', 'main')
+      const main = git(clone, 'rev-parse', 'HEAD')
+      yield* (yield* Runs).publish(task.taskId)
+      // Nothing new for a pull request: none opens, and the commit stays on the task's first branch.
+      assert.lengthOf(github.changes, 1)
+      assert.strictEqual(git(task.path, 'rev-parse', 'althar/add-a-retry'), mine)
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), main)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 })
 
 describe('a settled task’s card, its worktree kept', () => {
@@ -301,7 +274,6 @@ describe('a settled task’s card, its worktree kept', () => {
         }).pipe(Effect.ensuring(git.done))
       }).pipe(Effect.provide(runtimeWith(github)))
     },
-    60_000,
   )
 
   it.live.skipIf(process.platform === 'win32')(
@@ -333,6 +305,5 @@ describe('a settled task’s card, its worktree kept', () => {
         }).pipe(Effect.ensuring(git.done))
       }).pipe(Effect.provide(runtimeWith(github)))
     },
-    60_000,
   )
 })
