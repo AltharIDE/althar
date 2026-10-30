@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, toConversation } from './support'
+import { launch, openFirstProject, startTask, still, toConversation } from './support'
 
 /*
  * What the task built and the evidence its lead hands as it finishes, in a
@@ -38,14 +38,14 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await page.getByRole('button', { name: 'What it printed: The checkout tests' }).click()
     await expect(page.getByText('1 passed')).toBeVisible()
     await expect(page.getByText('Not tried against the real payment provider: no sandbox account')).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/evidence-outputs.png', fullPage: true })
 
     // Its screenshot opens full size.
     await page.getByRole('button', { name: /View The retry button after a failed checkout full size/ }).click()
     const dialog = page.getByRole('dialog')
     await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/evidence-lightbox.png' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
@@ -59,7 +59,7 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await expect(round.getByText('Not checked')).toBeVisible()
     await expect(page.getByRole('article', { name: 'What the task built' })).toHaveCount(0)
     await round.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/evidence-thread.png', fullPage: true })
     await round.screenshot({ path: 'test-results/evidence-round.png' })
 
@@ -79,8 +79,8 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await expect(card.getByRole('button', { name: /^Merge into/ })).toBeVisible()
     const top = async (one: Locator) => (await one.boundingBox())?.y ?? Number.NaN
     const story = page.getByRole('heading', { name: 'What changed', level: 2 })
-    await expect.poll(async () => (await top(story)) - (await top(card)), { timeout: 5_000 }).toBeGreaterThan(0)
-    await page.waitForTimeout(400)
+    await expect.poll(async () => (await top(story)) - (await top(card))).toBeGreaterThan(0)
+    await still(page)
     await page.screenshot({ path: 'test-results/evidence-outputs-narrow.png', scale: 'css' })
   } finally {
     await electronApp.close()

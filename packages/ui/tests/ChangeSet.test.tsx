@@ -4,12 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { OPUS, SONNET } from '../src/fixtures/models'
 import { GITHUB } from '../src/fixtures/outputs'
 import { ChangeState, CheckState } from '../src/foundations/vocabulary'
-import { ChangeSet, foldersOf, type PullRequest } from '../src/outputs/ChangeSet/ChangeSet'
+import { ChangeSet, foldersOf, groupsOf, type PullRequest } from '../src/outputs/ChangeSet/ChangeSet'
 import type { ChangedFile } from '../src/primitives/FileChanges/FileChanges'
 
 /*
  * What a task changed, on the Outputs page: where it stands, its checks and
- * review in a line each, and its files by folder.
+ * review in a line each, and its files, under their folders where that helps.
  */
 
 const files = (...paths: string[]): ChangedFile[] => paths.map((path) => ({ path, add: 3, del: 1 }))
@@ -24,9 +24,31 @@ describe('where a change stands', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('counts the commits its remote does not have yet', () => {
-    render(<ChangeSet state={ChangeState.Branch} prs={one({ number: undefined })} remote={{ name: 'origin', pushed: true, ahead: 3 }} />)
-    expect(screen.getByText('3 commits not on origin yet')).toBeInTheDocument()
+  it('names its branch, and counts the commits its remote does not have yet', () => {
+    render(
+      <ChangeSet
+        state={ChangeState.Branch}
+        branch="althar/add-a-retry"
+        prs={one({ number: undefined })}
+        remote={{ name: 'origin', pushed: true, ahead: 3 }}
+      />,
+    )
+    expect(screen.getByText('althar/add-a-retry')).toBeInTheDocument()
+    expect(screen.getByText('3 commits not pushed')).toBeInTheDocument()
+  })
+
+  it('says nothing of its remote once it has every commit, and says what no commit has', () => {
+    render(
+      <ChangeSet
+        state={ChangeState.Branch}
+        branch="althar/add-a-retry"
+        prs={one({ number: undefined })}
+        remote={{ name: 'origin', pushed: true, ahead: 0 }}
+        uncommitted={1}
+      />,
+    )
+    expect(screen.queryByText(/pushed|origin/)).not.toBeInTheDocument()
+    expect(screen.getByText('Uncommitted changes in 1 file')).toBeInTheDocument()
   })
 
   it('says a pull request accepted into its merge queue is there, beside it', () => {
@@ -73,7 +95,34 @@ describe('its checks and review, a line each', () => {
   })
 })
 
-describe('its files by folder', () => {
+describe('its files, under their folders where that helps', () => {
+  it('lists a few files with no headings where most folders hold one, and under each folder where they hold several', () => {
+    expect(groupsOf(files('README.md', 'apps/cli/package.json', 'apps/site/package.json', 'package.json'))).toBeNull()
+    expect(
+      groupsOf(files('src/b.ts', 'README.md', 'src/a.ts', 'test/a.test.ts', 'test/b.test.ts', 'src/c.ts'))?.map((folder) => [
+        folder.path,
+        folder.files.map((file) => file.path),
+      ]),
+    ).toEqual([
+      ['', ['README.md']],
+      ['src', ['src/a.ts', 'src/b.ts', 'src/c.ts']],
+      ['test', ['test/a.test.ts', 'test/b.test.ts']],
+    ])
+  })
+
+  it('heads the files at the top of the repository with its name', () => {
+    render(
+      <ChangeSet
+        state={ChangeState.Ready}
+        prs={one({ files: files('README.md', 'src/a.ts', 'src/b.ts', 'src/c.ts') })}
+        onOpenFile={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('meridian-api')).toBeInTheDocument()
+    expect(screen.getByText('src')).toBeInTheDocument()
+    expect(screen.queryByText('Top level')).not.toBeInTheDocument()
+  })
+
   it('keeps a folder whole when only some of it is in subfolders and it holds no more than half the change', () => {
     const folders = foldersOf(
       files('apps/desktop/main.ts', 'apps/site/index.ts', 'apps/README.md', 'docs/retry.md', 'src/limit.ts', 'lib/x.ts'),
@@ -98,8 +147,12 @@ describe('its files by folder', () => {
 
   it('opens a file at the top of the repository by its own path', () => {
     const onOpenFile = vi.fn()
-    render(<ChangeSet state={ChangeState.Ready} prs={one({ files: files('README.md', 'src/limit.ts') })} onOpenFile={onOpenFile} />)
-    expect(screen.getByRole('button', { name: /Top level/ })).toBeInTheDocument()
+    render(<ChangeSet state={ChangeState.Ready} prs={one({ files: files('src/limit.ts', 'README.md') })} onOpenFile={onOpenFile} />)
+    // The top of the repository first, each file there to press.
+    expect(screen.getAllByRole('button', { name: /^Open the diff of/ }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Open the diff of README.md',
+      'Open the diff of src/limit.ts',
+    ])
     fireEvent.click(screen.getByRole('button', { name: 'Open the diff of README.md' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open the diff of src/limit.ts' }))
     expect(onOpenFile.mock.calls).toEqual([['README.md'], ['src/limit.ts']])

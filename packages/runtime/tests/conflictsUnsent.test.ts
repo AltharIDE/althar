@@ -15,6 +15,7 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { hosted, notices, repository, runtime, until } from './support'
 import {
   asked,
@@ -74,6 +75,17 @@ const uncheckedOf = (projectId: string) =>
     ([one]) => one !== null,
   ).pipe(Effect.map(([one]) => one))
 
+/**
+ * The task's folder no longer on this computer, as Althar has seen. Its looks at a task take turns, so once one has said
+ * so, none that began before, with the folder still here, is left to find main moved on and start a round with it.
+ */
+const goneHere = (projectId: string, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+    yield* uncheckedOf(projectId)
+  })
+
 const runIs = (taskId: string, state: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE runs SET state = ${state} WHERE task_id = ${taskId}`)
 
@@ -122,7 +134,7 @@ describe('a conflicting task whose run didn’t succeed', () => {
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
       )
-      assert.strictEqual(why, 'You stopped it, so Althar doesn’t start its lead for a conflict.')
+      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])
       // Resolve now: asked, and the card says nothing more of why not.
@@ -133,14 +145,40 @@ describe('a conflicting task whose run didn’t succeed', () => {
   })
 })
 
+describe('a stopped task its lead was told to carry on, its run still suspended', () => {
+  it.live('isn’t said to be stopped while its lead is at work, nor its conflict put to the person', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      yield* runIs(taskId, 'suspended')
+      // Told to go on, as Carry on did before it resumed the run: its lead works, its run still suspended.
+      yield* (yield* Sessions).send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'Carry on. [lead:wait]' })
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'running')
+      moveHostMainOn(working, bare)
+      yield* Effect.sleep('2 seconds')
+      const [card] = yield* cards(projectId)
+      assert.strictEqual(card?.phase, 'running')
+      assert.isNull(card?.conflictUnsent ?? null)
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      // Once its lead stops, it is stopped again: why its conflict wasn't asked shows.
+      yield* (yield* Sessions).interrupt(threadId)
+      const [why] = yield* until(
+        Effect.map(unsentOf(projectId), (one) => [one]),
+        ([one]) => one !== null,
+      )
+      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
 describe('a conflicting task Althar can’t merge here', () => {
   it.live('says its folder isn’t on this computer, where its host says it conflicts', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
     return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
-      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      yield* goneHere(projectId, taskId)
       moveHostMainOn(working, bare)
       const [why] = yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
@@ -157,9 +195,8 @@ describe('a task Althar can’t look at here, where its host says it merges clea
     const { working, bare } = hosted()
     const github = silentHost(bare, false)
     return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
-      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      yield* goneHere(projectId, taskId)
       moveHostMainOn(working, bare)
       assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       // Not said to conflict: Althar doesn't know.
@@ -340,7 +377,7 @@ describe('a branch merging here, with no pull request', () => {
       moveMainOn(working)
       yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
-        ([one]) => one === 'You stopped it, so Althar doesn’t start its lead for a conflict.',
+        ([one]) => one === 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
       )
       // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
       rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })

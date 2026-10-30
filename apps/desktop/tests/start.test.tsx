@@ -150,7 +150,7 @@ describe('accounts in settings', () => {
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
     await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
-    await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
+    await within(accounts).findByRole('textbox', { name: 'Name this account' })
     // The agents' next read never comes back before the screen closes.
     vi.mocked(client.status).mockImplementation(() => new Promise(() => undefined))
     await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
@@ -226,9 +226,9 @@ describe('accounts in settings', () => {
     await userEvent.type(within(accounts).getByRole('textbox', { name: 'The code chatgpt.com showed' }), 'AB12{Enter}')
     expect(client.pasteAccountSignInCode).toHaveBeenCalledWith('flow_account', 'AB12')
     at = 1
-    expect(await within(accounts).findByText('Invalid code.', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await within(accounts).findByText('Invalid code.')).toBeTruthy()
     at = 2
-    const name = await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
+    const name = await within(accounts).findByRole('textbox', { name: 'Name this account' })
     expect((name as HTMLInputElement).value).toBe('Account 2')
     expect(within(accounts).getByText('dana@northwind.io')).toBeTruthy()
     expect(within(accounts).getByText('ChatGPT Team')).toBeTruthy()
@@ -274,7 +274,7 @@ describe('accounts in settings', () => {
     // Signed in again: back to its line, nothing to name.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in again' }))
     finished = true
-    await waitFor(() => expect(within(accounts).queryByRole('group', { name: 'Signing x in' })).toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(within(accounts).queryByRole('group', { name: 'Signing x in' })).toBeNull())
     open.mockRestore()
   })
 

@@ -5,8 +5,8 @@ import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
-import { Button } from '../../primitives/Button/Button'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { NextStep, NextSteps } from '../../primitives/NextStep/NextStep'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
 import { IssueRef, type IssueRefProps } from '../Issue/Issue'
@@ -139,9 +139,11 @@ export function TaskCard({
           )}
         </div>
         {onOpen && (
-          <Button variant={yours ? 'signal' : 'default'} trailingIcon="arrow" className={s.open} onClick={() => onOpen(task)}>
-            {yours ? t.answer : t.open}
-          </Button>
+          <NextSteps className={s.next}>
+            <NextStep signal={yours} arrow onPress={() => onOpen(task)}>
+              {yours ? t.answer : t.open}
+            </NextStep>
+          </NextSteps>
         )}
       </div>
     </article>

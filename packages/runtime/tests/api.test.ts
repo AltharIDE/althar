@@ -16,7 +16,7 @@ import {
 } from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -554,22 +554,25 @@ describe('the API', () => {
     ),
   )
 
-  it.live('hears a change as soon as it is written, not at the next poll', () =>
+  it.effect('hears a change as soon as it is written, not at the next poll', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const { cursor } = yield* client.ListProjects()
-        const heard = yield* Effect.forkChild(
-          Stream.runHead(Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed')),
+        // What the watch hears changed, as it hears it.
+        const heard = yield* Queue.unbounded<string>()
+        yield* Effect.forkChild(
+          Stream.runForEach(client.Watch({ since: cursor }), (event) =>
+            event._tag === 'Changed' ? Queue.offer(heard, event.aggregateId) : Effect.void,
+          ),
         )
-        // Let the watch reach its wait, so only a wake-up can bring the change in time.
-        yield* Effect.sleep('100 millis')
-        const started = Date.now()
-        yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Quick' })
-        yield* Fiber.join(heard)
-        // The fallback read is a second away; the signal brings it far sooner.
-        assert.isBelow(Date.now() - started, 500)
+        const hears = (id: string): Effect.Effect<void> =>
+          Effect.flatMap(Queue.take(heard), (got) => (got === id ? Effect.void : hears(id)))
+        // Once it hears the first, it is listening, and reads again only when woken.
+        yield* hears((yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'First' })).id)
+        // The test's clock stands still, so the feed's fallback read never comes: only the store's signal brings this.
+        yield* hears((yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Quick' })).id)
       }),
     ),
   )
@@ -2477,12 +2480,8 @@ describe('words', () => {
       'The pull request changed since you looked at it. Have another look before you accept it.',
     )
     assert.deepStrictEqual(
-      (['working', 'stopped', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
-      [
-        "The task's work isn't done yet. Its pull request opens when it is.",
-        'The task’s work stopped before it was done, so it has no pull request to open.',
-        'The task is settled, so its branch stays as it is.',
-      ],
+      (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
+      ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
     )
     assert.deepStrictEqual(
       (

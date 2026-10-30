@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask } from './support'
+import { launch, openFirstProject, startTask, still } from './support'
 
 /*
  * Who holds the places a waiting task waits for (ADR-032): with one agent at a
@@ -47,7 +47,7 @@ test('names the task whose server keeps a place, and stops it from the plan that
     await expect(pill).toBeVisible()
     await pill.click()
     await expect(page.getByRole('dialog', { name: 'Keeping a place' })).toContainText('Serve the prototype')
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/places-waiting.png', fullPage: true })
 
     // Stopped from here, the place frees and the waiting task starts on its own.
@@ -55,7 +55,7 @@ test('names the task whose server keeps a place, and stops it from the plan that
     await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
     await expect(pill).toHaveCount(0)
     await expect(page.getByText('Ready', { exact: true })).toHaveCount(2)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/places-started.png', fullPage: true })
   } finally {
     await electronApp.close()

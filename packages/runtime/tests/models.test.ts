@@ -258,7 +258,8 @@ describe('the models each agent offers', () => {
     Effect.gen(function* () {
       const models = yield* Models
       const sql = yield* SqlClient.SqlClient
-      yield* models.catalog
+      // Read twice at once, as the coordinator and the model picker can: each agent is asked once all the same.
+      yield* Effect.all([models.catalog, models.catalog], { concurrency: 'unbounded' })
       const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       assert.strictEqual(asked?.models.length, 2)
       const processes = yield* sql<{

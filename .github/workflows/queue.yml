@@ -5,7 +5,9 @@ name: queue
 # lands only if that passes. A pull request that fails there goes back to its branch, and main never has it.
 #
 # The queue runs a pull request's own checks (desktop.yml, harness.yml and the rest), for the paths it changes, as its
-# pull request did: a merge waits about as long as its checks took. The heavy suites stay in post-merge.yml.
+# pull request did. It adds two of its own: for a change to the app or what it builds on, the end-to-end run (e2e.yml),
+# in four parts; and for changed tests, those tests many times over (stress.yml), which the pull request ran too. A
+# merge waits about as long as the longest of them. Coverage and the packages stay in post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks
 # being the ones that say how it stands; in the queue, it passes once every check that ran there did.
@@ -32,6 +34,7 @@ jobs:
       brand: ${{ steps.paths.outputs.brand }}
       report: ${{ steps.paths.outputs.report }}
       windows-installer: ${{ steps.paths.outputs.windows-installer }}
+      stress: ${{ steps.paths.outputs.stress }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -47,7 +50,7 @@ jobs:
         run: |
           bun -e '
             const changed = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
-            for (const name of ["desktop", "harness", "ui", "site", "brand", "report", "windows-installer"]) {
+            for (const name of ["desktop", "harness", "ui", "site", "brand", "report", "windows-installer", "stress"]) {
               const workflow = Bun.YAML.parse(await Bun.file(`.github/workflows/${name}.yml`).text())
               const globs = workflow.on.pull_request.paths.map((path) => new Bun.Glob(path))
               console.log(`${name}=${changed.some((file) => globs.some((glob) => glob.match(file)))}`)
@@ -89,10 +92,21 @@ jobs:
     if: needs.changes.outputs.windows-installer == 'true'
     uses: ./.github/workflows/windows-installer.yml
 
+  # The app's end-to-end run, for the changes desktop.yml runs for: they all reach the app.
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/e2e.yml
+
+  stress:
+    needs: changes
+    if: needs.changes.outputs.stress == 'true'
+    uses: ./.github/workflows/stress.yml
+
   # The one check main's rules require: passes when nothing that ran failed. On a pull request, nothing above runs.
   merge-queue:
     name: merge queue
-    needs: [changes, desktop, harness, ui, site, brand, report, windows-installer]
+    needs: [changes, desktop, harness, ui, site, brand, report, windows-installer, e2e, stress]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

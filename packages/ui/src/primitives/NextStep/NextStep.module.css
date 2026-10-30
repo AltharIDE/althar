@@ -1,0 +1,60 @@
+/*
+ * A card's strip: its width, a hairline over it and between two steps, each step the row's full height with no button
+ * shape. The card gives it the margins that take it to its edges, and the radius of its corners, which it clips to.
+ */
+.steps {
+  display: flex;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.step {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.step + .step {
+  box-shadow: inset 1px 0 0 var(--line);
+}
+/* a button of its own sits above the card's, which covers the card */
+.act {
+  position: relative;
+}
+
+/* its words, centred, the row's height: the same whether they are a button or the card's link */
+.words,
+.steps .press {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.words {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.steps .words.signal,
+.steps .step .press.signal {
+  color: var(--signal);
+}
+.steps .step .press.signal:hover:not(:disabled) {
+  background: var(--signal-dim);
+}
+.steps .step .press.signal:active:not(:disabled) {
+  background: var(--signal-hover);
+}
+/* the focus ring inside the strip, which clips; pressed with the mouse, none */
+.steps .press:focus-visible {
+  outline-offset: -2px;
+}
+.press:focus:not(:focus-visible) {
+  outline: none;
+}
