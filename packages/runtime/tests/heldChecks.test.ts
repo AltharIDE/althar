@@ -64,16 +64,16 @@ describe('checks Althar sees through, that its host won’t show', () => {
       const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
       // Its checks run: it is Althar's to see through.
-      const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
+      const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running')
       const taskThread = running?.threadId ?? ''
       github.failNext('checks', 'not_found')
       const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Althar can't read the checks on PR #1"))
-      const [refused] = said(yield* until(notices(taskThread), (all) => said(all).length > 0, Duration.seconds(10)))
+      const [refused] = said(yield* until(notices(taskThread), (all) => said(all).length > 0))
       assert.strictEqual(
         refused,
         "Althar can't read the checks on PR #1: its host refused them (The fake checks failed (not_found)). It still listens for what people say on it, and the change is yours now.",
       )
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(10))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.isNull(ready?.step)
       // Refused again on the same commit, nothing more is said.
       const asked = () => github.calls.filter((call) => call === 'checks').length
@@ -101,12 +101,12 @@ describe('checks Althar sees through, that its host won’t show', () => {
       const threadId = yield* coordinator.thread(project.projectId)
       const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       // The person has opened it: the change is theirs already.
       yield* (yield* Tasks).see({ taskId: ready?.taskId ?? '' })
       github.failNext('checks', 'forbidden')
       const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Althar can't read the checks on PR #1"))
-      const [refused] = said(yield* until(notices(ready?.threadId ?? ''), (all) => said(all).length > 0, Duration.seconds(10)))
+      const [refused] = said(yield* until(notices(ready?.threadId ?? ''), (all) => said(all).length > 0))
       assert.strictEqual(
         refused,
         "Althar can't read the checks on PR #1: its host refused them (The fake checks failed (forbidden)). It still listens for what people say on it.",
@@ -128,7 +128,7 @@ describe('checks Althar sees through, that its host won’t show', () => {
       const threadId = yield* coordinator.thread(project.projectId)
       const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-      const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
+      const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running')
       // The person opens it while its checks run: it is theirs from here.
       yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
       const asked = () => github.calls.filter((call) => call === 'checks').length

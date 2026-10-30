@@ -142,7 +142,7 @@ const walk = async (
     name: more.again === undefined ? `Connect ${name}` : `Sign in to ${name} again`,
   })
   const press = (name: string | RegExp) => userEvent.click(within(panel).getByRole('button', { name }))
-  const heading = (name: string) => within(panel).findByRole('heading', { name }, { timeout: 4000 })
+  const heading = (name: string) => within(panel).findByRole('heading', { name })
   return { client, panel, closed, press, heading }
 }
 
@@ -273,9 +273,7 @@ describe('connecting GitLab', () => {
     })
     await press(/git.halyard.dev\s*halyard’s server, from its remote/)
     expect(await heading('halyard’s GitLab')).toBeTruthy()
-    expect(
-      await within(panel).findByText('GitLab answers at git.halyard.dev · from halyard’s remote, origin', {}, { timeout: 3000 }),
-    ).toBeTruthy()
+    expect(await within(panel).findByText('GitLab answers at git.halyard.dev · from halyard’s remote, origin')).toBeTruthy()
     expect(client.findServer).toHaveBeenCalledWith('gitlab', halyard)
     await press('Make a token')
     expect(await heading('Make a token on git.halyard.dev')).toBeTruthy()
@@ -291,9 +289,9 @@ describe('connecting GitLab', () => {
     expect(within(panel).getByText(/Waiting for you to approve · the code lasts (9|10) min/)).toBeTruthy()
     await press('Open the page again')
     expect(open).toHaveBeenLastCalledWith('https://gitlab.com/oauth/device?user_code=WXYZ-0000', '_blank')
-    expect(await within(panel).findByText('The code expired.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await within(panel).findByText('The code expired.')).toBeTruthy()
     expect(client.startSignIn).toHaveBeenCalledWith('gitlab', 'https://gitlab.com', undefined)
-  }, 10_000)
+  })
 
   it('says each thing it asks GitLab while GitLab is asked, with who the token is', async () => {
     const { panel, press, heading } = await walk('gitlab', {
@@ -456,7 +454,7 @@ describe('connecting Bitbucket', () => {
     await press('On a company’s own server')
     expect(await heading('Your company’s Bitbucket')).toBeTruthy()
     await userEvent.type(within(panel).getByLabelText('Server address'), 'git.tessera.dev')
-    expect(await within(panel).findByText('Bitbucket Data Center answers at git.tessera.dev', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await within(panel).findByText('Bitbucket Data Center answers at git.tessera.dev')).toBeTruthy()
     expect(within(panel).getByRole('button', { name: 'bitbucket.org instead' })).toBeTruthy()
     await press('Make a token')
     expect(await heading('Make a token on git.tessera.dev')).toBeTruthy()
@@ -521,7 +519,7 @@ describe('connecting Linear', () => {
     expect(within(panel).getByText('Reads your workspace’s issues')).toBeTruthy()
     expect(within(panel).getByText('Moves an issue’s status')).toBeTruthy()
     expect(within(panel).getByText('Through Althar’s Linear app, which renews its own sign-in.')).toBeTruthy()
-  }, 10_000)
+  })
 
   it('takes a personal key, and says when Linear doesn’t take it, with a new one made or another pasted', async () => {
     const { client, panel, press, heading } = await walk('linear', {
@@ -665,7 +663,7 @@ describe('connecting Jira', () => {
     expect(await within(panel).findByText('Nothing answers at jira.gone.test')).toBeTruthy()
     await userEvent.clear(field)
     await userEvent.type(field, 'jira.northwind.test')
-    expect(await within(panel).findByText('Jira Data Center answers at jira.northwind.test', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await within(panel).findByText('Jira Data Center answers at jira.northwind.test')).toBeTruthy()
     await press('Continue')
     expect(await heading('Make a token on jira.northwind.test')).toBeTruthy()
     expect(within(panel).getByText('Create token, named Althar.')).toBeTruthy()
@@ -1078,10 +1076,10 @@ describe('connecting GitHub', () => {
     await press(/Continue with GitHub/)
     expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com', 'conn6')
     // How it stands couldn't be read: said, with the sign-in started again on a press.
-    expect(await within(panel).findByText('That sign-in isn’t there any more.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await within(panel).findByText('That sign-in isn’t there any more.')).toBeTruthy()
     await press('Try again')
     expect(client.startSignIn).toHaveBeenCalledTimes(2)
-  }, 10_000)
+  })
 
   it('says GitHub didn’t answer a check, and connects as it is', async () => {
     const { panel, closed, press, heading } = await walk('github', {

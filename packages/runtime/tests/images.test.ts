@@ -10,6 +10,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Context, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
+import { until } from '@althar/testing/effect'
 
 import { artifactPath } from '../src/Artifacts'
 import { connection, services } from '../src/Api'
@@ -68,16 +69,6 @@ const connected = (
     return { client, grant, sql: Context.get(context, SqlClient.SqlClient) }
   })
 
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
-  })
-
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
 const said = (items: ReadonlyArray<ThreadItem>) => items.flatMap((item) => (item.kind === 'agent_message' ? [item.content.text] : []))
 const messages = (items: ReadonlyArray<ThreadItem>) => items.flatMap((item) => (item.kind === 'user_message' ? [item] : []))
@@ -89,7 +80,7 @@ const taskWithLead = (setup: Effect.Success<ReturnType<typeof connected>>, agent
     const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
     const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the layout' })
     yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId })
-    yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+    yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
     return { project, task }
   })
 
@@ -102,7 +93,7 @@ describe('images sent with a message', () => {
         const { task } = yield* taskWithLead(setup)
         const send = { commandId: commandId(), threadId: task.threadId, body: 'What is off here?', disposition: 'after_current' as const }
         yield* client.Send({ ...send, images: [png, jpeg] })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: What is off here?')),
         )
         assert.include(said(thread.items).join('\n'), `saw images: image/png ${PNG.length} B, image/jpeg ${JPEG.length} B`)
@@ -143,7 +134,7 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [{ digest: digest(PNG), name: 'shot.png' }],
         })
-        const again = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const again = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: And now?')),
         )
         assert.include(said(again.items).join('\n'), `saw images: image/png ${PNG.length} B\n`)
@@ -153,7 +144,7 @@ describe('images sent with a message', () => {
         )
         // Images alone are a message too.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: '', disposition: 'after_current', images: [jpeg] })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.startsWith(`saw images: image/jpeg ${JPEG.length} B\n\necho: `)),
         )
       }),
@@ -173,7 +164,7 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [png],
         })
-        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const heard = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           said(snapshot.items).some((text) => text.includes('saw images')),
         )
         assert.include(said(heard.items).join('\n'), `saw images: image/png ${PNG.length} B`)
@@ -195,7 +186,7 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [png, jpeg],
         })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.startsWith('echo: Look')),
         )
         assert.include(said(thread.items), "echo: Look\n\n(The person sent 2 images with this, which Althar couldn't pass on to you.)")
@@ -205,7 +196,7 @@ describe('images sent with a message', () => {
         // The message keeps them all the same.
         assert.lengthOf(messages(thread.items)[0]?.content.pictures ?? [], 2)
         // The window knows which agents take images, from what each said when it started or was asked.
-        const catalog = yield* eventually(client.GetModels({}), (all) => all.every((agent) => !agent.probing))
+        const catalog = yield* until(client.GetModels({}), (all) => all.every((agent) => !agent.probing))
         assert.deepStrictEqual(
           catalog.map((agent) => [agent.agentId, agent.images]),
           [
@@ -287,7 +278,7 @@ describe('images sent with a message', () => {
           const before = yield* client.GetThread({ threadId })
           assert.strictEqual(messages(before.items)[0]?.content.pictures[0]?.name, 'photo.jpg')
           yield* client.StartSession({ commandId: commandId(), threadId, agentId: 'codex' })
-          const thread = yield* eventually(client.GetThread({ threadId }), (value) =>
+          const thread = yield* until(client.GetThread({ threadId }), (value) =>
             said(value.items).some((text) => text.includes('saw images')),
           )
           assert.include(said(thread.items).join('\n'), `saw images: image/jpeg ${JPEG.length} B`)
@@ -351,11 +342,11 @@ describe('a message that was dictated', () => {
         const { task } = yield* taskWithLead(setup)
         const send = { threadId: task.threadId, disposition: 'after_current' as const }
         yield* client.Send({ ...send, commandId: commandId(), body: 'Fix the Alpha settings', dictated: true })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: Fix the Alpha settings')),
         )
         yield* client.Send({ ...send, commandId: commandId(), body: 'And the Althar menu' })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: And the Althar menu')),
         )
         assert.include(said(thread.items), `echo: Fix the Alpha settings\n\n${DICTATED}`)
@@ -385,7 +376,7 @@ describe('a message that was dictated', () => {
           disposition: 'after_current',
           dictated: true,
         })
-        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const heard = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           said(snapshot.items).some((text) => text.includes('Ask the alter lead')),
         )
         assert.include(said(heard.items).join('\n'), `Ask the alter lead\n\n${DICTATED}`)

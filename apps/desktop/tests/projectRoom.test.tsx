@@ -305,7 +305,7 @@ describe('a task’s card in the Talk room', () => {
     // Its copy shows once it is read again.
     act(() => emit(changed('thread_item', 'c0', 'thc')))
     await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', 'c0'))
-    expect(await screen.findByRole('button', { name: 'Skip' }, { timeout: 3000 })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Skip' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^gpt-5\.2-codex/ })).toBeNull()
   })
 })

@@ -79,9 +79,9 @@ describe('an automation’s signature', () => {
 
   it('signs a pull request it opens, whatever the credit', () => {
     const body = (automation: string | null, credit: boolean) => bodyOf({ lead: 'Bumped.', issue: null, credit, automation })
-    assert.include(body('Nightly bump', false), '<sub>Opened by [Althar](https://github.com/AltharIDE/althar)’s nightly bump.</sub>')
+    assert.include(body('Nightly bump', false), 'Opened by [Althar](https://github.com/AltharIDE/althar)’s nightly bump.')
     assert.notInclude(body(null, false), 'Opened by')
-    assert.include(body(null, true), '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
+    assert.include(body(null, true), 'Opened by [Althar](https://github.com/AltharIDE/althar).')
   })
 })
 
