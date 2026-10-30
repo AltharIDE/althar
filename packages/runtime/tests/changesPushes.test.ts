@@ -9,9 +9,11 @@ import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import type { PushRefused } from '../src/errors'
 import { words } from '../src/words'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
+import { Policies } from '../src/Policies'
 import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
@@ -193,13 +195,25 @@ describe('the Push button', () => {
     return Effect.gen(function* () {
       const changes = yield* Changes
       const { projectId, taskId, here } = yield* opened
+      const policies = yield* Policies
+      // This test exercises the code host's protected-branch refusal. Let
+      // protected files through so the local skills guard doesn't stop first.
+      yield* policies.set(
+        projectId,
+        { repositoryFiles: { writeSkills: true, writeOpenSpec: true, pushProtected: true } },
+        (yield* Instance).personId,
+      )
       for (let n = 1; n <= 2; n++) agentCommit(here, `Step ${n}`)
       const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 2)
       const before = tip()
       writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 })
       const refused = yield* Effect.flip(changes.push(taskId, seen?.change?.localHead ?? ''))
       assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'PushRefused')
-      assert.strictEqual(words(refused, String).message, 'PR #1 refused the push: pre-receive hook declined.')
+      assert.strictEqual((refused as PushRefused).why, 'protected')
+      assert.strictEqual(
+        words(refused, String).message,
+        'The branch is protected, so PR #1 didn’t take the push. Push to another branch or a fork, or ask its owners to let you push to it.',
+      )
       // Nothing went, and the card says so: the same two to push.
       assert.strictEqual(tip(), before)
       const [still] = yield* cards(projectId)

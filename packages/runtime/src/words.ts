@@ -7,6 +7,7 @@ import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
+import { pushDetailOf, secondsOf } from './pushFailure'
 import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
@@ -214,8 +215,18 @@ export const words = (
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
+        const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
         const said = lastLine(text(error, 'stderr'))
-        return sentence(`git ${Array.isArray(args) ? String(args[0] ?? '') : ''} didn't work${said === '' ? '' : `: ${said}`}`)
+        if (said !== '') return sentence(`${command} didn't work: ${said}`)
+        // git said nothing: what Althar knows of how it ended.
+        if (fieldOf(error, 'timedOut') === true) {
+          const timeout = fieldOf(error, 'timeout')
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+        }
+        const signal = text(error, 'signal')
+        if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
+        const code = fieldOf(error, 'code')
+        return typeof code === 'number' ? `${command} failed with code ${code}, without saying why.` : `${command} didn't work.`
       }
       case 'CommandIdReused':
         return 'That request was already used for something else. Try again.'
@@ -230,7 +241,9 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
-        if (why === 'protected') {
+        // A branch-protection refusal from the host has no `needs`; the local
+        // repository-files guard sets it to explain which switches would allow the push.
+        if (why === 'protected' && Array.isArray(fieldOf(error, 'needs'))) {
           const held = text(error, 'said')
           const many = held.includes(',')
           const needs = fieldOf(error, 'needs')
@@ -243,6 +256,21 @@ export const words = (
           return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
         }
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
+        const host = text(error, 'host')
+        const where = host === '' ? remote : host
+        if (why === 'forbidden')
+          return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`
+        if (why === 'protected')
+          return `${host === '' ? `The branch is protected, so ${remote} didn’t take the push.` : `The branch is protected on ${host}, so it didn’t take the push.`} Push to another branch or a fork, or ask its owners to let you push to it.`
+        if (why === 'unreachable')
+          return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
+        if (why === 'unanswered')
+          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+        if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
+        // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
+        if (host !== '')
+          return `${host} didn’t accept your sign-in, so nothing was pushed. Sign git in to ${host} from a terminal, then try again.`
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }
       case 'CantMerge': {
@@ -315,7 +343,24 @@ export const words = (
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
-  if (reason === 'PushRefused') return { reason, message, why: text(error, 'why') }
+  if (reason === 'PushRefused')
+    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+  // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
+  if (reason === 'GitFailed') {
+    const code = fieldOf(error, 'code')
+    const timeout = fieldOf(error, 'timeout')
+    const detail =
+      text(error, 'stderr').trim() === ''
+        ? ''
+        : pushDetailOf({
+            stderr: text(error, 'stderr'),
+            ...(typeof code === 'number' ? { code } : {}),
+            ...(text(error, 'signal') === '' ? {} : { signal: text(error, 'signal') }),
+            ...(fieldOf(error, 'timedOut') === true ? { timedOut: true } : {}),
+            ...(typeof timeout === 'number' ? { timeout } : {}),
+          })
+    return { reason, message, ...(detail === '' ? {} : { detail }) }
+  }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }

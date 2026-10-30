@@ -1,10 +1,19 @@
 import { Schema } from 'effect'
 
-/** A git command failed. */
+/**
+ * A git command failed: what git wrote to stderr, never the command line in
+ * its place. Where it wrote nothing, how it ended says why: its exit code, the
+ * signal that stopped it, or that it ran past its time and Althar stopped it
+ * (`timedOut`, after `timeout` milliseconds).
+ */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   args: Schema.Array(Schema.String),
   cwd: Schema.String,
   stderr: Schema.String,
+  code: Schema.optional(Schema.Number),
+  signal: Schema.optional(Schema.String),
+  timedOut: Schema.optional(Schema.Boolean),
+  timeout: Schema.optional(Schema.Number),
 }) {}
 
 /** The folder opened as a project is not inside a git repository. */
@@ -169,21 +178,29 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
 
 /**
  * A push its remote won't take: it has commits this one doesn't (`behind`),
- * git couldn't sign in there (`denied`), or the remote itself said no, such
- * as a protected branch (`refused`, with what it said). Replacing a pull
- * request's commits also stops where the pull request moved on from the
- * head the person saw (`moved`), and where the project's rules never allow
- * a force push (`never`).
+ * git couldn't sign in there (`denied`), the account signed in may not push
+ * there (`forbidden`), the branch is protected (`protected`), the host
+ * couldn't be reached (`unreachable`), it got no answer in time, as while
+ * git waits for a sign-in no one can give (`unanswered`), or the remote
+ * itself said no, as a hook does (`refused`, with what it said), or git
+ * failed in a way none of these says (`failed`, all it said in `detail`). Replacing a
+ * pull request's commits also stops where the pull request moved on from
+ * the head the person saw (`moved`), and where the project's rules never
+ * allow a force push (`never`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'refused', 'moved', 'never', 'protected']),
+  why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'failed', 'moved', 'never']),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
-  /** What the remote said, for one it refused; for `protected`, the skill or OpenSpec paths that were held back. */
+  /** What the remote said, for one it refused: its one line, or paths held back for `protected`. */
   said: Schema.optional(Schema.String),
   /** For `protected`, the project's Repository files switches that are off and would let them go. */
   needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
+  /** The code host the remote is on, by name, where Althar knows it: GitLab. */
+  host: Schema.optional(Schema.String),
+  /** All git said, for a quiet Details: never the sentence itself. */
+  detail: Schema.optional(Schema.String),
 }) {}
 
 /**

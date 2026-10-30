@@ -119,6 +119,7 @@ import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { guardPush } from './repositoryGuard'
+import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
@@ -2497,16 +2498,23 @@ export class Changes extends Context.Service<
           return merged
         })
 
-      /** Why a push the person's git made failed, in its words where the remote gave some: else git's own failure. */
-      const refusal = (taskId: string, remote: string, failed: GitFailed): Effect.Effect<never, GitFailed | PushRefused> => {
-        // The remote said no on its own terms, such as a protected branch: what it said, not a guess.
-        const refused = /\[remote rejected\][^(]*\(([^)]*)\)/i.exec(failed.stderr)
-        if (refused !== null) return Effect.fail(new PushRefused({ taskId, why: 'refused', remote, said: refused[1] ?? '' }))
-        if (/! \[rejected\].*\((fetch first|non-fast-forward)\)/i.test(failed.stderr))
-          return Effect.fail(new PushRefused({ taskId, why: 'behind', remote }))
-        if (/authentication|permission denied|could not read (username|password)|terminal prompts disabled/i.test(failed.stderr))
-          return Effect.fail(new PushRefused({ taskId, why: 'denied', remote }))
-        return Effect.fail(failed)
+      /**
+       * Why a push failed, in its words where git's output says (pushFailure.ts), with all it said kept
+       * for Details. `host` names the code host the remote is on, where known.
+       */
+      const refusal = (taskId: string, remote: string, failed: GitFailed, host?: string): Effect.Effect<never, PushRefused> => {
+        // One none of these names still says it in a sentence of its own, and keeps all git said, and how it ended, for Details.
+        const known = pushFailureOf(failed) ?? { why: 'failed' as const }
+        return Effect.fail(
+          new PushRefused({
+            taskId,
+            why: known.why,
+            remote,
+            ...(known.said === undefined ? {} : { said: known.said }),
+            ...(host === undefined ? {} : { host }),
+            detail: pushDetailOf(failed),
+          }),
+        )
       }
 
       /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
@@ -2587,8 +2595,10 @@ export class Changes extends Context.Service<
             worktree: string
             branch: string
             baseCommit: string | null
+            remotes: string
           }>`
-            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit,
+              b.remote_fingerprints AS remotes
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2618,7 +2628,11 @@ export class Changes extends Context.Service<
               head: sent,
             })
             yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
-              Effect.catchTag('GitFailed', (failed) => refusal(taskId, `${remote}/${repository.branch}`, failed)),
+              Effect.catchTag('GitFailed', (failed) =>
+                Effect.flatMap(hostOfRemotes(remotesOf(repository)), (host) =>
+                  refusal(taskId, `${remote}/${repository.branch}`, failed, host?.name),
+                ),
+              ),
             )
             yield* settle
             // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
@@ -2643,8 +2657,9 @@ export class Changes extends Context.Service<
           const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
             SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
-          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null }>`
-            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null; remotes: string }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit,
+              b.remote_fingerprints AS remotes
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2681,8 +2696,17 @@ export class Changes extends Context.Service<
               head: tip,
             })
             // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
-            yield* gitWithin(60_000, repository.root, 'push', '--', remote.slice(0, at), `${tip}:refs/heads/${remote.slice(at + 1)}`).pipe(
-              Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)),
+            yield* gitWithin(
+              60_000,
+              repository.root,
+              'push',
+              '--',
+              remote.slice(0, at),
+              `${tip}:refs/heads/${remote.slice(at + 1)}`,
+            ).pipe(
+              Effect.catchTag('GitFailed', (failed) =>
+                Effect.flatMap(hostOfRemotes(remotesOf(repository)), (host) => refusal(taskId, remote, failed, host?.name)),
+              ),
             )
             pushed.push({ branch: repository.base, remote })
           }
@@ -2775,11 +2799,12 @@ export class Changes extends Context.Service<
                       Effect.succeed(
                         refused.why === 'denied'
                           ? `${remote} didn't take the person's sign-in, so ${tag} wasn't pushed. Tell the person.`
-                          : `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`,
+                          : refused.why === 'refused'
+                            ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
+                            : refused.why === 'failed'
+                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
-                    ),
-                    Effect.catchTag('GitFailed', (other) =>
-                      Effect.succeed(`Pushing ${tag} failed: ${other.stderr.trim().split('\n').at(-1) ?? ''}`),
                     ),
                   ),
             ),
@@ -3584,7 +3609,7 @@ export class Changes extends Context.Service<
         openedAt: string | null
       }
 
-      const remotesOf = (repository: ShippingRow) =>
+      const remotesOf = (repository: { readonly remotes: string }) =>
         Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(repository.remotes), () => [])
 
       /**

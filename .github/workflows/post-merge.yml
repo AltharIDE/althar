@@ -1,10 +1,10 @@
 name: post-merge
 
-# The heavy part of desktop, harness and ui, after merge: their checks again (two pull requests can each pass and still
-# clash), the coverage gates, the Storybook build, the desktop app's end-to-end run and its packages, Windows' too. On a
-# pull request those workflows run only checks and unit tests, so a change to main doesn't hold every open pull request
-# up for the long runs. site and brand are quick, and still run in full on their own. Main may go red for a while; a
-# release can't: release.yml cuts only a commit this workflow passed on.
+# Everything desktop, harness and ui run, after merge, in full: their checks again, every unit test with the coverage
+# gates, the Storybook build, the desktop app's end-to-end run and its packages, and on Windows every unit test and
+# the smoke test. A pull request and the merge queue run only what a change reaches, and on Linux; this is where
+# Windows' unit tests run, within the hour of a merge. site and brand are quick, and still run in full on their own.
+# Main may go red for a while; a release can't: release.yml cuts only a commit this workflow passed on, Windows too.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
 # red, an issue titled "Main is red" says which run failed and which merges since the last green run could have broken
@@ -48,13 +48,16 @@ jobs:
       - run: bun install --frozen-lockfile
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
+      # @althar/testing has no coverage gate of its own: its tests run plain.
       - env:
-          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/skills apps/cli
+          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/skills packages/testing apps/cli
         run: |
           failed=''
           for package in $PACKAGES; do
             echo "::group::$package"
-            (cd "$package" && bun run check && bun run test:coverage) || failed="$failed $package"
+            tests='test:coverage'
+            [ "$package" = packages/testing ] && tests='test'
+            (cd "$package" && bun run check && bun run "$tests") || failed="$failed $package"
             echo "::endgroup::"
           done
           if [ -n "$failed" ]; then
@@ -206,6 +209,125 @@ jobs:
   desktop-e2e:
     uses: ./.github/workflows/e2e.yml
 
+  # Windows, where no one here works day to day: every unit test of the desktop app and everything it builds on, in
+  # parts that take about as long as each other, the runtime's split by file. Their checks don't change by OS: the jobs
+  # above run them.
+  windows:
+    name: windows (${{ matrix.part }})
+    runs-on: windows-2025
+    # A few times a part's usual run (seven to ten minutes), so a hang fails here, not at the limit.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: desktop
+            packages: apps/desktop
+          - part: runtime 1/4
+            packages: packages/runtime
+            shard: 1/4
+          - part: runtime 2/4
+            packages: packages/runtime
+            shard: 2/4
+          - part: runtime 3/4
+            packages: packages/runtime
+            shard: 3/4
+          - part: runtime 4/4
+            packages: packages/runtime
+            shard: 4/4
+          - part: packages
+            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The runner's git checks text out with CRLF (core.autocrlf), which the repositories the tests make and read back
+      # don't expect: they write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
+      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
+      # Set from a step: a job's env can't read the runner context, and GitHub refuses the whole workflow if it does.
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
+      # Each package's tests, every one run even when one before it fails, so a run says all that broke.
+      - env:
+          PACKAGES: ${{ matrix.packages }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run test ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed on Windows:$failed"
+            exit 1
+          fi
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  # The app itself on Windows: built unpackaged, started, and a project made of a repository (e2e/smoke.spec.ts). A
+  # pull request ran it for code that behaves differently there; this runs it on every merge.
+  windows-e2e:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
+      - run: bun run test:e2e e2e/smoke.spec.ts
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: windows-e2e
+          path: apps/desktop/test-results
+          retention-days: 7
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
   # The Linux packages as a build test.
   package:
     runs-on: ubuntu-24.04
@@ -233,8 +355,8 @@ jobs:
             apps/desktop/out/dist/althar-*.rpm
           if-no-files-found: error
 
-  # The Windows installer as a build test, installed and uninstalled on windows-2025: the same job a pull request that
-  # changes packaging runs.
+  # The Windows installer as a build test, installed, opened and uninstalled on windows-2025: the job a branch can run
+  # by hand before it merges (`gh workflow run windows-installer.yml --ref <branch>`).
   package-windows:
     uses: ./.github/workflows/windows-installer.yml
 
@@ -242,7 +364,7 @@ jobs:
   # on main's newest commit speaks for main: a re-run of an older commit, or one a newer push is already waiting
   # behind, leaves the issue to that newer run.
   report:
-    needs: [harness, runtime, harness-runtime, ui, desktop, desktop-e2e, package, package-windows]
+    needs: [harness, runtime, harness-runtime, ui, desktop, desktop-e2e, windows, windows-e2e, package, package-windows]
     if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

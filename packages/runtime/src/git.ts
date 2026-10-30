@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, type ExecFileException } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -95,6 +95,24 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/**
+ * A failed git command as git ended it: what it wrote to stderr, and how it
+ * stopped. Node's own message is only the command line, so it stands in only
+ * where git never ran or its output overflowed, a failure Node names itself.
+ * Stopped by Node with git still running is its time running out.
+ */
+const failedWith = (args: ReadonlyArray<string>, cwd: string, timeout: number, error: ExecFileException, stderr: string): GitFailed => {
+  const ownCode = typeof error.code === 'string'
+  return new GitFailed({
+    args: [...args],
+    cwd,
+    stderr: stderr.trim() || (ownCode ? error.message : ''),
+    ...(typeof error.code === 'number' ? { code: error.code } : {}),
+    ...(typeof error.signal === 'string' ? { signal: error.signal } : {}),
+    ...(error.killed === true && !ownCode ? { timedOut: true, timeout } : {}),
+  })
+}
+
 const run = (
   timeout: number,
   cwd: string,
@@ -117,11 +135,7 @@ const run = (
         env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
-        resume(
-          error === null
-            ? Effect.succeed(trim ? stdout.trim() : stdout)
-            : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
-        ),
+        resume(error === null ? Effect.succeed(trim ? stdout.trim() : stdout) : Effect.fail(failedWith(args, cwd, timeout, error, stderr))),
     )
     if (input === undefined || child.stdin === null) return
     // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
