@@ -214,7 +214,7 @@ const TILES: Tile[] = [
         Every workspace, <b>side by side.</b>
       </>
     ),
-    lead: 'One tracker per company or client, each bound to its project: Linear, Jira, Trello or GitHub Issues in, pull requests out to GitHub, GitLab or Bitbucket.',
+    lead: 'Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project.',
     piece: (tone) => <Fragment key={tone} source={workspaces} tone={tone} className={s.stage} />,
   },
 ]
