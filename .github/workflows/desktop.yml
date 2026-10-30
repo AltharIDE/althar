@@ -1,12 +1,15 @@
 name: desktop
 
-# On a pull request: checks and unit tests, on Linux and on Windows, on Windows one end-to-end smoke test, since nothing
-# else runs the app there, and the app's whole end-to-end run (e2e.yml). The coverage gate and the packages run after
-# merge, in post-merge.yml.
+# On a pull request, and for its entry in the merge queue: the desktop app's checks and the unit tests its change
+# reaches, and the app's whole end-to-end run (e2e.yml) when it reaches the app (packages/testing/src/select.ts). On a
+# pull request, Windows' smoke test too, when what reaches the app is code that behaves differently there. Windows'
+# unit tests, the coverage gate and the packages run after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
   pull_request:
+    # And when a draft is ready for review: a draft's end-to-end runs wait for it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       [
         'apps/desktop/**',
@@ -20,9 +23,14 @@ on:
         'package.json',
         'bun.lock',
         'vite.config.ts',
+        '.bun-version',
+        '.node-version',
+        'lint/**',
+        'patches/**',
         'packages/testing/**',
         '.github/actions/flaky/**',
         '.github/workflows/desktop.yml',
+        '.github/workflows/e2e.yml',
       ]
 
 permissions:
@@ -38,12 +46,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # What the change reaches: the desktop app's checks or not, which of its tests, and whether the end-to-end runs do.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      jobs: ${{ steps.plan.outputs.jobs }}
+      any: ${{ steps.plan.outputs.any }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      windows-e2e: ${{ steps.plan.outputs.windows-e2e }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
+      # group's head merges the whole group when it passes, and so must cover every entry in it.
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+        run: |
+          if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
+            git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
+          else
+            echo '*' > "$RUNNER_TEMP/changed"
+          fi
+      # A draft runs its checks and unit tests, and its end-to-end runs once it is ready for review.
+      - id: plan
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: bun packages/testing/src/select.ts plan desktop "$RUNNER_TEMP/changed"
+
   verify:
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -53,95 +90,21 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
-        working-directory: .
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: bun run check
-      - run: bun run test
-      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
-      - if: always()
-        uses: ./.github/actions/flaky
-
-  # Windows, where no one here works day to day: the checks and unit tests of the desktop app and everything it builds
-  # on, in parts that take about as long as each other, so what breaks there shows on the pull request. The runtime's
-  # tests, the longest, are split by file.
-  windows:
-    name: windows (${{ matrix.part }})
-    runs-on: windows-2025
-    # A few times a part's usual run (seven to ten minutes), so a hang fails here, not at the limit.
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - part: desktop
-            packages: apps/desktop
-          - part: runtime 1/4
-            packages: packages/runtime
-            shard: 1/4
-          - part: runtime 2/4
-            packages: packages/runtime
-            shard: 2/4
-          - part: runtime 3/4
-            packages: packages/runtime
-            shard: 3/4
-          - part: runtime 4/4
-            packages: packages/runtime
-            shard: 4/4
-          - part: packages
-            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
-    defaults:
-      run:
-        shell: bash
-    env:
-      # The runner's git checks text out with CRLF (core.autocrlf), which the repositories the tests make and read back
-      # don't expect: they write LF and compare it.
-      GIT_CONFIG_COUNT: '1'
-      GIT_CONFIG_KEY_0: core.autocrlf
-      GIT_CONFIG_VALUE_0: 'false'
-    steps:
-      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
-      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
-      # Set from a step: a job's env can't read the runner context, and GitHub refuses the whole workflow if it does.
-      - run: |
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            ~/AppData/Local/electron/Cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
-      - run: bun install --frozen-lockfile
-      # Each package's checks and tests, every one run even when one before it fails, so a run says all that broke.
       - env:
-          PACKAGES: ${{ matrix.packages }}
-          SHARD: ${{ matrix.shard }}
-        run: |
-          failed=''
-          for package in $PACKAGES; do
-            echo "::group::$package"
-            (cd "$package" && bun run check && bun run test ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::Failed on Windows:$failed"
-            exit 1
-          fi
+          PLAN: ${{ needs.plan.outputs.jobs }}
+        run: bun packages/testing/src/select.ts run
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
 
-  # The app itself on Windows: built unpackaged, started, and a project made of a repository (e2e/smoke.spec.ts).
+  # The app itself on Windows, where no one here works day to day: built unpackaged, started, and a project made of a
+  # repository (e2e/smoke.spec.ts). On the pull request only, for code that behaves differently there; after merge,
+  # post-merge.yml runs it on every merge, with Windows' unit tests.
   windows-e2e:
+    needs: plan
+    if: github.event_name == 'pull_request' && needs.plan.outputs.windows-e2e == 'true'
     runs-on: windows-2025
     timeout-minutes: 20
     defaults:
@@ -176,9 +139,9 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
-  # The app's whole end-to-end run, in four parts, on the pull request itself: a change that breaks a spec it didn't
-  # touch fails here, where it was made, not first in the merge queue, where the pull requests queued behind it fail
-  # with it. In the queue, queue.yml runs it once more, on main as it will be.
+  # The app's whole end-to-end run, in four parts, when the change reaches the app: on the pull request, so a change
+  # that breaks a spec it didn't touch fails where it was made, and again in the merge queue, on main as it will be.
   e2e:
-    if: github.event_name == 'pull_request'
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true'
     uses: ./.github/workflows/e2e.yml

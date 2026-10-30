@@ -1,9 +1,9 @@
 name: e2e
 
 # The desktop app's end-to-end run: the built app, with the fake agent, in four parts by file, each on a machine of its
-# own (about seven minutes each, against twenty-five as one). A pull request that changes the app or what it builds on
-# runs it (desktop.yml), so a change that breaks a spec fails there; the merge queue runs it again, on main as it will
-# be (queue.yml), and post-merge.yml once more, for the release.
+# own (about seven minutes each, against twenty-five as one). desktop.yml runs it for a change that reaches the app, on
+# the pull request, so a change that breaks a spec fails there, and again in the merge queue, on main as it will be;
+# post-merge.yml once more, for the release.
 on:
   workflow_call:
   workflow_dispatch:
