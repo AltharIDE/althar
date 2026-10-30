@@ -58,8 +58,14 @@
     `decideInside` (`packages/runtime/src/rules.ts`).
   - **What still holds inside:** the project's own words. A command or a
     kind it never allows, where the line plainly is one, is refused, and a
-    command it asks about asks. What it can't read runs, even while Never
-    lists something. No one reads the keychain or git's stored passwords,
+    command it asks about asks. What it can't read (`$(…)`, a script in
+    another language, a shell given a file) runs, unless Never lists
+    something nothing at the boundary stops, a deploy or a command the
+    project named: then it is refused, with how to write it so Althar can
+    read it (`HELD_INSIDE`). A Never that lists only what the sandbox and
+    git's guard stop (writes outside, a push to the default branch, a force
+    push, deleting another branch) leaves it running. None of the person's
+    projects had a Never rule on 2026-10-30. No one reads the keychain or git's stored passwords,
     whose service a Mac's sandbox still reaches. Keys and sign-ins stay
     unreadable by the sandbox's deny list, not by reading the words. The
     coordinator's edit tools stay denied, and its copies and mirror
@@ -67,7 +73,12 @@
   - **What crosses meets the rules as before:** a command that runs or asks
     to run outside the sandbox, an edit outside the task's worktree, a host
     it asks for. With everything allowed, only ADR-067's irreversible kinds
-    ask; in every other mode, the rules as they stand.
+    ask; in every other mode, the rules as they stand. But with everything
+    allowed, a command the agent asks to run outside that Althar can't read
+    is refused, saying to run it inside, where it runs without asking, or as
+    plain commands (`decideLeaving`): outside, nothing would stop a script
+    writing to the person's checkout. What the project runs outside from
+    the start, its tests and its build, goes as it said.
   - **What can't be undone is stopped where it happens, at git.** Every
     lead's git takes its hooks from a folder of Althar's (`core.hooksPath`
     by the environment, `pushGuard.ts`). Its `pre-push` stops a push to the
@@ -78,9 +89,12 @@
     what it stopped and to run it plainly, outside the sandbox, so Althar
     asks the person. Each hook then runs the repository's own, from its own
     `core.hooksPath` or its git folder. When the person allows a request the
-    rules read as one of these, the session gets a pass for two minutes,
-    which the hooks let through. Writes outside the worktree are stopped by
-    the sandbox itself.
+    rules read as one of these, the session gets a pass for two minutes
+    naming the git commands they allowed (`gitCommandsOf`). The guard lets
+    through only a git whose own words (`ps`) are one of those, and only
+    that run of it: the pass is spent on it, and an unrelated push or
+    deletion meanwhile gets nothing. Writes outside the worktree are stopped
+    by the sandbox itself.
   - **A refusal says why in the refused call itself,** for an agent that
     reads it there (`PermissionMeanings.reasonInBand`). Althar's patch of
     claude-agent-acp hands the SDK the reason sent in the answer's `_meta`
@@ -94,7 +108,12 @@
     and on the card (`counted`). The project's rules say, under "Last 14
     days", how each kind went: how often it asked and was allowed, was
     refused, and was worked around (`tally.ts`). A kind that mostly gets
-    worked around can be dropped.
+    worked around can be dropped. What the boundary refuses itself, which no
+    rule sees, is counted too, from the failed call: the guard names the
+    kind it stopped on a line of its own, and a held session's "Operation
+    not permitted" or "Read-only file system" is the sandbox's, counted as
+    credentials where it names where keys are kept, else as writing
+    outside (`stoppedIn`, the item's `stopped`).
   - **Where there is no sandbox Althar holds,** today's rules stay: on
     Windows, in a Flatpak, on Linux without bubblewrap and socat or where
     they can't start a namespace, for Codex (which asks only to go beyond
@@ -114,13 +133,23 @@
     what happens. The guard sees the refs git actually sends.
 - **Trade-off:** inside the sandbox a lead may run anything the sandbox
   lets it: install into its worktree, start servers on localhost, reach the
-  hosts it was given. A Mac's sandbox reaches the keychain's service, so a
-  credential helper told to run inside it could read what that helper
-  stored. Althar refuses that where it reads the words, but a script could
-  hide it, as it could before. The guard holds against a mistake, not an
-  agent set on getting past it: one that changes its environment or git's
-  config gets past it. With everything allowed, a script that asks to run
-  outside the sandbox is read as before.
+  hosts it was given. **The keychain stays reachable on a Mac.** Claude
+  Code's macOS profile allows the keychain's service
+  (`com.apple.securityd.xpc`) and takes no setting to deny it; denying a
+  read of `/usr/bin/security` doesn't stop it running, and a profile of
+  Althar's can't be nested inside Claude Code's (`sandbox_apply` is refused
+  there), all tried on 2026-10-30. So a script inside the sandbox could run
+  `security find-generic-password` or git's `credential-osxkeychain` and
+  read an item whose access list trusts that tool, as the person's GitHub
+  sign-in does. Althar refuses that where the words show it, but a script
+  hides it. The same was open before this decision to any plain command
+  Claude Code runs in its sandbox without asking, such as `python3 x.py`.
+  Closing it needs Claude Code's sandbox to deny that service; until then,
+  Never rules don't make it unreachable either. The guard holds against a
+  mistake, not an agent set on getting past it: one that changes its
+  environment or git's config gets past it. What the project runs outside
+  the sandbox from the start (its tests, its build) can run code the agent
+  wrote, as before.
 - **Checked:** on this Mac on 2026-10-29 (`tests/agents/boundary.test.ts`),
   a Claude Code lead with everything allowed ran a python heredoc that
   edited its worktree, `cp $TMPDIR/…` and a `for` loop with `$((…))`, with
@@ -131,7 +160,8 @@
   sandbox. Its python heredoc writing outside its folder, and `touch` in
   the person's checkout, failed there, and it posted one reply. `ps` showed
   each command under `sandbox-exec`.
-- **Revisit when:** an agent loses work through what its sandbox held, or
+- **Revisit when:** Claude Code's sandbox can deny the keychain's service;
+  an agent loses work through what its sandbox held, or
   through a push the guard let by; Althar can tell before a session starts
   that a sandbox will start on Windows; Codex's or OpenCode's sandbox can be
   held as Claude Code's.

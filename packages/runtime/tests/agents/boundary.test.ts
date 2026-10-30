@@ -13,6 +13,7 @@ import { Permissions } from '../../src/Permissions'
 import { Policies } from '../../src/Policies'
 import { Projects } from '../../src/Projects'
 import * as Runtime from '../../src/Runtime'
+import { tallyOf } from '../../src/tally'
 import { Sessions } from '../../src/Sessions'
 
 /*
@@ -101,8 +102,10 @@ const record = (threadId: string, projectId: string) =>
     const calls = yield* sql<{ content: string }>`
       SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'tool_call' ORDER BY sequence`
     for (const call of calls) {
-      const content = JSON.parse(call.content) as { title?: string; status?: string; output?: unknown }
-      say(`call (${content.status ?? ''}): ${clip(content.title ?? '', 200)}`)
+      const content = JSON.parse(call.content) as { title?: string; status?: string; stopped?: string }
+      say(
+        `call (${content.status ?? ''}${content.stopped === undefined ? '' : `, stopped: ${content.stopped}`}): ${clip(content.title ?? '', 200)}`,
+      )
     }
     const decisions = yield* sql<{ kind: string; title: string; outcome: string; reason: string | null; counted: string | null }>`
       SELECT r.tool_kind AS kind, r.title, d.outcome, d.reason, d.kind AS counted FROM decisions d
@@ -193,6 +196,13 @@ describe('the sandbox is the boundary, on Claude Code', () => {
         )
         assert.deepStrictEqual(cards, [], 'it was asked about a command')
         assert.isAbove(watch.seen.size, 0, 'no command ran under sandbox-exec')
+        // What the boundary refused it, no rule seeing it, is counted all the same: the guard's pushes, the sandbox's write and read.
+        const tally = yield* tallyOf(project.projectId)
+        for (const kind of tally) say(`counted: ${JSON.stringify(kind)}`)
+        const refused = (kind: string) => tally.find((each) => each.kind === kind)?.refused ?? 0
+        assert.isAtLeast(refused('default-branch'), 1, 'the guard’s push to main was not counted')
+        assert.isAtLeast(refused('outside'), 1, 'the sandbox’s write outside was not counted')
+        assert.isAtLeast(refused('credentials'), 1, 'the sandbox’s read of keys was not counted')
         say(`home: ${home}`)
       }).pipe(Effect.scoped, Effect.provide(layer))
     },

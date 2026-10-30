@@ -920,9 +920,13 @@ command that doesn't ask to leave it, and starts as none of the commands
 that run outside from the start, is allowed in every mode without the
 rules reading what it does (`runsInside`, `decideInside`). Only what the
 project said itself holds there: a command or kind it never allows, where
-the line plainly is one, is refused; a command it asks about asks; and no
-one reads the keychain or git's stored passwords, whose service a Mac's
-sandbox still reaches. Where nothing holds a session (Windows, a Flatpak,
+the line plainly is one, is refused; what Althar can't read is refused too
+where Never lists what the boundary doesn't stop (a deploy, a named
+command); a command it asks about asks; and no one reads the keychain or
+git's stored passwords where the words show it, whose service a Mac's
+sandbox still reaches (ADR-071's trade-off). With everything allowed, a
+command the agent asks to run outside that Althar can't read is refused,
+saying to run it inside (`decideLeaving`). Where nothing holds a session (Windows, a Flatpak,
 Codex, OpenCode, a review's lead), every request meets the rules below.
 
 **Git stops what can't be undone, wherever it comes from.** Every lead's
@@ -933,7 +937,8 @@ deleting a branch that isn't the task's; `reference-transaction` stops
 deleting such a branch here, or moving one so it loses commits. It says
 what it stopped and to run it plainly outside the sandbox, so Althar asks;
 once the person allows a request the rules read as one of these, the
-session has a two-minute pass the hooks let through. Each hook then runs
+session has a two-minute pass naming those git commands, which the hooks
+let through once, for the git whose own words (`ps`) match. Each hook then runs
 the repository's own. It holds against a mistake: an agent that changes
 its environment gets past it.
 
@@ -943,7 +948,8 @@ credentials, the code host, what a reader may not do, the rest), on the
 decision (`decisions.kind`) and the card (`counted`). The project's rules
 show how each went over the last 14 days (`tally.ts`): asked and allowed,
 refused, and worked around (the agent's turn went on and a later call
-completed).
+completed). What the guard or the sandbox refused, which no rule saw, is
+read from the failed call and counted too (`stoppedIn`).
 
 A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:
