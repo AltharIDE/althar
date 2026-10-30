@@ -8,7 +8,10 @@
   --hair-2: rgba(255, 244, 232, 0.16);
   --lit: #aeb6ff;
   --glow: rgba(60, 76, 255, 0.9);
-  --col: min(1120px, calc(100% - 2 * var(--gut)));
+  --col: min(840px, calc(100% - 2 * var(--gut)));
+  --wide: min(1120px, calc(100% - 2 * var(--gut)));
+  /* How far the log's words stand in from the rail. */
+  --in: 48px;
   position: relative;
   isolation: isolate;
   overflow: clip;
@@ -29,7 +32,7 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  min-height: clamp(460px, calc(100svh - 300px), 620px);
+  min-height: clamp(440px, calc(100svh - 330px), 580px);
   margin: 0 16px;
   padding: 34px 40px 40px;
   border-radius: 30px;
@@ -79,7 +82,7 @@
 .clock { min-width: 15ch; }
 /* One mark for each change aboard, lit. */
 .meter { display: flex; gap: 4px; margin-top: 2px; }
-.meter span { width: 3px; height: 12px; border-radius: 1px; background: var(--lit); box-shadow: 0 0 6px rgba(70, 86, 255, 0.8); }
+.meter span { width: 2px; height: 11px; border-radius: 1px; background: var(--lit); box-shadow: 0 0 6px rgba(70, 86, 255, 0.8); }
 
 .name { display: grid; align-content: center; justify-items: center; gap: 18px; padding: 40px 0 56px; text-align: center; }
 .h1 {
@@ -90,14 +93,14 @@
   letter-spacing: -0.05em;
   color: #fff;
 }
-.lead { max-width: 30em; font-size: 16px; line-height: 1.5; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.68); text-wrap: balance; }
+.lead { max-width: 36em; font-size: 16px; line-height: 1.5; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.68); text-wrap: balance; }
 
 /* ---- the log ---- */
 
 .log { width: var(--col); margin: 112px auto 0; padding: 0; list-style: none; }
 
 /* An entry hangs from the rail at its left, the rail running on down to the next. */
-.entry { position: relative; padding: 0 0 88px 48px; }
+.entry { position: relative; padding: 0 0 88px var(--in); scroll-margin-top: 88px; }
 .entry::before { content: ''; position: absolute; left: 5px; top: 12px; bottom: -6px; width: 1px; background: var(--hair-2); }
 .launch { padding-bottom: 0; }
 .launch::before { display: none; }
@@ -121,6 +124,7 @@
   white-space: nowrap;
 }
 .t { color: var(--lit); }
+.met { text-transform: none; letter-spacing: 0.06em; }
 .note { color: var(--ink-2); }
 .rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
 .out { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); text-decoration: none; }
@@ -129,6 +133,8 @@
 /* The version, as code, and the release's title. */
 .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 20px 0 30px; }
 .v { font: 500 28px/1.15 var(--mono); letter-spacing: -0.03em; color: #fff; }
+a.v { text-decoration: none; }
+a.v:hover { color: var(--lit); }
 .title { font: 400 28px/1.2 'Inter Display', var(--display); letter-spacing: -0.03em; color: #d6cfc4; text-wrap: balance; }
 
 /* Its changes, a run of each kind under its word. */
@@ -138,11 +144,15 @@
 .run[data-kind='new'] > .label { color: var(--lit); }
 .run[data-kind='improved'] > .label { color: #d8d0c4; }
 .run[data-kind='fixed'] > .label { color: var(--ink-2); }
-.lines { display: grid; gap: 11px; max-width: 44em; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.6; letter-spacing: -0.005em; color: #e3ddd3; text-wrap: pretty; }
+.lines { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.6; letter-spacing: -0.005em; color: #e3ddd3; text-wrap: pretty; }
+/* Each line marked at its start, in its kind's colour, so a run reads as lines. */
+.run .lines li { position: relative; }
+.run .lines li::before { content: ''; position: absolute; left: -22px; top: 0.8em; width: 8px; height: 1px; background: currentColor; opacity: 0.28; }
+.run[data-kind='new'] .lines li::before { background: var(--lit); opacity: 0.6; }
 .code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 244, 232, 0.07); font: 0.86em var(--mono); color: #fff; white-space: pre-wrap; }
 
 /* The tail: each merge a line, its day once, its pull request at the end. */
-.tail .lines { max-width: none; gap: 0; }
+.tail .lines { gap: 0; }
 .merged { padding: 9px 0; border-top: 1px solid var(--hair); }
 .merged:last-child { border-bottom: 1px solid var(--hair); }
 .again { visibility: hidden; }
@@ -170,38 +180,44 @@
 
 /* ---- what's next: a course on a chart ---- */
 
-.ahead { width: var(--col); margin: 120px auto 0; }
-.ahead .head { margin-bottom: 26px; }
-.chart {
+/* A chart of its own, wider than the log, its stamp and title inside it as the window's readouts are. */
+.ahead {
   position: relative;
-  padding: 40px 44px 48px;
-  border-radius: 24px;
+  isolation: isolate;
+  width: var(--wide);
+  margin: 128px auto 0;
+  padding: 34px 40px 52px;
+  border-radius: 28px;
+  scroll-margin-top: 88px;
   background:
-    radial-gradient(ellipse 40% 60% at 0 100%, rgba(43, 59, 255, 0.12), transparent 70%),
+    radial-gradient(ellipse 45% 70% at 0 100%, rgba(43, 59, 255, 0.13), transparent 70%),
     #0b0907;
-  box-shadow: inset 0 0 0 1px var(--hair);
+  box-shadow: inset 0 0 0 1px var(--hair), 0 40px 80px -40px rgba(0, 0, 0, 0.9);
 }
+.ahead .head { margin-bottom: 8px; }
 /* The chart's grid, faint, fading out toward its far side. */
-.chart::before {
+.ahead::before {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: -1;
   border-radius: inherit;
-  background-image: radial-gradient(circle, rgba(255, 238, 220, 0.16) 1px, transparent 1.4px);
+  background-image: radial-gradient(circle, rgba(255, 238, 220, 0.15) 1px, transparent 1.4px);
   background-size: 24px 24px;
-  background-position: 12px 12px;
-  -webkit-mask: linear-gradient(100deg, #000 30%, transparent 95%);
-  mask: linear-gradient(100deg, #000 30%, transparent 95%);
+  background-position: 4px 4px;
+  -webkit-mask: linear-gradient(100deg, #000 25%, transparent 95%);
+  mask: linear-gradient(100deg, #000 25%, transparent 95%);
   pointer-events: none;
 }
-.course { position: absolute; left: 44px; right: 44px; top: 40px; width: calc(100% - 88px); height: 132px; overflow: visible; }
+.plot { position: relative; }
+.course { position: absolute; left: 0; top: 0; width: 100%; overflow: visible; }
 .course path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
 .flown { stroke: var(--lit); stroke-width: 2; filter: drop-shadow(0 0 4px rgb(60 76 255)) drop-shadow(0 0 12px rgba(60, 76, 255, 0.6)); }
 .plotted { stroke: rgba(255, 244, 232, 0.42); stroke-width: 1.5; stroke-dasharray: 5 7; }
 .beyond { stroke-width: 1.5; stroke-dasharray: 0.5 8; }
 
 .stages { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
-.stage { position: relative; padding: calc(var(--y) + 30px) 36px 0 0; }
+.stage { position: relative; padding: calc(var(--y) + 30px) 28px 0 0; }
 .waypoint { position: absolute; left: -6px; top: calc(var(--y) - 6px); width: 12px; height: 12px; border-radius: 50%; background: #0b0907; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.5); }
 .stage[data-stage='now'] .waypoint { background: var(--lit); box-shadow: 0 0 0 5px rgba(60, 76, 255, 0.18), 0 0 16px var(--glow); }
 .stage[data-stage='later'] .waypoint { box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.26); }
@@ -222,10 +238,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 18px 40px;
-  width: var(--col);
-  margin: 120px auto 0;
-  padding: 30px 0 110px;
-  border-top: 1px solid var(--hair);
+  width: var(--wide);
+  margin: 64px auto 0;
+  padding: 0 0 96px;
 }
 .endRow p { font-size: 17px; color: var(--ink-2); }
 .endRow .v { font-size: 17px; letter-spacing: -0.01em; }
@@ -258,31 +273,32 @@
   .stage[data-stage='next']::before { border-left: 1.5px dashed rgba(255, 244, 232, 0.4); box-shadow: none; }
   .stage[data-stage='later']::before { border-left: 1.5px dotted rgba(255, 244, 232, 0.3); box-shadow: none; -webkit-mask: linear-gradient(#000, transparent); mask: linear-gradient(#000, transparent); }
   .waypoint { top: -1px; }
-  .chart::before { -webkit-mask: linear-gradient(180deg, #000 30%, transparent 95%); mask: linear-gradient(180deg, #000 30%, transparent 95%); }
-  .chart { padding: 32px 28px 36px 34px; }
+  .ahead::before { -webkit-mask: linear-gradient(180deg, #000 30%, transparent 95%); mask: linear-gradient(180deg, #000 30%, transparent 95%); }
+  .ahead { padding: 30px 28px 40px; }
+  .plot { margin-top: 28px; padding-left: 6px; }
 }
 
 @media (max-width: 640px) {
-  .main { padding-top: 66px; border-radius: 0 0 24px 24px; }
+  .main { --in: 26px; padding-top: 72px; border-radius: 0 0 24px 24px; }
   .window { min-height: 540px; margin: 0 10px; padding: 22px 20px 26px; border-radius: 24px; }
   .limb { top: calc(100% - 34px); left: -80%; right: -80%; }
   .readout b { font-size: 14px; }
   .name { gap: 14px; padding: 32px 0 44px; }
   .lead { font-size: 15px; }
   .log { margin-top: 72px; }
-  .entry { padding: 0 0 64px 26px; }
+  .entry { padding-bottom: 64px; }
   .head { gap: 2px 12px; margin: 16px 0 22px; }
   .v, .title { font-size: 22px; }
   .stamp { gap: 10px; letter-spacing: 0.1em; }
   .runs { gap: 22px; }
   /* Each kind's word over its run, so the lines take the width. */
   .run { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .run .lines li::before { left: -13px; width: 6px; }
   .lines { font-size: 15px; }
   .merged { grid-template-columns: 56px minmax(0, 1fr); padding: 10px 0; }
   .text { display: block; }
   .pr { margin-left: 8px; white-space: nowrap; }
-  .ahead { margin-top: 88px; }
-  .chart { padding: 28px 20px 30px 28px; border-radius: 20px; }
+  .ahead { width: auto; margin: 88px 10px 0; padding: 24px 20px 32px; border-radius: 24px; }
   .endRow { flex-direction: column; align-items: stretch; margin-top: 88px; padding-bottom: 96px; }
   .ways { display: grid; gap: 10px; }
   .primary, .secondary { justify-content: center; height: 48px; }

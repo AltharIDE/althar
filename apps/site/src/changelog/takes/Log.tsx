@@ -196,7 +196,8 @@ function Window() {
 function Stamp({ day, date, note, link }: { day: string; date: string; note?: string; link?: ReactNode }) {
   return (
     <p className={s.stamp}>
-      <span className={s.t}>{day}</span>
+      {/* A mission day keeps its small d: T+8d. */}
+      <span className={cx(s.t, day.startsWith('T+') && s.met)}>{day}</span>
       <span>{date}</span>
       {note && <span className={s.note}>{note}</span>}
       <span className={s.rule} aria-hidden="true" />
@@ -255,7 +256,10 @@ function Entry({ release, first }: { release: (typeof RELEASES)[number]; first: 
         }
       />
       <h2 className={s.head}>
-        <span className={s.v}>{release.version}</span>
+        {/* The version links to its own entry, to share. */}
+        <a className={s.v} href={`#v${release.version}`}>
+          {release.version}
+        </a>
         <span className={s.title}>{release.title}</span>
       </h2>
       <div className={s.runs}>
@@ -283,8 +287,8 @@ function Entry({ release, first }: { release: (typeof RELEASES)[number]; first: 
  */
 const STAGES: readonly Stage[] = ['now', 'next', 'later']
 /** The course's height, in px, and its height at a share `x` of the way across. */
-const COURSE_H = 132
-const courseY = (x: number) => 118 - 104 * x ** 1.4
+const COURSE_H = 150
+const courseY = (x: number) => 138 - 126 * x ** 1.5
 const along = (from: number, to: number) => {
   const points: string[] = []
   for (let i = 0; i <= 24; i++) {
@@ -312,11 +316,17 @@ function Ahead() {
       <h2 className={s.head} id="next-h">
         <span className={s.title}>What’s next</span>
       </h2>
-      <div className={s.chart}>
-        <svg className={s.course} viewBox={`0 0 1000 ${COURSE_H}`} preserveAspectRatio="none" aria-hidden="true">
+      <div className={s.plot}>
+        <svg
+          className={s.course}
+          viewBox={`0 0 1000 ${COURSE_H}`}
+          preserveAspectRatio="none"
+          style={{ height: COURSE_H }}
+          aria-hidden="true"
+        >
           <defs>
             <linearGradient id="log-fade" gradientUnits="userSpaceOnUse" x1="667" y1="0" x2="1000" y2="0">
-              <stop offset="0" stopColor="rgb(255 244 232)" stopOpacity="0.3" />
+              <stop offset="0" stopColor="rgb(255 244 232)" stopOpacity="0.45" />
               <stop offset="1" stopColor="rgb(255 244 232)" stopOpacity="0" />
             </linearGradient>
           </defs>
