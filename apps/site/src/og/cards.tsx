@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
  * again: `bun run og`.
  */
 
-export type OgPage = 'home' | 'shifts' | 'thesis'
+export type OgPage = 'home' | 'shifts' | 'changelog' | 'thesis'
 
 export interface OgCard {
   title: ReactNode
@@ -39,6 +39,16 @@ export const CARDS: Record<OgPage, OgCard> = {
       </>
     ),
     lead: 'New models, new limits, new owners, new terms: what changed for people who code with agents, each one dated and sourced.',
+  },
+  changelog: {
+    title: (
+      <>
+        What changed,
+        <br />
+        <b>release by release.</b>
+      </>
+    ),
+    lead: 'Every Althar release since the first, in the release notes’ own words, and what’s next.',
   },
   thesis: {
     title: (
