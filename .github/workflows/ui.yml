@@ -64,6 +64,9 @@ jobs:
       - id: plan
         working-directory: .
         run: bun packages/testing/src/select.ts plan ui "$RUNNER_TEMP/changed"
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - if: steps.plan.outputs.any == 'true'
+        uses: ./.github/actions/flaky/quarantine
       - if: steps.plan.outputs.any == 'true'
         working-directory: .
         env:

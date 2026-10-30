@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
-import { LoadMeter, Offline, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -131,7 +131,7 @@ function TabsBar({
       }
       // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
       lights={host.platform === 'darwin' ? 'space' : 'drawn'}
-      text={{ newProjectKbd: host.platform === 'darwin' ? '⌘N' : 'Ctrl+N' }}
+      text={{ newProjectKbd: modKey('N') }}
       maximized={chrome.window?.maximized === true}
       onCloseWindow={() => host.window('close')}
       onMinimize={() => host.window('minimize')}
@@ -162,7 +162,6 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
-  const { host } = useServices()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // The plan gauge's peek, from any screen with the bar.
@@ -186,7 +185,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
-      const command = host.platform === 'darwin' ? event.metaKey : event.ctrlKey
+      const command = primaryDown(event)
       // ⌘, opens and closes the quick settings; ⌘⇧, goes to the settings' tab. Once there is a project, and its bar.
       if (command && !event.altKey && event.code === 'Comma' && !none) {
         event.preventDefault()
@@ -209,12 +208,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         return
       }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+      if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
         newProject()
         return
       }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+      if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
         event.preventDefault()
@@ -231,7 +230,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, host.platform])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none])
   return (
     <CarriedBack.Provider value={back}>
       <VisitContext.Provider value={tabs.visit}>

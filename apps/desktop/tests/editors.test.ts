@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { Effect } from 'effect'
 
 import { argsAt, bundleOf, editorsHere, fileLink, fileManagerOf, openInEditor, start } from '../src/runtime/editors'
+import { thisDevice } from '@althar/runtime/device'
 import { deviceWords } from '../src/renderer/shared/device'
 import { isGenerated } from '../src/renderer/shared/generated'
 
@@ -117,5 +118,9 @@ describe('this computer, as each system calls it', () => {
     expect(deviceWords('darwin')).toEqual({ this: 'this Mac', This: 'This Mac', the: 'the Mac', count: 'the Dock icon', files: 'Finder' })
     expect(deviceWords('win32')).toEqual({ this: 'this PC', This: 'This PC', the: 'the PC', count: null, files: 'File Explorer' })
     expect(deviceWords('linux')).toMatchObject({ this: 'this computer', count: 'the launcher icon' })
+  })
+
+  it('is called the same in the words the runtime writes', () => {
+    for (const platform of ['darwin', 'win32', 'linux'] as const) expect(thisDevice(platform)).toBe(deviceWords(platform).this)
   })
 })

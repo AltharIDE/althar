@@ -1,8 +1,9 @@
 name: Flaky tests
 description: >-
   Files the tests this job found flaky (they failed, then passed on their retry; packages/testing) as GitHub issues
-  labelled flaky, one per test. Use it as a job's last step, with `if: always()`, in a job whose env sets FLAKY_REPORT
-  and whose permissions include `issues: write`.
+  labelled flaky, one per test, and puts each quarantined test that failed (.github/actions/flaky/quarantine) on its
+  issue, listing them in the job's summary. Use it as a job's last step, with `if: always()`, in a job whose env sets
+  FLAKY_REPORT and whose permissions include `issues: write`.
 runs:
   using: composite
   steps:

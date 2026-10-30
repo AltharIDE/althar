@@ -89,6 +89,8 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - env:
           PLAN: ${{ toJSON(matrix) }}
         run: bun packages/testing/src/select.ts run

@@ -12,6 +12,8 @@ export default defineConfig({
       // src/testing is test tooling, not production code: the fakes are exercised by every test that uses them.
       exclude: ['src/index.ts', 'src/testing/**'],
       reporter: ['text', 'html'],
+      // Checked when a test fails too, so a run that only quarantined tests fail still gates on it (@althar/testing).
+      reportOnFailure: true,
       thresholds: { lines: 90, branches: 90 },
     },
   },

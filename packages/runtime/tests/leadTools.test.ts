@@ -11,6 +11,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { thisDevice } from '../src/device'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -182,7 +183,7 @@ describe('a lead’s pull request tools, at their edges', () => {
       rmSync(worktree, { recursive: true, force: true })
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
-        "The task's worktree isn't on this computer, so Althar can't see what is on its branch. Tell the person.",
+        `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })

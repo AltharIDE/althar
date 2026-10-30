@@ -10,8 +10,8 @@ name: queue
 # The queue runs a pull request's own checks (desktop.yml, harness.yml and the rest), for the paths the group changes,
 # as its pull request did, and each runs what that change reaches: the checks and unit tests on Linux, and for a change
 # that reaches the app, its end-to-end run (desktop.yml calls e2e.yml). Not the stress run of changed tests or Windows'
-# smoke test, which the pull request ran on the same change; Windows' unit tests, coverage and the packages run after
-# merge, in post-merge.yml.
+# smoke test, which the pull request ran on the same change, but a build fails if either failed on the head of a pull
+# request in its group. Windows' unit tests, coverage and the packages run after merge, in post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks
 # being the ones that say how it stands; in the queue, it passes once every check that ran there did.
@@ -101,6 +101,11 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
@@ -112,3 +117,21 @@ jobs:
               exit 1
               ;;
           esac
+      # Stress and Windows' smoke test run on the pull request alone, so one that failed on a pull request's own head
+      # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine.
+      - if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prs="$(gh api "repos/$GH_REPO/compare/main...$GITHUB_SHA" --jq '.commits[].commit.message | split("\n")[0] | capture("\\(#(?<n>[0-9]+)\\)$").n')"
+          for pr in $prs; do
+            head="$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha)"
+            stress="$(gh api "repos/$GH_REPO/actions/workflows/stress.yml/runs?head_sha=$head&per_page=1" --jq '.workflow_runs[0].conclusion // ""')"
+            smoke="$(gh api "repos/$GH_REPO/commits/$head/check-runs?check_name=windows-e2e" --jq '.check_runs[0].conclusion // ""')"
+            echo "#$pr at ${head::8}: stress ${stress:-not run}, smoke test ${smoke:-not run}"
+            if [ "$stress" = failure ] || [ "$smoke" = failure ]; then
+              echo "::error::#$pr's stress run or Windows' smoke test failed on its own head: fix it on its branch."
+              exit 1
+            fi
+          done

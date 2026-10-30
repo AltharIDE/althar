@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { DictationSetup, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -60,9 +61,9 @@ export interface DictationTrayText {
 
 export const dictationTrayText: DictationTrayText = {
   label: 'Dictation',
-  offer: 'Dictation needs a speech model on this Mac',
+  offer: `Dictation needs a speech model on ${device.this}`,
   offerFacts: (size) => `${size}, downloaded once`,
-  offerNote: 'It turns what you say into text here; nothing you say leaves the Mac.',
+  offerNote: `It turns what you say into text here; nothing you say leaves ${device.the}.`,
   download: 'Download',
   notNow: 'Not now',
   asking: 'Waiting for macOS to allow the microphone',
