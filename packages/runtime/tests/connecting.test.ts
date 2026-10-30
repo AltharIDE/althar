@@ -5,6 +5,7 @@ import { delimiter, join } from 'node:path'
 
 import { type Credential, type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
+import { deadline } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -26,10 +27,12 @@ import { fakeConnectors, HOST, hosted, repository, runtime } from './support'
  */
 
 describe('connecting', () => {
+  // The real gh and glab, which are what this tests: they get what is left of the test's time, not the ten seconds the
+  // app gives them, which a slow machine can take just to start one.
   it.live('reads no sign-in of gh or glab for a host they aren’t signed in to, or where they aren’t installed', () =>
     Effect.gen(function* () {
-      assert.isNull(yield* cliToken('gh', 'nowhere.invalid'))
-      assert.isNull(yield* cliToken('glab', 'nowhere.invalid'))
+      assert.isNull(yield* cliToken('gh', 'nowhere.invalid', deadline() - Date.now()))
+      assert.isNull(yield* cliToken('glab', 'nowhere.invalid', deadline() - Date.now()))
     }),
   )
 

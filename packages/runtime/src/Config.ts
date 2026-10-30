@@ -382,13 +382,19 @@ export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
 export type CliTool = 'gh' | 'glab'
 
 /**
+ * How long gh or glab may take to hand out a token before it counts as not
+ * answering: one stuck at its keychain doesn't hold a sign-in up.
+ */
+const CLI_ANSWERS_WITHIN = 10_000
+
+/**
  * The token a tool is signed in to a host with, read the way the tool itself
  * hands it out (from its config or the keychain it keeps it in), or null
  * where it isn't there or says it isn't signed in. A tool that didn't get to
- * say, timed out or never started, fails. Only the runtime reads it; it goes
- * to Althar's own keychain and never to an agent.
+ * say within `timeout`, or never started, fails. Only the runtime reads it;
+ * it goes to Althar's own keychain and never to an agent.
  */
-export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null, CliUnanswered> =>
+export const cliToken = (tool: CliTool, host: string, timeout = CLI_ANSWERS_WITHIN): Effect.Effect<string | null, CliUnanswered> =>
   Effect.callback<string | null, CliUnanswered>((resume) => {
     const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
     // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
@@ -398,7 +404,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))
