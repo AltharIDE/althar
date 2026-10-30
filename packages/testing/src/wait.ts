@@ -1,4 +1,5 @@
 import { deadline } from './deadline'
+import { seen } from './seen'
 
 /**
  * Reads until what it reads passes the check, every 20 ms, and gives back what passed: `until` (effect.ts) for a test
@@ -8,7 +9,7 @@ export const waitFor = async <A>(read: () => A | Promise<A>, check: (value: A) =
   for (;;) {
     const value = await read()
     if (check(value)) return value
-    if (Date.now() > deadline()) throw new Error(`Timed out waiting; last saw ${JSON.stringify(value)}`)
+    if (Date.now() > deadline()) throw new Error(`Timed out waiting; last saw ${seen(value)}`)
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }

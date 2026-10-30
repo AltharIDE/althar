@@ -167,8 +167,8 @@ describe('signing in inside Althar, when it goes otherwise', () => {
         { way: 'device' },
       )
     })
-    await waitFor(() => existsSync(marker))
-    expect(readFileSync(marker, 'utf8')).toBe('l1')
+    // What the fake was told to stop, once it has written it: the file is there a moment before what is in it.
+    expect(await waitFor(() => (existsSync(marker) ? readFileSync(marker, 'utf8') : ''))).toBe('l1')
     expect(said.map((event) => event.kind)).toEqual(['device'])
   })
 
