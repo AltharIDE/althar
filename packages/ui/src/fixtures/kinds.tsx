@@ -191,7 +191,7 @@ export const CHANGE_STOPPED: Card = {
   kind: TaskKind.Change,
   at: '22m',
   title: 'Reduce cold start on the checkout worker',
-  why: 'No agent is working on it.',
+  why: 'Stopped when you interrupted it',
   track: trackOf(['Implement', 'Review'], 1),
 }
 
