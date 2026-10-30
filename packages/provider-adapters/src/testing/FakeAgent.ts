@@ -278,6 +278,11 @@ export interface FakeAgentOptions {
    */
   readonly outOfUsage?: { readonly until?: number }
   /**
+   * The time it is, in epoch milliseconds, which its usage's resets are read by: the clock of the runtime that started
+   * it, in the same process, so a test that moves the runtime's clock moves the agent's too. The system's otherwise.
+   */
+  readonly now?: () => number
+  /**
    * Its connection, asked as each prompt starts: while it is down, every
    * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
    * or given a server error, as Claude Code ends its turn, having used
@@ -1245,6 +1250,7 @@ const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 export const fakeAgent = (options: FakeAgentOptions = {}): InProcessAgent => ({ _tag: 'InProcessAgent', app: fakeAgentApp(options) })
 
 export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
+  const now = options.now ?? Date.now
   const modes = options.modes ?? 'config'
   const variants = options.variants === true
   /** The effort levels of the model a session is on. */
@@ -1435,7 +1441,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // The markers in a linked file's words play as a message's do, for what the person sends with no words.
       const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : reminded ? words.join('\n\n') : whole}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
-      if (out !== undefined && (out.until === undefined || Date.now() < out.until))
+      if (out !== undefined && (out.until === undefined || now() < out.until))
         throw new acp.RequestError(
           -32603,
           out.until === undefined ? 'Claude AI usage limit reached' : `Claude AI usage limit reached|${Math.ceil(out.until / 1000)}`,
@@ -1951,7 +1957,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         }
         case scenarios.planUsage: {
           // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
-          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+          const inSeconds = (seconds: number) => Math.floor(now() / 1000) + seconds
           await update({
             sessionUpdate: 'usage_update',
             used: 10,
