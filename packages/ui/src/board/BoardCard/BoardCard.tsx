@@ -142,7 +142,7 @@ export function BoardCard({
           {t.from(from)}
         </p>
       )}
-      {next !== undefined && next !== null && next !== false && <NextSteps className={b.next}>{next}</NextSteps>}
+      {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>
   )

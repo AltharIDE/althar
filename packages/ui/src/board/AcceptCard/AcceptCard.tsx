@@ -107,7 +107,7 @@ export function AcceptCard({ task, title, prs = [], host, branch, checks, at, no
           </span>
         </div>
       )}
-      <NextSteps className={b.next} aria-hidden="true">
+      <NextSteps className={b.strip} aria-hidden="true">
         <NextStep signal>{t.review}</NextStep>
       </NextSteps>
     </article>
