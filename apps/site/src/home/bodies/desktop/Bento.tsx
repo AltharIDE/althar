@@ -19,7 +19,7 @@ import worktrees from './styled/d-worktrees.html?raw'
  * happened while you were away, and home across a whole row); five hold a feature drawn
  * as an interface lit by one light, dark or light (Althar fed by each of
  * your accounts in turn, automations, conflicts settled, tasks side by side
- * in worktrees of their own, workspaces bound to their projects).
+ * in worktrees of their own, trackers bound to their projects).
  * Narrower, two columns, then one.
  */
 
@@ -154,7 +154,7 @@ const TILES: Tile[] = [
         Conflicts, <b>settled.</b>
       </>
     ),
-    lead: 'When a task’s change and the default branch disagree, Althar asks its lead to settle it. Only one it can’t settle comes to you.',
+    lead: 'Agents work fast, and merging shouldn’t be what holds them up. Each lead settles its own conflicts; only the odd one needs you.',
     piece: (tone) => <Fragment key={tone} source={conflicts} tone={tone} className={s.stage} />,
   },
   {
@@ -214,7 +214,7 @@ const TILES: Tile[] = [
         Every workspace, <b>side by side.</b>
       </>
     ),
-    lead: 'Connect each Linear workspace you work in, one per company or client, and bind each project to its own. Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.',
+    lead: 'One tracker per company or client, each bound to its project: Linear, Jira, Trello or GitHub Issues in, pull requests out to GitHub, GitLab or Bitbucket.',
     piece: (tone) => <Fragment key={tone} source={workspaces} tone={tone} className={s.stage} />,
   },
 ]

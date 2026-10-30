@@ -11,18 +11,8 @@ import { useEffect, useRef } from 'react'
 /** Styles already in the head, by the fragment that brought them. */
 const styled = new Set<string>()
 
-/** `tone` is put on the host, where a fragment drawn in two tones looks for it. A fragment with words and links of its own is not `decorative`. */
-export function Fragment({
-  source,
-  tone,
-  className,
-  decorative = true,
-}: {
-  source: string
-  tone?: string
-  className?: string
-  decorative?: boolean
-}) {
+/** `tone` is put on the host, where a fragment drawn in two tones looks for it. */
+export function Fragment({ source, tone, className }: { source: string; tone?: string; className?: string }) {
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = host.current
@@ -43,5 +33,5 @@ export function Fragment({
       el.appendChild(run)
     }
   }, [source])
-  return <div ref={host} className={className} data-tone={tone} aria-hidden={decorative || undefined} />
+  return <div ref={host} className={className} data-tone={tone} aria-hidden="true" />
 }
