@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { spawnOwned } from '@althar/provider-adapters'
-import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -646,7 +646,7 @@ export class Launches extends Context.Service<
               Effect.tapError(() =>
                 Effect.andThen(
                   Scope.close(scope, Exit.void),
-                  change('processes', id, { state: 'unknown', endedAt: new Date().toISOString() }),
+                  Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })),
                 ),
               ),
             )
@@ -1189,10 +1189,11 @@ export class Launches extends Context.Service<
       /** A run once it says where it answers, or ends, or `within` goes by; what it was then, or nothing once it's gone. */
       const settled = (id: string, within: Duration.Duration) =>
         Effect.gen(function* () {
-          const until = Date.now() + Duration.toMillis(within)
+          const until = (yield* Clock.currentTimeMillis) + Duration.toMillis(within)
           for (;;) {
             const launch = launches.get(id)
-            if (launch === undefined || launch.url !== null || launch.ended !== null || Date.now() > until) return launch
+            if (launch === undefined || launch.url !== null || launch.ended !== null || (yield* Clock.currentTimeMillis) > until)
+              return launch
             yield* Effect.sleep(Duration.millis(250))
           }
         })

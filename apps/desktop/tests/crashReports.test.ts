@@ -159,7 +159,7 @@ describe('the switch', () => {
     await broken.stop()
     // Unmasked, it never goes.
     expect(fetch).not.toHaveBeenCalled()
-  }, 10_000)
+  })
 })
 
 describe('what a report carries', () => {
@@ -464,23 +464,30 @@ describe('handled failures', () => {
     expect(locked?.properties.$exception_list[0]?.value).toMatch(/^database is locked: ~\/…\//)
   })
 
-  it('sends ten a launch, apart from the twenty crashes, and the same one from two calls as two', async () => {
+  // Which ten of more go isn't said: each report is built as it goes, and they finish in the order they finish.
+  it('sends ten a launch, apart from the twenty crashes', async () => {
     const { fetch, requests } = posthog()
     const reports = sender(() => true, fetch)
-    const handled = (where: string, message: string) => reports.fromRuntime({ how: 'handled', name: 'SqlError', message, stack: '', where })
-    handled('Status', 'database is locked')
-    handled('ListProjects', 'database is locked')
-    handled('Status', 'database is locked')
-    for (let i = 0; i < 15; i += 1) handled('ListTasks', `row ${i} unreadable`)
+    for (let i = 0; i < 15; i += 1)
+      reports.fromRuntime({ how: 'handled', name: 'SqlError', message: `row ${i} unreadable`, stack: '', where: 'ListTasks' })
     for (let i = 0; i < 25; i += 1) reports.gone('window', { reason: 'crashed', exitCode: i })
     await reports.stop()
     const events = sent(requests)
-    const kept = events.filter((event) => event.properties.$exception_list[0]?.mechanism.type === 'handled')
-    expect(kept).toHaveLength(MOST_HANDLED)
-    const locked = kept.filter((event) => event.properties.$exception_list[0]?.value === 'database is locked')
-    expect(locked.map((event) => event.properties.where)).toEqual(expect.arrayContaining(['ListProjects', 'Status']))
-    expect(locked).toHaveLength(2)
+    expect(events.filter((event) => event.properties.$exception_list[0]?.mechanism.type === 'handled')).toHaveLength(MOST_HANDLED)
     expect(events).toHaveLength(MOST_HANDLED + MOST_A_LAUNCH)
+  })
+
+  it('sends the same one from two calls as two, and from one call once', async () => {
+    const { fetch, requests } = posthog()
+    const reports = sender(() => true, fetch)
+    const handled = (where: string) =>
+      reports.fromRuntime({ how: 'handled', name: 'SqlError', message: 'database is locked', stack: '', where })
+    handled('Status')
+    handled('ListProjects')
+    handled('Status')
+    await reports.stop()
+    expect(sent(requests).map((event) => event.properties.where)).toEqual(expect.arrayContaining(['ListProjects', 'Status']))
+    expect(sent(requests)).toHaveLength(2)
   })
 })
 

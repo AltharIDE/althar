@@ -64,14 +64,6 @@
   font-size: 13px;
   color: var(--t-3);
 }
-/* Pushed with no connection: what connecting would add, under the change. */
-.offer {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--t-2);
-  text-wrap: pretty;
-}
 /* A failed push's Details: quiet beside its sentence, and all git said under it, wrapping however long its refs and hashes */
 .failureMore {
   font-size: inherit;
@@ -118,9 +110,13 @@
   overflow-y: auto;
   container-type: inline-size;
 }
-/* What it made as wide as the window lets it be, what it changed in a column beside it, held in view as the page scrolls. */
+/*
+ * What it made as wide as the window lets it be, what it changed in a column beside it, held in view as the page scrolls. What it
+ * made alone is as wide; what it changed alone, as wide as the conversation reads, in the middle, as switching faces keeps it.
+ */
 .outputsWide,
-.outputsAlone {
+.outputsAlone,
+.outputsChanged {
   display: grid;
   gap: 44px;
   align-items: start;
@@ -133,6 +129,10 @@
 }
 .outputsAlone {
   grid-template-columns: minmax(0, 880px);
+  justify-content: center;
+}
+.outputsChanged {
+  grid-template-columns: minmax(0, var(--measure));
   justify-content: center;
 }
 .side,
@@ -151,20 +151,23 @@
   margin: -4px;
   padding: 4px;
 }
-.sideAlone {
-  max-width: 420px;
-}
-/* Narrow, as beside an open panel: the change first, what it made under it. */
-@container (max-width: 820px) {
+/* Narrow, as beside an open panel: the change first, as wide as the page, so its files' paths fit; what it made under it. */
+@container (max-width: 960px) {
   .outputsWide {
     grid-template-columns: minmax(0, 1fr);
     gap: 28px;
-    padding-inline: 24px;
   }
   .side {
     position: static;
     order: -1;
     max-height: none;
     overflow: visible;
+  }
+}
+@container (max-width: 820px) {
+  .outputsWide,
+  .outputsAlone,
+  .outputsChanged {
+    padding-inline: 24px;
   }
 }

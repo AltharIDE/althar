@@ -888,6 +888,8 @@ export const ChangeSummary = Schema.Struct({
    * the host hasn't worked it out, or doesn't say.
    */
   conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** In its target branch's merge queue, where accepting it put it: its host merges it once the queue's checks pass. */
+  queued: Schema.optional(Schema.Boolean),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
@@ -2258,7 +2260,9 @@ export const TaskRepositoryHere = Schema.Struct({
    * pushing it without a connection: the remote it goes to, whether the
    * remote has it, how many commits of it the remote doesn't have, and the
    * host's page for a new pull request from it, where that can be told.
-   * None for a repository without a remote.
+   * None for a repository without a remote. How many it doesn't have is
+   * null until the remote says, as the task is looked at, unless this
+   * computer knows it has them all.
    */
   remote: Schema.optional(
     Schema.NullOr(
@@ -2267,7 +2271,7 @@ export const TaskRepositoryHere = Schema.Struct({
         /** The task's branch, as it is named there. */
         branch: Schema.String,
         pushed: Schema.Boolean,
-        ahead: Schema.Number,
+        ahead: Schema.NullOr(Schema.Number),
         newPullRequest: Schema.NullOr(Schema.String),
       }),
     ),
@@ -2363,6 +2367,10 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
+    stopped: Schema.optional(
+      Schema.NullOr(Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.String })),
+    ),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */

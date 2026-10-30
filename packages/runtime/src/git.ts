@@ -323,6 +323,19 @@ export const remoteHeads = (cwd: string, source: FetchSource) =>
   )
 
 /**
+ * Where a remote's branch is, asked of it now: its commit, null where the
+ * remote has no such branch, undefined where it can't be asked, as offline.
+ */
+export const branchOn = (cwd: string, source: FetchSource, branch: string) =>
+  run(15_000, cwd, ['ls-remote', '--heads', source.url, `refs/heads/${branch}`], signedIn(source)).pipe(
+    Effect.map((listed): string | null | undefined => {
+      const line = listed.split('\n').find((one) => one.endsWith(`\trefs/heads/${branch}`))
+      return line === undefined ? null : (/^[0-9a-f]{40,64}/.exec(line)?.[0] ?? null)
+    }),
+    Effect.orElseSucceed(() => undefined),
+  )
+
+/**
  * Fetches refspecs as written, a `+` before one that may move however it
  * likes: whether git could. Tags come only where a refspec names them, and
  * nothing is written to FETCH_HEAD.

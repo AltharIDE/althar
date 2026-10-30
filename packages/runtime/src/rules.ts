@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from 'node:fs'
+import { readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { posix, win32 } from 'node:path'
 
@@ -74,13 +74,16 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
  * force a branch that isn't the task's, git discarding work in another
  * checkout, deleting or moving away what's outside the task's worktree,
  * changing another checkout, and a push the rules can't read. It asks the
- * person even with everything allowed.
+ * person even with everything allowed, where the rules read it as one of
+ * those (`lastingOf`): what they can't tell goes ahead there.
  */
 interface Kept {
   readonly reason: string
   readonly rule: RuleId | 'unclear'
   readonly floor?: boolean
   readonly irreversible?: boolean
+  /** Found only reading it from a folder the rules can't tell, as the worst it could be: `cd "$DIR" && git reset --hard`. */
+  readonly blind?: boolean
 }
 
 /** How firmly a kind is kept: `floor` past the coordinator, `irreversible` past allowing everything too. */
@@ -179,6 +182,12 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /**
+   * The folder `$TMPDIR`, `$TMP` and `$TEMP` name in the agent's commands,
+   * where Althar knows it: its own, as its launch made it (`privateTemp`).
+   * Other agents name a temp folder of their own choosing.
+   */
+  readonly temp?: string
   /** The system the agent works on, whose paths and commands it names: this computer's unless a test gives one. */
   readonly platform?: NodeJS.Platform
   /** The person's home folder: this computer's unless a test gives one. */
@@ -331,6 +340,7 @@ const secretCommandReason = (text: string, cwd?: string, system: System = system
     paths,
     folder: isFolder,
     unknown: paths.parse(home).root,
+    unsettled: (word) => unsettled(word),
   }
   // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
   const inSecret = (folders: ReadonlyArray<Folder>) => folders.some(({ at }) => at !== undefined && secretPath(at, paths.sep, system))
@@ -827,9 +837,10 @@ const takesText = (words: ReadonlyArray<string>): boolean => {
  * `cat <<'EOF' | sh`, a function or script, a continued line): there the rules
  * judge it as they would have, as a command. The operator and the line it is on
  * stay; the body and its closing line go. Comments are skipped, as `# <<'EOF'`
- * opens nothing.
+ * opens nothing. `reads` says which commands leave a body unread as commands:
+ * those that take only text, unless the caller says more.
  */
-export const withoutQuotedHeredocs = (text: string): string => {
+export const withoutQuotedHeredocs = (text: string, reads: (words: ReadonlyArray<string>) => boolean = takesText): string => {
   if (!text.includes('<<')) return text
   /** The commands of a pipeline, and of what is grouped with it in parentheses: the readers a heredoc's body can reach. */
   interface Group {
@@ -1013,13 +1024,28 @@ export const withoutQuotedHeredocs = (text: string): string => {
       !chunk.closed ||
       !chunk.heredoc.quoted ||
       chunk.heredoc.shadowed ||
-      !chunk.heredoc.group.commands.every(takesText)
+      !chunk.heredoc.group.commands.every(reads)
         ? typeof chunk === 'string'
           ? chunk
           : chunk.text
         : '',
     )
     .join('')
+}
+
+/** Interpreters that read a script in their own language, not the shell's: `python3 - <<'EOF'`. */
+const SCRIPT_LANGUAGES = /^(python[\d.]*|node|ruby|perl|php|bun|deno)$/
+
+/**
+ * Whether a command takes a heredoc's body as text or as a script in a
+ * language other than the shell's, whose words aren't commands: `python3 -`,
+ * `node`. What such a script does the rules can't read either way.
+ */
+const takesScript = (words: ReadonlyArray<string>): boolean => {
+  if (takesText(words)) return true
+  if (changesNames(words)) return false
+  const program = words.find((word) => !assignment.test(word)) ?? ''
+  return SCRIPT_LANGUAGES.test(program.slice(program.lastIndexOf('/') + 1))
 }
 
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
@@ -1031,6 +1057,9 @@ const splitCommandLine = (source: string) => {
   const operators: Array<ReadonlySet<number>> = []
   /** For each command, which of its words the shell expands, outside quotes: a glob, braces, a variable (`*.ts`, `$X`). */
   const expanded: Array<ReadonlySet<number>> = []
+  /** For each command, where it starts in the text: just past the separator before it. */
+  const starts: Array<number> = []
+  let begun = 0
   let words: Array<string> = []
   let operating = new Set<number>()
   let expanding = new Set<number>()
@@ -1061,6 +1090,7 @@ const splitCommandLine = (source: string) => {
     endWord()
     if (words.length > 0) {
       commands.push(words)
+      starts.push(begun)
       ends.push(separator)
       operators.push(operating)
       expanded.push(expanding)
@@ -1128,6 +1158,7 @@ const splitCommandLine = (source: string) => {
     if (separator !== undefined && !(separator === '&' && rest.startsWith('&>'))) {
       endCommand(separator)
       index += separator.length - 1
+      begun = index + 1
       continue
     }
     const redirect = REDIRECTS.find((candidate) => rest.startsWith(candidate))
@@ -1160,7 +1191,7 @@ const splitCommandLine = (source: string) => {
     inWord = true
   }
   endCommand()
-  return { commands, ends, operators, expanded, opaque, grouped, evaluated }
+  return { commands, ends, operators, expanded, opaque, grouped, evaluated, starts }
 }
 
 /** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
@@ -1579,9 +1610,13 @@ interface Places {
   readonly exists: (path: string) => boolean
   /** Whether a path is a folder that's there. */
   readonly folder: (path: string) => boolean
+  /** The names in a folder that's there; none where it isn't. */
+  readonly names: (path: string) => ReadonlyArray<string>
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
+  /** The folder `$TMPDIR` names in the agent's commands, where the rules know it (`RuleContext`'s `temp`). */
+  readonly temp: string | undefined
 }
 
 const places = (context: RuleContext): Places => {
@@ -1603,16 +1638,27 @@ const places = (context: RuleContext): Places => {
       return false
     }
   }
+  const names = (path: string) => {
+    try {
+      return readdirSync(follow(path))
+    } catch {
+      return []
+    }
+  }
+  // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
+  const scratch = [
+    ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
+  ].map(real)
+  const temp = context.temp === undefined ? undefined : real(context.temp)
   return {
     system,
     exists,
     folder,
+    names,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
-    scratch: [
-      ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
-    ].map(real),
+    scratch: temp === undefined ? scratch : [...scratch, temp],
+    temp,
   }
 }
 
@@ -1621,9 +1667,37 @@ const within = ({ paths }: System, root: string, path: string) => {
   return inner === '' || (!inner.startsWith(`..${paths.sep}`) && inner !== '..' && !paths.isAbsolute(inner))
 }
 
-/** Where a path a command names really is, from the folder the command runs in. */
-const locate = (where: Places, cwd: string, path: string) =>
-  where.real(where.system.paths.resolve(cwd, path.replace(HOME_WORD, where.system.home)))
+/** The temp folder, as a command may name it at the start of a path. */
+const TEMP_WORD = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%)(?=$|[/\\])/i
+
+/** The folder a command runs in, as it may name it at the start of a path. */
+const HERE_WORD = /^(\$PWD|\$\{PWD\})(?=$|[/\\])/
+
+/** Whether a path that starts with the temp folder's name climbs out of it: `$TMPDIR/../notes.md`. */
+const leavesTemp = (word: string) => {
+  const rest = word.replace(TEMP_WORD, '')
+  if (rest === word) return false
+  const inner = posix.normalize(`.${rest.replaceAll('\\', '/')}`)
+  return inner === '..' || inner.startsWith('../')
+}
+
+/**
+ * Where a path a command names really is, from the folder the command runs
+ * in: with the home folder, the temp folder and `$PWD` written out, so
+ * `cp $TMPDIR/x ./y` reads as `cp /…/x ./y`. Where the rules don't know the
+ * agent's temp folder, a path in it is read as in Althar's: what is in any
+ * temp folder is the task's own, whichever it is; one that climbs out of it
+ * is worked out only when the command runs (`unsettled`).
+ */
+const locate = (where: Places, cwd: string, path: string) => {
+  const { paths, home } = where.system
+  const temp = where.temp ?? where.scratch[0]
+  const written = path
+    .replace(HOME_WORD, home)
+    .replace(HERE_WORD, cwd)
+    .replace(TEMP_WORD, (word) => temp ?? word)
+  return where.real(paths.resolve(cwd, written))
+}
 
 const outside = (where: Places, path: string) =>
   !where.worktrees.some((root) => within(where.system, root, path)) && !where.scratch.some((root) => within(where.system, root, path))
@@ -1643,6 +1717,87 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
   }
 }
 
+/** A wildcard's characters in a path's name: `*.log`, `b-?.png`, `[ab].txt`. */
+const WILDCARD = /[*?[]/
+
+/**
+ * What a shell may make of a word besides `*`, `?` and `[…]`, where the
+ * rules don't read what it names: braces (`{a,b}.txt`), escapes, zsh's and
+ * extglob's patterns (`(a|b)`, `<1-9>`, `^*.ts`, `a#`, `*~x`, `=ls`).
+ */
+const EXPANDED = /[{}()<>|^#\\]|.~|^=/
+
+/**
+ * What a shell's wildcard in a name matches, as a test of a name: `*` any
+ * run of characters, `?` one, `[…]` one listed or in a range, `[!…]` or
+ * `[^…]` one not. None where it can't read it as the shell would, such as a
+ * class (`[[:digit:]]`), an equivalence (`[[=a=]]`), an unclosed `[` or one
+ * that starts `[]`. A name matches where it does as written or with case
+ * ignored, as a shell may (`nocaseglob`): ignoring case alone narrows a
+ * class left out, `[!A-Z]` then missing `l`. Matching more than the shell
+ * would only reads more as there.
+ */
+const wildcardPattern = (name: string): ((each: string) => boolean) | undefined => {
+  let pattern = '^'
+  for (let at = 0; at < name.length; at++) {
+    const char = name.charAt(at)
+    if (char === '*') pattern += '.*'
+    else if (char === '?') pattern += '.'
+    else if (char === '[') {
+      const negated = name.charAt(at + 1) === '!' || name.charAt(at + 1) === '^'
+      const from = at + (negated ? 2 : 1)
+      const end = name.indexOf(']', from)
+      const listed = end === -1 ? '' : name.slice(from, end)
+      // `[]a]` and `[!]a]` list `]` itself, not read; with `[` or `\` in it, it is a class, an equivalence or an escape.
+      if (listed === '' || /[[\\]/.test(listed)) return undefined
+      pattern += `[${negated ? '^' : ''}${listed.replace(/[\\^]/g, '\\$&')}]`
+      at = end
+    } else pattern += char.replace(/[.+^${}()|\]\\]/g, '\\$&')
+  }
+  try {
+    const exact = new RegExp(`${pattern}$`)
+    const caseless = new RegExp(`${pattern}$`, 'i')
+    return (each) => exact.test(each) || caseless.test(each)
+  } catch {
+    // A range out of order, `[z-a]`.
+    return undefined
+  }
+}
+
+/**
+ * Whether what a command names is surely not there now: it isn't, while its
+ * folder is; or, named relatively from a folder the rules guess the shell is
+ * in (`guessed`), nor is its folder, as where the shell is elsewhere (its
+ * folder holds from one command to the next) or a `cd` they followed leads
+ * nowhere. With a wildcard in its name, nothing in its folder matches it;
+ * with one before, the folder before it is named from there and isn't there.
+ * Never what the shell could expand otherwise (`EXPANDED`).
+ */
+const missing = (where: Places, word: string, path: string, guessed: boolean) => {
+  if (EXPANDED.test(word.replace(HOME_WORD, ''))) return false
+  const { paths } = where.system
+  const relative = guessed && !paths.isAbsolute(word.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+  const folder = paths.dirname(path)
+  if (!WILDCARD.test(path)) return !where.exists(path) && (relative || where.exists(folder))
+  if (WILDCARD.test(folder)) {
+    const parts = path.split(/[/\\]/)
+    return (
+      relative &&
+      !where.exists(
+        parts
+          .slice(
+            0,
+            parts.findIndex((part) => WILDCARD.test(part)),
+          )
+          .join(paths.sep) || paths.sep,
+      )
+    )
+  }
+  if (!where.exists(folder)) return relative
+  const matches = wildcardPattern(paths.basename(path))
+  return matches !== undefined && where.folder(folder) && !where.names(folder).some(matches)
+}
+
 const changesCheckout = (path: string) =>
   kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', 'irreversible')
 
@@ -1653,8 +1808,13 @@ const changesCheckout = (path: string) =>
  */
 const KNOWN_START = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%|\$PWD|\$\{PWD\})(?=$|[/\\])/i
 
-/** Whether a word is worked out only when the command runs: `$DIR`, `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`. */
-const unsettled = (word: string) => /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
+/**
+ * Whether a word is worked out only when the command runs: `$DIR`,
+ * `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`; and, where the rules
+ * don't know the agent's temp folder, a path climbing out of it.
+ */
+const unsettled = (word: string, where?: Places) =>
+  (where?.temp === undefined && leavesTemp(word)) || /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -2273,16 +2433,22 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     paths: where.system.paths,
     folder: where.folder,
     unknown: where.system.paths.parse(where.system.home).root,
+    unsettled: (word) => unsettled(word, where),
   }
   for (const line of lines)
     walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
       const unseenKinds: Array<Kept> = []
-      for (const { at = context.worktree, blind: unseen } of folders)
+      for (const { at = context.worktree, blind: unseen, guessed } of folders)
         for (const words of readings(written)) {
-          const found = kindsOf(words, at, where, context)
-          kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+          const found = kindsOf(words, at, where, context, guessed === true)
+          // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
+          const anywhere = unseen ? kindsOf(words, context.worktree, where, context).kinds.map((one) => JSON.stringify(one)) : []
+          const read = unseen
+            ? found.kinds.map((one) => (anywhere.includes(JSON.stringify(one)) ? one : { ...one, blind: true }))
+            : found.kinds
+          kinds.push(...read.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           if (unseen) unseenKinds.push(...found.kinds)
         }
@@ -2309,6 +2475,11 @@ interface Folder {
   /** None where the folder the line started in isn't known. */
   readonly at: string | undefined
   readonly blind: boolean
+  /**
+   * Reached from where the line starts by relative `cd`s alone, or none: a
+   * folder the rules read from the worktree's top, where the shell may not be.
+   */
+  readonly guessed?: boolean
 }
 
 /** How to follow a line's `cd`s. */
@@ -2320,10 +2491,12 @@ interface Following {
   readonly folder: (path: string) => boolean
   /** Where a `cd` that shows only when it runs is read as going: the root of the disk, the worst it could be. */
   readonly unknown: string
+  /** Whether a word is worked out only when the command runs (`unsettled`). */
+  readonly unsettled: (word: string) => boolean
 }
 
 const distinct = (folders: ReadonlyArray<Folder>): Array<Folder> => [
-  ...new Map(folders.map((one) => [`${one.blind}\0${one.at}`, one])).values(),
+  ...new Map(folders.map((one) => [`${one.blind}\0${one.guessed === true}\0${one.at}`, one])).values(),
 ]
 
 /**
@@ -2342,7 +2515,7 @@ const walkFolders = (
 ): ReadonlyArray<Folder> => {
   const unknown: Folder = { at: following.unknown, blind: true }
   // Where the command before succeeded and where it failed, which `&&` and `||` pick between.
-  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false }]
+  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false, guessed: true }]
   let failed: ReadonlyArray<Folder> = []
   // Every folder the line has been in, where `cd -` and `popd` go back to.
   let seen: ReadonlyArray<Folder> = ok
@@ -2372,13 +2545,17 @@ const walkFolders = (
             certain = false
             return seen
           }
-          if (target !== undefined && unsettled(target)) {
+          if (target !== undefined && following.unsettled(target)) {
             certain = false
             return [unknown]
           }
           const path = target ?? '~'
-          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/'))
-          const went = folders.map(({ at, blind }) => ({ at: following.resolve(at, path), blind: blind && relative }))
+          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+          const went = folders.map(({ at, blind, guessed }) => ({
+            at: following.resolve(at, path),
+            blind: blind && relative,
+            guessed: guessed === true && relative,
+          }))
           if (!went.every(({ at }) => at !== undefined && following.folder(at))) certain = false
           // A loop or a function may take a relative `cd` many times: `cd ..` again and again.
           return [...went, ...(scope.repeats === true && relative ? [unknown] : [])]
@@ -2410,6 +2587,8 @@ const kindsOf = (
   cwd: string,
   where: Places,
   context: RuleContext,
+  /** Whether `cwd` is where the rules guess the shell is: `Folder`'s `guessed`. */
+  guessed = false,
 ): { readonly kinds: ReadonlyArray<Kept>; readonly redirected: ReadonlyArray<Kept>; readonly cwd?: string } => {
   const follow = context.realPath ?? realpathSync
   // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
@@ -2445,7 +2624,13 @@ const kindsOf = (
             return false
           }
         })
-      if (discards(git, isPath))
+      // In a folder that is there but in no checkout, git has no work to throw away: it fails. Not the root of the disk, which
+      // stands for a folder the rules can't tell.
+      const noCheckout =
+        elsewhere !== where.system.paths.parse(where.system.home).root &&
+        where.folder(elsewhere) &&
+        checkoutOf(where, elsewhere) === undefined
+      if (!noCheckout && discards(git, isPath))
         kinds.push(
           kept(
             `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
@@ -2475,9 +2660,12 @@ const kindsOf = (
   }
   if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
   // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
-  const gone = commandsIn(words)
+  const removed = commandsIn(words)
     .flatMap(removes)
-    .find((path) => outside(where, locate(where, cwd, path)))
+    .filter((path) => outside(where, locate(where, cwd, path)))
+  // What isn't there when it asks loses no one anything: the line made it itself, or it runs from a folder the shell never reaches.
+  const gone = removed.find((path) => !missing(where, path, locate(where, cwd, path), guessed))
+  const absent = removed[0]
   const target = writes(words)
     .filter((path) => !redirects(words).includes(path))
     .find((path) => outside(where, locate(where, cwd, path)))
@@ -2492,6 +2680,8 @@ const kindsOf = (
         'irreversible',
       ),
     )
+  else if (absent !== undefined)
+    kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${absent}`, 'outside'))
   else if (replaced !== undefined) kinds.push(changesCheckout(replaced))
   else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
@@ -2521,9 +2711,9 @@ const programNamed = (words: ReadonlyArray<string>) => {
  */
 const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: RuleContext): ReadonlyArray<ReadonlyArray<string>> => {
   const xargs = xargsRuns(unwrap(words))
-  if (!words.some(unsettled) && xargs === undefined) return []
+  if (!words.some((word) => unsettled(word, where)) && xargs === undefined) return []
   return [where.system.paths.parse(where.system.home).root, context.defaultBranch].map((worst) => {
-    const read = words.map((word) => (unsettled(word) ? worst : word))
+    const read = words.map((word) => (unsettled(word, where) ? worst : word))
     return xargs === undefined ? read : [...(xargsRuns(unwrap(read)) ?? []), worst]
   })
 }
@@ -2695,10 +2885,21 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
 }
 
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
-const evenAllowed = (reason: string) =>
-  reason
-    .replace(/ always asks/, ' asks even with everything allowed')
-    .replace(/, so it asks\.$/, ", so it asks even with everything allowed: it could do what can't be undone.")
+const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
+
+/**
+ * What can't be undone in a request with everything allowed (ADR-067's
+ * amendment): only what the rules read as that. Not what they can't tell
+ * (`Kept`'s `unclear`, or what is only the worst a folder it can't tell
+ * could be, `blind`), nor the words of a script in a language other than
+ * the shell's (`python3 - <<'EOF'`).
+ */
+const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
+  const lasting = (kinds: ReadonlyArray<Kept>) =>
+    kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
+  if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
+}
 
 /** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */
 const BROADER_THAN_FLOOR: ReadonlyArray<Kept['rule']> = ['outside', 'unclear']
@@ -2717,9 +2918,9 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  *   the project named;
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can; and short of what can't be
- *   undone from the task (`Kept`'s `irreversible`, ADR-067), which asks the
- *   person;
+ *   refused, with how to run it so they can; and short of what the rules
+ *   read as what can't be undone from the task (`lastingOf`, ADR-067),
+ *   which asks the person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what could lose work or a secret asks the person where the project would
@@ -2765,8 +2966,9 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
         verdict: 'deny',
         reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
       }
-    // What can't be undone from the task still asks: allowing everything is for what the person could take back if it went wrong.
-    const lasting = found.find((each) => each.irreversible === true)
+    // What can't be undone from the task still asks, where the rules read it as that: allowing everything is for what the person
+    // could take back if it went wrong, and trusts the agent with what the rules can't read.
+    const lasting = lastingOf(request, context)
     return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
@@ -3310,8 +3512,8 @@ const FIND_LOOKS = new Set([
   '-s',
 ])
 
-/** A `sed` script that only prints lines: `1,40p`, `$p`, `/re/p`. Anything else (`w`, `e`, `r`) is refused. */
-const SED_PRINTS = /^((\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/))?)?p$/
+/** A `sed` script that only prints lines: `1,40p`, `$p`, `/re/p`, `12,+8p`. Anything else (`w`, `e`, `r`) is refused. */
+const SED_PRINTS = /^((\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/|[+~]\d+))?)?p$/
 
 /**
  * The shell's own commands that set a variable, an alias or a function, or
@@ -3435,8 +3637,38 @@ const GIT_LIST_FLAGS = new Set([
   'show',
 ])
 
+/**
+ * How far a reader is trusted: not at all, as a review's lead; `true`, as the
+ * coordinator in its own copies (ADR-058); `'contained'`, as the coordinator
+ * whose every command runs in a sandbox held to its folder and no network,
+ * where what writes its copies writes only what is thrown away.
+ */
+type Trust = boolean | 'contained'
+
+/** `git fetch`'s flags a contained reader may use: none that names a program, a file to write or a remote of its own. */
+const GIT_FETCH_FLAGS =
+  /^(-q|--quiet|-v|--verbose|--all|-p|--prune|-P|--prune-tags|-t|--tags|-n|--no-tags|--dry-run|--progress|--no-progress)$/
+
+/**
+ * Why a contained reader's `git fetch` would do more than bring its copy's
+ * only remote, the mirror Althar fetched before the turn (ADR-058): a flag
+ * beyond those, a remote or URL but `origin`, or a refspec that names where
+ * it writes.
+ */
+const gitFetchReason = (args: ReadonlyArray<string>): string | undefined => {
+  const flag = args.find((arg) => arg.startsWith('-') && !GIT_FETCH_FLAGS.test(arg))
+  if (flag !== undefined) return `\`git fetch ${flag}\` goes beyond bringing a copy's remote, and this role only reads.`
+  const [remote, ...refs] = args.filter((arg) => !arg.startsWith('-'))
+  if (remote !== undefined && remote !== 'origin')
+    return "`git fetch` here brings only a copy's own remote, `origin`; name no other, as this role only reads."
+  const ref = refs.find((each) => !/^[\w./-]+$/.test(each))
+  return ref === undefined
+    ? undefined
+    : `\`git fetch\` with \`${ref}\` names where it writes; fetch the branch by its name alone, as this role only reads.`
+}
+
 /** Why a git command a reader wants to run would change something or run a program, or nothing when it only looks. */
-const gitReason = (words: ReadonlyArray<string>, trusted: boolean): string | undefined => {
+const gitReason = (words: ReadonlyArray<string>, trusted: Trust): string | undefined => {
   const call = gitCall(words, '.')
   if (call === undefined) return undefined
   const before = words.slice(1, words.indexOf(call.subcommand, 1))
@@ -3450,6 +3682,8 @@ const gitReason = (words: ReadonlyArray<string>, trusted: boolean): string | und
   if (GIT_LOOKS.has(call.subcommand)) return undefined
   if (GIT_LISTS.has(call.subcommand) && call.args.every((arg) => GIT_LIST_FLAGS.has(arg))) return undefined
   if (trusted && call.subcommand === 'tag') return gitTagReason(call.args)
+  // Its sandbox keeps a fetch in its copy, from the mirror, whatever runs it: so it may fetch in a loop, as it may on a line of its own.
+  if (trusted === 'contained' && call.subcommand === 'fetch') return gitFetchReason(call.args)
   // A stash or the reflog only looks when listed or shown: `git stash` alone stashes the lead's work.
   if ((call.subcommand === 'stash' || call.subcommand === 'reflog') && ['list', 'show'].includes(call.args[0] ?? '')) return undefined
   return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
@@ -3495,6 +3729,69 @@ const namesOnly = (script: string): boolean => {
   return args.every((arg) => (arg.startsWith('-') ? NAMES_FLAGS.test(arg) : !/[$`*?[{]/.test(arg)))
 }
 
+/**
+ * What stands for the output of a substitution that prints only digits
+ * (`numbersOnly`), and for an arithmetic expansion's: a number, as any it
+ * prints is to every rule here, among a command's words, in a `sed` script
+ * or in arithmetic.
+ */
+const NUMBER = '1'
+/** What stands for an arithmetic expansion until `variantsOf` reads it: `${ALTHAR_ARITH0}`, by its number. */
+const arithmeticStandIn = (number: number) => `\${ALTHAR_ARITH${number}}`
+const ARITHMETIC_STAND_IN = /^\$\{ALTHAR_ARITH(\d+)\}$/
+
+/** Patterns that match a run of digits and nothing else. */
+const DIGIT_RUNS = new Set(['[0-9]+', '[[:digit:]]+', '[0-9][0-9]*', '[[:digit:]][[:digit:]]*'])
+
+/** A command's words without its redirects and what they name: `wc -l < notes.md` is `wc -l`. */
+const withoutAnyRedirects = (words: ReadonlyArray<string>, operators: ReadonlySet<number>): ReadonlyArray<string> =>
+  words.filter((word, index) => !operators.has(index) && !(operators.has(index - 1) && REDIRECTS.includes(words[index - 1] ?? '')))
+
+/**
+ * Whether a command prints only digits, with spaces or new lines between,
+ * whatever it reads: a count from `wc`, or what `grep -o` or `tr -cd`
+ * keeps of it.
+ */
+const printsDigits = (words: ReadonlyArray<string>): boolean => {
+  const [program, ...args] = words
+  const flags = args.filter((arg) => arg.startsWith('-'))
+  const operands = args.filter((arg) => !arg.startsWith('-'))
+  if (program === 'wc') return operands.length === 0 && flags.every((flag) => /^-[lcwm]+$/.test(flag))
+  if (program === 'tr') return args.length === 2 && /^-(cd|dc)$/.test(args[0] ?? '') && ['0-9', '[:digit:]'].includes(args[1] ?? '')
+  if (program !== 'grep' || operands.length !== 1 || !flags.every((flag) => /^-[oxE]+$/.test(flag))) return false
+  const letters = flags.join('')
+  const pattern = operands[0] ?? ''
+  const anchored = pattern.startsWith('^') && pattern.endsWith('$')
+  const run = anchored ? pattern.slice(1, -1) : pattern
+  // `+` repeats only in an extended pattern; in a basic one it is a `+` to match.
+  return DIGIT_RUNS.has(run) && (!run.endsWith('+') || letters.includes('E')) && (anchored || /[ox]/.test(letters))
+}
+
+/** Whether a command prints only some of the lines it reads, unchanged: `head -1`, `sort -n`. */
+const keepsLines = (words: ReadonlyArray<string>): boolean => {
+  const [program, ...args] = words
+  if (program === 'head' || program === 'tail') return args.every((arg) => /^(-n?\d*|\d+)$/.test(arg))
+  return program === 'sort' && args.every((arg) => /^-[nru]+$/.test(arg))
+}
+
+/**
+ * Whether a substitution's command prints only digits: one pipeline whose
+ * last command that changes what it prints is a count or keeps only digits
+ * (`grep -n x f | head -1 | cut -d: -f1 | grep -oE '[0-9]+'`), or `git
+ * rev-list --count`. What it prints is then a number, never a flag, nor a
+ * `sed` command, nor arithmetic that could run one.
+ */
+const numbersOnly = (script: string): boolean => {
+  const { commands, ends, operators, opaque, grouped, evaluated } = splitCommandLine(script)
+  if (opaque || grouped || evaluated || commands.length === 0 || ends.slice(0, -1).some((end) => end !== '|')) return false
+  const stages = commands.map((words, index) => withoutAnyRedirects(words, operators[index] ?? new Set()))
+  let last = stages.length - 1
+  while (last > 0 && keepsLines(stages[last] ?? [])) last -= 1
+  const producer = stages[last] ?? []
+  if (printsDigits(producer)) return true
+  return stages.length === 1 && producer[0] === 'git' && producer[1] === 'rev-list' && producer.includes('--count') && namesOnly(script)
+}
+
 /** The index of the `)` that closes what opens just before `from`, past quotes and parentheses of its own; -1 where none does. */
 const closingOf = (text: string, from: number): number => {
   let depth = 1
@@ -3520,10 +3817,15 @@ const closingOf = (text: string, from: number): number => {
  * The commands a line's substitutions run, `$(…)` and backticks, and the
  * line with each one's output standing as `OUTPUT`, outside quotes, so it
  * is read as words the shell expands; or why it can't be read so. For a
- * trusted reader: each command is read as a line of its own.
+ * trusted reader: each command is read as a line of its own. An arithmetic
+ * expansion, `$((…))`, stands as `${ALTHAR_ARITH0}`, by its number, for
+ * `variantsOf` to read once it knows what the line's variables hold.
  */
-const substitutionsIn = (text: string): { readonly scripts: ReadonlyArray<string>; readonly text: string } | string => {
+const substitutionsIn = (
+  text: string,
+): { readonly scripts: ReadonlyArray<string>; readonly text: string; readonly arithmetic: ReadonlyArray<string> } | string => {
   const scripts: Array<string> = []
+  const arithmetic: Array<string> = []
   let out = ''
   let quoted = false
   for (let index = 0; index < text.length; index += 1) {
@@ -3546,12 +3848,19 @@ const substitutionsIn = (text: string): { readonly scripts: ReadonlyArray<string
       continue
     }
     const standIn = (script: string) => {
-      const stands = namesOnly(script) ? NAMES : OUTPUT
+      const stands = numbersOnly(script) ? NUMBER : namesOnly(script) ? NAMES : OUTPUT
       return quoted ? `"${stands}"` : stands
     }
+    if (char === '$' && text[index + 1] === '(' && text[index + 2] === '(') {
+      const end = closingOf(text, index + 2)
+      if (end === -1 || text[end - 1] !== ')' || closingOf(text, index + 3) !== end - 1)
+        return "Althar can't tell where this `$((…))` ends, and this role only reads."
+      out += arithmeticStandIn(arithmetic.length)
+      arithmetic.push(text.slice(index + 3, end - 1))
+      index = end
+      continue
+    }
     if (char === '$' && text[index + 1] === '(') {
-      if (text[index + 2] === '(')
-        return 'An arithmetic expansion, `$((…))`, can set a variable, which changes what runs; work the number out yourself, as this role only reads.'
       const end = closingOf(text, index + 2)
       if (end === -1) return "Althar can't tell where this `$(…)` ends, and this role only reads."
       const script = text.slice(index + 2, end)
@@ -3572,7 +3881,7 @@ const substitutionsIn = (text: string): { readonly scripts: ReadonlyArray<string
     }
     out += char
   }
-  return { scripts, text: out }
+  return { scripts, text: out, arithmetic }
 }
 
 /** Whether all a word's shell expands is the output of substitutions that print only names (`NAMES`): it can't become a flag. */
@@ -3582,8 +3891,327 @@ const onlyNames = (word: string) => {
   return !/[*?[$]/.test(rest) && !/\{[^{}]*(,|\.\.)[^{}]*\}/.test(rest)
 }
 
+/*
+ * A trusted reader's line may set variables of its own and use them later in
+ * it (`for r in a b; do git -C "$r" status -sb; done`, `n=$(…); sed -n
+ * "${n},+8p" f`), and work out arithmetic. What each variable may hold is
+ * read from what sets it: a word as written, what a substitution prints
+ * (`OUTPUT`, `NAMES`, `NUMBER`), or, where what sets it may not have run,
+ * whatever the environment holds too, as `OUTPUT`. The line is then read
+ * once for each value, with the value in place of the variable, by every
+ * rule a line without variables meets: so a variable is never more than what
+ * it stands for written out.
+ */
+
+/**
+ * zsh's own variables with lower-case names, which change what runs or what
+ * the shell does (`path=.` sets `PATH`): none a line may set. Every variable
+ * either shell reads for itself otherwise has an upper-case name.
+ */
+const ZSH_OWN = new Set([
+  'path',
+  'fpath',
+  'cdpath',
+  'manpath',
+  'mailpath',
+  'module_path',
+  'fignore',
+  'psvar',
+  'watch',
+  'histchars',
+  'prompt',
+  'argv',
+  'status',
+  'pipestatus',
+  'signals',
+  'options',
+  'parameters',
+  'commands',
+  'functions',
+  'aliases',
+  'galiases',
+  'saliases',
+  'builtins',
+  'modules',
+  'nameddirs',
+  'userdirs',
+  'usergroups',
+  'reswords',
+  'patchars',
+  'widgets',
+  'keymaps',
+  'dirstack',
+  'history',
+  'historywords',
+  'jobdirs',
+  'jobstates',
+  'jobtexts',
+  'funcstack',
+  'functrace',
+  'funcfiletrace',
+  'funcsourcetrace',
+  'mapfile',
+  'termcap',
+  'terminfo',
+  'errnos',
+  'sysparams',
+  'match',
+  'mbegin',
+  'mend',
+  'reply',
+])
+
+/** Whether a line may set a variable of this name: a lower-case one that neither shell reads for itself. */
+const settable = (name: string) => /^[a-z][a-z0-9_]*$/.test(name) && !ZSH_OWN.has(name) && !/^(zsh|zle|dis_)/.test(name)
+
+/** A value written out that reads the same wherever it stands, unquoted or quoted: nothing in it the shell expands or splits. */
+const PLAIN_VALUE = /^[\w@%+=:,./~-]*$/
+
+/** What a command of a trusted reader's line does to its variables, past the keywords before it. */
+type Sets =
+  | { readonly _tag: 'keywords' }
+  | { readonly _tag: 'for'; readonly name: string; readonly words: ReadonlyArray<string> | undefined }
+  | { readonly _tag: 'read'; readonly names: ReadonlyArray<string> }
+  | { readonly _tag: 'assign'; readonly pairs: ReadonlyArray<readonly [string, string]> }
+
+/** The keywords a command may start with, past which its words are what it runs: `do`, `then`, `while`, a closing `done`. */
+const HEAD_WORDS = new Set([...SHELL_KEYWORDS, 'fi', 'done', '}'])
+
+/**
+ * What a command, as words without its redirects, does to its variables:
+ * only keywords (`done`, `fi`), `for name in …`, `read -r name…` (with an
+ * `IFS=` of its own), or setting variables and nothing else. Otherwise
+ * undefined: it runs something, and is read as any command is.
+ */
+const setsOf = (bare: ReadonlyArray<string>): Sets | undefined => {
+  let index = 0
+  while (index < bare.length && HEAD_WORDS.has(bare[index] ?? '')) index += 1
+  const rest = bare.slice(index)
+  if (rest.length === 0) return { _tag: 'keywords' }
+  const [first = '', name = '', inWord, ...words] = rest
+  if (first === 'for')
+    return settable(name) && (inWord === undefined || inWord === 'in')
+      ? { _tag: 'for', name, words: inWord === undefined ? undefined : words }
+      : undefined
+  const ifs = rest.findIndex((word) => !word.startsWith('IFS='))
+  if (rest[ifs] === 'read') {
+    const args = rest.slice(ifs + 1)
+    const names = args[0] === '-r' ? args.slice(1) : args
+    return names.length > 0 && names.every(settable) ? { _tag: 'read', names } : undefined
+  }
+  const pairs = rest.map((word) => /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(word))
+  if (pairs.every((pair) => pair !== null && settable(pair[1] ?? '')))
+    return { _tag: 'assign', pairs: pairs.map((pair) => [pair?.[1] ?? '', pair?.[2] ?? ''] as const) }
+  return undefined
+}
+
+/** Where a variable is set: by which command, to what, and the commands after it that surely see it so (`[from, to]`). */
+interface Binding {
+  readonly name: string
+  readonly at: number
+  readonly values: ReadonlyArray<string>
+  sure: readonly [number, number] | undefined
+}
+
+/** Why arithmetic would run a command, set a variable or read what isn't known to be a number; nothing when it only works out a number. */
+const arithmeticReason = (expression: string, valuesOf: (name: string) => ReadonlyArray<string> | undefined): string | undefined => {
+  const plain = expression.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, '$1$2')
+  if (!/^[\w\s+\-*/%<>=!&|^~?:,()]*$/.test(plain))
+    return 'This arithmetic, `$((…))`, holds more than numbers, variables and operators, and this role only reads.'
+  if (plain.replace(/[=!<>]=/g, '').includes('=') || /\+\+|--/.test(plain))
+    return 'This arithmetic, `$((…))`, sets a variable, which changes what runs; work the number out without setting one, as this role only reads.'
+  for (const name of plain.match(/\b[0-9]\w*|[A-Za-z_]\w*/g) ?? []) {
+    if (/^[0-9]/.test(name)) continue
+    const values = valuesOf(name)
+    if (values === undefined || !values.every((value) => /^\d+$/.test(value)))
+      return `Arithmetic, \`$((…))\`, works out what \`${name}\` holds as arithmetic too, which can run a command where it holds what a command printed, and Althar can't tell it holds a number. Keep only its digits as you set it (\`n=$(… | grep -oE '[0-9]+')\`), as this role only reads.`
+  }
+  return undefined
+}
+
+/** A `$name` or `${name}` the shell expands, outside single quotes: where it is, and whether it is inside double ones. */
+interface Use {
+  readonly from: number
+  readonly to: number
+  readonly name: string
+  readonly quoted: boolean
+}
+
+/** Every variable a text expands, by name, outside single quotes and `$'…'`, with where it stands. */
+const usesIn = (text: string): ReadonlyArray<Use> => {
+  const uses: Array<Use> = []
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? ''
+    if (char === '\\') index += 1
+    else if (char === "'" && !quoted) {
+      const close = text.indexOf("'", index + 1)
+      index = close === -1 ? text.length : close
+    } else if (char === '$' && text[index + 1] === "'" && !quoted) {
+      let end = index + 2
+      while (end < text.length && text[end] !== "'") end += text[end] === '\\' ? 2 : 1
+      index = end
+    } else if (char === '"') quoted = !quoted
+    else if (char === '$') {
+      const found = /^\{([A-Za-z_][A-Za-z0-9_]*)\}|^([A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(index + 1))
+      if (found === null) continue
+      const to = index + 1 + found[0].length
+      uses.push({ from: index, to, name: found[1] ?? found[2] ?? '', quoted })
+      index = to - 1
+    }
+  }
+  return uses
+}
+
+/** How many ways a line may be read, one for each value its variables may hold, before Althar stops trying. */
+const MOST_VARIANTS = 64
+
+/**
+ * A trusted reader's line, after `substitutionsIn`, as many times over as
+ * its variables may hold different values, each with the values in place of
+ * the variables it sets and its arithmetic worked out as `NUMBER`; or why it
+ * can't be read so. A line that sets none, and works out nothing, is itself.
+ */
+const variantsOf = (line: string, arithmetic: ReadonlyArray<string>): ReadonlyArray<string> | string => {
+  const text = withoutQuotedHeredocs(line)
+  const { commands, ends, operators, starts } = splitCommandLine(text)
+  const bare = commands.map((written, at) => withoutAnyRedirects(written, operators[at] ?? new Set()))
+  /** Each loop's first and last command, `for`, `while` or `until` to its `done`: what it runs again. */
+  const loops: Array<readonly [number, number]> = []
+  const blocks: Array<number | undefined> = []
+  for (const [at, words] of bare.entries())
+    for (const word of words) {
+      if (word === 'for') {
+        blocks.push(at)
+        break
+      }
+      if (['fi', 'done', '}'].includes(word)) {
+        const start = blocks.pop()
+        if (start !== undefined) loops.push([start, at])
+      } else if (['while', 'until'].includes(word)) blocks.push(at)
+      else if (['if', '{'].includes(word)) blocks.push(undefined)
+      else if (!SHELL_KEYWORDS.includes(word)) break
+    }
+  const setBy = bare.map((words) => {
+    const sets = setsOf(words)
+    if (sets === undefined || sets._tag === 'keywords') return []
+    return sets._tag === 'for' ? [sets.name] : sets._tag === 'read' ? sets.names : sets.pairs.map(([name]) => name)
+  })
+  /** Whether a loop that runs command `at` again sets the variable at or after it, so `at` may see that on the loop's next pass. */
+  const carried = (name: string, at: number) =>
+    loops.some(([start, end]) => start <= at && at <= end && setBy.some((names, by) => by >= at && by <= end && names.includes(name)))
+  const bindings: Array<Binding> = []
+  /** What a variable may hold where command `at` reads it: undefined where nothing before it set it, so the environment's is. */
+  const valuesAt = (name: string, at: number): ReadonlyArray<string> | undefined => {
+    const seen = bindings.filter((binding) => binding.name === name && binding.at < at)
+    // Set again later in a loop, it may hold anything on the next pass: what it holds there is read as what a command printed.
+    if (carried(name, at)) return [...new Set([...seen.flatMap((binding) => binding.values), OUTPUT])]
+    if (seen.length === 0) return undefined
+    const values = [...new Set(seen.flatMap((binding) => binding.values))]
+    const sure = seen.some(({ sure: range }) => range !== undefined && at > range[0] && at <= range[1])
+    return sure || values.includes(OUTPUT) ? values : [...values, OUTPUT]
+  }
+  const arithmeticAt = (word: string, at: number) => {
+    const number = ARITHMETIC_STAND_IN.exec(word)?.[1]
+    return number === undefined ? undefined : (arithmeticReason(arithmetic[Number(number)] ?? '', (name) => valuesAt(name, at)) ?? NUMBER)
+  }
+  /** What a word holds once the shell has expanded it, as `valuesAt` says it; or why that can't be told. */
+  const valuesOfWord = (word: string, at: number): ReadonlyArray<string> | string => {
+    const worked = arithmeticAt(word, at)
+    if (worked !== undefined) return worked === NUMBER ? [NUMBER] : worked
+    if (word.includes('ALTHAR_ARITH')) return [OUTPUT]
+    if (word === NAMES) return [NAMES]
+    const named = /^\$\{?([a-z][a-z0-9_]*)\}?$/.exec(word)?.[1]
+    const held = named === undefined ? undefined : valuesAt(named, at)
+    if (held !== undefined) return held
+    return PLAIN_VALUE.test(word) ? [word] : [OUTPUT]
+  }
+  /** The `for`s, `while`s, `if`s and groups open at each command, each with the variables it set for its body. */
+  const open: Array<{ readonly word: string; readonly bound: Array<Binding> }> = []
+  for (const [at, words] of bare.entries()) {
+    for (const word of words) {
+      if (word === 'for') break
+      if (['fi', 'done', '}'].includes(word)) {
+        for (const binding of open.pop()?.bound ?? []) if (binding.sure !== undefined) binding.sure = [binding.sure[0], at]
+      } else if (['if', 'while', 'until', '{'].includes(word)) open.push({ word, bound: [] })
+      else if (!SHELL_KEYWORDS.includes(word)) break
+    }
+    const sets = setsOf(words)
+    if (sets === undefined || sets._tag === 'keywords') continue
+    // Set where it surely runs, for every command after: not in a block, after `&&` or `||`, or on a side of a pipe or in the background.
+    const plain = open.length === 0 && ['', ';', '\n'].includes(ends[at - 1] ?? '') && !['|', '&'].includes(ends[at] ?? '')
+    const after: readonly [number, number] | undefined = plain ? [at, Number.POSITIVE_INFINITY] : undefined
+    if (sets._tag === 'for') {
+      const values: Array<string> = []
+      for (const word of sets.words ?? [OUTPUT]) {
+        const held = valuesOfWord(word, at)
+        if (typeof held === 'string') return held
+        values.push(...held)
+      }
+      const binding: Binding = {
+        name: sets.name,
+        at,
+        values: values.length === 0 ? [OUTPUT] : values,
+        sure: [at, Number.POSITIVE_INFINITY],
+      }
+      bindings.push(binding)
+      open.push({ word: 'for', bound: [binding] })
+    } else if (sets._tag === 'read') {
+      // What `while read` reads is surely set in the loop's body.
+      const loop = open.at(-1)
+      const inLoop = loop?.word === 'while' && words[0] === 'while'
+      for (const name of sets.names) {
+        const binding: Binding = { name, at, values: [OUTPUT], sure: inLoop ? [at, Number.POSITIVE_INFINITY] : after }
+        bindings.push(binding)
+        if (inLoop) loop.bound.push(binding)
+      }
+    } else
+      for (const [name, value] of sets.pairs) {
+        const held = valuesOfWord(value, at)
+        if (typeof held === 'string') return held
+        bindings.push({ name, at, values: held, sure: after })
+      }
+  }
+  const commandAt = (offset: number) => starts.findLastIndex((start) => start <= offset)
+  const groups = new Map<string, { readonly values: ReadonlyArray<string>; readonly uses: Array<Use> }>()
+  for (const use of usesIn(text)) {
+    const at = commandAt(use.from)
+    const worked = arithmeticAt(`\${${use.name}}`, at)
+    if (worked !== undefined && worked !== NUMBER) return worked
+    const values = worked === NUMBER ? [NUMBER] : settable(use.name) ? valuesAt(use.name, at) : undefined
+    if (values === undefined) continue
+    const key = `${use.name}\u0000${values.join('\u0000')}`
+    const group = groups.get(key) ?? { values, uses: [] }
+    group.uses.push(use)
+    groups.set(key, group)
+  }
+  const unread = "Althar can't tell what this `$((…))` works out, and this role only reads."
+  if (bindings.length === 0 && groups.size === 0) return line.includes('ALTHAR_ARITH') ? unread : [line]
+  const all = [...groups.values()]
+  if (all.reduce((count, group) => count * group.values.length, 1) > MOST_VARIANTS)
+    return "This line's variables may hold more values than Althar reads through; run it in parts, as this role only reads."
+  let variants: Array<ReadonlyArray<readonly [Use, string]>> = [[]]
+  for (const group of all)
+    variants = variants.flatMap((chosen) => group.values.map((value) => [...chosen, ...group.uses.map((use) => [use, value] as const)]))
+  const read = variants.map((chosen) =>
+    [...chosen]
+      .sort(([a], [b]) => b.from - a.from)
+      .reduce((written, [use, value]) => {
+        // What a command printed stands unquoted, so it is read as words the shell expands, as a substitution's is.
+        const put = use.quoted && value.startsWith('$') ? `"${value}"` : value
+        return written.slice(0, use.from) + put + written.slice(use.to)
+      }, text),
+  )
+  // Every arithmetic is read above, wherever it stands; one left would be worked out unread.
+  return read.some((variant) => variant.includes('ALTHAR_ARITH')) ? unread : read
+}
+
+/** Why `sed` would run what a command printed as its script: it could be any `sed` command, `w` among them, which writes. */
+const SED_OUTPUT =
+  "`sed` would run what a command printed as its script, which could be any `sed` command, `w` among them, which writes. Keep only its digits as you set it (`n=$(… | grep -oE '[0-9]+')`), as this role only reads."
+
 /** Why one command would change something or run another program, or nothing when it only looks. */
-const readerWordsReason = (words: ReadonlyArray<string>, trusted = false): string | undefined => {
+const readerWordsReason = (words: ReadonlyArray<string>, trusted: Trust = false): string | undefined => {
   const named = words[0] ?? ''
   const program = named.split('/').at(-1) ?? ''
   const written = writes(words).filter((target) => target !== '/dev/null')
@@ -3670,7 +4298,12 @@ const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined =>
  * expansion (`${PATH:=.}`, `$[PATH=1]`), and no file name the shell expands
  * into a flag (`rg x *` where a file is named `--pre=./run.sh`).
  */
-const readerCommandReason = (text: string, trusted = false): string | undefined => {
+const readerCommandReason = (
+  text: string,
+  trusted: Trust = false,
+  // How a shell's script is read: a trusted reader's as a line of its own, its variables and loops with it.
+  scriptReason: (text: string) => string | undefined = (inner) => readerCommandReason(inner, trusted),
+): string | undefined => {
   if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
   const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
@@ -3681,6 +4314,12 @@ const readerCommandReason = (text: string, trusted = false): string | undefined 
   for (const [index, written] of commands.entries()) {
     // Redirects after the rest, as the shell reads them: `> /dev/null security …` runs `security`.
     const { words, at: movedTo } = redirectsLast(written, operators[index] ?? new Set())
+    // A trusted reader's `for`, `read`, assignment or closing keyword runs nothing; `variantsOf` read what it sets.
+    if (trusted && setsOf(withoutAnyRedirects(written, operators[index] ?? new Set())) !== undefined) {
+      const targets = writes(words).filter((target) => target !== '/dev/null')
+      if (targets.length > 0) return `It would write to ${targets[0]}, and this role only reads.`
+      continue
+    }
     const launched = readerLaunchReason(words)
     if (launched !== undefined) return launched
     // A wrapper alone runs nothing else: `env` prints the environment.
@@ -3697,7 +4336,7 @@ const readerCommandReason = (text: string, trusted = false): string | undefined 
       if (option !== undefined) return `\`${program} ${option}\` has the shell read or run more than its script, and this role only reads.`
       const written = writes(inner).filter((target) => target !== '/dev/null')
       if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
-      const reason = readerCommandReason(args[script + 1] ?? '', trusted)
+      const reason = scriptReason(args[script + 1] ?? '')
       if (reason !== undefined) return reason
       continue
     }
@@ -3711,8 +4350,16 @@ const readerCommandReason = (text: string, trusted = false): string | undefined 
           (each) =>
             each >= 1 && (ends === -1 || each < ends) && !REDIRECTS.includes(inner[each - 1] ?? '') && !onlyNames(inner[each] ?? ''),
         )
+      // As `sed`'s script it is worse than a flag; digits alone are neither.
+      if (
+        at !== undefined &&
+        program === 'sed' &&
+        at === 1 + args.findIndex((arg) => !arg.startsWith('-')) &&
+        SUBSTITUTED.test(inner[at] ?? '')
+      )
+        return SED_OUTPUT
       if (at !== undefined && SUBSTITUTED.test(inner[at] ?? ''))
-        return `What \`$(…)\` prints could start with a dash, which \`${program}\` would take for a flag: run it on its own and name what it prints, or put it after \`--\`, as this role only reads.`
+        return `What \`$(…)\` prints, or a variable set from it, could start with a dash, which \`${program}\` would take for a flag: run it on its own and name what it prints, or put it after \`--\`, as this role only reads.`
       if (at !== undefined)
         return `The shell would expand \`${inner[at]}\`, which \`${program}\` could take for a flag where a file's name starts with a dash; quote it or name the files, as this role only reads.`
     }
@@ -3731,6 +4378,13 @@ export interface ReaderOptions {
   readonly offline?: boolean
   readonly cwd?: string
   readonly trusted?: boolean
+  /**
+   * A trusted reader whose agent runs every command in a sandbox held to its
+   * folder, never outside it, and reaching no network (ADR-058): what a
+   * command writes stays in its copies, so it may `git fetch` there wherever
+   * the command asks, as in a loop.
+   */
+  readonly contained?: boolean
   /**
    * Where a trusted reader's own tools may read (ADR-058): none of `denied`
    * but what `allowed` gives back, real paths, as its sandbox holds its
@@ -3845,15 +4499,28 @@ const readerLineReason = (command: string, options: ReaderOptions): string | und
     if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)
     if (typeof found === 'string') return found
-    if (found.scripts.length > 0)
-      return [...found.scripts, found.text].map((line) => readerLineReason(line, options)).find((reason) => reason !== undefined)
+    const variants = variantsOf(found.text, found.arithmetic)
+    if (typeof variants === 'string') return variants
+    for (const script of found.scripts) {
+      const reason = readerLineReason(script, options)
+      if (reason !== undefined) return reason
+    }
+    return variants.map((line) => plainReaderLineReason(line, options)).find((reason) => reason !== undefined)
   }
+  return plainReaderLineReason(command, options)
+}
+
+/** Why a line, its substitutions and variables read already, would do more than look: the rules every reader's line meets. */
+const plainReaderLineReason = (command: string, options: ReaderOptions): string | undefined => {
+  if (options.trusted === true && options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
   return (
     parseCommandLine(command)
       .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((found) => found !== undefined) ??
     secretCommandReason(command, options.cwd) ??
-    readerCommandReason(command, options.trusted === true)
+    readerCommandReason(command, options.trusted === true ? (options.contained === true ? 'contained' : true) : false, (script) =>
+      readerLineReason(script, options),
+    )
   )
 }
 

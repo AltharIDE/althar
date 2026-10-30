@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -20,10 +20,11 @@ const named = [{ definition: { id: 'codex', name: 'Codex' } }]
 
 describe('the words for an agent out of usage', () => {
   it('say when it is back, and that a step waits for it, without naming the step where none is given', () => {
-    const later = new Date(Date.now() + 3 * 60 * 60_000).toISOString()
-    assert.strictEqual(outWords({ from: 'Codex', resetsAt: later }), `Codex ran out of usage, until ${whenWords(later)}.`)
+    const now = Date.parse('2026-10-03T12:00:00')
+    const later = new Date(now + 3 * 60 * 60_000).toISOString()
+    assert.strictEqual(outWords({ from: 'Codex', resetsAt: later, now }), `Codex ran out of usage, until ${whenWords(later, now)}.`)
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, waits: 'step' }),
+      outWords({ from: 'Codex', resetsAt: null, now, waits: 'step' }),
       'Codex ran out of usage. The step waits until Codex is back. To carry on now, pick another model on the task.',
     )
   })
@@ -87,7 +88,6 @@ describe('a lead outside a step whose agent runs out of usage', () => {
       const [taken] = yield* until(
         Effect.map(turns(created.threadId), (rows) => rows.filter((row) => row.prompt?.includes('aider was working on this') === true)),
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       assert.include(taken?.prompt, 'aider was working on this when it reached its usage limit, and may have done some of it already.')
       const running = Option.getOrUndefined(yield* sessions.running(created.threadId))

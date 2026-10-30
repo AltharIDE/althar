@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { homedir } from 'node:os'
 
 import {
@@ -973,7 +974,10 @@ export class Connections extends Context.Service<
        * is handed out, so a quick browser finds it there.
        */
       const listenForCode = (port: number, state: string, productName: string) =>
-        Effect.callback<{ readonly code: Deferred.Deferred<string>; readonly close: Effect.Effect<void> }, ConnectorFailed>((resume) => {
+        Effect.callback<
+          { readonly code: Deferred.Deferred<string>; readonly port: number; readonly close: Effect.Effect<void> },
+          ConnectorFailed
+        >((resume) => {
           const code = Deferred.makeUnsafe<string>()
           const server: Server = createServer((req, res) => {
             const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
@@ -995,7 +999,10 @@ export class Connections extends Context.Service<
               ),
             ),
           )
-          server.listen(port, '127.0.0.1', () => resume(Effect.succeed({ code, close: Effect.sync(() => void server.close()) })))
+          // On the port asked for, or, asked for 0, any that is free: the browser comes back to whichever it is.
+          server.listen(port, '127.0.0.1', () =>
+            resume(Effect.succeed({ code, port: (server.address() as AddressInfo).port, close: Effect.sync(() => void server.close()) })),
+          )
         })
 
       /** The connection a sign-in signs in again: where it is, and the account it signs in as. */
@@ -1065,8 +1072,8 @@ export class Connections extends Context.Service<
           }
           const browser = info.browser
           const pkce = makePkce()
-          const redirectUri = `http://127.0.0.1:${connectors.callbackPort}/callback`
           const listening = yield* listenForCode(connectors.callbackPort, pkce.state, info.name)
+          const redirectUri = `http://127.0.0.1:${listening.port}/callback`
           yield* follow(
             flowId,
             Effect.gen(function* () {

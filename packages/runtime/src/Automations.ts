@@ -10,7 +10,7 @@ import {
 import { ConnectorFailed, type ListedChange } from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { definitionOf, partsOf } from './automated'
@@ -252,7 +252,8 @@ export class Automations extends Context.Service<
       const connections = yield* Connections
       const limits = yield* Limits
       const options = (yield* RuntimeConfig).automations ?? {}
-      const nowOf = options.now ?? (() => Date.now())
+      // The runtime's clock, read where a schedule is worked out outside an effect: a test's clock is the one it reads too.
+      const nowOf = yield* Clock.clockWith((clock) => Effect.succeed(() => clock.currentTimeMillisUnsafe()))
       const zoneOf = options.zone ?? localZone
       const tick = Duration.toMillis(options.tick ?? Duration.seconds(30))
       const settle = Duration.toMillis(options.settle ?? Duration.minutes(2))
@@ -268,8 +269,6 @@ export class Automations extends Context.Service<
       const admitted = <A, E, R>(effect: Effect.Effect<A, E, R>) => admitting.withPermits(1)(effect)
       /** Wakes the clock when an automation changes. */
       const wake = yield* Queue.sliding<void>(1)
-      /** Now, for an automation's rows: the clock its schedule is read by, so what was turned on and what came compare. */
-      const stamp = Effect.sync(() => new Date(nowOf()).toISOString())
 
       const refused = (message: string) => new AutomationRefused({ message })
 
@@ -379,7 +378,7 @@ export class Automations extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const at = yield* stamp
+          const at = yield* timestamp
           const number = row.definition + 1
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -420,7 +419,7 @@ export class Automations extends Context.Service<
           const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${input.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
           const automationId = yield* newId(Ids.automation)
-          const at = yield* stamp
+          const at = yield* timestamp
           const on = input.on === true
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -474,7 +473,7 @@ export class Automations extends Context.Service<
             Effect.gen(function* () {
               const row = yield* load(automationId)
               if (!when(row)) return false
-              const revision = yield* change('automations', automationId, { ...set, updatedAt: yield* stamp })
+              const revision = yield* change('automations', automationId, { ...set, updatedAt: yield* timestamp })
               yield* fact({ projectId: row.projectId, aggregateType: 'automation', aggregateId: automationId, revision, type, actorId })
               return true
             }),
@@ -490,7 +489,7 @@ export class Automations extends Context.Service<
           yield* stand(
             automationId,
             (row) => row.state !== 'on',
-            { state: 'on', since: yield* stamp, pausedBy: null, pauseReason: null },
+            { state: 'on', since: yield* timestamp, pausedBy: null, pauseReason: null },
             'automation.turned_on',
             actorId,
           )
@@ -560,7 +559,7 @@ export class Automations extends Context.Service<
               const [row] = yield* sql<{ projectId: ProjectId; automationId: string; state: string }>`
                 SELECT project_id, automation_id, state FROM automation_occurrences WHERE id = ${occurrenceId}`
               if (row === undefined || (row.state !== 'starting' && row.state !== 'running')) return undefined
-              const revision = yield* change('automation_occurrences', occurrenceId, { state, reason, endedAt: yield* stamp })
+              const revision = yield* change('automation_occurrences', occurrenceId, { state, reason, endedAt: yield* timestamp })
               yield* fact({
                 projectId: row.projectId,
                 aggregateType: 'automation_occurrence',
@@ -616,7 +615,7 @@ export class Automations extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const id = input.id ?? (yield* newId(Ids.automationOccurrence))
-          const at = yield* stamp
+          const at = yield* timestamp
           const ended = input.state !== 'starting'
           return yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1298,7 +1297,7 @@ export class Automations extends Context.Service<
                 stood === row.state
                   ? {}
                   : stood === 'on'
-                    ? { state: 'on', since: yield* stamp, pausedBy: null, pauseReason: null }
+                    ? { state: 'on', since: yield* timestamp, pausedBy: null, pauseReason: null }
                     : { state: 'paused', pausedBy: 'person', pauseReason: null },
               )
             }),
@@ -1332,7 +1331,7 @@ export class Automations extends Context.Service<
               if (!paused) yield* sql`DELETE FROM settings WHERE key = ${ALL_PAUSED}`
               else
                 yield* sql`
-                  INSERT INTO settings ${sql.insert({ key: ALL_PAUSED, value: 'on', updatedAt: yield* stamp })}
+                  INSERT INTO settings ${sql.insert({ key: ALL_PAUSED, value: 'on', updatedAt: yield* timestamp })}
                   ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
               // Every card's next time changes with it.
               const all = yield* sql<{ id: string }>`SELECT id FROM automations WHERE state = 'on'`

@@ -85,7 +85,7 @@ afterEach(() => {
 })
 
 /* the walk moves a minute of the table's time in small acts, which is slow under coverage */
-describe('Welcome', { timeout: 30000 }, () => {
+describe('Welcome', () => {
   it('walks the table: every scene plays through to its end, and the last press leaves', async () => {
     const onDone = vi.fn()
     render(<Welcome onDone={onDone} />)

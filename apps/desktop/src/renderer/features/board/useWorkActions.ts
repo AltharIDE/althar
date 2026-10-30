@@ -167,7 +167,10 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
               message: 'This task has no lead to start. Pick an agent for it first.',
             })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
-          if (restarting && lead !== null)
+          // Stopped in the middle of its step, the task carries that step on, as its own screen does: its run goes on too, so
+          // nothing reads it as stopped while its lead works, and its time runs from now.
+          if (head.task.actions.includes('resume')) await client.resumeTask({ taskId: task.taskId })
+          else if (restarting && lead !== null)
             await client.startSession({ threadId: task.threadId, agentId: lead }).catch((failure: unknown) => {
               // Another start took over after the read: the queued note will go to that session.
               if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
