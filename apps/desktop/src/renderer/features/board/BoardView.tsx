@@ -108,6 +108,10 @@ export const text = {
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
+  /** What the lead is told to carry on where its branch conflicts: settle that first, as part of going on. */
+  carryOnMergingNote: 'Carry on. Your branch conflicts with the default branch: merge it in and settle the conflict first.',
+  /** A stopped task's conflict, one quiet line under what stopped it: Carry on settles it too. */
+  conflicts: 'Conflicts with the default branch',
   /** Settles a finished task that isn't a change, from its kept row. */
   done: 'Done',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
@@ -356,23 +360,12 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
 
 /**
  * A task whose lead stopped with no agent on it: the person's to carry on or abandon. When it stopped, not a running time, and why
- * in plain words, with its branch and what changed in it, and Carry on, which tells the lead to go on.
+ * in plain words, with its branch and what changed in it, and Carry on, which tells the lead to go on. A conflict with the default
+ * branch is one line under that, not why it waits: Carry on tells the lead to merge it in first.
  */
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
   const card = runningCard(work, '', () => '')
   const sendBack = actions?.sendBack
-  // Carry on is the card's one violet step, unless Resolve now is: then it is the quiet one before it.
-  const carryOn = (quiet: boolean) =>
-    sendBack === undefined ? null : (
-      <NextStep
-        signal={!quiet}
-        busy={actions?.sending?.has(work.taskId) ?? false}
-        doing={text.carryingOn}
-        onPress={() => void sendBack(work, text.carryOnNote)}
-      >
-        {text.carryOn}
-      </NextStep>
-    )
   const { at: _, ...rest } = card
   return {
     ...rest,
@@ -380,11 +373,37 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     word: text.status[TaskStatus.Stopped],
     why: work.stopped?.by == null ? text.stopped : text.stoppedBy[work.stopped.by],
     ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
-    ...(sendBack === undefined
+    ...(sendBack === undefined && work.conflictUnsent == null
       ? {}
-      : work.conflictUnsent != null
-        ? unsentOf(work, work.conflictUnsent, actions, carryOn(actions?.resolveNow !== undefined))
-        : { next: carryOn(false) }),
+      : {
+          // What stopped it leads; a conflict is one line under it, which Carry on settles on the way.
+          ...(work.conflictUnsent == null
+            ? {}
+            : {
+                foot: (
+                  <FactLine>
+                    <Fact icon="branch" tone="warm">
+                      {text.conflicts}
+                    </Fact>
+                  </FactLine>
+                ),
+              }),
+          // Carry on, the card's one step, on the strip at its foot.
+          ...(sendBack === undefined
+            ? {}
+            : {
+                next: (
+                  <NextStep
+                    signal
+                    busy={actions?.sending?.has(work.taskId) ?? false}
+                    doing={text.carryingOn}
+                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote)}
+                  >
+                    {text.carryOn}
+                  </NextStep>
+                ),
+              }),
+        }),
   }
 }
 
