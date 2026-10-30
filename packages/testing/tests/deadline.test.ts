@@ -43,3 +43,14 @@ test('says what it last read when it gives up', async () => {
     ),
   ).rejects.toThrow('Timed out waiting; last saw "nope"')
 })
+
+test('cuts long words in what it last read, so what comes after them still shows', async () => {
+  begin(100)
+  const prompt = `You are working on a task. ${'And more. '.repeat(400)}The end.`
+  await expect(
+    waitFor(
+      () => [{ prompt, state: 'pending' }],
+      () => false,
+    ),
+  ).rejects.toThrow(/last saw \[\{"prompt":"You are working on a task\. .{0,60}….{0,70}The end\.","state":"pending"\}\]$/)
+})
