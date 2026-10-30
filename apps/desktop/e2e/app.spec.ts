@@ -176,7 +176,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry', level: 1 })).toBeVisible()
     await expect(page.getByRole('article', { name: 'Add a retry' }).getByText(/^althar\/add-a-retry/)).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Merge into main on this (Mac|PC|computer)$/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
@@ -271,7 +271,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
 
     // What it changed, file by file, read from its worktree: ⌘D opens it.
-    await page.keyboard.press('Meta+d')
+    await page.keyboard.press('ControlOrMeta+d')
     const changes = page.getByRole('dialog', { name: 'Changes' })
     await expect(changes.getByText(/althar\/add-a-retry-to-the-checkout-call into main/)).toBeVisible()
     await expect(changes.getByRole('group', { name: 'change.txt' })).toContainText('change')

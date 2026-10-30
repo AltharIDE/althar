@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
 
+import { RELEASES, releaseUrl } from '../src/content/changelog'
 import { LINKS } from '../src/content/facts'
 import { PAGE_META, type PagePath } from '../src/content/pages'
 import { SHIFTS } from '../src/content/shifts'
-import { indexed, llmsTxt, MARKDOWN, robotsTxt, shiftsMd, sitemapXml } from '../src/lib/crawl'
+import { changelogMd, indexed, llmsTxt, MARKDOWN, robotsTxt, shiftsMd, sitemapXml } from '../src/lib/crawl'
 import { structuredData } from '../src/lib/structured'
 
 const ORIGIN = 'https://example.test'
@@ -44,6 +45,15 @@ describe('what crawlers are given', () => {
     for (const shift of SHIFTS) {
       expect(md).toContain(`**${shift.date} · ${shift.who}`)
       expect(md).toContain(`(${shift.source.url})`)
+    }
+  })
+
+  it('writes every release into the Markdown with its day, its lines and its notes', () => {
+    const md = changelogMd(ORIGIN)
+    for (const release of RELEASES) {
+      expect(md).toContain(`## ${release.version} · ${release.title}`)
+      expect(md).toContain(`Released ${release.date}. [Release notes](${releaseUrl(release.version)})`)
+      for (const change of release.changes) expect(md).toContain(`- ${change.text}`)
     }
   })
 

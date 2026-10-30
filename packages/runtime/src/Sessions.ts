@@ -35,6 +35,7 @@ import {
 } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
@@ -2833,11 +2834,11 @@ export class Sessions extends Context.Service<
               ? []
               : [
                   [
-                    'This task is for trying something out: a question, a look around, a prototype. Nothing of it leaves this computer: nothing is pushed, and no pull request opens.',
+                    `This task is for trying something out: a question, a look around, a prototype. Nothing of it leaves ${thisDevice()}: nothing is pushed, and no pull request opens.`,
                     `Put what you'd throw away, such as prototypes, notes and screenshots, in ${scratch}, which git ignores.`,
                     plainFirst === undefined
-                      ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on this computer. Commit there as on any task.`
-                      : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on this computer; commit there as on any task.`,
+                      ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on ${thisDevice()}. Commit there as on any task.`
+                      : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on ${thisDevice()}; commit there as on any task.`,
                     'If the person asks to make it a real change, to keep it, have it reviewed or open a pull request, call make_it_a_change: it gets a title for what it does, a reviewer and a pull request to end in.',
                     'When it is done, it waits in their Needs you until they settle it. If they tell you it is done, to keep it for later, or to discard it, call settle_task.',
                     'Where you changed nothing in the repository, finish_step needs only your summary.',

@@ -1,5 +1,6 @@
 import { useId } from 'react'
 
+import { modKey } from '../../foundations/keys'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -48,7 +49,7 @@ export interface ProjectListText {
 export const projectListText: ProjectListText = {
   title: 'Projects',
   newProject: 'New project',
-  newProjectKbd: '⌘N',
+  newProjectKbd: modKey('N'),
   yours: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   held: (n) => `${n} held for a reset`,
   queued: (n) => `${n} waiting for a free agent`,

@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Ids, newId } from '@althar/domain'
@@ -69,6 +71,45 @@ const answerPerson = Effect.gen(function* () {
   })
   return attention?.payload ?? ''
 })
+
+/**
+ * Decides a request the coordinator should answer by itself. One it leaves to
+ * the person would wait for an answer no one gives here: that fails at once,
+ * with what the person was asked, rather than once the test's time is up.
+ */
+const judgedAlone = (context: RequestContext, toJudge: PermissionRequest) =>
+  Effect.gen(function* () {
+    const permissions = yield* Permissions
+    const sql = yield* SqlClient.SqlClient
+    const leftToPerson = Effect.flatMap(
+      until(sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE state = 'open'`, (rows) => rows.length > 0),
+      ([attention]) => Effect.die(new Error(`The coordinator left it to the person: ${attention?.payload ?? ''}`)),
+    )
+    return yield* Effect.raceFirst(permissions.decide(context, toJudge), leftToPerson)
+  })
+
+/** A runtime whose coordinator judges in a process of its own, Claude Code's fake, told each folder an agent starts in. */
+const judgeAsProcess = (starting: (cwd: string) => void = () => undefined) =>
+  runtime(
+    ':memory:',
+    {},
+    {
+      agents: Layer.succeed(
+        Agents,
+        Agents.from(
+          ['claude-code', 'codex'].map((id) => ({
+            definition: definition(id),
+            transport: (cwd) => {
+              starting(cwd)
+              return id === 'claude-code'
+                ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+                : { _tag: 'InProcess', agent: fakeAgent() }
+            },
+          })),
+        ),
+      ),
+    },
+  )
 
 describe('coordinator permission judgments', () => {
   it.live('asks the person before launching a judge that cannot disable its tools', () => {
@@ -268,35 +309,45 @@ describe('coordinator permission judgments', () => {
   })
   it.live('owns and closes the process used for a coordinator judgment', () =>
     Effect.gen(function* () {
-      const { context, permissions, sql } = yield* setup
-      assert.strictEqual((yield* permissions.decide(context, request())).decision, 'allow')
+      const { context, sql } = yield* setup
+      assert.strictEqual((yield* judgedAlone(context, request())).decision, 'allow')
       const [process] = yield* sql<{ state: string; pid: number; processGroupId: number }>`
       SELECT state, pid, process_group_id FROM processes WHERE purpose = 'agent' AND provider_session_id IS NULL`
       assert.strictEqual(process?.state, 'exited')
       assert.isAbove(process?.pid ?? 0, 0)
       assert.strictEqual(process?.pid, process?.processGroupId)
-    }).pipe(
-      Effect.provide(
-        runtime(
-          ':memory:',
-          {},
-          {
-            agents: Layer.succeed(
-              Agents,
-              Agents.from(
-                ['claude-code', 'codex'].map((id) => ({
-                  definition: definition(id),
-                  transport: (cwd) =>
-                    id === 'claude-code'
-                      ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
-                      : { _tag: 'InProcess', agent: fakeAgent() },
-                })),
-              ),
-            ),
-          },
+    }).pipe(Effect.provide(judgeAsProcess())),
+  )
+  // Windows holds the folder a judge ran in a moment after it has gone; here, the folder keeps something it can't remove.
+  it.live.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'keeps its judgment where the folder the judge ran in can’t be removed yet',
+    () => {
+      const held: Array<string> = []
+      const hold = (cwd: string) => {
+        if (!basename(cwd).startsWith('althar-permission-')) return
+        const locked = join(cwd, 'held')
+        mkdirSync(locked)
+        writeFileSync(join(locked, 'open'), '')
+        chmodSync(locked, 0o555)
+        held.push(locked)
+      }
+      return Effect.gen(function* () {
+        const { context } = yield* setup
+        assert.strictEqual((yield* judgedAlone(context, request())).decision, 'allow')
+        assert.lengthOf(held, 1)
+        assert.isTrue(existsSync(held[0] ?? ''), 'The folder the judge ran in stays where it can’t be removed')
+      }).pipe(
+        Effect.provide(judgeAsProcess(hold)),
+        Effect.ensuring(
+          Effect.sync(() => {
+            for (const locked of held) {
+              chmodSync(locked, 0o755)
+              rmSync(dirname(locked), { recursive: true, force: true })
+            }
+          }),
         ),
-      ),
-    ),
+      )
+    },
   )
   it.live('falls back when the coordinator is signed out, without trying another model', () => {
     const signedOut: Array<string> = []

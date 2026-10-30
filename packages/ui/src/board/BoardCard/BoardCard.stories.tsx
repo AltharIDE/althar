@@ -438,6 +438,16 @@ export const WaitingOverTheNumber: Story = {
     await expect(within(canvasElement).getByText('6 of 6 agents busy on this Mac, and 1 more')).toBeInTheDocument()
   },
 }
+/** Its folder being set up before its lead starts: under way, saying what holds it, with no step begun and no clock. */
+export const SettingUp: Story = {
+  args: { ...CHANGE_QUEUED, status: TaskStatus.Running, word: 'Installing dependencies', why: undefined },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Installing dependencies')).toBeInTheDocument()
+    await expect(card.queryByText('Stopped')).toBeNull()
+    await expect(card.queryByRole('button', { name: 'Carry on' })).toBeNull()
+  },
+}
 /** Stopped, as the board shows it: Carry on, which tells its lead to go on, the strip at its foot. */
 export const Stopped: Story = {
   args: {

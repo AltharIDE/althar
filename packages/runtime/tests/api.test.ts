@@ -20,6 +20,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream }
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -856,14 +857,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
+          ['SessionFailed', `missing couldn't start. althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
+          description: `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -2257,7 +2258,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', `gh isn't signed in to github.test on ${thisDevice()}.`])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
@@ -2345,7 +2346,7 @@ describe('words', () => {
       [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
       [
         { _tag: 'SignOutFailed', line: 'codex logout' },
-        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+        `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`,
       ],
       [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
       [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
@@ -2484,17 +2485,32 @@ describe('words', () => {
       (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
       ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
     )
+    // A refused merge says it in a few words: no path on this computer, a couple of files by name and the rest counted.
     assert.deepStrictEqual(
       (
         [
-          ['untracked', 'new.ts in /code/web'],
-          ['moved', 'web’s main'],
+          ['busy', { into: 'main', files: ['middleware.ts'] }],
+          ['busy', { into: 'main', files: ['middleware.ts', 'app/hooks/useAuth.ts', 'a.ts', 'b.ts'] }],
+          ['busy', { into: 'web’s main', files: [] }],
+          ['untracked', { into: 'web’s main', files: ['src/new.ts'] }],
+          ['untracked', { into: 'main', files: ['a.ts', 'b.ts', 'c.ts'] }],
+          ['conflicts', { into: 'main', files: ['README.md', 'src/a.ts'] }],
+          ['submodule', { into: 'main', files: ['vendor/library'] }],
         ] as const
-      ).map(([why, detail]) => said(new CantMerge({ taskId: 't', why, detail }))),
+      ).map(([why, more]) => said(new CantMerge({ taskId: 't', why, detail: '/code/web', ...more }))),
       [
-        'The merge would overwrite files git doesn’t track: new.ts in /code/web. Move them away, then merge again.',
-        'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
+        'Your main checkout has uncommitted changes to middleware.ts.',
+        'Your main checkout has uncommitted changes to middleware.ts, useAuth.ts and 2 more.',
+        'Your web’s main checkout has changes in the way.',
+        'Your web’s main checkout has an untracked file in the way: new.ts.',
+        'Your main checkout has untracked files in the way: a.ts, b.ts and 1 more.',
+        'It conflicts with main in README.md and a.ts.',
+        'Submodule vendor/library has uncommitted changes, or isn’t at the commit recorded for it.',
       ],
+    )
+    assert.strictEqual(
+      said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })),
+      'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
     )
     assert.strictEqual(
       said({ _tag: 'NoChangeToOpen', why: 'something new' }),
@@ -2533,8 +2549,7 @@ describe('words', () => {
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
-      message:
-        'It conflicts with the default branch, in README.md. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.',
+      message: 'It conflicts with the default branch in README.md.',
       why: 'conflicts',
       detail: 'README.md',
     })

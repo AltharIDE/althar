@@ -83,6 +83,7 @@ const text: Record<string, string> = {
   'sitemap.xml': entry.sitemapXml(origin),
   'llms.txt': entry.llmsTxt(origin),
   [entry.MARKDOWN['/shifts']!.slice(1)]: entry.shiftsMd(origin, today),
+  [entry.MARKDOWN['/changelog']!.slice(1)]: entry.changelogMd(origin),
   [entry.MARKDOWN['/thesis']!.slice(1)]: thesis,
 }
 for (const [file, body] of Object.entries(text)) await writeFile(resolve(dist, file), body)

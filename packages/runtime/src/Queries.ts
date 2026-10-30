@@ -1813,6 +1813,8 @@ export class Queries extends Context.Service<
             leadModel: string | null
             leadEffort: string | null
             firstSession: string | null
+            turns: number
+            settingUp: number | null
             starting: number
             held: string | null
             heldFor: string | null
@@ -1847,6 +1849,12 @@ export class Queries extends Context.Service<
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
               (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
+              -- Whether its lead has had a turn yet: before its first, no agent has worked on it.
+              (SELECT count(*) FROM turn_deliveries d WHERE d.thread_id = t.id) AS turns,
+              -- Its folder being set up (Setups.ts): whether by the setup kept for its repository (1), else the install its
+              -- lockfile names (0); null for none under way.
+              (SELECT json_extract(i.content, '$.kept') FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'setup'
+                AND json_extract(i.content, '$.ended') IS NULL ORDER BY i.sequence DESC LIMIT 1) AS setting_up,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'admitted')
@@ -1911,6 +1919,10 @@ export class Queries extends Context.Service<
               : yield* sql<{ state: string }>`
                   SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
           const cutShort = lastTurn?.state === 'interrupted' && task.held === null
+          // Before its lead's first turn no agent has worked on it: its folder still being set up, or its plan started, it is
+          // under way, its lead on its way, never stopped. Its first turn waits for the setup.
+          const settingUp = task.turns === 0 && task.settingUp !== null
+          const unstarted = task.turns === 0 && (task.planState === 'accepted' || task.runState === 'running')
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -1926,7 +1938,7 @@ export class Queries extends Context.Service<
             if (task.runState === 'succeeded') return checksRun ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
-            return (working && !cutShort) || task.held !== null ? 'running' : 'stopped'
+            return (working && !cutShort) || task.held !== null || settingUp || unstarted ? 'running' : 'stopped'
           })()
           // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it.
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null ? 'kept' : ready
@@ -1950,14 +1962,15 @@ export class Queries extends Context.Service<
                       : []
                   const until = suspended?.endedAt ?? null
                   if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
-                    return { by: 'althar' as const, at: until ?? task.runAt ?? '' }
+                    return { by: 'althar' as const, at: until ?? task.runAt }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
                     WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
                     ORDER BY requested_at DESC, rowid DESC LIMIT 1`
                   const [run] = yield* sql<{ endedAt: string | null }>`
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
-                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
+                  // Null where nothing says when: the card then shows no time.
+                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
@@ -2011,6 +2024,8 @@ export class Queries extends Context.Service<
             slug: task.slug,
             phase,
             ...(stopped === undefined ? {} : { stopped }),
+            // Its folder being set up before its lead's first turn: the install its lockfile names, or the setup kept for it.
+            ...(settingUp ? { settingUp: task.settingUp === 1 ? ('kept' as const) : ('install' as const) } : {}),
             kind,
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,

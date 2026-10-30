@@ -12,7 +12,10 @@ import {
   DiffLineKind,
   type FileView,
   Behind,
+  commandDown,
   Composer,
+  keys,
+  modKey,
   DictationTray,
   Issue,
   TaskActivity,
@@ -37,7 +40,7 @@ import {
 import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { device, platform } from '../../shared/device'
+import { device } from '../../shared/device'
 import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -165,7 +168,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: platform === 'darwin' ? '⌘D' : 'Ctrl+D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -415,7 +418,7 @@ export function TaskView({
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
       if (files.length === 0) return
       event.preventDefault()
       show()
@@ -818,7 +821,7 @@ export function TaskView({
             </>
           ) : null
         }
-        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        text={{ sendNowKey: modKey(keys.return) }}
         // What goes on outside the conversation, as one chip over its end: why it waits, what its lead left running, the pull requests it listens to.
         above={
           <Behind
@@ -980,6 +983,7 @@ export function TaskView({
               pending={model.pending}
               doing={model.doing}
               error={model.error}
+              errorMore={model.errorMore}
               onAccept={(changes) => void model.accept(changes)}
               onMergeHere={() => void model.mergeHere()}
               onOpenChange={() => void model.openChange()}

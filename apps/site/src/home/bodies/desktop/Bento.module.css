@@ -1,0 +1,69 @@
+/* The bento: tiles of different widths on a six-column grid, each a title and a line over its picture. */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: minmax(470px, auto);
+  gap: 14px;
+  max-width: 1280px;
+  margin: 70px auto 0;
+  padding: 0 var(--gut);
+  list-style: none;
+}
+.span2 { grid-column: span 2; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span6 { grid-column: span 6; }
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.head { display: grid; gap: 8px; padding: 28px 30px 0; }
+.title { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.2vw, 32px); font-weight: 300; line-height: 1.05; letter-spacing: -0.035em; color: var(--t-1); text-wrap: balance; }
+.title b { font-weight: 700; letter-spacing: -0.04em; }
+.lead { max-width: 36em; margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; }
+/* The piece at the tile's foot, running off its bottom edge as a screenshot would. */
+.pic { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 0; margin-top: 24px; padding: 0 30px; }
+.pic > * { width: 100%; margin-bottom: -28px; }
+/* A small piece stands whole in the middle of its tile. */
+.small .pic { align-items: center; padding-bottom: 30px; }
+.small .pic > * { margin-bottom: 0; }
+/* A drawing stands whole in the middle of what is left, on the faintest warm ground. */
+.drawn { background: radial-gradient(ellipse 70% 55% at 50% 78%, #fbf9f4, var(--paper) 72%); }
+.drawn .pic { align-items: center; padding: 0 18px 18px; }
+.drawn .pic > * { max-width: 660px; margin-bottom: 0; }
+
+/* A drawing as an interface lit by one light: its stage runs the tile's width, on a ground the tile continues, so it has no frame. */
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; container-type: inline-size; }
+.drawn[data-tone] .pic { padding: 0 1px 1px; }
+.drawn[data-tone] .pic > * { max-width: none; }
+.drawn[data-tone='light'] { background: #f8f6f1; }
+.drawn[data-tone='dark'] { background: #0e0b09; box-shadow: none; }
+.drawn[data-tone='dark'] .title { color: #f4efe7; }
+.drawn[data-tone='dark'] .lead { color: rgba(244, 239, 231, 0.66); }
+
+/* Pieces of the app, framed as pictures: a card on its own, or a window. */
+.card { border-radius: 14px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line-2), 0 24px 50px rgba(40, 30, 10, 0.08); }
+.window { border-radius: 12px; background: var(--n-2); box-shadow: 0 0 0 1px var(--line-2), 0 24px 50px rgba(40, 30, 10, 0.1); }
+.pad { padding: 16px; background: var(--n-1); }
+.since { display: grid; gap: 4px; padding: 14px 16px; background: var(--n-1); }
+.home { height: 100%; background: var(--n-2); }
+
+@media (max-width: 1100px) {
+  .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span2, .span3, .span4 { grid-column: span 1; }
+  .span6 { grid-column: span 2; }
+}
+@media (max-width: 700px) {
+  .span6 { grid-column: span 1; }
+  .bento { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; margin-top: 40px; }
+  .head { padding: 22px 22px 0; }
+  .pic { padding: 0 18px; margin-top: 20px; }
+  /* A wide drawing, larger than the tile, its empty sides cut off. */
+  .drawn.span4 .pic > * { width: 132%; max-width: none; margin: 0 -16%; }
+  .drawn[data-tone].span4 .pic > * { width: 100%; margin: 0; }
+}

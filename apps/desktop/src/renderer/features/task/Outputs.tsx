@@ -1,6 +1,8 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
 import { doing, type Doing } from './actions'
-import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade } from '@althar/ui'
+import { Failure } from './Failure'
+import type { ErrorMore } from './useTask'
+import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade, modKey } from '@althar/ui'
 import type { ReactNode } from 'react'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
@@ -61,7 +63,9 @@ export const text = {
   /** Beside the commits its remote doesn't have: its branch, pushed alone, with the person's own git. */
   pushBranch: (remote: string) => `Push to ${remote}`,
   openOn: (host: string) => `Open on ${host}`,
-  conflicts: (into: string, files: string) => `It conflicts with ${into} as it is now, in ${files}.`,
+  conflicts: (into: string, files: string) => `It conflicts with ${into} in ${fewOf(files.split(', '))}.`,
+  /** Merging here stays on this computer: the button says so, under what isn't pushed. */
+  mergeHere: (label: string) => `${label} on ${device.this}`,
   /** Merged and pushed, with nothing left between it and its base: said in a line. */
   mergedAll: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
     const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
@@ -92,7 +96,7 @@ export const text = {
   pullRequest: (change: ChangeSummary, several: boolean) =>
     several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
   named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -108,6 +112,12 @@ export const conflictsOf = (conflict: string, here: ReadonlyArray<{ readonly nam
       ? { name: null, branch: here[0]?.branch ?? 'main', files: part }
       : { name: repository.name, branch: repository.branch, files: part.slice(at + 2) }
   })
+
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
 
 /** A repository by its name alone: `web` for `meridian/web`. */
 const nameOf = (repository: string) => repository.slice(repository.lastIndexOf('/') + 1)
@@ -141,6 +151,7 @@ export function Outputs({
   pending,
   doing: acting = null,
   error,
+  errorMore = null,
   onAccept,
   onMergeHere,
   onOpenChange,
@@ -161,6 +172,8 @@ export function Outputs({
   /** Which action is on its way, where one is: only its button shows as working; the others wait. */
   doing?: Doing | null
   error: string | null
+  /** Where the error is a failed push, or git's: why, for its way out, and all git said, for Details. */
+  errorMore?: ErrorMore | null
   /** The files merging it here conflicts in, after a merge refused for that. */
   conflict?: string | null
   /** Asks the lead to bring its branch up to date, settling the conflict. */
@@ -202,6 +215,14 @@ export function Outputs({
   // Each card is read out by the task's title, as what it changed; and opens what it changed, or a file of it.
   const files = { onReviewDiff: () => onOpenFile(), diffKey: text.diffKey, onOpenFile }
   const label = { label: task.title }
+  // What went wrong, in the card it went wrong in: Try again where that may be all it takes, and all git said behind Details.
+  // Connecting, where it changes how the work goes up, is the branch card's own action already.
+  const failure = (onRetry?: () => void) =>
+    error === null
+      ? {}
+      : {
+          error: <Failure message={error} more={errorMore} onRetry={onRetry} />,
+        }
   // Only the button pressed shows as working; while it does, the others wait.
   const pressed = (key: Doing) => ({ busy: acting === key, disabled: pending && acting !== key })
 
@@ -289,7 +310,7 @@ export function Outputs({
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(error === null ? {} : { error })}
+              {...failure()}
               text={{
                 ...label,
                 pr: (n) => `${first.short} ${first.prefix}${n}`,
@@ -334,7 +355,7 @@ export function Outputs({
               ),
             }
           : {})}
-        {...(error === null ? {} : { error })}
+        {...failure(onPushHere)}
         text={label}
       />
     ) : null
@@ -388,7 +409,7 @@ export function Outputs({
                     {...pressed(doing.mergeHere)}
                     onClick={onMergeHere}
                   >
-                    {mergeHereLabel(task.here, first !== undefined)}
+                    {text.mergeHere(mergeHereLabel(task.here, first !== undefined))}
                   </Button>,
                 ]
               : []),
@@ -427,13 +448,7 @@ export function Outputs({
               {...(first === undefined && review !== undefined ? { review } : {})}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(first !== undefined
-                ? {}
-                : conflict !== null && onResolve !== undefined
-                  ? { error: conflicted }
-                  : error === null
-                    ? {}
-                    : { error })}
+              {...(first !== undefined ? {} : conflict !== null && onResolve !== undefined ? { error: conflicted } : failure(onPushBranch))}
               text={label}
             />
           )

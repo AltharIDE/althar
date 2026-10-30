@@ -1,0 +1,938 @@
+<style>
+.s-d-conflicts {
+  --bg: #0e0b09;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 45% 22%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 34%, #1b1612 0%, #14100d 48%, #0d0a08 100%);
+  --dot: rgba(255, 238, 220, 0.16);
+  --dots-o: 0.75;
+  --grain-o: 0.07;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 46%, rgba(6, 5, 4, 0) 58%, rgba(6, 5, 4, 0.5) 100%);
+  --under: radial-gradient(closest-side, rgba(66, 80, 255, 0.3), rgba(108, 64, 240, 0.12) 52%, rgba(108, 64, 240, 0) 100%);
+  --card: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-sh: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8), 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  --edge: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+  --edge-on: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  --edge-calm: 0.3;
+  --lit:
+    radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%),
+    linear-gradient(180deg, rgba(255, 250, 244, 0.025), rgba(255, 250, 244, 0) 40%);
+  --ink: #efebe4;
+  --ink2: #9d978d;
+  --ink3: #6c665e;
+  --code: #bdb6ab;
+  --code-dim: #6c665e;
+  --code-kw: #8c8579;
+  --chip: rgba(255, 244, 232, 0.045);
+  --chip-edge: rgba(255, 244, 232, 0.12);
+  --amber: #d8933f;
+  --amber-ink: #f0b46a;
+  --amber-band: rgba(216, 147, 63, 0.085);
+  --amber-tok: rgba(216, 147, 63, 0.2);
+  --keep: #9aa2ff;
+  --keep-ink: #dfe2ff;
+  --keep-band: rgba(86, 98, 255, 0.11);
+  --keep-tok: rgba(96, 108, 255, 0.22);
+  --keep-bar: linear-gradient(180deg, #8a93ff, #9a7cff);
+  --calm-band: rgba(255, 244, 232, 0.025);
+  --node: radial-gradient(circle at 50% 22%, #2c2620 0%, #1a1612 52%, #110e0b 100%);
+  --node-sh: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1cqw 2cqw -0.4cqw rgba(0, 0, 0, 0.8);
+  --node-ring: linear-gradient(180deg, rgba(255, 244, 232, 0.3), rgba(160, 168, 255, 0.16) 55%, rgba(122, 84, 246, 0.3));
+  --node-hl: linear-gradient(180deg, rgba(255, 248, 238, 0.09), rgba(255, 248, 238, 0));
+  --node-mark: #f3efe8;
+  --ring-a: rgba(255, 242, 228, 0.075);
+  --ring-b: rgba(255, 242, 228, 0.06);
+  --cap-b: #d9dcff;
+  --cap-warm: #eaa959;
+  --spin: #8a93ff;
+  --spin-track: rgba(255, 244, 232, 0.12);
+  --ok: #72c78b;
+  --fs-plan: max(8px, 1.5cqw);
+  --fs-mono: max(7px, 1.12cqw);
+  --fs-code: max(7px, 1.48cqw);
+  --pad-x: 1.7cqw;
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+[data-tone='light'] .s-d-conflicts {
+  --bg: #f4f2ec;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 45% 22%, rgba(255, 255, 255, 0.75), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 34%, #fcfbf8 0%, #f7f5f0 50%, #efece5 100%);
+  --dot: rgba(20, 20, 28, 0.16);
+  --dots-o: 0.7;
+  --grain-o: 0.022;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 46%, rgba(110, 88, 56, 0) 62%, rgba(110, 88, 56, 0.07) 100%);
+  --under: radial-gradient(closest-side, rgba(43, 59, 255, 0.12), rgba(122, 63, 240, 0.05) 52%, rgba(122, 63, 240, 0) 100%);
+  --card: linear-gradient(180deg, #ffffff 0%, #fefefd 55%, #fcfbf8 100%);
+  --card-sh: 0 0.08cqw 0.16cqw rgba(64, 46, 24, 0.07), 0 0.4cqw 0.8cqw -0.25cqw rgba(64, 46, 24, 0.08), 0 2cqw 4.4cqw -1.4cqw rgba(64, 46, 24, 0.17);
+  --edge: linear-gradient(180deg, rgba(20, 20, 28, 0.055), rgba(20, 20, 28, 0.1) 26%, rgba(20, 20, 28, 0.12));
+  --edge-on: linear-gradient(180deg, rgba(43, 59, 255, 0.55), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.1));
+  --edge-calm: 0.32;
+  --lit: radial-gradient(90% 60% at 50% 0%, rgba(43, 59, 255, 0.055), rgba(43, 59, 255, 0) 70%);
+  --ink: #141417;
+  --ink2: #45454c;
+  --ink3: #6f6f77;
+  --code: #36363d;
+  --code-dim: #8a8a92;
+  --code-kw: #6f6f77;
+  --chip: rgba(20, 20, 28, 0.03);
+  --chip-edge: rgba(20, 20, 28, 0.12);
+  --amber: #c9822f;
+  --amber-ink: #8f5512;
+  --amber-band: rgba(201, 130, 47, 0.085);
+  --amber-tok: rgba(201, 130, 47, 0.18);
+  --keep: #2b3bff;
+  --keep-ink: #1d2ad8;
+  --keep-band: rgba(43, 59, 255, 0.06);
+  --keep-tok: rgba(43, 59, 255, 0.11);
+  --keep-bar: linear-gradient(180deg, #2b3bff, #7a3ff0);
+  --calm-band: rgba(20, 20, 28, 0.022);
+  --node: radial-gradient(circle at 50% 22%, #ffffff 0%, #f9f8f4 58%, #efece5 100%);
+  --node-sh: 0 0.08cqw 0.18cqw rgba(64, 46, 24, 0.08), 0 1.2cqw 2.4cqw -0.8cqw rgba(64, 46, 24, 0.24);
+  --node-ring: linear-gradient(180deg, rgba(20, 20, 28, 0.08), rgba(43, 59, 255, 0.2) 55%, rgba(122, 63, 240, 0.34));
+  --node-hl: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+  --node-mark: #1c1c22;
+  --ring-a: rgba(20, 20, 28, 0.09);
+  --ring-b: rgba(20, 20, 28, 0.085);
+  --cap-b: #2b3bff;
+  --cap-warm: #b06f1c;
+  --spin: #2b3bff;
+  --spin-track: rgba(20, 20, 28, 0.1);
+  --ok: #2e8c46;
+}
+.s-d-conflicts * { box-sizing: border-box; }
+.s-d-conflicts .s-d-conflicts__ground { position: absolute; inset: 0; background: var(--ground); }
+.s-d-conflicts .s-d-conflicts__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--dot) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 46%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  mask-image: radial-gradient(ellipse 62% 70% at 50% 46%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  opacity: var(--dots-o);
+}
+.s-d-conflicts .s-d-conflicts__under {
+  position: absolute;
+  left: 2cqw;
+  top: 30cqw;
+  width: 51cqw;
+  height: 22cqw;
+  background: var(--under);
+  opacity: 0;
+  z-index: 1;
+  will-change: opacity;
+}
+
+/* Glass code cards: one version each of src/refunds/retry.ts. */
+.s-d-conflicts .s-d-conflicts__card {
+  position: absolute;
+  left: 4cqw;
+  width: 46.5cqw;
+  padding: 1.45cqw var(--pad-x) 1.4cqw;
+  border-radius: 1.5cqw;
+  background: var(--card);
+  box-shadow: var(--card-sh);
+  display: flex;
+  flex-direction: column;
+  will-change: transform, opacity;
+}
+.s-d-conflicts .s-d-conflicts__card--main { top: 12.2cqw; z-index: 2; transform-origin: 50% 0%; }
+.s-d-conflicts .s-d-conflicts__card--task { top: 35.6cqw; z-index: 3; }
+.s-d-conflicts .s-d-conflicts__card::before,
+.s-d-conflicts .s-d-conflicts__card::after,
+.s-d-conflicts .s-d-conflicts__node::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-d-conflicts .s-d-conflicts__card::before { background: var(--edge); }
+.s-d-conflicts .s-d-conflicts__card::after {
+  background: var(--edge-on);
+  opacity: 0;
+  transition: opacity 0.8s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"]::after { opacity: 1; }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"]::after { opacity: var(--edge-calm); }
+.s-d-conflicts .s-d-conflicts__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--lit);
+  opacity: 0;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__lit { opacity: 1; }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__lit { opacity: 0.35; }
+.s-d-conflicts .s-d-conflicts__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: max(4px, 0.8cqw);
+  height: max(12px, 2.3cqw);
+  white-space: nowrap;
+}
+.s-d-conflicts .s-d-conflicts__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  height: 100%;
+  padding: 0 0.75em 0 0.6em;
+  border-radius: 999px;
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+  font: 500 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.s-d-conflicts .s-d-conflicts__chip svg { width: 1.15em; height: 1.15em; display: block; fill: none; stroke: var(--ink2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-conflicts .s-d-conflicts__after {
+  font-size: max(7.5px, 1.3cqw);
+  color: var(--ink3);
+  opacity: 0;
+  transform: translateX(-0.4em);
+  transition: opacity 0.6s ease, transform 0.8s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__after,
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__after { opacity: 1; transform: none; }
+.s-d-conflicts .s-d-conflicts__path {
+  margin-left: auto;
+  font: 400 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.01em;
+  color: var(--ink3);
+}
+.s-d-conflicts .s-d-conflicts__path i { font-style: normal; }
+.s-d-conflicts .s-d-conflicts__path b { font-weight: 400; color: var(--ink2); }
+.s-d-conflicts .s-d-conflicts__code {
+  margin-top: 1.35cqw;
+  font: 400 var(--fs-code)/1.66 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0;
+  color: var(--code);
+}
+.s-d-conflicts .s-d-conflicts__ln {
+  position: relative;
+  display: flex;
+  white-space: pre;
+}
+.s-d-conflicts .s-d-conflicts__ln > b {
+  position: relative;
+  flex: none;
+  width: 3ch;
+  font-weight: 400;
+  color: var(--code-dim);
+  transition: color 0.6s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__ln > span { position: relative; }
+.s-d-conflicts .s-d-conflicts__ln i { font-style: normal; color: var(--code-kw); }
+.s-d-conflicts .s-d-conflicts__ln--x::before,
+.s-d-conflicts .s-d-conflicts__ln--x::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  transition: background-color 0.6s var(--ease), opacity 0.6s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__ln--x::before {
+  left: calc(-1 * var(--pad-x));
+  right: calc(-1 * var(--pad-x));
+  background-color: var(--amber-band);
+}
+.s-d-conflicts .s-d-conflicts__ln--x::after {
+  left: calc(-1 * var(--pad-x));
+  width: 2px;
+  background: var(--amber);
+}
+.s-d-conflicts .s-d-conflicts__ln--x > b { color: var(--amber); }
+.s-d-conflicts .s-d-conflicts__ln--x > span { color: var(--ink); }
+.s-d-conflicts .s-d-conflicts__ln em {
+  font-style: normal;
+  border-radius: 0.25em;
+  padding: 0 0.12em;
+  margin: 0 -0.12em;
+  background-color: var(--amber-tok);
+  color: var(--amber-ink);
+  transition: background-color 0.6s var(--ease), color 0.6s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__ln--x::before { background-color: var(--keep-band); }
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__ln--x::after,
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__ln--x::after { background: var(--keep-bar); }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__ln--x::after { opacity: 0.55; }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__ln--x::before { background-color: var(--calm-band); }
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__ln--x > b { color: var(--keep); }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__ln--x > b { color: var(--code-dim); }
+.s-d-conflicts .s-d-conflicts__card[data-st="keep"] .s-d-conflicts__ln em { background-color: var(--keep-tok); color: var(--keep-ink); }
+.s-d-conflicts .s-d-conflicts__card[data-st="calm"] .s-d-conflicts__ln em { background-color: transparent; color: var(--ink); }
+
+/* The lead. */
+.s-d-conflicts .s-d-conflicts__ring {
+  position: absolute;
+  left: 67.5cqw;
+  top: 31.25cqw;
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  -webkit-mask: radial-gradient(closest-side, transparent 60%, #000 85%, rgba(0, 0, 0, 0.35) 100%);
+  mask: radial-gradient(closest-side, transparent 60%, #000 85%, rgba(0, 0, 0, 0.35) 100%);
+}
+.s-d-conflicts .s-d-conflicts__ring--a {
+  width: 11cqw;
+  height: 11cqw;
+  margin: -5.5cqw 0 0 -5.5cqw;
+  border: 1px solid var(--ring-a);
+  -webkit-mask: none;
+  mask: none;
+}
+.s-d-conflicts .s-d-conflicts__ring--b {
+  width: 17cqw;
+  height: 17cqw;
+  margin: -8.5cqw 0 0 -8.5cqw;
+  border: 1px dashed var(--ring-b);
+  -webkit-mask: none;
+  mask: none;
+  will-change: transform;
+}
+.s-d-conflicts .s-d-conflicts__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  pointer-events: none;
+}
+.s-d-conflicts .s-d-conflicts__node {
+  position: absolute;
+  left: 67.5cqw;
+  top: 31.25cqw;
+  width: 6.8cqw;
+  height: 6.8cqw;
+  margin: -3.4cqw 0 0 -3.4cqw;
+  border-radius: 50%;
+  background: var(--node);
+  box-shadow: var(--node-sh);
+  display: grid;
+  place-items: center;
+  z-index: 5;
+}
+.s-d-conflicts .s-d-conflicts__node::before { background: var(--node-ring); }
+.s-d-conflicts .s-d-conflicts__node::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 1px;
+  height: 30%;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  background: var(--node-hl);
+}
+.s-d-conflicts .s-d-conflicts__node svg { position: relative; width: 2.9cqw; height: 2.9cqw; display: block; fill: var(--node-mark); }
+.s-d-conflicts .s-d-conflicts__label {
+  position: absolute;
+  left: 72.7cqw;
+  top: 31.25cqw;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35cqw;
+  z-index: 5;
+}
+.s-d-conflicts .s-d-conflicts__agent {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  font-size: max(9.5px, 1.75cqw);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.s-d-conflicts .s-d-conflicts__agent span {
+  font: 500 max(7px, 1.1cqw)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  color: var(--ink3);
+}
+.s-d-conflicts .s-d-conflicts__caps,
+.s-d-conflicts .s-d-conflicts__checks {
+  position: relative;
+  width: 24cqw;
+  height: max(10px, 1.8cqw);
+  font-size: max(8px, 1.4cqw);
+  line-height: max(10px, 1.8cqw);
+  color: var(--ink2);
+}
+.s-d-conflicts .s-d-conflicts__checks {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 0.55cqw;
+}
+.s-d-conflicts .s-d-conflicts__cap,
+.s-d-conflicts .s-d-conflicts__ck {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(0.4em);
+  transition: opacity 0.5s ease, transform 0.8s var(--ease);
+}
+.s-d-conflicts .s-d-conflicts__cap b { font-weight: 500; color: var(--cap-b); }
+.s-d-conflicts .s-d-conflicts__cap--0 b { color: var(--cap-warm); }
+.s-d-conflicts .s-d-conflicts__cap.is-on,
+.s-d-conflicts .s-d-conflicts__ck.is-on { opacity: 1; transform: none; }
+.s-d-conflicts .s-d-conflicts__ck svg { width: 1em; height: 1em; display: block; flex: none; }
+.s-d-conflicts .s-d-conflicts__ck--run { color: var(--ink2); }
+.s-d-conflicts .s-d-conflicts__ck--run circle { fill: none; stroke: var(--spin-track); stroke-width: 2.6; }
+.s-d-conflicts .s-d-conflicts__ck--run path { fill: none; stroke: var(--spin); stroke-width: 2.6; stroke-linecap: round; }
+.s-d-conflicts .s-d-conflicts__ck--ok { color: var(--ok); font-weight: 500; }
+.s-d-conflicts .s-d-conflicts__ck--ok path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-conflicts .s-d-conflicts__grain {
+  position: absolute;
+  inset: 0;
+  background-size: 64px 64px;
+  opacity: var(--grain-o);
+  mix-blend-mode: overlay;
+  z-index: 6;
+  pointer-events: none;
+}
+.s-d-conflicts .s-d-conflicts__vig {
+  position: absolute;
+  inset: 0;
+  background: var(--vig);
+  z-index: 7;
+  pointer-events: none;
+}
+@container (max-width: 520px) {
+  .s-d-conflicts { --pad-x: 1.35cqw; }
+  .s-d-conflicts .s-d-conflicts__card { padding-top: 1.35cqw; padding-bottom: 1.25cqw; }
+  .s-d-conflicts .s-d-conflicts__path i { display: none; }
+  .s-d-conflicts .s-d-conflicts__ln > b { width: 2.6ch; }
+}
+</style>
+<div class="s-d-conflicts" aria-hidden="true">
+  <div class="s-d-conflicts__ground"></div>
+  <div class="s-d-conflicts__dots"></div>
+  <div class="s-d-conflicts__under"></div>
+  <div class="s-d-conflicts__ring s-d-conflicts__ring--a"></div>
+  <div class="s-d-conflicts__ring s-d-conflicts__ring--b"></div>
+  <div class="s-d-conflicts__card s-d-conflicts__card--main" data-st="conf">
+    <div class="s-d-conflicts__lit"></div>
+    <div class="s-d-conflicts__head">
+      <span class="s-d-conflicts__chip"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-12 3.5-12 7.6"/></svg>main</span>
+      <span class="s-d-conflicts__path"><i>src/refunds/</i><b>retry.ts</b></span>
+    </div>
+    <div class="s-d-conflicts__code">
+      <div class="s-d-conflicts__ln"><b>12</b><span><i>const</i> policy =</span></div>
+      <div class="s-d-conflicts__ln s-d-conflicts__ln--x"><b>13</b><span>  retry(<em>3</em>, { backoff: <em>'2s'</em> })</span></div>
+      <div class="s-d-conflicts__ln"><b>14</b><span><i>export default</i> policy</span></div>
+    </div>
+  </div>
+  <div class="s-d-conflicts__card s-d-conflicts__card--task" data-st="conf">
+    <div class="s-d-conflicts__lit"></div>
+    <div class="s-d-conflicts__head">
+      <span class="s-d-conflicts__chip"><svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-12 3.5-12 7.6"/></svg>task 432</span>
+      <span class="s-d-conflicts__after">on the new main</span>
+      <span class="s-d-conflicts__path"><i>src/refunds/</i><b>retry.ts</b></span>
+    </div>
+    <div class="s-d-conflicts__code">
+      <div class="s-d-conflicts__ln"><b>12</b><span><i>const</i> policy =</span></div>
+      <div class="s-d-conflicts__ln s-d-conflicts__ln--x"><b>13</b><span>  retry(<em>5</em>, { backoff: <em>retryAfter</em> })</span></div>
+      <div class="s-d-conflicts__ln"><b>14</b><span><i>export default</i> policy</span></div>
+    </div>
+  </div>
+  <canvas class="s-d-conflicts__fx"></canvas>
+  <div class="s-d-conflicts__node"><svg class="s-d-conflicts__mk" viewBox="0 0 24 24"><path/></svg></div>
+  <div class="s-d-conflicts__label">
+    <span class="s-d-conflicts__agent">Opus 5.5<span>Lead</span></span>
+    <span class="s-d-conflicts__caps">
+      <span class="s-d-conflicts__cap s-d-conflicts__cap--0 is-on">Both changed <b>line 13</b></span>
+      <span class="s-d-conflicts__cap s-d-conflicts__cap--1">Settling <b>line 13</b></span>
+      <span class="s-d-conflicts__cap s-d-conflicts__cap--2">Kept the task’s change</span>
+      <span class="s-d-conflicts__cap s-d-conflicts__cap--3">Settled by its lead</span>
+      <span class="s-d-conflicts__checks">
+        <span class="s-d-conflicts__ck s-d-conflicts__ck--run"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 018.5 8.5"/></svg>Running checks</span>
+        <span class="s-d-conflicts__ck s-d-conflicts__ck--ok"><svg viewBox="0 0 24 24"><path d="M5 12.6l4.4 4.4L19 7.4"/></svg>Checks passed</span>
+      </span>
+    </span>
+  </div>
+  <div class="s-d-conflicts__grain"></div>
+  <div class="s-d-conflicts__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-d-conflicts')) return
+  const MARK = 'M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z'
+  root.querySelectorAll('.s-d-conflicts__mk path').forEach((p) => p.setAttribute('d', MARK))
+
+  // Tone, read once: the light is the same cobalt-to-violet on both, deeper and softer on paper.
+  const toneEl = root.closest('[data-tone]')
+  const LIGHT = !!toneEl && toneEl.dataset.tone === 'light'
+  const K = LIGHT
+    ? { comp: 'source-over', ga: 0.5, wide: 0.07, line: 0.95, dormant: 'rgba(20,20,28,0.13)', port: 'rgba(20,20,28,0.32)', rim: 'rgba(43,59,255,0.9)',
+        route: ['rgb(70,84,255)', 'rgb(43,59,255)', 'rgb(122,63,240)'], warm: 'rgba(201,130,47,',
+        cob: [43, 59, 255], vio: [122, 63, 240], hot: [34, 46, 236], hotCore: 0.34,
+        ramp: [[150, 112, 246], [43, 59, 255], [66, 82, 255]] }
+    : { comp: 'lighter', ga: 1, wide: 0.13, line: 0.92, dormant: 'rgba(255,242,228,0.085)', port: 'rgba(255,242,228,0.3)', rim: '#c9ceff',
+        route: ['rgb(176,184,255)', 'rgb(112,122,255)', 'rgb(128,96,250)'], warm: 'rgba(216,147,63,',
+        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255], hotCore: 0.12,
+        ramp: [[128, 76, 244], [78, 96, 255], [226, 230, 255]] }
+
+  const Q = (s) => root.querySelector(s)
+  const main = Q('.s-d-conflicts__card--main')
+  const task = Q('.s-d-conflicts__card--task')
+  const lnMain = main.querySelector('.s-d-conflicts__ln--x')
+  const lnTask = task.querySelector('.s-d-conflicts__ln--x')
+  const nodeEl = Q('.s-d-conflicts__node')
+  const ringB = Q('.s-d-conflicts__ring--b')
+  const under = Q('.s-d-conflicts__under')
+  const caps = Array.from(root.querySelectorAll('.s-d-conflicts__cap'))
+  const ckRun = Q('.s-d-conflicts__ck--run')
+  const ckOk = Q('.s-d-conflicts__ck--ok')
+  const spin = ckRun.querySelector('svg')
+  const cv = Q('.s-d-conflicts__fx')
+  const ctx = cv.getContext('2d')
+
+  // Film grain, generated once (no external images).
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    Q('.s-d-conflicts__grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  function sprite(c3, core) {
+    const [r, g, b] = c3
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(K.cob, 0.18)
+  const SP_VIO = sprite(K.vio, 0.16)
+  const SP_HOT = sprite(K.hot, K.hotCore)
+
+  const NB = 30
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    const [a, b2, c] = K.ramp
+    const f = t < 0.62 ? t / 0.62 : (t - 0.62) / 0.38
+    const p = t < 0.62 ? a : b2, q = t < 0.62 ? b2 : c
+    BEAM_COL.push(`rgb(${(p[0] + (q[0] - p[0]) * f) | 0},${(p[1] + (q[1] - p[1]) * f) | 0},${(p[2] + (q[2] - p[2]) * f) | 0})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const seg = (t, a, b) => clamp((t - a) / (b - a))
+  const bell = (t, at, w) => Math.exp(-Math.pow((t - at) / w, 2))
+
+  // Timeline, in seconds within one loop.
+  const P = 10
+  const IN0 = 0.95, IN1 = 1.85       // both versions run up to the lead
+  const TH1 = 3.35                   // the lead settles it
+  const OUT0 = TH1, OUT1 = 3.95      // and sends it back down both lines
+  const MG0 = 4.0, MG1 = 4.95        // the two become one
+  const CK0 = 5.0, OK = 6.7          // checks run again, and pass
+  const RS0 = 8.95, RS1 = 9.9        // reset
+  const SPLIT = 0.42                 // where the lines meet the node, either side of its left
+
+  let W = 0, H = 0, U = 1, dpr = 1
+  const node = { x: 0, y: 0, r: 0 }
+  const T = { x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 }
+  let mainTop = 0, taskTop = 0, mergeTop = 0, portDy = 0, peek = 0
+  let sPort = 0
+  const M = 90
+  const mk = () => ({ xs: new Float32Array(M), ys: new Float32Array(M), len: 0, grad: null })
+  const rtMain = mk(), rtTask = mk(), rtOne = mk()
+  const tmpX = new Float32Array(65), tmpY = new Float32Array(65), tmpL = new Float32Array(65)
+
+  function bez(rt, x0, y0, x1, y1, x2, y2, x3, y3) {
+    let L = 0
+    for (let i = 0; i <= 64; i++) {
+      const t = i / 64, m = 1 - t
+      const a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t
+      tmpX[i] = a * x0 + b * x1 + c * x2 + d * x3
+      tmpY[i] = a * y0 + b * y1 + c * y2 + d * y3
+      if (i) L += Math.hypot(tmpX[i] - tmpX[i - 1], tmpY[i] - tmpY[i - 1])
+      tmpL[i] = L
+    }
+    rt.len = L
+    let s = 0
+    for (let i = 0; i < M; i++) {
+      const want = (i / (M - 1)) * L
+      while (s < 63 && tmpL[s + 1] < want) s++
+      const span = tmpL[s + 1] - tmpL[s] || 1
+      const f = Math.min(1, Math.max(0, (want - tmpL[s]) / span))
+      rt.xs[i] = tmpX[s] + (tmpX[s + 1] - tmpX[s]) * f
+      rt.ys[i] = tmpY[s] + (tmpY[s + 1] - tmpY[s]) * f
+    }
+    const gr = ctx.createLinearGradient(x0, y0, x3, y3)
+    gr.addColorStop(0, K.route[2])
+    gr.addColorStop(0.5, K.route[1])
+    gr.addColorStop(1, K.route[0])
+    rt.grad = gr
+  }
+  // From a card's conflicting line, out of its right edge, into the node at angle a.
+  function wire(rt, x0, y0, a) {
+    const x3 = node.x + Math.cos(a) * (node.r + 0.5), y3 = node.y + Math.sin(a) * (node.r + 0.5)
+    const d = Math.hypot(x3 - x0, y3 - y0)
+    bez(rt, x0, y0, x0 + (x3 - x0) * 0.5, y0, x3 + Math.cos(a) * d * 0.42, y3 + Math.sin(a) * d * 0.42, x3, y3)
+  }
+
+  function measure() {
+    W = root.clientWidth; H = root.clientHeight; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    node.x = nodeEl.offsetLeft + nodeEl.offsetWidth / 2
+    node.y = nodeEl.offsetTop + nodeEl.offsetHeight / 2
+    node.r = nodeEl.offsetWidth / 2
+    mainTop = main.offsetTop
+    taskTop = task.offsetTop
+    // Settled, the task's card rests on the new main: main tucks in behind, its header showing.
+    const head = main.querySelector('.s-d-conflicts__head')
+    peek = head.offsetTop + head.offsetHeight + U * 0.7
+    mergeTop = Math.round(node.y - task.offsetHeight / 2 + peek / 2)
+    under.style.top = (mergeTop + task.offsetHeight - under.offsetHeight / 2).toFixed(1) + 'px'
+    portDy = lnTask.offsetTop + lnTask.offsetHeight / 2
+    const xr = task.offsetLeft + task.offsetWidth
+    wire(rtMain, xr, mainTop + lnMain.offsetTop + lnMain.offsetHeight / 2, Math.PI + SPLIT)
+    wire(rtTask, xr, taskTop + portDy, Math.PI - SPLIT)
+    wire(rtOne, xr, mergeTop + portDy, Math.PI)
+    T.x = task.offsetLeft + 0.5
+    T.y = mergeTop + 0.5
+    T.w = task.offsetWidth - 1
+    T.h = task.offsetHeight - 1
+    T.r = Math.max(1, (parseFloat(getComputedStyle(task).borderTopLeftRadius) || 10) - 0.5)
+    T.per = 2 * (T.w - 2 * T.r) + 2 * (T.h - 2 * T.r) + 2 * Math.PI * T.r
+    sPort = (T.w / 2 - T.r) + (Math.PI * T.r) / 2 + (portDy - T.r)
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  function rrPoint(R, s) {
+    const { x, y, w, h, r } = R
+    s %= R.per
+    if (s < 0) s += R.per
+    const q = (Math.PI * r) / 2
+    let L = w / 2 - r
+    if (s < L) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= L
+    if (s < q) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= L
+    if (s < q) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = w - 2 * r
+    if (s < L) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= L
+    if (s < q) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= L
+    if (s < q) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q
+    PT[0] = x + r + s; PT[1] = y
+  }
+  function routePoint(rt, u) {
+    const f = clamp(u) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = rt.xs[i] + (rt.xs[i + 1] - rt.xs[i]) * t
+    PT[1] = rt.ys[i] + (rt.ys[i + 1] - rt.ys[i]) * t
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+  function pathRoute(rt, u0, u1) {
+    const i0 = Math.ceil(u0 * (M - 1)), i1 = Math.floor(u1 * (M - 1))
+    ctx.beginPath()
+    routePoint(rt, u0)
+    ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
+    routePoint(rt, u1)
+    ctx.lineTo(PT[0], PT[1])
+  }
+  function dormant(rt, a) {
+    if (a <= 0.004) return
+    pathRoute(rt, 0, 1)
+    ctx.globalAlpha = a
+    ctx.lineWidth = 1
+    ctx.strokeStyle = K.dormant
+    ctx.stroke()
+  }
+  function litRoute(rt, u0, u1, a) {
+    if (a <= 0.004 || u1 - u0 < 0.002) return
+    pathRoute(rt, u0, u1)
+    ctx.strokeStyle = rt.grad
+    ctx.globalCompositeOperation = K.comp
+    ctx.globalAlpha = a * K.wide
+    ctx.lineWidth = Math.max(3, U * 0.6)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * K.line
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+  function packet(x, y, a) {
+    if (a <= 0.004) return
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_VIO, x, y, U * 6, 0.2 * a * K.ga)
+    glow(SP_COB, x, y, U * 3.8, 0.55 * a * K.ga)
+    glow(SP_HOT, x, y, U * 1.05, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  function flash(x, y, f, big) {
+    if (f <= 0.01) return
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_COB, x, y, U * big, f * 0.5 * K.ga)
+    glow(SP_HOT, x, y, U * 1.3, f)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  function port(x, y, a) {
+    if (a <= 0.01) return
+    ctx.globalAlpha = a
+    ctx.fillStyle = K.port
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, U * 0.22), 0, Math.PI * 2); ctx.fill()
+  }
+  function beam(R, s, len, a) {
+    if (a <= 0.004 || len < 1) return
+    const sg = len / NB
+    ctx.lineWidth = LIGHT ? 1.6 : 1.5
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const s0 = s - len + i * sg
+      rrPoint(R, s0)
+      const ax = PT[0], ay = PT[1]
+      rrPoint(R, s0 + sg + 0.35)
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1])
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = K.comp
+    for (let i = 0; i < 12; i++) {
+      const t = 0.2 + (i / 11) * 0.8
+      rrPoint(R, s - len * (1 - t))
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 2, a * 0.2 * t * t * K.ga)
+    }
+    rrPoint(R, s)
+    glow(SP_VIO, PT[0], PT[1], U * 6, a * 0.16 * K.ga)
+    glow(SP_COB, PT[0], PT[1], U * 3.2, a * 0.42 * K.ga)
+    glow(SP_HOT, PT[0], PT[1], U * 0.9, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  // A comet round the node's rim: head at angle h, trailing len radians.
+  function orbit(h, len, a) {
+    if (a <= 0.004 || len <= 0.01) return
+    const r = node.r + Math.max(2, U * 0.32)
+    ctx.lineWidth = LIGHT ? 1.6 : 1.5
+    for (let i = 0; i < NB; i++) {
+      const a0 = h - len + (i / NB) * len
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.arc(node.x, node.y, r, a0, a0 + len / NB + 0.01)
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = K.comp
+    const hx = node.x + Math.cos(h) * r, hy = node.y + Math.sin(h) * r
+    glow(SP_VIO, hx, hy, U * 5, a * 0.16 * K.ga)
+    glow(SP_COB, hx, hy, U * 2.8, a * 0.42 * K.ga)
+    glow(SP_HOT, hx, hy, U * 0.85, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  const shown = { cap: -1, ck: '', tst: '', mY: 1e9, mA: -1, tY: 1e9, ring: -1, spin: -1, under: -1 }
+
+  function render(t) {
+    if (!W) return
+    // ---------- DOM ----------
+    const mg = io(seg(t, MG0, MG1)) * (1 - io(seg(t, RS0, RS1)))
+    const mY = (mergeTop - peek - mainTop) * mg
+    const tY = (mergeTop - taskTop) * mg
+    const mA = 1 - 0.45 * mg
+    if (Math.abs(mY - shown.mY) > 0.05 || Math.abs(mA - shown.mA) > 0.004) {
+      main.style.transform = `translate3d(0,${mY.toFixed(2)}px,0) scale(${(1 - 0.05 * mg).toFixed(4)})`
+      main.style.opacity = mA.toFixed(3)
+      shown.mY = mY; shown.mA = mA
+    }
+    if (Math.abs(tY - shown.tY) > 0.05) { task.style.transform = `translate3d(0,${tY.toFixed(2)}px,0)`; shown.tY = tY }
+    const tst = t < OUT1 || t >= RS0 + 0.3 ? 'conf' : t < OK ? 'keep' : 'calm'
+    if (tst !== shown.tst) { task.dataset.st = tst; shown.tst = tst }
+    const cap = t < IN1 ? 0 : t < MG0 + 0.35 ? 1 : t < OK ? 2 : t < RS0 + 0.3 ? 3 : 0
+    if (cap !== shown.cap) { caps.forEach((c, i) => c.classList.toggle('is-on', i === cap)); shown.cap = cap }
+    const ck = t >= CK0 && t < OK ? 'run' : t >= OK && t < RS0 + 0.3 ? 'ok' : ''
+    if (ck !== shown.ck) { ckRun.classList.toggle('is-on', ck === 'run'); ckOk.classList.toggle('is-on', ck === 'ok'); shown.ck = ck }
+    if (ck === 'run') { const sp = ((t - CK0) * 400) % 360; spin.style.transform = `rotate(${sp.toFixed(1)}deg)`; shown.spin = sp }
+    const ring = (t * 6) % 360
+    if (Math.abs(ring - shown.ring) > 0.05) { ringB.style.transform = `rotate(${ring.toFixed(2)}deg)`; shown.ring = ring }
+    const ug = io(seg(t, MG1 - 0.3, MG1 + 0.6)) * (1 - 0.55 * io(seg(t, OK, OK + 1))) * (1 - io(seg(t, RS0, RS0 + 0.5)))
+    if (Math.abs(ug - shown.under) > 0.004) { under.style.opacity = ug.toFixed(3); shown.under = ug }
+
+    // ---------- Light ----------
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.lineCap = 'butt'
+
+    // The two lines while there are two versions; one line once they are one.
+    const twoA = 1 - seg(t, MG0 - 0.05, MG0 + 0.35) + seg(t, RS1 - 0.35, RS1)
+    const oneA = seg(t, MG1 - 0.35, MG1) * (1 - seg(t, RS0, RS0 + 0.3))
+    dormant(rtMain, clamp(twoA))
+    dormant(rtTask, clamp(twoA))
+    dormant(rtOne, oneA)
+    const xr = rtMain.xs[0]
+    port(xr, rtMain.ys[0], clamp(twoA))
+    port(xr, rtTask.ys[0], clamp(twoA))
+    port(xr, rtOne.ys[0], oneA)
+
+    // Both versions run up to the lead, side by side, and meet at the node.
+    const inU = iosine(seg(t, IN0, IN1))
+    const inLit = (t >= IN0 ? 1 : 0) * (1 - 0.35 * seg(t, IN1 + 0.2, TH1)) * clamp(twoA)
+    if (t < OUT0) {
+      litRoute(rtMain, 0, inU, inLit)
+      litRoute(rtTask, 0, inU, inLit)
+    }
+    if (t >= IN0 && t < IN1) {
+      const a = clamp((t - IN0) / 0.1)
+      routePoint(rtMain, inU); packet(PT[0], PT[1], a)
+      routePoint(rtTask, inU); packet(PT[0], PT[1], a)
+    }
+    const inF = t > IN1 - 0.12 ? bell(t, IN1, 0.16) : 0
+
+    // The lead turns it over: a comet round its rim, the halo breathing.
+    const thA = seg(t, IN1, IN1 + 0.15) * (1 - seg(t, TH1 - 0.1, TH1 + 0.05))
+    const thU = iosine(seg(t, IN1, TH1))
+    const head = Math.PI + thU * Math.PI * 2 * 1.25
+    const tail = Math.min(Math.PI * 0.9, 0.2 + thU * Math.PI * 3)
+
+    // It sends one answer back down both lines.
+    const outU = 1 - iosine(seg(t, OUT0, OUT1))
+    if (t >= OUT0 && t < MG0 + 0.4) {
+      const la = clamp(twoA)
+      litRoute(rtMain, outU, 1, la)
+      litRoute(rtTask, outU, 1, la)
+      if (t < OUT1) {
+        routePoint(rtMain, outU); packet(PT[0], PT[1], 1)
+        routePoint(rtTask, outU); packet(PT[0], PT[1], 1)
+      }
+    }
+    const hitF = t > OUT1 - 0.12 ? bell(t, OUT1, 0.15) : 0
+    flash(xr, rtMain.ys[0], hitF, 4.5)
+    flash(xr, rtTask.ys[0], hitF, 4.5)
+
+    // One line, one card: lit while the checks run, then calm.
+    const oneLit = oneA * (1 - 0.5 * io(seg(t, OK, OK + 0.9)))
+    litRoute(rtOne, 0, 1, oneLit)
+
+    // Halo round the node.
+    const halo = 0.18 + 0.32 * inF + 0.22 * thA * (0.75 + 0.25 * Math.sin((t - IN1) * 7)) + 0.12 * oneLit
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_VIO, node.x, node.y, U * 13, halo * 0.45 * K.ga)
+    glow(SP_COB, node.x, node.y, U * 7.5, halo * 0.9 * K.ga)
+    ctx.globalCompositeOperation = 'source-over'
+    orbit(head, tail, thA)
+    if (inF > 0.01) {
+      for (const s of [-1, 1]) {
+        const a = Math.PI + s * SPLIT
+        flash(node.x + Math.cos(a) * node.r, node.y + Math.sin(a) * node.r, inF, 4)
+      }
+    }
+    // The rim stays faintly lit where the one line meets it.
+    if (oneLit > 0.01) {
+      ctx.globalCompositeOperation = K.comp
+      glow(SP_COB, node.x - node.r, node.y, U * 1.6, 0.35 * oneLit * K.ga)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+
+    // While the checks run, a beam laps the settled card once, then rests.
+    if (t > MG1 && t < OK + 0.35) {
+      const k = seg(t, MG1, OK)
+      const lenFull = Math.min(T.per * 0.3, U * 21)
+      const sHead = sPort + T.per * iosine(k) * 0.999
+      const len = Math.min(lenFull, T.per * iosine(k) * 0.9) * (1 - seg(t, OK, OK + 0.32))
+      beam(T, sHead, len, seg(t, MG1, MG1 + 0.15))
+    }
+    // The moment it passes: a soft flash where the line meets the card.
+    const okF = t > OK - 0.1 ? bell(t, OK, 0.22) : 0
+    flash(xr, rtOne.ys[0], okF * 0.8, 5)
+    ctx.globalAlpha = 1
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  const STILL = OK + 1.1
+  let Tm = 0.2
+  let raf = 0, last = 0, onScreen = false, ready = false
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    Tm = (Tm + dt) % P
+    render(Tm)
+    raf = requestAnimationFrame(frame)
+  }
+  function invalidate() {
+    shown.mY = shown.tY = 1e9
+    shown.mA = shown.ring = shown.under = -1
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) { invalidate(); render(STILL) }
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) { invalidate(); render(mq.matches ? STILL : Tm) }
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>
