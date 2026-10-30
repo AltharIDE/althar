@@ -81,6 +81,12 @@ const cantOf = (error: unknown) => {
   return [said._tag, said.why, said.detail]
 }
 
+/** A merge refused for what's in the way in a checkout: why, where, into which branch, and the files. */
+const inTheWayOf = (error: unknown) => {
+  const said = error as { readonly why?: string; readonly detail?: string; readonly into?: string; readonly files?: ReadonlyArray<string> }
+  return [said.why, said.detail, said.into, said.files]
+}
+
 const stateOf = (taskId: string) =>
   Effect.map(
     Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`),
@@ -384,7 +390,7 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('merges nothing when it conflicts, or the checkout has changes not committed, or the branch moved since it was seen', () =>
+  it.live('merges nothing when it conflicts, or the branch moved since it was seen', () =>
     Effect.gen(function* () {
       const root = repository()
       const { task, worktrees } = yield* taskIn([root], root)
@@ -403,13 +409,77 @@ describe('merging a task here', () => {
       // Asked without the head seen in it, a repository hasn't been seen.
       const unseen = yield* Effect.flip(mergeHere(task.taskId, []))
       assert.strictEqual(cantOf(unseen)[1], 'changed')
-
-      const clean = commit(worktree, 'retry.ts', 'retry\n')
-      writeFileSync(join(root, 'README.md'), '# Not yet\n')
-      const busy = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head: clean }]))
-      assert.deepStrictEqual(cantOf(busy).slice(1), ['busy', realpathSync(root)])
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('moves a checkout past changes to files the merge leaves alone, as git would, and keeps them as they were', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      commit(root, 'notes.md', 'notes\n')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const head = commit(worktree, 'app.ts', 'app, retried\n')
+      // The person's own work, in files the task didn't change: one edited, one staged, one git doesn't track.
+      writeFileSync(join(root, 'notes.md'), 'notes, half written\n')
+      writeFileSync(join(root, 'README.md'), '# Meridian, renamed\n')
+      git(root, 'add', 'README.md')
+      writeFileSync(join(root, 'scratch.txt'), 'scratch\n')
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), git(worktree, 'rev-parse', 'HEAD'))
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, retried\n')
+      assert.strictEqual(readFileSync(join(root, 'notes.md'), 'utf8'), 'notes, half written\n')
+      assert.strictEqual(readFileSync(join(root, 'scratch.txt'), 'utf8'), 'scratch\n')
+      assert.strictEqual(git(root, 'diff', '--cached', '--name-only'), 'README.md')
+      assert.strictEqual(git(root, 'diff', '--name-only'), 'notes.md')
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where the checkout has changes not committed to a file the merge changes, staged or not, and says which', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const slug = worktrees[0]?.slug ?? ''
+      const head = commit(worktree, 'app.ts', 'app, retried\n')
+      const tip = git(root, 'rev-parse', 'main')
+      writeFileSync(join(root, 'app.ts'), 'app, mine\n')
+      writeFileSync(join(root, 'README.md'), '# Not yet\n')
+      const busy = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head }]))
+      assert.deepStrictEqual(inTheWayOf(busy), ['busy', realpathSync(root), 'main', ['app.ts']])
+      git(root, 'add', 'app.ts')
+      const staged = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head }]))
+      assert.deepStrictEqual(inTheWayOf(staged), ['busy', realpathSync(root), 'main', ['app.ts']])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, mine\n')
+      assert.strictEqual(readFileSync(join(root, 'README.md'), 'utf8'), '# Not yet\n')
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where a file not committed since it was planned is one the merge changes, and puts nothing back wrong', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      const { worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'app.ts', 'app, retried\n')
+      const tip = git(root, 'rev-parse', 'main')
+      writeFileSync(join(root, 'README.md'), '# Not yet\n')
+      const plan = yield* planMerge(root, 'main', head, 'Merge')
+      if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+      writeFileSync(join(root, 'app.ts'), 'app, mine\n')
+      assert.deepStrictEqual((yield* applyMerges([{ root, branch: 'main', plan }]))?.problem, {
+        kind: 'busy',
+        checkout: realpathSync(root),
+        files: ['app.ts'],
+        untracked: [],
+      })
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, mine\n')
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -619,7 +689,7 @@ describe('merging a task here', () => {
       mkdirSync(join(roots[0] ?? '', 'dist'))
       writeFileSync(join(roots[0] ?? '', 'dist', 'new.ts'), 'built\n')
       const refused = yield* Effect.flip(mergeHere(task.taskId, heads))
-      assert.deepStrictEqual(cantOf(refused).slice(1), ['untracked', `new.ts in ${roots[1] ?? ''}`])
+      assert.deepStrictEqual(inTheWayOf(refused), ['untracked', roots[1] ?? '', 'web’s main', ['new.ts']])
       assert.deepStrictEqual(
         roots.map((root) => git(root, 'rev-parse', 'main')),
         before,

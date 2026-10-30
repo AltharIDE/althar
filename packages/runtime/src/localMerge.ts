@@ -13,9 +13,10 @@ import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
  * working tree (`git merge-tree`), so nothing on disk changes for a merge
  * that can't happen. The default branch then moves to it: as a ref, where no
  * working tree has it checked out; or, where one does, by a fast-forward
- * there, only while that working tree has nothing uncommitted and no file git
- * doesn't track where the merge puts one, so the person's own work is never
- * touched. A submodule's checkout never moves (the person runs `git
+ * there, as strict as git's own: only while no file the merge changes has a
+ * change not committed there, and no file git doesn't track is where the
+ * merge puts one. Changes to other files stay as they are, so the person's
+ * own work is never touched. A submodule's checkout never moves (the person runs `git
  * submodule update`), so only those whose recorded commit the merge changes
  * are read, and must be clean, at the commit recorded for them: any other is
  * left alone, whatever its state, even one git can't read. Refs move first
@@ -38,8 +39,13 @@ export type MergePlan =
     }
   /** It can't: the files that conflict. */
   | { readonly kind: 'conflicts'; readonly files: ReadonlyArray<string> }
-  /** It can't now: the branch is checked out in a working tree with changes not committed, or files git doesn't track where the merge puts some. */
-  | { readonly kind: 'busy'; readonly checkout: string; readonly untracked: ReadonlyArray<string> }
+  /** It can't now: the branch is checked out in a working tree with changes not committed to `files` the merge changes, or files git doesn't track where the merge puts some. */
+  | {
+      readonly kind: 'busy'
+      readonly checkout: string
+      readonly files: ReadonlyArray<string>
+      readonly untracked: ReadonlyArray<string>
+    }
   /** It can't now: it moves the submodule checked out at `submodule`, which has changes not committed or isn't at the commit recorded for it. */
   | { readonly kind: 'submodule'; readonly checkout: string; readonly submodule: string }
   /** It can't safely read `checkout`, the checkout or a submodule the merge moves. Keep the complete diagnostic, not just its last line. */
@@ -60,11 +66,30 @@ export const checkedOut = (root: string, branch: string) =>
     return path === '' ? null : process.platform === 'win32' ? win32.normalize(path) : path
   })
 
-const checkCheckout = (checkout: string) =>
-  trackedStatus(checkout).pipe(
+/** The paths moving from `from` to `to` changes, adds or removes. */
+const touchedBy = (root: string, from: string, to: string) =>
+  Effect.map(
+    git(root, 'diff', '--name-only', '--no-renames', '-z', from, to),
+    (said) => new Set(said.split('\0').filter((path) => path !== '')),
+  )
+
+/**
+ * Whether `checkout` can move from `from` to `to` as git's fast-forward
+ * would: none of the files it changes has a change not committed there,
+ * staged or not. Any other file's change stays as it is.
+ */
+const checkCheckout = (root: string, checkout: string, from: string, to: string) =>
+  Effect.all([
+    touchedBy(root, from, to),
+    // Its status first: it refreshes the index, so a file only touched, its content the same, isn't counted as changed.
+    Effect.andThen(trackedStatus(checkout), git(checkout, 'diff', '--name-only', '--no-renames', '--ignore-submodules=all', '-z', 'HEAD')),
+  ]).pipe(
     Effect.match({
       onFailure: (error) => ({ kind: 'unreadable', checkout, detail: error.stderr }) as const,
-      onSuccess: (changes) => (changes === '' ? null : ({ kind: 'busy', checkout, untracked: [] } as const)),
+      onSuccess: ([touched, changed]) => {
+        const files = changed.split('\0').filter((path) => path !== '' && touched.has(path))
+        return files.length === 0 ? null : ({ kind: 'busy', checkout, files, untracked: [] } as const)
+      },
     }),
   )
 
@@ -124,19 +149,15 @@ export const planMerge = (root: string, branch: string, head: string, message: s
     if ((yield* gitOutcome(root, 'merge-base', '--is-ancestor', head, tip)).code === 0)
       return { kind: 'already' } as const satisfies MergePlan
     const checkout = yield* checkedOut(root, branch)
-    if (checkout !== null) {
-      const problem = yield* checkCheckout(checkout)
-      if (problem !== null) return problem satisfies MergePlan
-    }
     const merge = yield* mergeOf(root, tip, head, message)
     if (merge.kind === 'conflicts') return merge
     if (checkout !== null) {
-      const problem = yield* checkSubmodules(root, checkout, tip, merge.to)
+      const problem = (yield* checkCheckout(root, checkout, tip, merge.to)) ?? (yield* checkSubmodules(root, checkout, tip, merge.to))
       if (problem !== null) return problem satisfies MergePlan
     }
     // A fast-forward in a working tree won't overwrite a file git doesn't track there, where the merge puts one.
     const untracked = checkout === null ? [] : yield* inTheWay(root, checkout, tip, merge.to)
-    if (checkout !== null && untracked.length > 0) return { kind: 'busy', checkout, untracked } as const satisfies MergePlan
+    if (checkout !== null && untracked.length > 0) return { kind: 'busy', checkout, files: [], untracked } as const satisfies MergePlan
     return { ...merge, checkout } satisfies MergePlan
   })
 
@@ -176,7 +197,7 @@ const mergeOf = (root: string, tip: string, head: string, message: string) =>
 /** The files git doesn't track in `checkout` (ignored ones aside, which git replaces) where moving from `from` to `to` puts one. */
 const inTheWay = (root: string, checkout: string, from: string, to: string) =>
   Effect.gen(function* () {
-    const touched = new Set((yield* git(root, 'diff', '--name-only', '--no-renames', '-z', from, to)).split('\0'))
+    const touched = yield* touchedBy(root, from, to)
     const untracked = (yield* git(checkout, 'ls-files', '--others', '--exclude-standard', '-z')).split('\0')
     return untracked.filter((path) => path !== '' && touched.has(path))
   })
@@ -224,7 +245,8 @@ export const applyMerges = <M extends { readonly root: string; readonly branch: 
       }
       if (!(yield* stillOn(move.plan.checkout, move.branch, move.plan.from))) return { ...move, problem: { kind: 'moved' } as const }
       const problem =
-        (yield* checkCheckout(move.plan.checkout)) ?? (yield* checkSubmodules(move.root, move.plan.checkout, move.plan.from, move.plan.to))
+        (yield* checkCheckout(move.root, move.plan.checkout, move.plan.from, move.plan.to)) ??
+        (yield* checkSubmodules(move.root, move.plan.checkout, move.plan.from, move.plan.to))
       if (problem !== null) return { ...move, problem }
     }
     const done: Array<M> = []

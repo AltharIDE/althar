@@ -2483,17 +2483,32 @@ describe('words', () => {
       (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
       ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
     )
+    // A refused merge says it in a few words: no path on this computer, a couple of files by name and the rest counted.
     assert.deepStrictEqual(
       (
         [
-          ['untracked', 'new.ts in /code/web'],
-          ['moved', 'web’s main'],
+          ['busy', { into: 'main', files: ['middleware.ts'] }],
+          ['busy', { into: 'main', files: ['middleware.ts', 'app/hooks/useAuth.ts', 'a.ts', 'b.ts'] }],
+          ['busy', { into: 'web’s main', files: [] }],
+          ['untracked', { into: 'web’s main', files: ['src/new.ts'] }],
+          ['untracked', { into: 'main', files: ['a.ts', 'b.ts', 'c.ts'] }],
+          ['conflicts', { into: 'main', files: ['README.md', 'src/a.ts'] }],
+          ['submodule', { into: 'main', files: ['vendor/library'] }],
         ] as const
-      ).map(([why, detail]) => said(new CantMerge({ taskId: 't', why, detail }))),
+      ).map(([why, more]) => said(new CantMerge({ taskId: 't', why, detail: '/code/web', ...more }))),
       [
-        'The merge would overwrite files git doesn’t track: new.ts in /code/web. Move them away, then merge again.',
-        'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
+        'Your main checkout has uncommitted changes to middleware.ts.',
+        'Your main checkout has uncommitted changes to middleware.ts, useAuth.ts and 2 more.',
+        'Your web’s main checkout has changes in the way.',
+        'Your web’s main checkout has an untracked file in the way: new.ts.',
+        'Your main checkout has untracked files in the way: a.ts, b.ts and 1 more.',
+        'It conflicts with main in README.md and a.ts.',
+        'Submodule vendor/library has uncommitted changes, or isn’t at the commit recorded for it.',
       ],
+    )
+    assert.strictEqual(
+      said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })),
+      'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
     )
     assert.strictEqual(
       said({ _tag: 'NoChangeToOpen', why: 'something new' }),
@@ -2532,8 +2547,7 @@ describe('words', () => {
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
-      message:
-        'It conflicts with the default branch, in README.md. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.',
+      message: 'It conflicts with the default branch in README.md.',
       why: 'conflicts',
       detail: 'README.md',
     })

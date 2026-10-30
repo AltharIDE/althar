@@ -2,6 +2,7 @@ import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { relative, sep } from 'node:path'
 
 import {
   type Account,
@@ -2367,7 +2368,8 @@ export class Changes extends Context.Service<
             SELECT k.state, k.title, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
-          const cant = (why: CantMerge['why'], detail = '') => new CantMerge({ taskId, why, detail })
+          const cant = (why: CantMerge['why'], detail = '', said: { into?: string; files?: ReadonlyArray<string> } = {}) =>
+            new CantMerge({ taskId, why, detail, ...said })
           if (task.state !== 'open') return yield* cant('settled')
           const all = yield* repositoriesHere(taskId)
           // A plain task with no branch yet has nothing the person could have seen to merge.
@@ -2376,6 +2378,11 @@ export class Changes extends Context.Service<
           if (repositories.length === 0) return yield* cant('pull_request')
           const several = all.length > 1
           const named = (repository: (typeof repositories)[number], what: string) => (several ? `${repository.name}: ${what}` : what)
+          // The branch it merges into, in a few words: by its repository's name in a task of several.
+          const into = (repository: (typeof repositories)[number]) =>
+            several ? `${repository.name}’s ${repository.base}` : repository.base
+          // A submodule by its path in the repository, not where it is on this computer.
+          const submoduleIn = (checkout: string, submodule: string) => relative(checkout, submodule).split(sep).join('/')
           // Worked out for every repository first: one that can't be merged stops them all.
           const plans = yield* Effect.forEach(repositories, (repository) =>
             Effect.gen(function* () {
@@ -2396,25 +2403,33 @@ export class Changes extends Context.Service<
           )
           const conflicts = conflicting.map(({ repository, files }) => named(repository, files.join(', ')))
           if (conflicts.length > 0) {
+            const said = {
+              into: conflicting.length === 1 && conflicting[0] !== undefined ? into(conflicting[0].repository) : 'their default branches',
+              files: conflicting.flatMap(({ files }) => files),
+            }
             // Where the project says so, the lead resolves it unasked, and the person merges again after.
             const asked = yield* askable(taskId, null)
-            if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '))
+            if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '), said)
             if (asked === 'yes') {
               const found = yield* Effect.forEach(conflicting, ({ repository, files }) => conflictHere(repository, files))
               yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
-              return yield* cant('resolving', conflicts.join('; '))
+              return yield* cant('resolving', conflicts.join('; '), said)
             }
-            return yield* cant('conflicts', conflicts.join('; '))
+            return yield* cant('conflicts', conflicts.join('; '), said)
           }
           const missing = plans.find(({ plan }) => plan.kind === 'missing')
           if (missing !== undefined) return yield* cant('missing', missing.repository.base)
-          for (const { plan } of plans)
+          for (const { repository, plan } of plans)
             if (plan.kind === 'busy')
               return yield* plan.untracked.length > 0
-                ? cant('untracked', `${plan.untracked.join(', ')} in ${plan.checkout}`)
-                : cant('busy', plan.checkout)
+                ? cant('untracked', plan.checkout, { into: into(repository), files: plan.untracked })
+                : cant('busy', plan.checkout, { into: into(repository), files: plan.files })
           for (const { repository, plan } of plans)
-            if (plan.kind === 'submodule') return yield* cant('submodule', named(repository, plan.submodule))
+            if (plan.kind === 'submodule')
+              return yield* cant('submodule', named(repository, plan.submodule), {
+                into: into(repository),
+                files: [submoduleIn(plan.checkout, plan.submodule)],
+              })
           const refused = yield* applyMerges(
             plans.flatMap(({ repository, plan }) =>
               plan.kind === 'move' ? [{ root: repository.root, branch: repository.base, plan, repository }] : [],
@@ -2422,11 +2437,18 @@ export class Changes extends Context.Service<
           )
           if (refused?.problem?.kind === 'unreadable')
             return yield* cant('unreadable', named(refused.repository, `${refused.problem.checkout}\n${refused.problem.detail}`))
-          if (refused?.problem?.kind === 'submodule') return yield* cant('submodule', named(refused.repository, refused.problem.submodule))
+          if (refused?.problem?.kind === 'submodule')
+            return yield* cant('submodule', named(refused.repository, refused.problem.submodule), {
+              into: into(refused.repository),
+              files: [submoduleIn(refused.problem.checkout, refused.problem.submodule)],
+            })
           if (refused !== null)
             return yield* refused.plan.checkout === null || refused.problem?.kind === 'moved'
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)
-              : cant('busy', refused.plan.checkout)
+              : cant('busy', refused.plan.checkout, {
+                  into: into(refused.repository),
+                  files: refused.problem?.kind === 'busy' ? refused.problem.files : [],
+                })
           for (const { settle } of plans) yield* settle
           const merged = plans.map(({ repository, plan }) => ({
             repository: repository.name,
