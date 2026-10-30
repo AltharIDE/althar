@@ -555,14 +555,17 @@ describe('a task’s course', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('stops a reviewer that was still starting as the task stopped, once it is up', () =>
-    Effect.gen(function* () {
+  it.live('stops a reviewer that was still starting as the task stopped, once it is up', () => {
+    // Codex, the reviewer, is held starting until the task has stopped.
+    let goOn = () => {}
+    const up = new Promise<void>((resolve) => (goOn = resolve))
+    return Effect.gen(function* () {
       const plans = yield* Plans
       const tasks = yield* Tasks
       const sql = yield* SqlClient.SqlClient
       const { task, planId, actor } = yield* planned('Retry checkout [lead:finish] [review:wait]', [implement(), reviewBy()])
       yield* plans.start(planId, actor)
-      // The review is admitted and its reviewer takes its time to start: the task stops meanwhile.
+      // The review is admitted and its reviewer is still starting: the task stops meanwhile.
       yield* until(
         sql<{
           id: string
@@ -570,6 +573,7 @@ describe('a task’s course', () => {
         (rows) => rows.length === 1,
       )
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
+      goOn()
       const reviewThread = sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
       const [thread] = yield* until(reviewThread, (rows) => rows.length === 1)
       // Once up, it is stopped, and its attempt stays as stopping left it.
@@ -589,8 +593,8 @@ describe('a task’s course', () => {
         (rows) => rows.length === 1,
       )
       assert.strictEqual(reviewing?.agentId, 'codex')
-    }).pipe(Effect.provide(withQueries({ each: { codex: { slowStart: 1_500 } } }))),
-  )
+    }).pipe(Effect.provide(withQueries({ each: { codex: { beforeNewSession: () => up } } })))
+  })
 
   it.live('resumes a review on the agent it was handed to, not the one planned', () =>
     Effect.gen(function* () {
