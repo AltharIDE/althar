@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Allow always (ADR-018), as the person meets it: under "Ask me", a lead's
@@ -73,8 +73,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await expect(receipt).toBeVisible()
     await receipt.click()
     await expect(page.getByText('commands starting “git status”')).toBeVisible()
-    // Once its fold has opened.
-    await page.waitForTimeout(400)
+    await still(page)
     if (shots) await page.screenshot({ path: join(shots, 'app-allowed-by-rule.png') })
 
     // The rule is in the project's rules; taken off there, the next asks again.
@@ -107,7 +106,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     if (shots) await page.screenshot({ path: join(shots, 'app-home-permission.png') })
     await status.getByRole('button', { name: 'More answers' }).click()
     await expect(page.getByRole('menuitem', { name: 'Always allow commands starting “git status”' })).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     if (shots) await page.screenshot({ path: join(shots, 'app-home-more-answers.png') })
     await page.getByRole('menuitem', { name: 'Always allow commands starting “git status”' }).click()
     // Answered, its line stays where it was, quiet, saying what was said; the other still waits under it.
@@ -116,7 +115,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await expect(tests.getByRole('button', { name: 'Allow once' })).toBeVisible()
     await expect(needs.getByRole('article').nth(0)).toHaveAccessibleName('Run git status -s')
     await expect(needs.getByRole('article').nth(1)).toHaveAccessibleName('Run npm test')
-    await page.waitForTimeout(400)
+    await still(page)
     if (shots) await page.screenshot({ path: join(shots, 'app-home-answered-always.png') })
   } finally {
     await electronApp.close()

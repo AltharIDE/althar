@@ -97,6 +97,19 @@ export const ChangeRequest = Schema.Struct({
    * repository's own; absent where the host doesn't say, as a list may not.
    */
   headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  /**
+   * Whether it is in its target branch's merge queue, which merges it once
+   * the queue's own checks pass on that branch as it will be: true as a
+   * merge put it there, and as the host says when asked (`change` with
+   * `queue`). Absent where it wasn't asked, or the host has no queue.
+   */
+  queued: Schema.optional(Schema.Boolean),
+  /**
+   * Why the queue last took it out, as the host says when asked: its checks
+   * there failed, it conflicted, someone took it out, or it merged (a read
+   * can still say open for a moment after). Null where it never did.
+   */
+  leftQueue: Schema.optional(Schema.NullOr(Schema.Literals(['checks', 'conflict', 'removed', 'merged', 'other']))),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
@@ -301,7 +314,12 @@ export interface CodeHost {
       readonly from?: Repository
     },
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
-  change(repository: Repository, number: number): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * A change as the host has it now. With `queue`, whether an open one is in
+   * its target branch's merge queue too, and why the queue last took it out:
+   * asked only of one Althar put there, since it takes another call.
+   */
+  change(repository: Repository, number: number, ask?: { readonly queue?: boolean }): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * The repository's changes, whoever opened them, newest change first,
    * narrowed as the query says, to its limit; and whether there are more.
@@ -313,7 +331,9 @@ export interface CodeHost {
   /**
    * Merges a change, because the person said to: never on an agent's word.
    * In the first way the repository allows; refused, as a draft or with
-   * checks or reviews it still needs, with the host's own words.
+   * checks or reviews it still needs, with the host's own words. Where its
+   * target branch merges through a merge queue, it goes in the queue
+   * instead, and comes back open and `queued`: the host merges it later.
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**

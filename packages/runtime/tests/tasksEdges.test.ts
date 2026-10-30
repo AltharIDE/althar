@@ -1,6 +1,6 @@
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -127,12 +127,10 @@ describe('marking a quick task done', () => {
           Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended !== null) }),
         ),
         (gone) => gone.length === 1,
-        Duration.seconds(20),
       )
       yield* until(
         Effect.map(Effect.orDie((yield* Queries).card(served?.taskId ?? '')), (card) => (card?.phase === 'ready' ? [card] : [])),
         (ready) => ready.length === 1,
-        Duration.seconds(20),
       )
       assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: served?.taskId ?? '' }))
       assert.deepStrictEqual(stopped, [])

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, toConversation } from './support'
+import { launch, openFirstProject, sizeWindow, startTask, still, toConversation } from './support'
 
 /*
  * Why a task waits, over its composer, in a real window with the fake agent:
@@ -38,10 +38,10 @@ test('says over the composer why the task waits, opens who holds the place, and 
 
     // A task whose server keeps the one place, then two that wait for it.
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await startTask(page, 'Add a retry', '[lead:wait]')
     await startTask(page, 'Tidy the docs', '[lead:wait]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2, { timeout: 20_000 })
+    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2)
 
     // The second in line, opened from the board.
     await page.getByRole('radio', { name: /^Board/ }).click()
@@ -51,7 +51,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
 
     // The chip says it waits, and where it stands, not who holds the place.
     const chip = page.getByRole('button', { name: 'Waiting for a place, 2nd in Up next' })
-    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toBeVisible()
     await expect(chip).toHaveText(/^Waiting for a place\s*2nd in Up next$/)
     const composer = page
       .locator('form')
@@ -70,7 +70,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
       })
     }
     await page.mouse.move(1400, 300)
-    await page.waitForTimeout(300)
+    await still(page)
     await shoot('test-results/waiting-chip.png')
 
     // It opens who holds the place: the task by its title, what keeps it, and Stop; and the way to the front.
@@ -78,13 +78,13 @@ test('says over the composer why the task waits, opens who holds the place, and 
     const behind = page.getByRole('dialog', { name: 'Behind this task' })
     await expect(behind.getByText('1 task is running; 1 of them only for a server it left running.')).toBeVisible()
     await expect(behind.getByText('Serve the prototype')).toBeVisible()
-    await page.waitForTimeout(300)
+    await still(page)
     await behind.screenshot({ path: 'test-results/waiting-open.png', scale: 'css', animations: 'disabled' })
     await page.keyboard.press('Escape')
 
     // At the window's narrowest, the chip still sits whole on the composer's edge, over nothing else.
-    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(880, 700))
-    await page.waitForTimeout(400)
+    await sizeWindow(electronApp, page, 880, 700)
+    await still(page)
     const [edge, field] = await Promise.all([chip.boundingBox(), composer.boundingBox()])
     if (edge === null || field === null) throw new Error('The chip isn’t laid out')
     expect(edge.x).toBeGreaterThanOrEqual(field.x)
@@ -100,7 +100,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
 
     // Stopping the server frees the place: it starts, and no longer waits.
     await behind.getByRole('button', { name: 'Stop what Serve the prototype left running' }).click()
-    await expect(page.getByRole('button', { name: /^Waiting for a place/ })).toHaveCount(0, { timeout: 20_000 })
+    await expect(page.getByRole('button', { name: /^Waiting for a place/ })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }

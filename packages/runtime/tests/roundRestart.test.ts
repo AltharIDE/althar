@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Plans } from '../src/Plans'
@@ -58,7 +58,7 @@ describe('a round of work a restart stopped', () => {
           end: null,
         })
         yield* plans.start(planId, actor)
-        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded', Duration.seconds(20))
+        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
         // The person asks its lead something: a round of work opens, and its lead looks around.
         const body = 'What does the retry do? [lead:explore]'
         yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: created.threadId, body })

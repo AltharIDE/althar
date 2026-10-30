@@ -81,13 +81,12 @@ const gitIn = (cwd: string, ...args: ReadonlyArray<string>) => {
 }
 
 /** The task's card once `check` holds of it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean, limit = 20) =>
+const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
       Effect.map(queries.card(taskId), (one) => [one]),
       ([one]) => one !== undefined && check(one),
-      Duration.seconds(limit),
     )
     return card ?? assert.fail('no card')
   })
@@ -99,7 +98,6 @@ const branchedOnce = (taskId: string) =>
     yield* until(
       sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces WHERE task_id = ${taskId}`,
       (rows) => rows[0]?.branchedAt != null,
-      Duration.seconds(20),
     )
     return yield* worktreeOf(taskId)
   })
@@ -121,7 +119,6 @@ const sayAfterDone = (threadId: string, body: string) =>
     yield* until(
       Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
       (gone) => gone.length === 1,
-      Duration.seconds(10),
     )
     yield* say(threadId, body)
     yield* sessions.startLast(threadId)
@@ -228,7 +225,6 @@ describe('a plain task', () => {
       yield* until(
         sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
         (rows) => (rows[0]?.n ?? 0) === 1,
-        Duration.seconds(20),
       )
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
@@ -352,7 +348,6 @@ describe('a plain task', () => {
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
           (rows) => (rows[0]?.n ?? 0) === 1,
-          Duration.seconds(20),
         )
         assert.strictEqual((yield* state)[0]?.state, 'open')
         assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
@@ -405,7 +400,6 @@ describe('a plain task', () => {
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state = 'succeeded'`,
           (rows) => rows[0]?.n === 1,
-          Duration.seconds(20),
         )
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'ready'), { kind: 'plain', unshipped: null })
         assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'pull request')
@@ -729,7 +723,7 @@ describe('making a quick task a change', () => {
       assert.lengthOf(github.changes, 0)
       // The person likes it, and asks its lead to make it a real thing: it does, then reports, and the review comes first.
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
       // Its thread says when it became a change, between what the quick task showed and what the change did, and the
       // description its lead wrote for the pull request, which its Outputs says it is with.
@@ -814,7 +808,6 @@ describe('making a quick task a change', () => {
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 1,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(
         github.changes.map((change) => [change.title, change.draft]),
@@ -870,7 +863,7 @@ describe('making a quick task a change', () => {
       const place = yield* opened
       // Its lead commits, and is asked at once, in the words its task was given.
       const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'review'])
       // One run, its plan's, with the review and no more of staying here; its graph patched with the review.

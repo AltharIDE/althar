@@ -48,7 +48,7 @@ describe('the Push button', () => {
     const opened = Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
       const taskId = ready?.taskId ?? ''
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
         path: string
@@ -258,7 +258,7 @@ describe('a push the lead asks the person for', () => {
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:push]',
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{
         path: string

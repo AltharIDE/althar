@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import type { UsageWindow } from '@althar/provider-adapters'
-import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, type Holds, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -20,7 +20,7 @@ import { Queries } from '../src/Queries'
 import type { PlanStep } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { usableModels } from '../src/usableModels'
-import { items, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * Steering new work by the plans' windows as last read (Limits): a new step
@@ -31,12 +31,6 @@ import { items, repository, runtime, until } from './support'
  */
 
 const HOUR = 60 * 60 * 1000
-/**
- * How long a test of a later round may take: a lead and a review, then the round after, each review three seconds by
- * design (`[review:slowly]`), which `reviewed` and the wait for the card allow 20 and 30 seconds; the suite's 20 cut
- * them short on a slow runner.
- */
-const ROUNDS = { timeout: 50_000 }
 
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, database = ':memory:') =>
   Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { each })))
@@ -114,11 +108,11 @@ describe('a new step on an agent nearly out', () => {
       const { projectId, task, start } = yield* planned([lead('claude-code')])
       yield* reading(yield* first('claude-code'), 'claude-code', left(3, resetsAt))
       yield* start
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(
         (yield* said(task.threadId))[0],
-        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake codex takes the work instead.`,
+        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}, so Fake codex takes the work instead.`,
       )
     }).pipe(Effect.provide(withAgents()))
   })
@@ -129,21 +123,21 @@ describe('a new step on an agent nearly out', () => {
       const { projectId, task, start } = yield* planned([lead('claude-code')])
       for (const agentId of ['claude-code', 'codex', 'opencode']) yield* reading(yield* first(agentId), agentId, left(2, resetsAt))
       yield* start
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'claude-code')
       assert.isFalse((yield* said(task.threadId)).some((title) => title.includes('left')))
     }).pipe(Effect.provide(withAgents()))
   })
 
-  it.live('waits for the reset before it starts where the project waits, and starts then, on the same agent', () => {
-    const back = Date.now() + 2500
+  it.effect('waits for the reset before it starts where the project waits, and starts then, on the same agent', () => {
+    const back = later()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, task, start } = yield* planned([lead('claude-code')])
       yield* rule('wait')(projectId)
       yield* reading(yield* first('claude-code'), 'claude-code', left(3, new Date(back).toISOString()))
       yield* start
-      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual(
         [held?.step, held?.waits?.agentId, held?.waits?.left, held?.waits?.why],
         ['implement', 'claude-code', 3, 'waits'],
@@ -154,9 +148,10 @@ describe('a new step on an agent nearly out', () => {
       )
       // Nothing started on it meanwhile.
       assert.deepStrictEqual(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`, [])
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      yield* atReset(back)
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents()), onTestClock)
   })
 
   it.live('asks the person before it starts where the project asks, with the agent itself among the ways on', () => {
@@ -171,7 +166,6 @@ describe('a new step on an agent nearly out', () => {
       const [call] = yield* until(
         sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
         (rows) => rows.length === 1,
-        Duration.seconds(10),
       )
       const payload = JSON.parse(call?.payload ?? '{}') as {
         why: string
@@ -192,21 +186,21 @@ describe('a new step on an agent nearly out', () => {
       const { task, start } = yield* planned([lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }])
       yield* reading(yield* first('codex'), 'codex', left(1, resetsAt))
       yield* start
-      yield* until(
-        said(task.threadId),
-        (titles) => titles.some((title) => title.includes('takes the review instead')),
-        Duration.seconds(20),
-      )
+      yield* until(said(task.threadId), (titles) => titles.some((title) => title.includes('takes the review instead')))
       assert.include(
         yield* said(task.threadId),
-        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake opencode takes the review instead.`,
+        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}, so Fake opencode takes the review instead.`,
       )
     }).pipe(Effect.provide(withAgents()))
   })
 })
 
-/* The lead's plan reviewed slowly, so a reading can fall while the review runs, between the lead's steps or the review's rounds. */
-const reviewed = <E, R>(lowered: (projectId: string) => Effect.Effect<void, E, R>, policy?: 'wait' | 'ask') =>
+/*
+ * The lead's plan reviewed slowly, so a reading can fall while the review runs, between the lead's steps or the
+ * review's rounds: the test holds its reviewer (`reviewer`, given to Codex), and its first round reports once the reading
+ * has fallen.
+ */
+const reviewed = <E, R>(reviewer: Holds, lowered: (projectId: string) => Effect.Effect<void, E, R>, policy?: 'wait' | 'ask') =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const steps = [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false } as const]
@@ -221,9 +215,9 @@ const reviewed = <E, R>(lowered: (projectId: string) => Effect.Effect<void, E, R
       sql<{ state: string }>`
         SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND a.state = 'running'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     yield* lowered(projectId)
+    reviewer.open('[review:slowly]')
     return { projectId, task }
   })
 
@@ -234,66 +228,70 @@ const sessionsOn = (threadId: string) =>
     SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`,
   )
 
-describe('a settle step on a lead that fell nearly out since it worked', ROUNDS, () => {
+describe('a settle step on a lead that fell nearly out since it worked', () => {
   it.live('goes to an agent with room where the project moves on, and the thread says why', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
-      const { projectId, task } = yield* reviewed(() =>
+      const { projectId, task } = yield* reviewed(reviewer, () =>
         Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(3, resetsAt))),
       )
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'opencode')
       assert.include(
         yield* said(task.threadId),
-        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake opencode takes the fixes instead.`,
+        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}, so Fake opencode takes the fixes instead.`,
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
         ['claude-code', 'opencode'],
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 
-  it.live('waits for the reset where the project waits, starting nothing meanwhile, and settles then on the same lead', () =>
-    Effect.gen(function* () {
+  it.effect('waits for the reset where the project waits, starting nothing meanwhile, and settles then on the same lead', () => {
+    const reviewer = holds()
+    return Effect.gen(function* () {
       let back = 0
       const { projectId, task } = yield* reviewed(
+        reviewer,
         () =>
           Effect.gen(function* () {
-            back = Date.now() + 8000
+            back = later()
             yield* reading(yield* first('claude-code'), 'claude-code', left(3, new Date(back).toISOString()))
           }),
         'wait',
       )
-      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual([held?.step, held?.waits?.agentId, held?.waits?.left, held?.waits?.why], ['settle', 'claude-code', 3, 'waits'])
       assert.isTrue(
         (yield* said(task.threadId)).some((title) =>
           title.startsWith('Fake claude-code has 3% of its five-hour limit left, so the fixes wait until '),
         ),
       )
-      assert.isBelow(Date.now(), back)
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
         ['claude-code'],
       )
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      yield* atReset(back)
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
-    }).pipe(Effect.provide(withAgents())),
-  )
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })), onTestClock)
+  })
 
   it.live('asks the person where the project asks, with the lead itself among the ways on', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { task } = yield* reviewed(
+        reviewer,
         () => Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(4, resetsAt))),
         'ask',
       )
       const [call] = yield* until(
         sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
         (rows) => rows.length === 1,
-        Duration.seconds(10),
       )
       const payload = JSON.parse(call?.payload ?? '{}') as {
         step: string
@@ -312,10 +310,11 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
         ['claude-code'],
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 
   it.live('goes on on the lead’s account with room where the project rotates, and says so', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
       const accounts = yield* Accounts
@@ -324,13 +323,13 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
       const usual = yield* first('claude-code')
       const work = yield* accounts.add({ agentId: 'claude-code', name: 'work', folder: mkdtempSync(join(tmpdir(), 'althar-settle-')) })
       yield* reading(usual, 'claude-code', left(80, resetsAt))
-      const { projectId, task } = yield* reviewed((projectId) =>
+      const { projectId, task } = yield* reviewed(reviewer, (projectId) =>
         Effect.gen(function* () {
           yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
           yield* reading(usual, 'claude-code', left(3, resetsAt))
         }),
       )
-      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => [session.agentId, session.accountId]),
         [
@@ -345,11 +344,11 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
           ),
         ),
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 
   /* The lead on the first of its two accounts, both nearly out once its work is in review, where the project rotates. */
-  const bothLow = (resetsAt: string, policy?: 'wait' | 'ask') =>
+  const bothLow = (reviewer: Holds, resetsAt: string, policy?: 'wait' | 'ask') =>
     Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
@@ -361,6 +360,7 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
       })
       yield* reading(usual, 'claude-code', left(80, resetsAt))
       const reviewing = yield* reviewed(
+        reviewer,
         (projectId) =>
           Effect.gen(function* () {
             yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
@@ -373,10 +373,11 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
     })
 
   it.live('goes by the project’s rule where it rotates but every account is nearly out: to an agent with room, where it moves on', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
-      const { projectId, task, usual } = yield* bothLow(resetsAt)
-      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const { projectId, task, usual } = yield* bothLow(reviewer, resetsAt)
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'opencode')
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => [session.agentId, session.agentId === 'claude-code' ? session.accountId : '']),
@@ -387,34 +388,37 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
       )
       assert.isTrue(
         (yield* said(task.threadId)).some((title) =>
-          title.endsWith(`has 3% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake opencode takes the fixes instead.`),
+          title.endsWith(
+            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}, so Fake opencode takes the fixes instead.`,
+          ),
         ),
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 
   it.live('waits for the reset where it rotates but every account is nearly out and the project waits, starting nothing meanwhile', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
-      const { projectId, task, usual } = yield* bothLow(resetsAt, 'wait')
-      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(15))
+      const { projectId, task, usual } = yield* bothLow(reviewer, resetsAt, 'wait')
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual([held?.step, held?.waits?.agentId, held?.waits?.left], ['settle', 'claude-code', 3])
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => [session.agentId, session.accountId]),
         [['claude-code', usual]],
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 
   it.live('asks the person where it rotates but every account is nearly out and the project asks, starting nothing meanwhile', () => {
+    const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { task, usual } = yield* bothLow(resetsAt, 'ask')
+      const { task, usual } = yield* bothLow(reviewer, resetsAt, 'ask')
       const [call] = yield* until(
         sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       const payload = JSON.parse(call?.payload ?? '{}') as { step: string; why: string; limit: { left: number } }
       assert.deepStrictEqual([payload.step, payload.why, payload.limit.left], ['settle', 'usage_limit', 3])
@@ -422,13 +426,14 @@ describe('a settle step on a lead that fell nearly out since it worked', ROUNDS,
         (yield* sessionsOn(task.threadId)).map((session) => [session.agentId, session.accountId]),
         [['claude-code', usual]],
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 })
 
-describe('a later round of review on a reviewer that fell nearly out since the last', ROUNDS, () => {
+describe('a later round of review on a reviewer that fell nearly out since the last', () => {
   it.live('starts afresh on another of its agent’s accounts with room where the project rotates, and says so', () => {
     const resetsAt = second(Date.now() + HOUR)
+    const reviewer = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
@@ -438,13 +443,13 @@ describe('a later round of review on a reviewer that fell nearly out since the l
       yield* reading(usual, 'codex', left(80, resetsAt))
       yield* reading(work.id, 'codex', left(60, resetsAt))
       // The first round reviews on the usual account; meanwhile it falls to 1%, while the other has 60%.
-      const { projectId, task } = yield* reviewed((projectId) =>
+      const { projectId, task } = yield* reviewed(reviewer, (projectId) =>
         Effect.gen(function* () {
           yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
           yield* reading(usual, 'codex', left(1, resetsAt))
         }),
       )
-      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       const reviewers = yield* sql<{ agentId: string; accountId: string }>`
         SELECT s.agent_id, s.account_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at, s.rowid`
@@ -460,7 +465,7 @@ describe('a later round of review on a reviewer that fell nearly out since the l
           /^Fake codex \(.+\) has 1% of its five-hour limit left, until .+, so Fake codex \(work\) takes the review instead\.$/.test(title),
         ),
       )
-    }).pipe(Effect.provide(withAgents()))
+    }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 })
 
@@ -546,13 +551,13 @@ describe('the words for an agent nearly out', () => {
   it('name the window and how little is left', () => {
     assert.strictEqual(windowWords({ kind: 'weekly', label: 'Opus' }), 'weekly Opus limit')
     assert.strictEqual(windowWords({ kind: 'other', label: 'Spend limit' }), 'Spend limit')
-    assert.strictEqual(roomWords(room), '3% of its five-hour limit left')
+    assert.strictEqual(roomWords(room, Date.parse('2026-10-03T12:00:00')), '3% of its five-hour limit left')
     assert.strictEqual(
-      lowWords({ from: 'Codex', room, step: 'review', to: { agent: 'Claude Code', model: 'Claude Sonnet 5.5' } }),
+      lowWords({ from: 'Codex', room, now: 0, step: 'review', to: { agent: 'Claude Code', model: 'Claude Sonnet 5.5' } }),
       'Codex has 3% of its five-hour limit left, so Claude Code takes the review instead, on Claude Sonnet 5.5.',
     )
     assert.strictEqual(
-      lowWords({ from: 'Codex', room, step: 'settle' }),
+      lowWords({ from: 'Codex', room, now: 0, step: 'settle' }),
       'Codex has 3% of its five-hour limit left, so the fixes wait until Codex has room again. To carry on now, pick another model on the task.',
     )
     assert.isBelow(room.leftPercent, NEARLY_OUT)

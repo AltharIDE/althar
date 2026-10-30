@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Schedule } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -177,12 +177,12 @@ describe('merging a task here', () => {
       const head = commit(worktree, 'retry.ts', 'retry\n')
       const queries = yield* Queries
       const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
-      // The pull request opens where the branch goes.
+      // The pull request opens where the branch goes; what of it origin has isn't known here before it is asked or pushed to.
       assert.deepStrictEqual(yield* remoteOf, {
         name: 'origin',
         branch,
         pushed: false,
-        ahead: 1,
+        ahead: null,
         newPullRequest: `https://github.com/alice/api/compare/main...${branch}?expand=1`,
       })
       // Now it pushes to a folder here, and fetches only main, so git wouldn't note the branch there itself.
@@ -217,6 +217,57 @@ describe('merging a task here', () => {
       // The task stays as it was: pushing isn't merging.
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live(
+    'counts what the remote doesn’t have once it says: not what it has from a push made elsewhere, nor what bringing main in brought',
+    () =>
+      Effect.gen(function* () {
+        const root = repository()
+        const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        git(remote, 'init', '-q', '--bare', '-b', 'main')
+        git(root, 'remote', 'add', 'origin', remote)
+        git(root, 'push', '-q', '-u', 'origin', 'main')
+        const { task, worktrees } = yield* taskIn([root], root)
+        const worktree = worktrees[0]?.path ?? ''
+        const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+        const queries = yield* Queries
+        const changes = yield* Changes
+        const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+        // As the person looks: origin asked where the branch is, and the task read again once it has said.
+        const asked = Effect.gen(function* () {
+          const head = git(worktree, 'rev-parse', 'HEAD')
+          yield* changes.askRemotes(task.taskId)
+          yield* changes
+            .askedAt(worktree, branch)
+            .pipe(Effect.repeat({ until: (at) => at === head, schedule: Schedule.spaced('25 millis') }), Effect.timeout('10 seconds'))
+          return yield* remoteOf
+        })
+        // Its first commit reaches origin from another clone, so nothing here notes it (git from 2.56 notes a push here even by
+        // origin's address); then the lead commits again.
+        commit(worktree, 'retry.ts', 'retry\n')
+        const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+        git(elsewhere, 'clone', '-q', remote, '.')
+        git(elsewhere, 'fetch', '-q', root, `refs/heads/${branch}:refs/heads/${branch}`)
+        git(elsewhere, 'push', '-q', 'origin', branch)
+        commit(worktree, 'more.ts', 'more\n')
+        // Until origin says, how much of it origin has isn't known: no count.
+        assert.deepInclude(yield* remoteOf, { pushed: false, ahead: null })
+        // Asked: only the commit since is new to it.
+        assert.deepInclude(yield* asked, { pushed: true, ahead: 1 })
+        // Main moves on, on origin too, and the lead brings it in: main's commit origin has, so only the merge is new.
+        commit(root, 'theirs.ts', 'theirs\n')
+        git(root, 'push', '-q', 'origin', 'main')
+        git(worktree, 'merge', '-q', '--no-edit', 'main')
+        assert.deepInclude(yield* asked, { pushed: true, ahead: 2 })
+        // Pushed from here, git notes it: all of it there, known without asking.
+        git(worktree, 'push', '-q', 'origin', branch)
+        assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+        // Its branch gone from origin, as once deleted there, and the lead commits again: none of its own commits is there now.
+        git(remote, 'branch', '-q', '-D', branch)
+        commit(worktree, 'last.ts', 'last\n')
+        assert.deepInclude(yield* asked, { pushed: false, ahead: 4 })
+      }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('pushes to origin where the default branch follows a branch here rather than a remote', () =>

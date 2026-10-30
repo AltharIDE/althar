@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 
+import { budget } from '@althar/testing/budget'
 import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
@@ -9,23 +10,23 @@ const app = join(import.meta.dirname, '..')
 /**
  * Althar's own window. Not `firstWindow()`: where the edge is the menu bar
  * (Linux), its sheet is a page of its own made as the app starts, and on a
- * busy machine it can be the first to appear.
+ * busy machine it can be the first to appear. A window's address can come
+ * after the window, so it reads them all until one is Althar's, and says
+ * which were open if none is.
  */
 export const mainWindow = async (electronApp: ElectronApplication): Promise<Page> => {
   const isMain = (page: Page) => page.url().split(/[?#]/)[0]?.endsWith('/renderer/index.html') === true
-  const deadline = Date.now() + 30_000
-  for (;;) {
-    const found = electronApp.windows().find(isMain)
-    if (found !== undefined) return found
-    if (Date.now() > deadline)
-      throw new Error(
-        `Althar's window didn't open; open: ${electronApp
-          .windows()
-          .map((page) => page.url())
-          .join(', ')}`,
-      )
-    await electronApp.waitForEvent('window', { timeout: 1_000 }).catch(() => undefined)
-  }
+  let found: Page | undefined
+  await expect
+    .poll(
+      () => {
+        found = electronApp.windows().find(isMain)
+        return found === undefined ? electronApp.windows().map((page) => page.url()) : 'open'
+      },
+      { message: "Althar's window opens" },
+    )
+    .toBe('open')
+  return found as Page
 }
 
 /**
@@ -48,6 +49,7 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
     Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
   )
   const electronApp = await electron.launch({
+    timeout: budget.medium,
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
     args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
     ...(scheme === 'system' ? { colorScheme: null } : {}),
@@ -61,6 +63,9 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
       ...env,
     },
   })
+  // Playwright gives the config's times to the browsers it starts, not to an app it launches, whose actions would each have
+  // 30 s on any machine: a click, or a wait for the window, takes the medium budget, as an assertion does (playwright.config.ts).
+  electronApp.context().setDefaultTimeout(budget.medium)
   return { electronApp, page: await mainWindow(electronApp) }
 }
 
@@ -87,6 +92,58 @@ export const openFirstProject = async (electronApp: ElectronApplication, page: P
  */
 export const shown = (page: Page, text: string | RegExp, options?: { readonly exact?: boolean }) =>
   page.getByText(text, options).filter({ visible: true })
+
+/**
+ * Once the window is still, for a screenshot: the launch has played over it,
+ * and every animation and transition that ends (a fold opening, a dialog
+ * fading in, lanes easing to their widths) has ended. One that loops, as a
+ * spinner does, never ends, and isn't waited for.
+ */
+export const still = (page: Page) =>
+  page.waitForFunction(
+    () =>
+      document.querySelector('[class*="veil"]') === null &&
+      document.getAnimations().every((one) => one.playState !== 'running' || one.effect?.getComputedTiming().endTime === Infinity),
+  )
+
+/** Sizes Althar's window, and waits until its page is laid out at the new width. */
+export const sizeWindow = async (electronApp: ElectronApplication, page: Page, width: number, height: number) => {
+  const made = await electronApp.browserWindow(page)
+  const [inner] = await made.evaluate(
+    (one, [wide, high]) => {
+      one.setSize(wide, high)
+      return one.getContentSize()
+    },
+    [width, height] as const,
+  )
+  await page.waitForFunction((wide) => window.innerWidth === wide, inner)
+}
+
+/**
+ * Holds what the window sends the runtime, as a runtime too busy to answer
+ * would, until the function it gives back is called; what the runtime sends
+ * still arrives. What the window shows meanwhile it had already. React's
+ * scheduler wakes itself through a port too, with nothing in the message:
+ * that goes through.
+ */
+export const holdRuntime = async (page: Page) => {
+  await page.evaluate(() => {
+    const held: Array<() => void> = []
+    // oxlint-disable-next-line typescript/unbound-method -- applied to the port it was called on
+    const post = MessagePort.prototype.postMessage
+    MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+      if (args[0] === null || args[0] === undefined) post.apply(this, args)
+      else held.push(() => post.apply(this, args))
+    } as MessagePort['postMessage']
+    Object.assign(window, {
+      release: () => {
+        MessagePort.prototype.postMessage = post
+        for (const send of held.splice(0)) send()
+      },
+    })
+  })
+  return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
+}
 
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
