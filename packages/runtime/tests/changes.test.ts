@@ -18,7 +18,7 @@ import { Projects } from '../src/Projects'
 import { taskShown } from '../src/evidence'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { HOST, hosted, items, until } from './support'
+import { HOST, hosted, items, notices, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
 
@@ -421,6 +421,69 @@ describe('a task that ends in a pull request', () => {
       // Listening as ever, every minute here, isn't what heard it.
     }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
   })
+
+  it.live(
+    'puts a pull request in its branch’s merge queue, says when the queue takes it out, and settles it once the queue merges it',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const number = ready?.change?.number ?? 0
+        const changes = yield* Changes
+        const said = Effect.map(notices(ready?.threadId ?? ''), (all) => all.map((notice) => notice.title ?? ''))
+        const card = Effect.map(cards(projectId), (all) => all[0])
+        // Accepted, it goes in the queue: open, in it, and its thread says so. It isn't settled: its host merges it later.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        const queued = yield* card
+        assert.deepInclude(queued?.change, { state: 'open', queued: true })
+        assert.strictEqual(queued?.phase, 'ready')
+        assert.include(yield* said, "PR #1 is in the merge queue for main. It merges once the queue's checks pass.")
+        // Accepted again while in it, as a second press does, it is in it still, said once.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        assert.lengthOf(
+          (yield* said).filter((title) => title.includes('is in the merge queue')),
+          1,
+        )
+        // The queue takes it out, its checks failed there: the thread says so, and it is the person's to merge again.
+        github.dequeue(number, 'checks')
+        yield* changes.refresh(taskId)
+        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
+        assert.strictEqual(back?.change?.state, 'open')
+        assert.include(yield* said, "The merge queue took PR #1 out: its checks failed there. It's back in Needs you, to merge again.")
+        // Accepted again at the same head, it goes in again: another merge, not the first one's answer kept.
+        yield* changes.merge(taskId, back?.change?.head ?? '')
+        assert.lengthOf(
+          github.calls.filter((call) => call === 'merge'),
+          2,
+        )
+        assert.isTrue((yield* card)?.change?.queued)
+        // Out of the queue as it merges, while a read still says open: in it still, and nothing said.
+        github.dequeue(number, 'merged')
+        const asked = github.calls.length
+        yield* changes.refresh(taskId)
+        yield* until(
+          Effect.sync(() => github.calls.slice(asked)),
+          (since) => since.includes('activity'),
+        )
+        assert.isTrue((yield* card)?.change?.queued)
+        // The queue merges it, and it settles.
+        github.mergeByHand(number)
+        yield* changes.refresh(taskId)
+        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
+        assert.strictEqual(settled?.change?.state, 'merged')
+        assert.lengthOf(
+          (yield* said).filter((title) => title.includes('merge queue took')),
+          1,
+        )
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+    },
+  )
 
   it.live('pushes the branch only, when that is how the task ends', () => {
     const { working, bare } = hosted()
