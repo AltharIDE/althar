@@ -41,23 +41,16 @@ export function HeroLab({ id, nav }: { id: string; nav: ReactNode }) {
   )
 }
 
+/** Links to every style, in a row under the first screen, so nothing covers it. */
 export function HeroSwitch({ current }: { current: string }) {
   return (
-    <label className={s.switch}>
-      Hero
-      <select
-        value={current}
-        onChange={(event) => {
-          window.location.search = `?hero=${event.target.value}`
-        }}
-      >
-        <option value="photo">Photo</option>
-        {STYLES.map((one) => (
-          <option key={one.id} value={one.id}>
-            {one.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <nav className={s.switch} aria-label="Styles of the first screen">
+      <span>Hero</span>
+      {[{ id: 'photo', name: 'Photo' }, ...STYLES].map((one) => (
+        <a key={one.id} href={`?hero=${one.id}`} aria-current={one.id === current ? 'page' : undefined}>
+          {one.name}
+        </a>
+      ))}
+    </nav>
   )
 }

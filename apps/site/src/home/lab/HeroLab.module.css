@@ -10,30 +10,25 @@
 .under { top: 0; bottom: 0; }
 .stage { position: absolute; inset: 0; container-type: size; }
 
-/* The switch between the styles, small in the corner while they're compared. */
+/* The links between the styles, in a row under the first screen while they're compared. */
 .switch {
-  position: fixed;
-  z-index: 60;
-  right: 12px;
-  bottom: 12px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 12px;
-  border-radius: 99px;
-  background: rgba(20, 17, 14, 0.78);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 8px 24px rgba(0, 0, 0, 0.35);
-  font: 500 12px/1 var(--font);
-  color: rgba(255, 248, 240, 0.7);
+  gap: 6px;
+  padding: 14px 16px;
+  background: #0e0b09;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font: 500 13px/1 var(--font);
 }
-.switch select {
-  appearance: none;
-  padding: 6px 26px 6px 10px;
-  border: 0;
+.switch span { margin-right: 4px; color: rgba(255, 248, 240, 0.5); }
+.switch a {
+  padding: 8px 12px;
   border-radius: 99px;
-  background: rgba(255, 255, 255, 0.12) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23fff' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 10px center / 9px;
-  color: #fff;
-  font: 600 12px/1 var(--font);
+  color: rgba(255, 248, 240, 0.8);
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
+.switch a:hover { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32); }
+.switch a[aria-current] { background: #fff; color: var(--live); box-shadow: none; font-weight: 600; }
