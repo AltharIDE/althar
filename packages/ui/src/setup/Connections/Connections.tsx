@@ -52,6 +52,10 @@ export interface ConnectionsText {
   addServer: string
   addWorkspace: string
   disconnect: string
+  /** Disconnect's name for a screen reader, saying which it disconnects: Disconnect Blushh. */
+  disconnectOne: (which: string) => string
+  /** Sign in again's, the same way: Sign in again to Blushh. */
+  signInAgainTo: (which: string) => string
 }
 
 export const connectionsText: ConnectionsText = {
@@ -62,6 +66,8 @@ export const connectionsText: ConnectionsText = {
   addServer: 'Add a server',
   addWorkspace: 'Add a workspace',
   disconnect: 'Disconnect',
+  disconnectOne: (which) => `Disconnect ${which}`,
+  signInAgainTo: (which) => `Sign in again to ${which}`,
 }
 
 export interface ConnectionsProps {
@@ -90,10 +96,16 @@ const hostOf = (url: string) => {
   }
 }
 
-/** A connection by where it reaches, its workspace or server, over who it signs in as there; by who alone where it reaches only the hosted service. */
-const namesOf = (connection: ServiceConnection, t: ConnectionsText) => {
+/**
+ * A connection by where it reaches, its workspace or server, over who it
+ * signs in as there; by who alone where it reaches only the hosted service.
+ * `which` names it for its buttons: its workspace or server, or the service.
+ */
+const namesOf = (connection: ServiceConnection, service: ServiceOption, t: ConnectionsText) => {
   const where = connection.workspace ?? (connection.instance === undefined ? undefined : hostOf(connection.instance))
-  return where === undefined ? { first: t.signedInAs(connection.account), then: undefined } : { first: where, then: connection.account }
+  return where === undefined
+    ? { first: t.signedInAs(connection.account), then: undefined, which: service.name }
+    : { first: where, then: connection.account, which: where }
 }
 
 /** The services Althar can reach for you, each with who you are there, or how to connect it. */
@@ -145,24 +157,36 @@ export function Connections({
               )}
             </div>
             {mine.length > 0 && (
-              <ul className={s.rows}>
+              <ul aria-label={service.name} className={s.rows}>
                 {mine.map((connection) => {
-                  const { first, then } = namesOf(connection, t)
+                  const { first, then, which } = namesOf(connection, service, t)
                   return (
                     <li key={connection.id} className={cx(s.connection, connection.needsSignIn && s.needs)}>
                       <span className={s.who}>
-                        <span className={s.first}>{first}</span>
-                        {then !== undefined && <span className={s.then}>{then}</span>}
+                        <span className={s.first} title={first}>
+                          {first}
+                        </span>
+                        {then !== undefined && (
+                          <span className={s.then} title={then}>
+                            {then}
+                          </span>
+                        )}
                       </span>
                       <span className={s.actions}>
                         <ActionButton
+                          aria-label={t.disconnectOne(which)}
                           {...(connection.needsSignIn ? {} : { flush: 'end' as const })}
                           onClick={() => onDisconnect(connection.id)}
                         >
                           {t.disconnect}
                         </ActionButton>
                         {connection.needsSignIn && (
-                          <ActionButton tone="strong" flush="end" onClick={() => onSignInAgain(connection.id)}>
+                          <ActionButton
+                            aria-label={t.signInAgainTo(which)}
+                            tone="strong"
+                            flush="end"
+                            onClick={() => onSignInAgain(connection.id)}
+                          >
                             {t.signInAgain}
                           </ActionButton>
                         )}
