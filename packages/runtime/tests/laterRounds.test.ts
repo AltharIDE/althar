@@ -1,6 +1,6 @@
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -71,18 +71,13 @@ const toldLater = (taskId: string) =>
         SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
         WHERE t.task_id = ${taskId} AND t.kind = 'step' AND i.body LIKE 'Round 2.%'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     return told?.body ?? ''
   })
 
 /** Waits until the task's run is over, its later round passed. */
 const passed = (taskId: string) =>
-  until(
-    attempts(taskId),
-    (rows) => rows.some((row) => row.step === 'review' && row.iteration === 1 && row.state === 'succeeded'),
-    Duration.seconds(20),
-  )
+  until(attempts(taskId), (rows) => rows.some((row) => row.step === 'review' && row.iteration === 1 && row.state === 'succeeded'))
 
 describe('a later round of review, its lead’s server still running', () => {
   it.live('starts at once in its task’s place, with what the lead settled', () =>

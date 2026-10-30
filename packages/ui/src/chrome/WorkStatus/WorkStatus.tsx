@@ -1,5 +1,5 @@
 import { Popover as P } from 'radix-ui'
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type ComponentPropsWithRef, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
@@ -12,6 +12,9 @@ import s from './WorkStatus.module.css'
  * opens the first of them. Pointed at, or with ArrowDown, it shows what
  * they are, each a way into its own; the one already on screen shows, but
  * isn't a way anywhere. With none, it says so and does nothing.
+ *
+ * Bare, the count is the words of a chip it sits in, such as a project's
+ * header's: no pill or dot of its own, the chip's colour and glyph saying it.
  */
 
 export interface WorkStatusText {
@@ -60,11 +63,23 @@ export interface WorkStatusProps {
   needs?: ReadonlyArray<WorkNeed>
   /** Which end of the count the preview lines up with: its end, at the end of a bar; its start, where the count starts a line. */
   align?: 'start' | 'end'
+  /** The count as the words of the chip it sits in: no pill or dot of its own. */
+  bare?: boolean
   className?: string
   text?: Partial<WorkStatusText>
 }
 
-export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, align = 'end', className, text }: WorkStatusProps) {
+export function WorkStatus({
+  running = 0,
+  yours,
+  onYours,
+  needs,
+  ring = false,
+  align = 'end',
+  bare = false,
+  className,
+  text,
+}: WorkStatusProps) {
   const t = { ...workStatusText, ...text }
   return (
     <span className={cx(s.status, className)}>
@@ -74,7 +89,7 @@ export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, a
           {t.running(running)}
         </span>
       )}
-      <Yours yours={yours} onYours={onYours} needs={needs} ring={ring} align={align} t={t} />
+      <Yours yours={yours} onYours={onYours} needs={needs} ring={ring} align={align} bare={bare} t={t} />
     </span>
   )
 }
@@ -85,6 +100,7 @@ function Yours({
   needs,
   ring,
   align,
+  bare,
   t,
 }: {
   yours: number
@@ -92,23 +108,45 @@ function Yours({
   needs?: ReadonlyArray<WorkNeed>
   ring: boolean
   align: 'start' | 'end'
+  bare: boolean
   t: WorkStatusText
 }) {
   if (yours === 0) return <span className={s.none}>{t.none}</span>
-  const said = (
+  const said = bare ? (
+    t.yours(yours)
+  ) : (
     <>
       <LiveDot signal ping={ring} className={s.dot} />
       {t.yours(yours)}
     </>
   )
-  if (!onYours) return <span className={s.yoursText}>{said}</span>
+  if (!onYours) return <span className={bare ? undefined : s.yoursText}>{said}</span>
   if (needs === undefined || needs.length === 0)
     return (
-      <ActionButton tone="strong" onClick={onYours}>
+      <Count bare={bare} onClick={onYours}>
         {said}
-      </ActionButton>
+      </Count>
     )
-  return <Preview said={said} onYours={onYours} needs={needs} align={align} t={t} />
+  return <Preview said={said} onYours={onYours} needs={needs} align={align} bare={bare} t={t} />
+}
+
+/** The count as a way in: the bar's strong action button, or bare, the chip's own words. */
+function Count({
+  bare,
+  ref,
+  className,
+  children,
+  ...rest
+}: Omit<ComponentPropsWithRef<'button'>, 'children'> & { bare: boolean; children: ReactNode }) {
+  return bare ? (
+    <button ref={ref} type="button" className={cx(s.bare, className)} {...rest}>
+      {children}
+    </button>
+  ) : (
+    <ActionButton ref={ref} tone="strong" {...(className === undefined ? {} : { className })} {...rest}>
+      {children}
+    </ActionButton>
+  )
 }
 
 /** How long the pointer rests before the preview opens, and lingers after it leaves. */
@@ -125,12 +163,14 @@ function Preview({
   onYours,
   needs,
   align,
+  bare,
   t,
 }: {
   said: ReactNode
   onYours: () => void
   needs: ReadonlyArray<WorkNeed>
   align: 'start' | 'end'
+  bare: boolean
   t: WorkStatusText
 }) {
   const [open, setOpen] = useState(false)
@@ -171,9 +211,9 @@ function Preview({
   return (
     <P.Root open={open} onOpenChange={setOpen}>
       <P.Anchor asChild>
-        <ActionButton
+        <Count
           ref={count}
-          tone="strong"
+          bare={bare}
           aria-expanded={open}
           aria-controls={open ? id : undefined}
           aria-keyshortcuts="ArrowDown"
@@ -190,7 +230,7 @@ function Preview({
           }}
         >
           {said}
-        </ActionButton>
+        </Count>
       </P.Anchor>
       <P.Portal>
         <P.Content

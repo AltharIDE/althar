@@ -96,7 +96,7 @@ describe('a description in the repository’s template', () => {
   it('is the template itself, unticked, where nothing was written or done to put in it', () => {
     assert.strictEqual(
       bodyOf({ lead: null, ...nothingElse, template: '## Summary\n\n- [x] Done\n', written: null }),
-      '## Summary\n\n- [ ] Done\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## Summary\n\n- [ ] Done\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
   })
 
@@ -108,11 +108,11 @@ describe('a description in the repository’s template', () => {
   it('with no template, is the lead’s own, else what it did', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: null, written: null }),
-      'Did it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      'Did it.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
     assert.strictEqual(
       bodyOf({ built: 'Built it.', lead: 'Did it.', ...nothingElse, template: null, written: 'Why, and what.' }),
-      'Why, and what.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      'Why, and what.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
   })
 
@@ -120,7 +120,7 @@ describe('a description in the repository’s template', () => {
     const fenced = '## Summary\n\n```sh\n# run the tests\nbun test\n```\n'
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: fenced, written: '## Summary\n\nDid it.' }),
-      '## Summary\n\nDid it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## Summary\n\nDid it.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
   })
 
@@ -128,23 +128,23 @@ describe('a description in the repository’s template', () => {
     const written = '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [x] Tests pass\n'
     assert.strictEqual(
       bodyOf({ built: 'Built it. Try it at localhost.', lead: 'Did it.', ...nothingElse, template, written }),
-      '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
   })
 
   it('puts the summary in the template’s place for it where the lead’s drops a heading, or below where it has none', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template, written: 'Did it, my own way.' }),
-      '## Summary\n\n<!-- What and why. -->\n\nDid it.\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## Summary\n\n<!-- What and why. -->\n\nDid it.\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
     // `What type of change` is a checklist; the summary goes under Description.
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: '## What type of change?\n\n- [ ] Fix\n\n## Description\n', written: null }),
-      '## What type of change?\n\n- [ ] Fix\n\n## Description\n\nDid it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## What type of change?\n\n- [ ] Fix\n\n## Description\n\nDid it.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: '## Checklist\n\n- [ ] Tests pass', written: null }),
-      '## Checklist\n\n- [ ] Tests pass\n\n### Summary\n\nDid it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+      '## Checklist\n\n- [ ] Tests pass\n\n### Summary\n\nDid it.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
     )
   })
 })

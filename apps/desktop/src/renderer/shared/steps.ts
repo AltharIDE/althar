@@ -24,12 +24,14 @@ export const stepText = {
     checks_running: 'Checks running',
     // Its pull request, as the person pressed Merge, until its host says it merged (data/merges).
     merging: 'Merging',
+    // Its pull request in its branch's merge queue, until its host merges it or the queue takes it out (data/merges).
+    merge_queue: 'In the merge queue',
   } as Readonly<Record<string, string>>,
 }
 
 /** Whether a step comes after the plan's steps: a conflict round's, the checks of a change Althar sees through, or its merge. */
 export const afterSteps = (step: string | null) =>
-  step === 'conflict' || step === 'checks' || step === 'checks_running' || step === 'merging'
+  step === 'conflict' || step === 'checks' || step === 'checks_running' || step === 'merging' || step === 'merge_queue'
 
 /** The names of the steps it takes: on a round of work after its plan (ADR-034), its lead's follow-up in place of Implement. */
 export const stepNames = (steps: ReadonlyArray<PlanStep>, followUp = false): ReadonlyArray<string> =>

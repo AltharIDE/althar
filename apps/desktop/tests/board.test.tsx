@@ -704,10 +704,10 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // On the front page: three things that need you, one in progress, and what settled last; nothing says what runs.
-    expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
-    const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
-    expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
+    // In the header, where it stands is one chip: three things that need you, a way into them; what runs isn't said beside it.
+    const header = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header') as HTMLElement
+    expect(within(header).getByRole('button', { name: '3 need you' })).toBeTruthy()
+    expect(header.textContent).not.toMatch(/in progress|running|merged/)
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
@@ -973,6 +973,25 @@ describe('the board', () => {
       expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
+    })
+
+    it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
+      const queued = board({
+        tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: change({ queued: true }) } : one)),
+      })
+      const getBoard = vi.fn(async () => queued)
+      const { client, emit } = fakeClient({ getBoard })
+      withServices(<Project />, client)
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      // Read so, as after a restart, with nothing pressed in this window: at work, and saying where.
+      expect(await lane('Running').findByText('In the merge queue')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The queue took it out: it is the person's to merge again.
+      getBoard.mockImplementation(async () => board())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('In the merge queue')).toBeNull()
     })
 
     it('is the person’s again once its pull request merged and another of its own is open', async () => {

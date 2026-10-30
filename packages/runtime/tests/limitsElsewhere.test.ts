@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -78,7 +78,7 @@ describe('the coordinator out of usage', () => {
       const { projectId, threadId, say } = yield* asked('Is the checkout slow?')
       yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
       yield* say
-      const [reply] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(15))
+      const [reply] = yield* until(replies(threadId), (all) => all.length > 0)
       assert.deepStrictEqual(reply, { agentId: 'claude-code', accountId: work.id })
       assert.include(
         yield* said(threadId),
@@ -97,7 +97,7 @@ describe('the coordinator out of usage', () => {
         const instance = yield* Instance
         const { projectId, threadId, say } = yield* asked('Is the checkout slow?')
         yield* say
-        const lines = yield* until(said(threadId), (all) => all.some((line) => line.includes('ran out of usage')), Duration.seconds(15))
+        const lines = yield* until(said(threadId), (all) => all.some((line) => line.includes('ran out of usage')))
         assert.include(lines, 'Fake claude-code ran out of usage. Your message waits until Fake claude-code is back.')
         assert.lengthOf(yield* replies(threadId), 0)
 
@@ -123,7 +123,6 @@ describe('the coordinator out of usage', () => {
             payload: string
           }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
           (rows) => rows.length === 1,
-          Duration.seconds(15),
         )
         assert.deepInclude(JSON.parse(call?.payload ?? '{}'), { step: 'implement', why: 'usage_limit', agentId: 'claude-code' })
         const ran = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${task.threadId}`
@@ -164,7 +163,6 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       const [call] = yield* until(
         sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       yield* sql`UPDATE attention_requests SET payload = json_set(payload, '$.limit.accountId', NULL) WHERE id = ${call?.id ?? ''}`
       yield* runs.answerStuck({
@@ -179,11 +177,7 @@ describe('a usage-limit call made without the account that ran out, as an earlie
         `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}, when Fake claude-code is back, as you said.`,
       )
       // At the reset, its lead carries on, on the agent's first account, and finishes.
-      yield* until(
-        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`,
-        (rows) => rows[0]?.state === 'succeeded',
-        Duration.seconds(15),
-      )
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, (rows) => rows[0]?.state === 'succeeded')
       const [usual] = yield* accounts.of('claude-code')
       const ran = yield* sql<{ accountId: string }>`
         SELECT account_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at, rowid`

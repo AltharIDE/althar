@@ -362,6 +362,9 @@ interface SessionState {
 /** What a lead's brief says where it is started again on a task that settled (the runtime's Sessions.ts). */
 const SETTLED_AGAIN = 'This task is settled:'
 
+/** How the runtime's reminder to report begins, which the person's words waiting for the turn go after (the runtime's Runs.ts). */
+const REMINDED = /^Your (step|review) isn't done until you call Althar's /
+
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
   '\n  \u001b[32mVITE\u001b[39m v7.1.0  ready in 312 ms\n\n  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m\n  ➜  Network: use --host to expose\n'
@@ -1424,8 +1427,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
       if (again) for (const marker of whole.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+      // Reminded to report, with the person's words that waited for the same turn, it does what the words ask. They come in the
+      // order they were queued: the reminder first, or, where the person wrote as the turn ended, after their words.
+      const paragraphs = whole.split('\n\n')
+      const words = paragraphs.filter((paragraph) => !REMINDED.test(paragraph))
+      const reminded = words.length > 0 && words.length < paragraphs.length
       // The markers in a linked file's words play as a message's do, for what the person sends with no words.
-      const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : whole}${cuesIn(params.prompt)}`
+      const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : reminded ? words.join('\n\n') : whole}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(

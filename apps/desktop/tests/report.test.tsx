@@ -209,7 +209,7 @@ describe('Report a problem', () => {
     })
     render(<ReportDialog host={fakeHost({ report: host })} />)
     await ask({ kind: 'asked', from: 'settings' })
-    const box = await screen.findByRole('textbox', { name: 'What happened?' }, { timeout: 2_000 })
+    const box = await screen.findByRole('textbox', { name: 'What happened?' })
     await userEvent.type(box, 'Nothing opened')
     await userEvent.click(screen.getByRole('button', { name: /^Send/ }))
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Althar couldn’t reach its reports service.')

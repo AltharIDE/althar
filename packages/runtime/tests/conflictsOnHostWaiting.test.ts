@@ -2,6 +2,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Queries } from '../src/Queries'
 import { hosted, notices, until } from './support'
 import {
@@ -121,7 +123,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(inTurn(threadId), (turn) => [turn]),
         ([turn]) => turn === false,
-        Duration.seconds(20),
       )
       yield* Effect.sleep(Duration.millis(1200))
       const [during] = yield* rounds(taskId)
@@ -234,7 +235,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
         ([seen]) => seen?.phase === 'running' && seen.step === 'conflict' && !seen.turn,
-        Duration.seconds(20),
       )
       // Pushed, it waits for the checks on what Althar pushed: ready for the person to accept once they pass.
       yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
@@ -252,7 +252,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
         ([seen]) => seen?.phase === 'running' && seen.step === 'checks' && !seen.turn,
-        Duration.seconds(20),
       )
       yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
       assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
@@ -275,7 +274,10 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       // The thread header says so as well, from the same card.
       const queries = yield* Queries
       assert.strictEqual((yield* Effect.orDie(queries.thread(threadId))).task.handedBack, card.handedBack)
-      // Once its branch moves it is the person's own again, and the card says nothing of the round.
+      // Once its branch moves the card says nothing of the round, which stood for the branch as the lead left it. The
+      // rule goes off first: still conflicting, the moved branch is the lead's to try again, and Althar would ask it at
+      // once, so the card a moment later could be at work on that, or the new round's.
+      yield* (yield* Policies).set(projectId, { resolveConflicts: false }, (yield* Instance).personId)
       git((yield* worktreeOf(taskId)).path, 'commit', '-q', '--allow-empty', '-m', 'Look again')
       assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
     }).pipe(Effect.provide(runtimeWith({ github })))

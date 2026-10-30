@@ -379,6 +379,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
           },
     ...(target === '' ? {} : { target }),
     ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
+    ...(field(value, 'queued') === true ? { queued: true } : {}),
     head: text(value, 'headSha') || null,
     listening,
     localHead: null,
