@@ -59,7 +59,7 @@
   - **What still holds inside:** the project's own words. A command or a
     kind it never allows, where the line plainly is one, is refused, and a
     command it asks about asks. What it can't read (`$(…)`, a script in
-    another language, Bun's or Deno's or `tsx`'s, a shell given a file, a
+    another language, Bun's or Deno's (`-e`, `--eval=`, a file, past their options) or `tsx`'s, a shell given a file, a
     program run from a file rather than one installed) runs, unless Never lists
     something nothing at the boundary stops, a deploy or a command the
     project named: then it is refused, with how to write it so Althar can
