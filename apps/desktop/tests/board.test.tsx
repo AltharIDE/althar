@@ -198,7 +198,8 @@ describe('the board’s lanes', () => {
       const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
       expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
       expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
-      expect(card('Stopped n').getByText('No agent is working on it')).toBeTruthy()
+      // Stopped with no reason: the word alone, no line saying no agent works on it.
+      expect(card('Stopped n').queryByText('No agent is working on it')).toBeNull()
       expect(card('Stopped d').getByText('20h ago')).toBeTruthy()
       expect(card('Stopped d').queryByText('21h')).toBeNull()
       expect(card('Stopped r').getByText('From Nightly dependency check')).toBeTruthy()
@@ -1107,7 +1108,7 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
     await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
-    expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
+    expect(await screen.findByText('No lead to start. Pick an agent for it first.')).toBeTruthy()
     expect(send).not.toHaveBeenCalled()
     expect(startSession).not.toHaveBeenCalled()
   })
@@ -1138,9 +1139,8 @@ describe('the board', () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     const status = await screen.findByRole('alert')
-    expect(status.textContent).toContain('Note queued, but the lead could not start.')
+    expect(status.textContent).toContain("Queued, but the lead didn't start.")
     expect(status.textContent).toContain('No signed-in account is available.')
-    expect(status.textContent).toContain("The note is already queued; don't send it again.")
     expect(screen.queryByRole('textbox')).toBeNull()
   })
 
@@ -1333,17 +1333,13 @@ describe('every state the board shows', () => {
     expect(within(screen.getByRole('region', { name: 'Needs you' })).getByText('Stopped work')).toBeTruthy()
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText('Stopped work')).toBeNull()
     expect(screen.getByText('Conversation')).toBeTruthy()
-    expect(
-      screen.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(screen.getByText('Claude Code closed before finishing the step.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
     expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
-    expect(screen.getByText("Althar couldn't open the pull request. Try again, or go on without it.")).toBeTruthy()
+    expect(screen.getByText("Couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
@@ -1598,7 +1594,7 @@ describe('every state the board shows', () => {
       getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', phase: 'ready', change: runningChecks })], calls: [] })),
     })
     withServices(<Docked target={{ kind: 'task', id: 't9' }} />, client)
-    expect(await screen.findByText('It can be accepted once its checks pass')).toBeTruthy()
+    expect(await screen.findByText('Waiting for its checks')).toBeTruthy()
   })
 })
 
@@ -1769,11 +1765,7 @@ describe('each kind’s card', () => {
     expect(question.getByText('Which database?')).toBeTruthy()
     const stuck = within(cardOf('Gave up'))
     expect(stuck.getByText('Stuck')).toBeTruthy()
-    expect(
-      stuck.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(stuck.getByText('Claude Code closed before finishing the step.')).toBeTruthy()
     // Merged, with commits after it: its branch, with what is in no pull request yet.
     const after = within(cardOf('Merged, then more'))
     expect(after.getByText('Ready for a new pull request')).toBeTruthy()
@@ -2046,7 +2038,7 @@ describe('a ready card’s next step, done from the card', () => {
         changed: { files: 3, add: 287, del: 375 },
         startedAt: '2026-09-29T08:00:00.000Z',
         stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z' },
-        conflictUnsent: 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
+        conflictUnsent: 'It’s stopped.',
         automation: { id: 'au1', name: 'Nightly dependency check' },
       }),
     ]

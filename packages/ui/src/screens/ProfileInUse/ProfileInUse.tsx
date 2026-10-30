@@ -21,7 +21,7 @@ export interface ProfileInUseText {
 
 export const profileInUseText: ProfileInUseText = {
   title: 'Althar is open somewhere else',
-  later: 'That may be another Althar, or the command line. Once it closes, Althar can open again.',
+  later: 'Close it, then try again.',
   retry: 'Try again',
 }
 

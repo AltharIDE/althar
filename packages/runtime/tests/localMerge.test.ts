@@ -143,7 +143,7 @@ describe('merging a task here', () => {
       assert.deepStrictEqual(yield* mergedOf, [{ repository: slug, name: basename(root), branch: 'main', remote: 'origin/main', ahead: 0 }])
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Pushed main to origin.',
+        'Pushed main.',
       )
       // The remote moved on meanwhile: it refuses, and says how to put it right.
       const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
@@ -199,7 +199,7 @@ describe('merging a task here', () => {
       assert.include(git(remote, 'log', '-1', '--format=%B', branch), 'Co-authored-by: Althar')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        `Pushed ${branch} to origin.`,
+        `Pushed ${branch}.`,
       )
       assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 1 })
       // A commit that isn't on the branch, or isn't a commit at all, isn't pushed.
@@ -592,7 +592,7 @@ describe('merging a task here', () => {
       )
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Merged here: api into main, web into main.',
+        'Merged 2 repositories here.',
       )
     }).pipe(Effect.provide(runtime())),
   )

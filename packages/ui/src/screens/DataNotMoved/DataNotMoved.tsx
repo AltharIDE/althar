@@ -28,9 +28,9 @@ export interface DataNotMovedText {
 
 export const dataNotMovedText: DataNotMovedText = {
   title: 'This update couldn’t move your data',
-  copied: 'Your data is safe. Althar made a copy of it before the update.',
-  untouched: 'Your data is safe: the update left it as it was.',
-  notCopied: 'Your data is safe: Althar couldn’t make a copy of it first, so the update left it as it was.',
+  copied: 'A copy from before the update is kept.',
+  untouched: 'Your data is as it was.',
+  notCopied: 'Your data is as it was.',
   copy: 'Copy from before the update',
   show: 'Show in Finder',
   stoppedBy: 'What stopped it',

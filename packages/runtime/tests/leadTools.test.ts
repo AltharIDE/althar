@@ -300,7 +300,7 @@ describe('rerun_check, on the task’s own pull request', () => {
       const notices = Effect.map(items(lead.threadId), (rows) =>
         rows.flatMap((row) => (row.kind === 'notice' ? [String(row.content.title)] : [])),
       )
-      assert.include(yield* notices, 'Running test on PR #1 again, as its lead asked.')
+      assert.include(yield* notices, 'Running a check on PR #1 again.')
       const sql = yield* SqlClient.SqlClient
       const kept = yield* sql<{ id: string }>`
         SELECT json_extract(o.payload, '$.id') AS id FROM observations o JOIN external_links l ON l.id = o.subject_id

@@ -26,62 +26,21 @@ import { text as stuckText } from './StuckCall'
 
 type Step = StuckStep['step']
 
-/** The step a usage limit stopped, in a sentence: while it was at it, and the work that waits, which may be plural. */
-const stepWords: Readonly<Record<Step, { readonly during: string; readonly work: string; readonly plural?: true }>> = {
-  implement: { during: ' while working on the task', work: 'the work' },
-  settle: { during: ' while fixing what the review found', work: 'the fixes', plural: true },
-  review: { during: ' during the review', work: 'the review' },
-  publish: { during: '', work: 'the step' },
-}
-
-const capital = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
-
-/** The step's work with its verb agreeing: "the review waits", "the fixes wait". */
-const workThat = (step: Step, one: string, many: string) => `${stepWords[step].work} ${stepWords[step].plural === true ? many : one}`
-
-/** An agent a new step steered clear of before it ran out: how little it has left. */
-const nearlyOut = (agent: string, left: number) => `${agent} is nearly out of usage, with ${Math.floor(left)}% left.`
-
 export const limitText = {
   /**
-   * The call: whose limit, on which step, until when, and the ways on; the
-   * same words wherever the call shows. `left`, asked before the step started,
-   * its agent nearly out: what it has left is one of the ways on.
+   * The call: whose limit, and until when, the same wherever the call shows;
+   * its options are the ways on. `left`, asked before the step started, its
+   * agent nearly out: what it has left.
    */
-  what: (agent: string, resets: string | null, step: Step = 'publish', left?: number) => {
-    const { during } = stepWords[step]
-    const ways = (first: string, second: string) =>
-      step === 'review' ? `${first}, ${second}, or skip the review.` : `${first}, or ${second}.`
-    if (left !== undefined)
-      return `${nearlyOut(agent, left)}${resets === null ? '' : ` It's back in full at ${resets}.`} ${ways(
-        `Pick a model to carry on now, ${agent} too`,
-        resets === null ? `try ${agent} again` : 'wait until then',
-      )}`
-    return resets === null
-      ? `${agent} ran out of usage${during} and didn't say when it's back. ${ways('Pick another model to carry on', `try ${agent} again`)}`
-      : `${agent} ran out of usage${during}. It's back at ${resets}. ${ways('Pick another model to carry on now', 'wait until then')}`
-  },
-  /** Held for the reset on its own: whose limit, on which step, why it waits rather than moving on, until when, and that it can move now. */
-  held: (agent: string, at: string, step: Step, why: HeldForLimit['why'], left?: number) => {
-    const { during } = stepWords[step]
-    const waits = workThat(step, 'waits', 'wait')
-    const now = step === 'review' ? 'To carry on now, pick another model, or skip the review.' : 'To carry on now, pick another model.'
-    const out = left === undefined ? `${agent} ran out of usage${during}.` : nearlyOut(agent, left)
-    switch (why) {
-      case 'nothing_free':
-        return `${out} No other model was free, so ${waits} until ${at}, when it's back. ${now}`
-      case 'waits':
-        return `${out} This project waits for usage to reset, so ${waits} until ${at}. ${now}`
-      case 'asked':
-        return `${out} ${capital(waits)} until ${at}, as you said. ${now}`
-      default:
-        return `${out} ${capital(waits)} until ${at}, when it's back. ${now}`
-    }
-  },
-  /** Kept waiting from the card: it folds, and the step runs again at the reset. */
-  waitingNote: (step: Step) => `${workThat(step, 'runs', 'run')} again then`,
-  /** Moved to another model from the card: the step carries on with it. */
-  movedNote: (step: Step) => `${workThat(step, 'carries', 'carry')} on there`,
+  what: (agent: string, resets: string | null, left?: number) =>
+    left !== undefined
+      ? `${agent} has ${Math.floor(left)}% of its usage left${resets === null ? '' : `, until ${resets}`}.`
+      : resets === null
+        ? `${agent} is out of usage.`
+        : `${agent} is out of usage until ${resets}.`,
+  /** Held for the reset on its own: whose limit, and until when. */
+  held: (agent: string, at: string, left?: number) =>
+    left === undefined ? `${agent} is out of usage until ${at}.` : `${agent} has ${Math.floor(left)}% of its usage left, until ${at}.`,
   out: (at: string) => `out until ${at}`,
   perUse: 'paid per use',
 }
@@ -184,7 +143,7 @@ export function LimitCall({
       runtime={limitedOf(agents, agentName(agentId) || 'The agent', limit.accountId)}
       resets={resets}
       step={stuckText.step[step]}
-      text={{ what: (runtime, at) => limitText.what(runtime, at, step, limit.left) }}
+      text={{ what: (runtime, at) => limitText.what(runtime, at, limit.left) }}
       options={options}
       onSwap={(id) => {
         const picked = options.find((option) => option.id === id)?.choice
@@ -249,9 +208,7 @@ export function HeldLimit({
       resets={at}
       step={stuckText.step[step]}
       text={{
-        what: (runtime) => limitText.held(runtime, at, step, waits.why, waits.left),
-        waitingNote: limitText.waitingNote(step),
-        movedNote: limitText.movedNote(step),
+        what: (runtime) => limitText.held(runtime, at, waits.left),
       }}
       options={options}
       onSwap={(id) => {

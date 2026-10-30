@@ -350,7 +350,7 @@ describe('the Talk room’s composer when Althar doesn’t take what was said', 
     })
     withServices(<Project />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
-    const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
+    const queue = screen.getByRole('region', { name: '2 queued' })
     const [first, second] = within(queue).getAllByRole('button', { name: 'Edit' })
     await userEvent.click(second as HTMLElement)
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('already has that message'))

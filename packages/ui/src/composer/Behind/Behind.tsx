@@ -70,8 +70,7 @@ export interface BehindText {
   /** The popover's name. */
   title: string
   waiting: string
-  /** Under the wait's head: how many hold the places, and how many only by what they left running. */
-  holding: (n: number, kept: number) => string
+  /** Under a task that holds a place only by what it left running: what that is, by name, or how many. */
   keptBy: (names: readonly string[]) => string
   stopKept: string
   stopKeptLabel: (title: string) => string
@@ -97,15 +96,7 @@ export interface BehindText {
 export const behindText: BehindText = {
   title: 'Behind this task',
   waiting: 'Waiting for a place',
-  holding: (n, kept) =>
-    `${n === 1 ? '1 task is running' : `${n} tasks are running`}${
-      kept === 0
-        ? ''
-        : kept === 1
-          ? '; 1 of them only for a server it left running'
-          : `; ${kept} of them only for servers they left running`
-    }.`,
-  keptBy: (names) => `Only its ${names.join(', ')} keeps the place`,
+  keptBy: (names) => `${names.length === 1 ? names[0] : names.length} left running`,
   stopKept: 'Stop',
   stopKeptLabel: (title) => `Stop what ${title} left running`,
   front: 'Move to the front of the line',
@@ -218,7 +209,6 @@ export function Behind({
   ]
     .filter(Boolean)
     .join(' · ')
-  const kept = wait?.holders.filter((holder) => holder.keptBy !== undefined).length ?? 0
 
   return (
     <div className={s.behind}>
@@ -290,29 +280,24 @@ export function Behind({
               {wait.place !== undefined && <span className={s.headAside}>{wait.place}</span>}
             </div>
             {wait.holders.length > 0 && (
-              <>
-                <p className={s.lead}>{t.holding(wait.holders.length, kept)}</p>
-                <ul className={s.list}>
-                  {wait.holders.map((holder) => (
-                    <li key={holder.id} className={s.holder}>
-                      <span className={s.holderGlyph}>
-                        {holder.keptBy === undefined ? <LiveDot /> : <Icon name="terminal" size={11} />}
+              <ul className={s.list}>
+                {wait.holders.map((holder) => (
+                  <li key={holder.id} className={s.holder}>
+                    <span className={s.holderGlyph}>{holder.keptBy === undefined ? <LiveDot /> : <Icon name="terminal" size={11} />}</span>
+                    <span className={s.holderMain}>
+                      <span className={s.holderTitle} title={holder.title}>
+                        {holder.title}
                       </span>
-                      <span className={s.holderMain}>
-                        <span className={s.holderTitle} title={holder.title}>
-                          {holder.title}
-                        </span>
-                        {holder.keptBy !== undefined && <span className={s.holderMeta}>{t.keptBy(holder.keptBy)}</span>}
-                      </span>
-                      {holder.keptBy !== undefined && holder.stoppable && onStopHeld && (
-                        <ActionButton size="small" aria-label={t.stopKeptLabel(holder.title)} onClick={() => onStopHeld(holder.id)}>
-                          {t.stopKept}
-                        </ActionButton>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </>
+                      {holder.keptBy !== undefined && <span className={s.holderMeta}>{t.keptBy(holder.keptBy)}</span>}
+                    </span>
+                    {holder.keptBy !== undefined && holder.stoppable && onStopHeld && (
+                      <ActionButton size="small" aria-label={t.stopKeptLabel(holder.title)} onClick={() => onStopHeld(holder.id)}>
+                        {t.stopKept}
+                      </ActionButton>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
             {onFront && (
               <div className={s.foot}>

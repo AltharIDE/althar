@@ -48,7 +48,7 @@ export const loadPeekText: LoadPeekText = {
   running: 'Running',
   processes: (n) => (n === 1 ? '1 process' : `${n} processes`),
   otherApps: 'Other apps',
-  nothingRuns: 'Nothing Althar started is running.',
+  nothingRuns: 'Nothing running',
   ago: '2 min ago',
   now: 'now',
   show: 'Show in the bar',

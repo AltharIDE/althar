@@ -29,9 +29,9 @@ export type GiveUp = Extract<StallAction, { _tag: 'GiveUp' }>
 
 /** What a thread says, as each role's agent is started again, when Althar stops it. */
 const STARTING_AGAIN: Readonly<Record<string, string>> = {
-  task: 'Start the lead again to carry on; it picks up from the thread.',
-  coordinator: 'Say something to start the coordinator again; it picks up from the thread.',
-  step: 'The review waits; Althar starts the reviewer again when the task resumes.',
+  task: 'Start the lead again to carry on.',
+  coordinator: 'Say something to start it again.',
+  step: 'The review waits until the task resumes.',
 }
 
 /** What the agent is told when its turn stalled. */
@@ -121,7 +121,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
             yield* say(
               place.projectId,
               action.threadId,
-              `${place.name} showed no sign of work again after Althar started it afresh, so Althar stopped it.`,
+              `${place.name} went quiet again after a fresh start. Stopped.`,
               STARTING_AGAIN[place.kind],
             )
           return yield* Effect.ignore(sessions.stop(action.threadId))
@@ -131,8 +131,8 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
           yield* say(
             place.projectId,
             action.threadId,
-            `${place.name} kept repeating \`${action.detail ?? ''}\`, so Althar stopped its turn.`,
-            'Say what to do instead, and it carries on from there.',
+            `${place.name} kept repeating a command. Stopped its turn.`,
+            'Say what to do instead.',
           )
         const stopped = yield* sessions.interrupt(action.threadId).pipe(Effect.timeoutOption(cancelGrace), Effect.option)
         if (Option.isNone(stopped) || Option.isNone(stopped.value)) yield* Effect.ignore(sessions.stop(action.threadId))
@@ -144,14 +144,10 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
         if (place === undefined) return
         switch (action._tag) {
           case 'CarryOn': {
-            const running =
-              action.tool === null
-                ? ''
-                : ` while running ${action.tool.command === null ? action.tool.title : `\`${action.tool.command}\``}`
             yield* say(
               place.projectId,
               action.threadId,
-              `${place.name} showed no sign of work for ${spanOf(action.quietFor)}${running}, so Althar stopped its turn and told it to carry on.`,
+              `${place.name} went quiet for ${spanOf(action.quietFor)}. Told it to carry on.`,
               undefined,
               'aside',
             )
@@ -161,7 +157,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
             yield* say(
               place.projectId,
               action.threadId,
-              `${place.name} ran \`${action.repeated}\` ${action.times} times in a row to the same end, so Althar stopped its turn and told it to try another way.`,
+              `${place.name} ran the same command ${action.times} times. Told it to try another way.`,
               undefined,
               'aside',
             )
@@ -175,8 +171,8 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
                 ...(place.effort === null ? {} : { effort: place.effort }),
                 said:
                   action.why === 'ignored_stop'
-                    ? `${place.name} didn't stop its turn when asked, so Althar started it afresh.`
-                    : `${place.name} showed no sign of work again, so Althar started it afresh.`,
+                    ? `${place.name} didn't stop when asked. Started it afresh.`
+                    : `${place.name} went quiet again. Started it afresh.`,
                 about: 'stall',
               }),
             )

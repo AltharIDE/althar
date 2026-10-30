@@ -568,7 +568,7 @@ describe('the start', () => {
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+      'go to Althar’s team. Never your code or any name.',
     )
     // Not a dialog, and nothing waits on it.
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -620,9 +620,7 @@ describe('the start', () => {
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
     expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
-    expect(
-      await screen.findByText('docs is a folder inside mono: on its own it makes a project, but with others, add mono itself.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('docs is inside mono. Add mono instead.')).toBeTruthy()
     expect(client.openProject).not.toHaveBeenCalled()
     // Alone, it opens as the folder it is.
     await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))

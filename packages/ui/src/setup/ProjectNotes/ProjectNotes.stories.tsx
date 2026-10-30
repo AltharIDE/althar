@@ -106,7 +106,7 @@ export const Removing: Story = {
     await expect(c.getByRole('button', { name: /^Remove “Dependency setup/ })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     await expect(c.queryByRole('list')).toBeNull()
-    await expect(c.getByText(/^None yet\./)).toHaveFocus()
+    await expect(c.getByText('None yet')).toHaveFocus()
   },
 }
 

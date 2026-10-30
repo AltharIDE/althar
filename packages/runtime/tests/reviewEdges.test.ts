@@ -95,7 +95,7 @@ describe('a reviewer whose turn does nothing', () => {
       )
       assert.include(
         (yield* notices(reviewer.threadId)).map((notice) => notice.title),
-        'Its turn ended before it could do anything, so Althar tells it to carry on in a minute.',
+        'Its turn ended without doing anything.',
       )
       const told = (yield* turns(reviewer.threadId)).map((turn) => turn.prompt ?? '')
       assert.include(

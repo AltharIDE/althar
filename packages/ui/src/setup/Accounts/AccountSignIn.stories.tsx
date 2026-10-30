@@ -211,7 +211,7 @@ export const PastingAKey: Story = {
   args: { step: { kind: 'key' } },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Billed per use to the key’s account, after your plans.')).toBeInTheDocument()
+    await expect(c.getByText('Billed per use to the key’s account')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Add key' }))
     await expect(c.getByRole('alert')).toHaveTextContent('Paste the key first')
     await userEvent.type(c.getByLabelText('OpenAI API key'), 'sk-proj-4f2a{Enter}')

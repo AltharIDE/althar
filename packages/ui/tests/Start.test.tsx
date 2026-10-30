@@ -38,7 +38,7 @@ const start = (more: Partial<StartProps> = {}) => {
 describe('the first screen', () => {
   it('counts the agents that are ready, and says so in the words of the rows it is given', () => {
     start({ runtimesText: { checking: 'Asking…' }, runtimes: [...TWO_READY, { id: 'codex', name: 'Codex', state: RuntimeState.Checking }] })
-    expect(screen.getByText(/2 agents are ready\./)).toBeInTheDocument()
+    expect(screen.getByText('2 of 3 ready')).toBeInTheDocument()
     expect(screen.getByText('Asking…')).toBeInTheDocument()
   })
 

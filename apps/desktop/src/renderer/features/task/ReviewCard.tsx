@@ -126,18 +126,16 @@ export const reviewedUnfurl = (review: ReviewBrief): Unfurl => ({
 
 export const reachText = {
   reads: (author: string) => `Reads ${author}’s branch`,
-  readsMeans:
-    'Althar fetched the pull request’s head into a copy of its own. The agent reads it there and can’t change it, or fetch anything into it itself.',
+  readsMeans: 'A copy of the pull request’s head, which the agent can’t change.',
   runs: 'runs nothing of it',
-  runsMeans: 'Nothing the pull request brings runs: no install, no build, no tests, no scripts. Commands that only look are allowed.',
+  runsMeans: 'No install, build, tests or scripts. Commands that only look are allowed.',
   offline: 'no network',
   offlineMeans: (source: string) =>
-    `The pull request is from outside the team, so the agent has no network: Althar refuses its fetches. What it knows of the pull request comes from its code and from Althar: its description, checks and comments on ${source}.`,
+    `From outside the team. The agent sees its code, and its description, checks and comments on ${source}.`,
   posts: 'posts nothing until you do',
-  postsMeans: (source: string) => `It writes a review draft. Nothing reaches ${source} until you post it from the draft’s card.`,
+  postsMeans: (source: string) => `Nothing reaches ${source} until you post the draft.`,
   postsItself: 'posts once drafted',
-  postsItselfMeans: (source: string) =>
-    `Your setting posts reviews of your team’s pull requests on ${source} as soon as they are drafted. Turn it off in Settings.`,
+  postsItselfMeans: (source: string) => `Your team’s reviews post on ${source} once drafted. Change it in Settings.`,
 }
 
 /** What a review task's lead can reach, as the sentence under its header says it. */

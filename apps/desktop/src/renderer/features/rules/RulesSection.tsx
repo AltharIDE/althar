@@ -30,18 +30,16 @@ export const text = {
   /** Why a command can't go ahead: a sentence that comes first has it. */
   onOtherList: (pattern: string, list: 'ask' | 'never') => {
     const named = list === 'never' ? 'Never' : 'Ask me'
-    return `“${pattern}” is under ${named}, which comes first, so nothing changed. Take it out there first.`
+    return `“${pattern}” is already under ${named}. Take it out there first.`
   },
   /** Why what was typed can't be a host. */
   notAHost: (typed: string) => `“${typed.trim()}” isn’t a host. Type its name, such as registry.npmjs.org.`,
   /** Why a wildcard can't be a host the sandbox reaches. */
-  wildHost:
-    'Name each host on its own, such as pkgs.example.com: the rules check every host a lead reaches, and can’t check every host under a *.',
+  wildHost: 'Name each host on its own, such as pkgs.example.com.',
   /** Enter on nothing but spaces or a lone *. */
   noCommand: 'Type how the command starts first.',
   /** A command Claude Code keeps in its sandbox whatever the list says. */
-  bunStays:
-    'Claude Code runs a command that starts with bun in its sandbox whatever this list says. Add what it runs instead, such as node scripts/e2e.ts.',
+  bunStays: 'Claude Code keeps bun commands in its sandbox. Add what they run instead, such as node scripts/e2e.ts.',
   /** The task names are shown for: its key from the project's name. */
   example: (project: string) => {
     const letters = project
@@ -54,19 +52,19 @@ export const text = {
   permission: {
     [PermissionPolicy.Rules]: {
       title: 'Allow, except what you keep',
-      note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
+      note: '“Always ask me” waits for you; “Never” is refused.',
     },
     [PermissionPolicy.Coordinator]: {
       title: 'The coordinator decides',
-      note: 'The coordinator allows or denies requests within the project’s rules, with a reason. Anything it can’t decide waits for you.',
+      note: 'What it can’t decide waits for you.',
     },
     [PermissionPolicy.Ask]: {
       title: 'Ask me',
-      note: 'What agents ask to do beyond the task’s own files waits for you. OpenCode has no sandbox, so each of its commands waits too.',
+      note: 'Anything beyond the task’s own files waits for you, and every OpenCode command.',
     },
     [PermissionPolicy.AllowAll]: {
       title: 'Allow everything',
-      note: 'Nothing waits for you. What “Never” lists is still refused, and, while it lists anything, a command Althar can’t read.',
+      note: 'Nothing waits for you. “Never” still holds.',
     },
   },
 }

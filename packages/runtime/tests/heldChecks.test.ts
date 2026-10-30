@@ -67,12 +67,9 @@ describe('checks Althar sees through, that its host won’t show', () => {
       const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running')
       const taskThread = running?.threadId ?? ''
       github.failNext('checks', 'not_found')
-      const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Althar can't read the checks on PR #1"))
+      const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Can't read the checks on PR #1"))
       const [refused] = said(yield* until(notices(taskThread), (all) => said(all).length > 0))
-      assert.strictEqual(
-        refused,
-        "Althar can't read the checks on PR #1: its host refused them (The fake checks failed (not_found)). It still listens for what people say on it, and the change is yours now.",
-      )
+      assert.strictEqual(refused, "Can't read the checks on PR #1.")
       const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.isNull(ready?.step)
       // Refused again on the same commit, nothing more is said.
@@ -105,12 +102,9 @@ describe('checks Althar sees through, that its host won’t show', () => {
       // The person has opened it: the change is theirs already.
       yield* (yield* Tasks).see({ taskId: ready?.taskId ?? '' })
       github.failNext('checks', 'forbidden')
-      const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Althar can't read the checks on PR #1"))
+      const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Can't read the checks on PR #1"))
       const [refused] = said(yield* until(notices(ready?.threadId ?? ''), (all) => said(all).length > 0))
-      assert.strictEqual(
-        refused,
-        "Althar can't read the checks on PR #1: its host refused them (The fake checks failed (forbidden)). It still listens for what people say on it.",
-      )
+      assert.strictEqual(refused, "Can't read the checks on PR #1.")
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

@@ -36,14 +36,6 @@
   color: var(--t-1);
 }
 
-.lede {
-  margin: 6px 0 0;
-  max-width: 56ch;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--t-3);
-}
-
 .error {
   margin: -12px 0 24px 2px;
   font-size: 12.5px;
@@ -135,14 +127,6 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--t-1);
-}
-
-.noneLede {
-  margin: 4px 0 0;
-  max-width: 60ch;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--t-2);
 }
 
 .starters {

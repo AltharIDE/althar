@@ -138,10 +138,7 @@ describe('a step whose connection is lost', () => {
       const { failure, ...reconnects } = card?.reconnects ?? { failure: null }
       assert.deepStrictEqual(reconnects, { agentId: 'claude-code', service: 'Anthropic', offline: true, next: null })
       assert.include([recorded.claude.offline.title, 'Reconnecting to Claude, attempt 1 of 10.'], failure)
-      assert.include(
-        yield* notices(task.threadId),
-        "Lost the connection to Anthropic. The work waits for it, and carries on by itself when it's back.",
-      )
+      assert.include(yield* notices(task.threadId), 'Lost the connection to Anthropic.')
       // Waited out a while offline, it is still only waiting: no reminder, no call for the person.
       yield* Effect.sleep(Duration.millis(300))
       assert.lengthOf(yield* turnsOf(task.threadId), 1)
@@ -157,7 +154,7 @@ describe('a step whose connection is lost', () => {
         [turns[0]?.state === 'interrupted' ? 'interrupted' : 'failed', 'completed'],
       )
       assert.include(turns[1]?.prompt ?? '', "Your last turn stopped because the connection to your model's service failed.")
-      assert.include(yield* notices(task.threadId), 'The connection is back; the step carried on from here.')
+      assert.include(yield* notices(task.threadId), 'The connection is back.')
       assert.lengthOf(yield* stuckCalls(task.taskId), 0)
     }).pipe(Effect.provide(layer))
   })
@@ -201,11 +198,11 @@ describe('a step whose connection is lost', () => {
       )
       // Each pause said, the person's to read, none of them a call.
       assert.deepStrictEqual(
-        (yield* notices(task.threadId)).filter((title) => title.startsWith('Anthropic failed, so the work waits')),
+        (yield* notices(task.threadId)).filter((title) => title.startsWith('Anthropic failed.')),
         [
-          'Anthropic failed, so the work waits: Althar tries again in 0 seconds.',
-          'Anthropic failed, so the work waits: Althar tries again in 0 seconds.',
-          'Anthropic failed, so the work waits: Althar tries again in 0 seconds.',
+          'Anthropic failed. Trying again in 0 seconds.',
+          'Anthropic failed. Trying again in 0 seconds.',
+          'Anthropic failed. Trying again in 0 seconds.',
         ],
       )
       // Try again, once Anthropic is back: the step's turn runs again in the same session, and finishes.

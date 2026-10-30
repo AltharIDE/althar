@@ -37,7 +37,7 @@ const refused = (message: string) => new ApiError({ reason: 'SqlError', message 
 const shown = async (more: Parameters<typeof fakeClient>[0] = {}) => {
   const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables })), ...more })
   withServices(<Project />, client)
-  await screen.findByText(/^Ask the coordinator about/)
+  await screen.findByRole('button', { name: /^Coordinator: / })
   return client
 }
 

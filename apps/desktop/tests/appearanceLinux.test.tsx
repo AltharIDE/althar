@@ -31,6 +31,5 @@ describe('Appearance on Linux', () => {
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
     ).toEqual(['Light', 'Dark', 'Match the computer'])
-    expect(screen.getByText('Match the computer turns dark when the computer does.')).toBeTruthy()
   })
 })

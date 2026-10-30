@@ -18,27 +18,30 @@ export const text = {
   tasks: 'Tasks',
   conflicts: {
     title: 'Resolve merge conflicts automatically',
-    line: 'When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.',
     /** Looks at every open task now, rather than as each default branch moves. */
     look: 'Look for conflicts now',
-    looking: 'Looking at each open task now.',
+    looking: 'Looking…',
   },
   moveIssues: {
     title: 'Move issues along with their tasks',
-    line: 'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
+    line: 'To In Progress, In Review, then Done',
   },
   changeIssues: {
     title: 'Change issues without asking',
-    line: 'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
   },
 }
 
 /** A switch's note: when it acts, what it does now where it can, and why it didn't hold where it didn't. */
-function SwitchNote({ line, now, failed }: { line: string; now?: ReactNode; failed: string | null }) {
+function SwitchNote({ line, now, failed }: { line?: string; now?: ReactNode; failed: string | null }) {
   return (
     <>
       {line}
-      {now !== undefined && <> {now}</>}
+      {now !== undefined && (
+        <>
+          {line === undefined ? '' : ' '}
+          {now}
+        </>
+      )}
       {failed !== null && (
         <span className={s.failedLine} role="alert">
           {failed}
@@ -57,7 +60,7 @@ function LookNow({ model }: { model: ProjectSettingsModel }) {
 /** A switch, in the order they are shown: its rule, its words, and how it stands. */
 interface Shown {
   readonly rule: RuleSwitch
-  readonly words: { readonly title: string; readonly line: string }
+  readonly words: { readonly title: string; readonly line?: string }
   readonly on: boolean
   readonly set: (on: boolean) => void
 }
@@ -97,7 +100,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
                 title={one.words.title}
                 note={
                   <SwitchNote
-                    line={one.words.line}
+                    {...(one.words.line === undefined ? {} : { line: one.words.line })}
                     {...(one.rule === 'resolveConflicts' && one.on ? { now: <LookNow model={model} /> } : {})}
                     failed={
                       model.ruleFailed?.rule === one.rule

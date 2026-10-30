@@ -44,10 +44,10 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await conflicts.click()
     await expect(conflicts).toBeChecked()
     await page.getByRole('button', { name: 'Look for conflicts now' }).click()
-    await expect(page.getByText('Looking at each open task now.')).toBeVisible()
+    await expect(page.getByText('Looking…')).toBeVisible()
     // The innermost of what holds both the switch and its note: the setting's row.
     await page
-      .locator('*', { has: conflicts, hasText: 'Looking at each open task now.' })
+      .locator('*', { has: conflicts, hasText: 'Looking…' })
       .last()
       .screenshot({ path: 'test-results/conflicts-settings.png', animations: 'disabled', scale: 'css' })
     await backToWork(page)

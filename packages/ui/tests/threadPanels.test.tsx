@@ -56,12 +56,11 @@ describe('a step’s own thread', () => {
   const panel = (props: Partial<Parameters<typeof StepPanel>[0]> = {}) =>
     render(<StepPanel step={step} agents={[OPUS]} body={(tab) => <p>{`Thread of ${tab}`}</p>} onClose={vi.fn()} {...props} />)
 
-  it('shows one agent’s thread with no tabs, and what its result does', () => {
+  it('shows one agent’s thread with no tabs', () => {
     panel()
     expect(screen.queryByRole('tablist')).toBeNull()
     expect(screen.getByText(`Thread of ${OPUS.id}`)).toBeInTheDocument()
     expect(screen.getByText('step 3 of 4')).toBeInTheDocument()
-    expect(screen.getByText('Returns a verdict and findings to the lead')).toBeInTheDocument()
   })
 
   it('gives two agents a tab each and one for both, starting on both', () => {
@@ -71,7 +70,6 @@ describe('a step’s own thread', () => {
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Both', expect.any(String), expect.any(String)])
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('step 3 of 4 · 2 reviewers')).toBeInTheDocument()
-    expect(screen.getByText('Combined into one list for the lead')).toBeInTheDocument()
     fireEvent.mouseDown(tabs[2]!)
     expect(onTabChange).toHaveBeenCalledWith(CODEX.id)
   })

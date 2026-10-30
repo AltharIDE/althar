@@ -29,10 +29,8 @@ export interface AgentInstallText {
 
 export const agentInstallText: AgentInstallText = {
   missing: (name) => `${name} isn’t on this Mac`,
-  can: (name, size) =>
-    `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it against the release, and keep it in its own folder. Your terminal stays as it is.`,
-  canPinned: (name, size, { from, version }) =>
-    `Althar can fetch ${name} ${version} from ${from}, about ${size}, check it against what it was pinned with, and keep it in its own folder. Your terminal stays as it is.`,
+  can: (name, size) => `${name}’s latest release, from GitHub, about ${size}.`,
+  canPinned: (name, size, { from, version }) => `${name} ${version}, from ${from}, about ${size}.`,
   cannot: (name) => `Install ${name} with its own installer, then come back here.`,
   download: (name) => `Download ${name}`,
   downloading: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,

@@ -19,7 +19,7 @@ import { localZone } from './slots'
 import { Agents } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
-import { branchedWords, branchOnFirstWrite } from './firstWrite'
+import { branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { IssueDrafts, leadsNeedTheCard, refusedDraft } from './IssueDrafts'
 import { Issues } from './Issues'
@@ -872,7 +872,7 @@ export class Coordinator extends Context.Service<
           const who = review === null ? 'with no review' : `reviewed by ${named(review)}`
           const ends =
             end === null
-              ? 'it ends on its branch, as its repository isn’t on a code host Althar knows'
+              ? 'it ends on its branch'
               : `it opens ${end === 'ready' ? 'a pull request ready for review' : 'a draft pull request'} when it’s done`
           const underWay = yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -887,16 +887,11 @@ export class Coordinator extends Context.Service<
               const under = yield* runs.makeChange(taskId, review, end, instance.systemId)
               // Made a change is a break in the lead's work: what it builds next may start afresh (ADR-038).
               yield* sessions.atBreak(task.threadId)
-              const branches = yield* sql<{ branch: string }>`
-                SELECT w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-                WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
-                ORDER BY b.created_at, b.rowid`
               // Althar's own housekeeping, kept with the lead's work.
               yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
                 title: `This task is a change now: ${who}, ${ends}.`,
-                ...(branches.length === 0 ? {} : { description: `Its work is ${branchedWords(branches.map((one) => one.branch))}.` }),
                 role: 'aside',
               })
               // What the coordinator hears at its next turn: what it is called now and was, who reviews it, and how it ends.

@@ -33,9 +33,7 @@ describe('an agent’s row', () => {
       ],
       { onInstall: () => {} },
     )
-    expect(
-      screen.getByText('Althar can fetch OpenCode 1.4.2 from opencode.ai, about 38 MB, check it, and keep it in its own folder.'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('OpenCode 1.4.2, from opencode.ai, about 38 MB.')).toBeInTheDocument()
   })
 
   it('offers only to check again for an agent it can neither fetch nor point to instructions for', () => {

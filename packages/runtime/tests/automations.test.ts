@@ -228,7 +228,7 @@ describe('automations', () => {
       assert.deepInclude(rows[1], {
         slot: '2026-10-22T09:00',
         state: 'missed',
-        reason: 'Missed: the computer was asleep, or Althar closed, at 9:00.',
+        reason: 'Missed 9:00.',
         taskId: null,
       })
       // One that skips what the computer slept through skips it.
@@ -458,10 +458,10 @@ describe('automations', () => {
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
       const refused = yield* Effect.flip(automations.runNow(automationId, instance.personId))
-      assert.strictEqual((refused as AutomationRefused).message, 'Its agent pays per use, and automations run on a plan only for now.')
+      assert.strictEqual((refused as AutomationRefused).message, 'Automations run only on a plan for now, and its agent pays per use.')
       clock.set('2026-10-21T08:00:05Z')
       const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.deepInclude(skipped, { state: 'skipped', reason: 'Its agent pays per use, and automations run on a plan only for now.' })
+      assert.deepInclude(skipped, { state: 'skipped', reason: 'Automations run only on a plan for now, and its agent pays per use.' })
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] }))))
   })
 
@@ -609,7 +609,7 @@ describe('automations', () => {
 
   it.live('run on a plan only where the agent’s status says so: one that can’t tell is refused, and skipped on its schedule', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
-    const unsure = 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
+    const unsure = 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
@@ -656,7 +656,7 @@ describe('automations', () => {
       )
       // Nor does a session of its run start on that account when it is named.
       const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, threadId: thread?.id ?? '', accountId: key.id }))
-      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Its agent pays per use, and automations run on a plan only for now.' })
+      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Automations run only on a plan for now, and its agent pays per use.' })
       // Outside an automation's run, the project's work still moves to it.
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, key.id)
     }).pipe(

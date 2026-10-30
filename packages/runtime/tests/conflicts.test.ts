@@ -243,10 +243,7 @@ describe('a conflict merging here', () => {
         // The round is kept, and says it waits; the lead isn't asked yet.
         yield* titled(threadId, 'It conflicts with main')
         const said = (yield* notices(threadId)).find((notice) => notice.title?.startsWith('It conflicts with main') === true)
-        assert.strictEqual(
-          said?.description,
-          'Althar asks the lead to resolve it, as the project’s rules say, once an agent is free on this computer.',
-        )
+        assert.strictEqual(said?.description, 'The lead resolves it once an agent is free.')
         assert.deepStrictEqual(
           (yield* rounds(taskId)).map((round) => round.state),
           ['resolving'],
@@ -451,7 +448,7 @@ describe('a task that says otherwise than its project', () => {
       yield* taskSays(taskId, true)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
       const said = (yield* notices(threadId)).find((notice) => notice.title === 'It conflicts with main, in change.txt.')
-      assert.strictEqual(said?.description, 'Althar asked the lead to resolve it, as you said for this task.')
+      assert.strictEqual(said?.description, 'The lead is resolving it.')
       assert.deepStrictEqual(
         (yield* rounds(taskId)).map((round) => [round.state, round.url]),
         [['resolved', null]],
@@ -528,7 +525,7 @@ describe('a round’s words, and what git says of its branch', () => {
       const { root, conflict } = split()
       assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "main isn't merged into the branch.", uncommitted: false })
       mergeMain(root)
-      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt, b.txt still conflict.', uncommitted: false })
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: '2 files still conflict.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'add', 'b.txt')
       assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt still conflicts.', uncommitted: false })
@@ -540,7 +537,7 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
       assert.deepStrictEqual(yield* unresolved(root, conflict), {
-        why: 'a.txt, b.txt still have conflict markers in them.',
+        why: '2 files still have conflict markers in them.',
         uncommitted: false,
       })
       writeFileSync(join(root, 'a.txt'), 'task\nmain\n')
@@ -610,7 +607,7 @@ describe('a round’s words, and what git says of its branch', () => {
   it('says where several repositories conflict, and names a pull request it can’t find', () => {
     const one = { repository: 'web', name: 'web', branch: 'develop', ref: 'develop', target: 'a', from: 'b', files: ['README.md'] }
     const two = { repository: 'api', name: 'api', branch: 'main', ref: 'main', target: 'c', from: 'd', files: ['a.ts', 'b.ts'] }
-    assert.strictEqual(whereLine([one, two]), 'web’s develop, in README.md; api’s main, in a.ts, b.ts')
+    assert.strictEqual(whereLine([one, two]), 'the default branch in 2 repositories')
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
     assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")

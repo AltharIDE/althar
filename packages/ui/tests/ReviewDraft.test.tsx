@@ -27,7 +27,7 @@ describe('ReviewDraft', () => {
     render(<ReviewDraft {...pending} drafter={undefined} as={undefined} />)
     expect(screen.getByText('The lead suggests Request changes')).toBeInTheDocument()
     expect(screen.getByText('ninemate')).toBeInTheDocument()
-    expect(screen.getByText('Nothing is on GitHub until you post it. It posts 3 of 3 comments.')).toBeInTheDocument()
+    expect(screen.getByText('Posts 3 of 3 comments')).toBeInTheDocument()
   })
 
   it('asks for a verdict before posting with none, and stops asking once one is chosen', () => {

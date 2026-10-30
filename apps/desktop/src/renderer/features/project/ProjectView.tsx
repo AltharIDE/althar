@@ -85,15 +85,14 @@ export const text = {
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
-  empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   keep: (from: string) => `Keep ${from}`,
-  queued: 'Queued · the coordinator reads it next',
-  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
+  queued: 'Queued',
+  queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
-  signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
+  signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
@@ -563,7 +562,6 @@ export function ProjectView({
                         {text.earlier}
                       </ThreadDivider>
                     )}
-                    {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks

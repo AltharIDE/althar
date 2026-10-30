@@ -53,11 +53,11 @@ test('shows every agent: those on this computer first, the rest to download or i
 
     // One Althar can fetch: its size and where from, and the download.
     await tabs.getByRole('tab', { name: 'Google Antigravity' }).click()
-    await expect(settings.getByText(/Althar can fetch Google Antigravity 1\.3\.0 from Google/)).toBeVisible()
+    await expect(settings.getByText(/Google Antigravity 1\.3\.0, from Google/)).toBeVisible()
     await expect(settings.getByRole('button', { name: 'Download Google Antigravity' })).toBeVisible()
     // Nothing yet of the models it may use: it says once it is here.
     await expect(settings.getByText('Models', { exact: true })).toHaveCount(0)
-    await expect(settings.getByText('It hasn’t said what it offers yet.')).toHaveCount(0)
+    await expect(settings.getByText('No models yet')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/agents-settings-antigravity.png', animations: 'disabled' })
 
     // One only its own installer puts here: its maker's page on installing it.

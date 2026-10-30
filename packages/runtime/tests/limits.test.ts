@@ -175,7 +175,7 @@ describe('an agent out of usage', () => {
       assert.deepStrictEqual([held?.phase, held?.step, held?.waits?.agentId], ['running', 'implement', 'claude-code'])
       assert.match(
         (yield* said(task.threadId))[0] ?? '',
-        /^Fake claude-code ran out of usage while working on the task\. The work waits until .+, when Fake claude-code is back\. To carry on now, pick another model on the task\.$/,
+        /^Fake claude-code ran out of usage while working on the task\. The work waits until .+\.$/,
       )
       yield* atReset(back)
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
@@ -354,10 +354,7 @@ describe('an agent out of usage', () => {
       yield* start
       yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       // It moves work on, but no other was free on a plan: it says so, and that the person can pick one.
-      assert.match(
-        (yield* said(task.threadId))[0] ?? '',
-        /\. No other model was free, so the work waits until .+\. Pick one on the task to carry on now\.$/,
-      )
+      assert.match((yield* said(task.threadId))[0] ?? '', /\. No other model is free: the work waits until .+\.$/)
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -493,10 +490,7 @@ describe('an agent out of usage, where the project asks', () => {
       yield* answer(call.id, { kind: 'wait' })
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual([held?.phase, held?.waits?.agentId, held?.waits?.until], ['running', 'claude-code', reset(back)])
-      assert.include(
-        yield* said(task.threadId),
-        `The work waits until ${whenWords(reset(back), yield* Clock.currentTimeMillis)}, when Fake claude-code is back, as you said.`,
-      )
+      assert.include(yield* said(task.threadId), `The work waits until ${whenWords(reset(back), yield* Clock.currentTimeMillis)}.`)
       yield* atReset(back)
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
@@ -635,7 +629,7 @@ describe('a step held for a usage limit, handed over by the person', () => {
       yield* start
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.strictEqual(held?.waits?.why, 'nothing_free')
-      assert.include((yield* said(task.threadId))[0], 'No other model was free')
+      assert.include((yield* said(task.threadId))[0], 'No other model is free')
       // Paid per use, Codex is never moved to unasked; the person may pick it.
       yield* handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: yield* usual('codex') })
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
@@ -911,20 +905,20 @@ describe('limits', () => {
     assert.strictEqual(outWords({ from: 'Codex', resetsAt: null, now }), 'Codex ran out of usage.')
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'review', waits: 'step' }),
-      'Codex ran out of usage during the review. The review waits until Codex is back. To carry on now, pick another model on the task.',
+      'Codex ran out of usage during the review. The review waits until Codex is back.',
     )
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: later.toISOString(), now, step: 'implement', waits: 'step', nothingFree: true }),
-      `Codex ran out of usage while working on the task. No other model was free, so the work waits until ${whenWords(later.toISOString(), now)}, when Codex is back. Pick one on the task to carry on now.`,
+      `Codex ran out of usage while working on the task. No other model is free: the work waits until ${whenWords(later.toISOString(), now)}.`,
     )
     // The fixes are many, so they wait.
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', waits: 'step' }),
-      'Codex ran out of usage while fixing what the review found. The fixes wait until Codex is back. To carry on now, pick another model on the task.',
+      'Codex ran out of usage while fixing what the review found. The fixes wait until Codex is back.',
     )
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', waits: 'step', nothingFree: true }),
-      'Codex ran out of usage while fixing what the review found. No other model was free, so the fixes wait until Codex is back. Pick one on the task to carry on now.',
+      'Codex ran out of usage while fixing what the review found. No other model is free: the fixes wait until Codex is back.',
     )
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', to: { agent: 'Claude Code', model: null } }),

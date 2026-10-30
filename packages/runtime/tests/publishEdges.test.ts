@@ -203,7 +203,7 @@ describe('opening a task’s pull request', () => {
       yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        "PR #1 was closed, so what the follow-up committed isn't in a pull request yet.",
+        "What the follow-up committed isn't in a pull request yet.",
       )
       assert.lengthOf(github.changes, 1)
     }).pipe(Effect.provide(runtimeWith(github)))

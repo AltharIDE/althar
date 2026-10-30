@@ -81,7 +81,7 @@ export const modelBrowserText: ModelBrowserText = {
   move: 'move',
   choose: 'use',
   pinVerb: 'pin',
-  foot: 'Pinned models are the short list in every picker',
+  foot: 'Pinned models show in every picker',
 }
 
 export interface ModelBrowserProps {

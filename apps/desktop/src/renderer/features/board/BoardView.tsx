@@ -87,7 +87,6 @@ export const text = {
     [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
-  stopped: 'No agent is working on it',
   /** Why a stopped task's lead stopped, in a card's words. */
   stoppedBy: stepText.stoppedBy,
   carryOn: 'Carry on',
@@ -286,7 +285,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
         : work.reconnects != null
           ? { status: TaskStatus.Paused, word: text.status[TaskStatus.Paused], why: reconnectsWords(work.reconnects, clock) }
           : work.phase === 'stopped'
-            ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
+            ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped] }
             : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
@@ -351,7 +350,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     ...rest,
     status: TaskStatus.Stopped,
     word: text.status[TaskStatus.Stopped],
-    why: work.stopped?.by == null ? text.stopped : text.stoppedBy[work.stopped.by],
+    ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
     ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
       ? {}

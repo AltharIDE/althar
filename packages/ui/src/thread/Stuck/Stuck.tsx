@@ -59,10 +59,11 @@ export interface StuckText {
   abandon: string
   told: string
   retried: (agent: string) => string
-  retriedNote: string
+  /** Beside what was answered, where there is something to add; none by default. */
+  retriedNote?: string
   tryingAgain: string
   abandoned: string
-  abandonedNote: string
+  abandonedNote?: string
   undo: string
   report: string
 }
@@ -71,7 +72,7 @@ export const stuckText: StuckText = {
   kicker: 'Stuck',
   after: (step, tries) => (tries === 0 ? step : `${step}, after ${tries} ${tries === 1 ? 'try' : 'tries'}`),
   tried: 'What it tried',
-  read: 'Why, as the lead reads it',
+  read: 'Why',
   tell: 'Tell the lead',
   tellPlaceholder: 'What should it do instead?',
   send: 'Send to the lead',
@@ -83,10 +84,8 @@ export const stuckText: StuckText = {
   abandon: 'Abandon this step',
   told: 'Told the lead',
   retried: (agent) => `Handed to ${agent}`,
-  retriedNote: 'the step starts again from the task’s record',
   tryingAgain: 'Trying again',
   abandoned: 'Abandoned',
-  abandonedNote: 'the branch and what it found are kept',
   undo: 'Undo',
   report: 'Report this',
 }
@@ -198,7 +197,7 @@ export function Stuck({
       case StuckAnswer.Retried:
         return (
           <AskAnswered said={t.retried(result.agent.short)} {...line}>
-            <AskNote>· {t.retriedNote}</AskNote>
+            {t.retriedNote !== undefined && <AskNote>· {t.retriedNote}</AskNote>}
           </AskAnswered>
         )
       case StuckAnswer.Again:
@@ -206,7 +205,7 @@ export function Stuck({
       case StuckAnswer.Abandoned:
         return (
           <AskAnswered denied said={t.abandoned} {...line}>
-            <AskNote>· {t.abandonedNote}</AskNote>
+            {t.abandonedNote !== undefined && <AskNote>· {t.abandonedNote}</AskNote>}
           </AskAnswered>
         )
       default:

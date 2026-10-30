@@ -109,7 +109,7 @@ describe('a done task of two repositories with commits after in each', () => {
       yield* (yield* Tasks).leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Abandoned 1 commit after PR #1 in api, 1 commit after where its branch started in web.',
+        'Abandoned 2 commits.',
       )
       // Settled again without them, its lead stops.
       yield* until(

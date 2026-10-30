@@ -8,19 +8,15 @@ import s from './Gallery.module.css'
 export interface GalleryText {
   /** What a picture is called for opening it. */
   view: (caption: string) => string
-  /** The line under a set that leaves out pictures shown before: its start, alone or after others. */
-  retook: string
-  alsoRetook: string
-  and: string
-  shownEarlier: string
+  /** The line under a set that leaves out pictures shown before, by how many: alone, or after others. */
+  retook: (n: number) => string
+  alsoRetook: (n: number) => string
 }
 
 export const galleryText: GalleryText = {
   view: (caption) => `View ${caption} full size`,
-  retook: 'Retook',
-  alsoRetook: 'It also retook',
-  and: ' and ',
-  shownEarlier: ', shown earlier.',
+  retook: (n) => `Retook ${n} shown earlier`,
+  alsoRetook: (n) => `Also retook ${n} shown earlier`,
 }
 
 /** A picture the lead means the person to see, with what it shows. */
@@ -100,13 +96,15 @@ export type GalleryProps = RootProps<
  * of them, two across, large, wider than the words, each with its whole
  * caption under it, in the groups their names make. One alone is wider
  * still. Views it showed before and took again aren't shown twice: a line
- * names them.
+ * counts them, and opens them on a click.
  */
 export function Gallery({ shots, retaken = [], text, className, ...rest }: GalleryProps) {
   const t = { ...galleryText, ...text }
   const { openImage } = useThreadShell()
   if (shots.length === 0 && retaken.length === 0) return null
   const one = shots.length === 1
+  const openable = retaken.find((shot) => shot.status !== 'failed')
+  const retakenWords = shots.length === 0 ? t.retook(retaken.length) : t.alsoRetook(retaken.length)
   return (
     <div className={cx(s.gallery, className)} {...rest}>
       {shots.length > 0 && (
@@ -140,20 +138,13 @@ export function Gallery({ shots, retaken = [], text, className, ...rest }: Galle
       )}
       {retaken.length > 0 && (
         <p className={s.retaken}>
-          {shots.length === 0 ? t.retook : t.alsoRetook}{' '}
-          {retaken.map((shot, index) => (
-            <span key={shot.id}>
-              {index > 0 && (index === retaken.length - 1 ? t.and : ', ')}
-              {openImage === undefined || shot.status === 'failed' ? (
-                <span>{shotName(shot.caption) ?? shot.name}</span>
-              ) : (
-                <LinkButton className={s.retake} onClick={() => openImage(shot, retaken)} aria-label={t.view(shot.caption)}>
-                  {shotName(shot.caption) ?? shot.name}
-                </LinkButton>
-              )}
-            </span>
-          ))}
-          {t.shownEarlier}
+          {openable === undefined || openImage === undefined ? (
+            retakenWords
+          ) : (
+            <LinkButton className={s.retake} onClick={() => openImage(openable, retaken)}>
+              {retakenWords}
+            </LinkButton>
+          )}
         </p>
       )}
     </div>

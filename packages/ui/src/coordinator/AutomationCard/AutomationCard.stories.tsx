@@ -144,7 +144,7 @@ export const Proposed: Story = {
     await expect(c.getByText('Automation · Meridian')).toBeInTheDocument()
     await expect(c.getByText('Nightly bump')).toBeInTheDocument()
     await expect(c.getByText('next tonight at 2:00')).toBeInTheDocument()
-    await expect(c.getByText('Nothing runs until you turn it on.')).toBeInTheDocument()
+    await expect(c.getByText('Off', { exact: true })).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: /Every night at 2:00/ }))
     await userEvent.click(await within(document.body).findByRole('menuitemradio', { name: 'Every weekday at 9:00' }))
     await waitFor(() => expect(c.getByRole('button', { name: /Every weekday at 9:00/ })).toBeInTheDocument())
@@ -261,7 +261,7 @@ export const ChangedNeedsTurningOn: Story = {
   ),
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('It runs again once you turn it on.')).toBeInTheDocument()
+    await expect(c.getByText('Off', { exact: true })).toBeInTheDocument()
     await expect(c.getByText('Every night at 2:00', { selector: 'span' })).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Turn on' }))
     await expect(args.onTurnOn).toHaveBeenCalled()

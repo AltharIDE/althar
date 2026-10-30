@@ -15,13 +15,13 @@ export interface ChoiceWords {
 export const permissionPolicyText: Record<PermissionPolicy, ChoiceWords> = {
   [PermissionPolicy.Rules]: {
     title: 'Allow, except what you keep',
-    note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
+    note: '“Always ask me” waits for you; “Never” is refused.',
   },
   [PermissionPolicy.Coordinator]: {
     title: 'The coordinator decides',
-    note: 'The coordinator decides within the project’s rules, with a reason. Anything it can’t decide waits for you.',
+    note: 'What it can’t decide waits for you.',
   },
-  [PermissionPolicy.AllowAll]: { title: 'Allow everything', note: 'Nothing asks. Every request is still recorded on its task.' },
+  [PermissionPolicy.AllowAll]: { title: 'Allow everything', note: 'Nothing asks.' },
   [PermissionPolicy.Ask]: { title: 'Ask me', note: 'Anything no rule covers waits for you.' },
 }
 
@@ -52,10 +52,10 @@ export const taskEndText: Record<TaskEnd, ChoiceWords & { short: string }> = {
 export const limitPolicyText: Record<LimitPolicy, ChoiceWords> = {
   [LimitPolicy.Move]: {
     title: 'Move the work to the next agent free',
-    note: 'In the order of your connections. Moves back after the reset if it is still running.',
+    note: 'Back after the reset, if still running',
   },
-  [LimitPolicy.Wait]: { title: 'Wait for the reset', note: 'The task keeps its place and resumes on its own.' },
-  [LimitPolicy.Ask]: { title: 'Ask me', note: 'A card in the thread, with the agents that are free.' },
+  [LimitPolicy.Wait]: { title: 'Wait for the reset', note: 'Resumes on its own' },
+  [LimitPolicy.Ask]: { title: 'Ask me', note: 'With the agents that are free' },
 }
 
 /** A repository's role, as a choice names it. */

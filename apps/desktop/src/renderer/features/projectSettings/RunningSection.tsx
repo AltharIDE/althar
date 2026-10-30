@@ -25,15 +25,15 @@ export const text = {
   add: 'Add something to run',
   where: 'Where its work goes',
   worktrees: 'Worktrees',
-  worktreesUnmade: 'Made with its first task, never in its repositories’ own folders',
+  worktreesUnmade: 'Made with its first task',
   branches: 'Branch names',
   asDocsSay: 'As each repository’s docs say',
   asDocsSayElse: (own: string) => `As each repository’s docs say, else ${own}`,
   finish: 'When a task is done',
   inRules: 'Change in Rules',
   onBranch: 'Leave it on its branch',
-  unconnected: (host: string) => `Nothing goes to ${host} until Althar is connected there. Then it opens a draft pull request`,
-  unknown: 'Its repositories are on no host Althar knows, so no pull request opens',
+  unconnected: (host: string) => `${host} isn’t connected`,
+  unknown: 'No code host Althar knows',
   connect: (host: string) => `Connect ${host}`,
 }
 

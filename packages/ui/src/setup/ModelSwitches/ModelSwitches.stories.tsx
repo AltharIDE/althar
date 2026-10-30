@@ -81,7 +81,7 @@ export const Many: Story = {
 export const NotKnownYet: Story = {
   args: { models: [] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('It hasn’t said what it offers yet.')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('No models yet')).toBeInTheDocument()
   },
 }
 

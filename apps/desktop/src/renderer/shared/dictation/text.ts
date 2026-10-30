@@ -8,9 +8,8 @@ import type { DictationTrayText } from '@althar/ui'
 
 const windows: Partial<DictationTrayText> = {
   offer: 'Dictation needs a speech model on this PC',
-  offerNote: 'It turns what you say into text here; nothing you say leaves this PC.',
+  offerNote: 'Runs on this PC.',
   asking: 'Waiting for Windows to allow the microphone',
-  askingNote: 'Answer the question Windows shows to go on.',
   deniedNote:
     'Turn on microphone access, and access for desktop apps, in Settings › Privacy & security › Microphone, then press the microphone again.',
   openPrivacy: 'Open Settings',
@@ -19,9 +18,8 @@ const windows: Partial<DictationTrayText> = {
 
 const linux: Partial<DictationTrayText> = {
   offer: 'Dictation needs a speech model on this computer',
-  offerNote: 'It turns what you say into text here; nothing you say leaves this computer.',
+  offerNote: 'Runs on this computer.',
   asking: 'Waiting for the system to allow the microphone',
-  askingNote: 'Answer the question the system shows to go on.',
   deniedNote: 'The system refused the microphone. Allow it in your desktop’s privacy or sound settings, then press the microphone again.',
   noMicrophoneNote: 'Connect one, or choose an input in your desktop’s sound settings.',
 }

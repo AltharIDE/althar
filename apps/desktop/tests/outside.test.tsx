@@ -90,7 +90,7 @@ describe('connections', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Make a token/ }))
     expect(screen.getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
     expect(screen.getByText('Step 1 of 3')).toBeTruthy()
-    expect(screen.getByText('It opens with the name, northwind as the owner, 90 days and the permissions set.')).toBeTruthy()
+    expect(screen.getByText('Opens filled in, for northwind.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open GitHub’s token page' }))
     expect(open).toHaveBeenCalledWith(GITHUB_TOKEN_PAGE, '_blank')
     await userEvent.click(screen.getByRole('button', { name: 'See the 6 permissions it sets' }))
@@ -165,7 +165,7 @@ describe('connections', () => {
 
     // Taken, but without one thing a task needs: said on its line, with how to change it.
     expect(await screen.findByRole('heading', { name: 'This token can’t open pull requests' })).toBeTruthy()
-    expect(screen.getByText('Pull requests isn’t allowed on this token, so a task would end on its branch.')).toBeTruthy()
+    expect(screen.getByText('Pull requests isn’t allowed on this token.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Done' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Change it on GitHub' }))
     expect(open).toHaveBeenCalledWith('https://github.com/settings/personal-access-tokens', '_blank')
@@ -336,7 +336,7 @@ describe('connections', () => {
     expect(await screen.findByText('Its sign-in stopped working')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     expect(await screen.findByRole('heading', { name: 'Make a new API token' })).toBeTruthy()
-    expect(screen.getByText('Its token stopped working. Tasks can’t reach it until it’s back.')).toBeTruthy()
+    expect(screen.getByText('Its token stopped working.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
     expect(screen.getByRole('heading', { name: 'Paste the new token' })).toBeTruthy()
     // The site and the email stay: only the token is asked for.
@@ -855,7 +855,7 @@ describe('running what a task built, with no agent', () => {
     // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
     current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Couldn’t install dependencies in meridian. The lead is told.')).toBeTruthy()
+    expect(await screen.findByText('Couldn’t install dependencies in meridian.')).toBeTruthy()
     expect(screen.getByText('error: lockfile had changes')).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
     // A setup kept for the repository, out of time: it says so.
@@ -864,12 +864,12 @@ describe('running what a task built, with no agent', () => {
       items: [...thread.items, ended({ code: null, timedOut: true, last: 'waiting' }, { kept: true, command: 'make deps' })],
     }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Couldn’t set up meridian. The lead is told.')).toBeTruthy()
-    expect(screen.getByText('It took too long, and was stopped.')).toBeTruthy()
+    expect(await screen.findByText('Couldn’t set up meridian.')).toBeTruthy()
+    expect(screen.getByText('Timed out.')).toBeTruthy()
     // Cut short as Althar quit, it says it runs again.
     current = { ...thread, items: [...thread.items, ended({ code: null, stopped: true })] }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Setting up meridian stopped as Althar quit. It runs again before the lead starts.')).toBeTruthy()
+    expect(await screen.findByText('Setting up meridian stopped when Althar quit.')).toBeTruthy()
   })
 
   it('offers no run where nothing says how it runs', async () => {
@@ -898,9 +898,8 @@ describe('what keeps the places a task waits for', () => {
     await userEvent.click(chip)
     const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
     // Each task that holds a place, the server's by what it left running; a task at work in its turn has nothing to stop.
-    expect(list.getByText('2 tasks are running; 1 of them only for a server it left running.')).toBeTruthy()
     expect(list.getByText('Fix the login')).toBeTruthy()
-    expect(list.getByText('Only its bun dev keeps the place')).toBeTruthy()
+    expect(list.getByText('bun dev left running')).toBeTruthy()
     expect(list.getAllByRole('button', { name: /^Stop what/ })).toHaveLength(1)
     await userEvent.click(list.getByRole('button', { name: 'Stop what Prototype the board left running' }))
     expect(client.stopBackground).toHaveBeenCalledWith('th2', 'bg-1')
@@ -1377,15 +1376,11 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText(/isn't connected to this repository's host/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
-    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe(
-      "Althar couldn't open the pull request. The host said no. Try again, or go on without it.",
-    )
+    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Couldn't open the pull request. The host said no.")
     expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+      'Paused after Althar restarted twice.',
     )
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe(
-      "Althar couldn't open the pull request. Try again, or go on without it.",
-    )
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Couldn't open the pull request.")
   })
 })
 

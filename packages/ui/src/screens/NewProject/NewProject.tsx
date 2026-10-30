@@ -103,7 +103,6 @@ export interface NewProjectText {
   colour: string
   madeOf: string
   folders: string
-  foldersNote: string
   noRemote: string
   leaveOut: (name: string) => string
   choose: string
@@ -132,11 +131,10 @@ export const newProjectText: NewProjectText = {
   label: 'New project',
   name: 'Name',
   namePlaceholder: 'Name the project',
-  nameNote: 'What the work is called. You can rename it later.',
+  nameNote: 'You can rename it later.',
   colour: 'Colour',
   madeOf: 'Made of',
   folders: 'Its folders',
-  foldersNote: 'The repositories its tasks may change.',
   noRemote: 'no remote',
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
@@ -369,7 +367,6 @@ export function NewProject({
           <h2 id={ids.folders} className={s.title}>
             {t.folders}
           </h2>
-          <p className={s.note}>{t.foldersNote}</p>
           {over && <div className={s.empty} aria-hidden="true" />}
           {folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
