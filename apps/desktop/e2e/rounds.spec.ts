@@ -79,7 +79,7 @@ test('a merged task goes back to work when the person writes to its lead, and sh
       .click()
     await expect(page.getByText('One commit after PR #1 isn’t in a pull request yet.')).toBeVisible()
     await page.screenshot({ path: 'test-results/rounds-offer.png', animations: 'disabled' })
-    await page.getByRole('button', { name: 'Open a new pull request' }).click()
+    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
 
     // The task has both: the new draft, on a branch of its own from main, and the merged one before it.
     await expect(page.getByText('Before this: PR #1, merged on GitHub.')).toBeVisible()
@@ -172,14 +172,14 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: 'Open a new pull request' }).click()
+    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
 
     // Then more in api: web's pull request open, to mark ready and accept, beside api's next, to open.
     commitIn(api, 'More for api')
     await again()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open a new pull request' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-mixed-task.png', animations: 'disabled' })
@@ -201,7 +201,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
     await again()
     await expect(page.getByText('3 commits aren’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: 'Open a new pull request' }).click()
+    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
     await expect(page.getByRole('alert')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark api ready for review' })).toBeEnabled()
     await page.mouse.move(1400, 300)
@@ -209,7 +209,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await again()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
     await expect(page.getByText('Before this: api PR #1, merged on GitHub.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open a new pull request' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-partial-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Back to api' }).click()
@@ -221,8 +221,8 @@ test('a task of two repositories: one’s pull request open beside the other’s
     rmSync(refuse)
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
-    await page.getByRole('button', { name: 'Open a new pull request' }).click()
-    await expect(page.getByRole('button', { name: 'Open a new pull request' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
+    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toHaveCount(0)
     expect(
       execFileSync('git', ['--git-dir', remotes.web ?? '', 'log', '-1', '--format=%s', `${branch}-2`], { encoding: 'utf8' }).trim(),
     ).toBe('More for web')

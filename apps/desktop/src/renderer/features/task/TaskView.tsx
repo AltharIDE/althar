@@ -52,6 +52,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
+import { readyWordOf } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
 import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -80,7 +81,7 @@ import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
-import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
@@ -139,7 +140,6 @@ export const text = {
   },
   working: 'Working',
   needsYou: 'Needs you',
-  ready: 'Ready for you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
@@ -157,7 +157,6 @@ export const text = {
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
-  stopped: 'Stopped',
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
@@ -178,7 +177,7 @@ export const text = {
 export const statusOf = (
   snapshot: ThreadSnapshot,
   agentName: (id: string) => string = (id) => id,
-): { readonly status: TaskStatus; readonly state: string } => {
+): { readonly status: TaskStatus; readonly state: string; readonly why?: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
   // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
   if (snapshot.task.phase === 'waiting')
@@ -202,29 +201,32 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // Ready, but its lead couldn't resolve a conflict with its default branch, or brought its failing checks to the person (ADR-070):
-  // it needs the person before it can be accepted.
-  if (phase === 'ready' && (snapshot.task.handedBack != null || snapshot.task.checksBack != null))
-    return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
   if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
     return { status: TaskStatus.Yours, state: text.finished }
-  // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
-  if (phase === 'ready' && inMergeQueue(snapshot.task.changes))
-    return { status: TaskStatus.Running, state: stepText.now[MERGE_QUEUE_STEP] ?? text.ready }
-  // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
-  if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
+  if (phase === 'ready') {
+    // Said as its card on the board says it: a conflict its lead couldn't resolve, commits for a new pull request, a pull request
+    // with something in its way.
+    const ready = readyWordOf(snapshot.task, latestOf(snapshot.task.changes).latest[0] ?? null)
+    // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
+    if (inMergeQueue(snapshot.task.changes)) return { status: TaskStatus.Running, state: stepText.now[MERGE_QUEUE_STEP] ?? ready }
+    // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
+    return { status: TaskStatus.Yours, state: ready }
+  }
   // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
   if (phase === 'kept') return { status: TaskStatus.Paused, state: text.kept }
   // Abandoned, it says so in place of where it stood, as stopped does.
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  // A recorded session the runtime no longer holds is no lead at work either.
-  if (snapshot.session === null || !snapshot.session.held) return { status: TaskStatus.Stopped, state: text.stopped }
+  // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
+  if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
+    const by = snapshot.task.stopped?.by
+    return { status: TaskStatus.Stopped, state: stepText.stopped, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+  }
   return { status: TaskStatus.Running, state: text.idle }
 }
 
@@ -513,7 +515,7 @@ export function TaskView({
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
-  const { status, state } = statusOf(snapshot, agentName)
+  const { status, state, why } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
   const took = tookOf(snapshot, now)
   // Its steps as a graph, where the runtime keeps rounds of work for it; without, its face isn't offered.
@@ -919,6 +921,7 @@ export function TaskView({
             title={snapshot.task.title}
             status={status}
             state={state}
+            {...(why === undefined ? {} : { why })}
             // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
             steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
             {...(took === null ? {} : { took })}

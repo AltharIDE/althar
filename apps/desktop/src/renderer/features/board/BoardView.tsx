@@ -40,17 +40,7 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import {
-  doingWords,
-  doneHere,
-  factsOf,
-  isBlocked,
-  labelWords,
-  nextWords,
-  pushResolves,
-  standingOf,
-  standingText,
-} from '../../shared/standing'
+import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -99,11 +89,7 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
   /** Why a stopped task's lead stopped, in a card's words. */
-  stoppedBy: {
-    declined: 'Stopped when you declined a command',
-    interrupted: 'Stopped when you interrupted it',
-    althar: 'Stopped by Althar',
-  },
+  stoppedBy: stepText.stoppedBy,
   carryOn: 'Carry on',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
@@ -122,12 +108,6 @@ export const text = {
   /** A review at work, reading someone else's pull request. */
   reading: 'Reading',
   reviewDrafted: 'Review drafted',
-  /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
-  mergeConflict: 'Merge conflict',
-  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
-  blocked: 'Not ready to accept',
-  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
-  readyOnPush: 'Ready once pushed',
   /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
   resolveNow: 'Resolve now',
   resolvingNow: 'Asking the lead',
@@ -500,17 +480,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         )
       return {
         ...base,
-        // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
-        word:
-          work.handedBack != null || work.conflictUnsent != null
-            ? text.mergeConflict
-            : change === null && work.unshipped != null
-              ? kindWords.unshipped
-              : change?.state === 'open' && isBlocked(standingOf(change))
-                ? text.blocked
-                : change?.state === 'open' && pushResolves(standingOf(change))
-                  ? text.readyOnPush
-                  : kindWords.ready,
+        // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
+        word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
         // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
         ...(work.handedBack != null || work.conflictUnsent != null

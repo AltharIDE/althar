@@ -139,7 +139,7 @@ describe('what a task changed, card by card', () => {
     // In a task of several, they may be in a repository with no pull request yet: after none.
     expect(screen.getByText('2 commits aren’t in a pull request yet.')).toBeTruthy()
     expect(screen.getByText('PR #5 was closed on GitHub.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Open a new pull request' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Open a new draft pull request' }))
     expect(onOpenChange).toHaveBeenCalled()
   })
 })
