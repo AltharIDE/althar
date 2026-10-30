@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import { Fragment } from './Fragment'
 import s from './Review.module.css'
 import proxy from './styled/r-proxy.html?raw'
+import braid from './styled/rp-braid.html?raw'
 import card from './styled/rp-card.html?raw'
 import loop from './styled/rp-loop.html?raw'
 import task from './styled/rp-task.html?raw'
@@ -21,6 +22,7 @@ const TAKES = [
   { id: 'task', name: 'Task', source: task },
   { id: 'card', name: 'One card', source: card },
   { id: 'loop', name: 'Loop', source: loop },
+  { id: 'braid', name: 'Braid', source: braid },
 ] as const
 
 const unchanging = () => () => {}
