@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Clock, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -18,7 +18,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { items, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * The coordinator out of usage, where limits.test.ts and accounts.test.ts
@@ -132,8 +132,8 @@ describe('the coordinator out of usage', () => {
 })
 
 describe('a usage-limit call made without the account that ran out, as an earlier Althar made one', () => {
-  it.live('holds the step until the reset when the person waits, and carries it on then on the agent’s own account', () => {
-    const back = Date.now() + 4000
+  it.effect('holds the step until the reset when the person waits, and carries it on then on the agent’s own account', () => {
+    const back = later()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const plans = yield* Plans
@@ -174,9 +174,10 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       assert.deepInclude(JSON.parse(held?.output ?? '{}'), { heldFor: 'claude-code', account: null, why: 'asked' })
       assert.include(
         yield* said(task.threadId),
-        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}, when Fake claude-code is back, as you said.`,
+        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), yield* Clock.currentTimeMillis)}, when Fake claude-code is back, as you said.`,
       )
       // At the reset, its lead carries on, on the agent's first account, and finishes.
+      yield* atReset(back)
       yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, (rows) => rows[0]?.state === 'succeeded')
       const [usual] = yield* accounts.of('claude-code')
       const ran = yield* sql<{ accountId: string }>`
@@ -185,6 +186,6 @@ describe('a usage-limit call made without the account that ran out, as an earlie
         ran.map((row) => row.accountId),
         [usual?.id],
       )
-    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
   })
 })

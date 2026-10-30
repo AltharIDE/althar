@@ -24,7 +24,7 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { fakeAgents, items, onTestClock, repository, runtime, until } from './support'
+import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * An agent out of usage (docs/architecture/05): its work moves on to the
@@ -34,9 +34,6 @@ import { fakeAgents, items, onTestClock, repository, runtime, until } from './su
  */
 
 const HOUR = 60 * 60 * 1000
-
-/** A reset half an hour off, which a test on its clock (`onTestClock`) moves past when it is ready, however long getting there took. */
-const later = () => Date.now() + HOUR / 2
 
 /** A runtime whose agents are out as given, with the project's queries. */
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut: ReadonlyArray<string> = []) =>
@@ -133,9 +130,6 @@ const usual = (agentId: string) =>
 
 /** A reset as the agent's error gives it: to the second. */
 const reset = (at: number) => new Date(Math.ceil(at / 1000) * 1000).toISOString()
-
-/** The clock moved on to the reset, at once: no further, so nothing due after it comes yet. */
-const atReset = (back: number) => TestClock.setTime(Date.parse(reset(back)))
 
 const lead = (agentId: string, model: string | null = null): PlanStep => ({ key: 'implement', agentId, model, skipped: false })
 

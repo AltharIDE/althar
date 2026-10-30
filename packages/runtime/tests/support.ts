@@ -397,18 +397,15 @@ export const task = (title = 'Retry checkout') =>
   })
 
 /**
- * An agent out of usage until a reset some seconds after it first says so: after another task's lead (`[lead:wait]`)
- * takes the one place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start
- * may fall either side on a busy machine.
+ * A reset two minutes off, for a test on its clock (`onTestClock`): the test moves the clock to it (`atReset`) once
+ * what comes before it has, as another task's lead taking the one place, however long getting there took. Further
+ * than any test takes to get there, and nearer than what else the runtime does by the clock meanwhile, which the move
+ * brings on too: a quiet turn's stall at ten minutes, a plan's countdown at five.
  */
-export const outUntilSoon = () => {
-  let until: number | undefined
-  return {
-    get until() {
-      return (until ??= Date.now() + 2_500)
-    },
-  }
-}
+export const later = () => Date.now() + 2 * 60_000
+
+/** The test's clock moved on to a reset as an agent's error gives it, to the second, and no further: nothing due after it comes yet. */
+export const atReset = (at: number) => TestClock.setTime(Math.ceil(at / 1000) * 1000)
 
 /** Waits until a query returns rows that pass the check, as long as its test may take (@althar/testing). */
 export { until } from '@althar/testing/effect'
