@@ -378,6 +378,26 @@ describe('the usage reader', () => {
     expect(seen).toHaveLength(1)
   })
 
+  it('stamps the windows with when it asked, not when they came, and gives that time again while it waits as a 429 asked', async () => {
+    let time = Date.parse('2026-10-15T12:00:00Z')
+    const asked = new Date(time).toISOString()
+    let reply: Reply = {}
+    const answer = server(() => reply).fetch
+    // Each answer takes two seconds to come.
+    const fetch: typeof answer = async (url, init) => {
+      time += 2000
+      return answer(url, init)
+    }
+    const r = reader({ fetch, now: () => new Date(time) })
+    const home = fakeHome()
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: false, usage: { observedAt: asked } })
+    time += MIN_INTERVAL
+    reply = { status: 429, retryAfter: '3600' }
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', last: { observedAt: asked } })
+    time += 60_000
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true, usage: { observedAt: asked } })
+  })
+
   it('waits as long as a 429 asks, or longer each time where it doesn’t say, showing the last windows meanwhile', async () => {
     let time = Date.parse('2026-10-15T12:00:00Z')
     let reply: Reply = {}

@@ -194,7 +194,8 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
 
     try {
       const windows = source.parse(await answer.json(), now())
-      const usage: AccountUsage = { windows, source: 'endpoint', observedAt: now().toISOString() }
+      // Stamped when it was asked, not when it came: what a session said on its way here may be the newer, and stays so each time this is given again.
+      const usage: AccountUsage = { windows, source: 'endpoint', observedAt: new Date(at).toISOString() }
       remember({ usage, notBefore: at + every, strikes: 0 })
       return { kind: 'usage', usage, stale: false }
     } catch {

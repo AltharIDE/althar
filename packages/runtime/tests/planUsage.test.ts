@@ -353,6 +353,59 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
     }),
   )
 
+  it.effect('keeps what a session said while the endpoint was asked each time the reader gives that answer again, as after a 429', () =>
+    Effect.gen(function* () {
+      let called!: () => void
+      const asking = new Promise<void>((resolve) => (called = resolve))
+      let reply!: () => void
+      const answered = new Promise<void>((resolve) => (reply = resolve))
+      const answers: Array<EndpointRead> = []
+      // As the reader answers: its windows stamped when it asked; then a 429 with them as its last, and them again while it waits.
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) => {
+          if (sourceId !== 'claude-oauth') return { kind: 'none' }
+          const next = answers.shift()
+          if (next !== undefined) return next
+          const usage = { windows: [used(10)], source: 'endpoint', observedAt: now().toISOString() } as const
+          answers.push(
+            { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.', last: usage },
+            { kind: 'usage', stale: true, usage },
+          )
+          called()
+          await answered
+          return { kind: 'usage', stale: false, usage }
+        },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        const reading = yield* Effect.forkChild(usage.now(true))
+        yield* Effect.promise(() => asking)
+        // A session says its windows a second after the endpoint is asked, and the endpoint answers a second after that.
+        yield* TestClock.adjust(Duration.seconds(1))
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
+        yield* TestClock.adjust(Duration.seconds(1))
+        reply()
+        const views = [accountOf(yield* Fiber.join(reading), 'claude-code')]
+        // No session says more for a quarter hour: the endpoint is asked again, and asks Althar to wait.
+        yield* TestClock.adjust(Duration.minutes(16))
+        views.push(accountOf(yield* usage.now(true), 'claude-code'))
+        // Meanwhile the reader gives its last answer again, the one the session's windows were newer than.
+        yield* TestClock.adjust(Duration.minutes(1))
+        views.push(accountOf(yield* usage.now(true), 'claude-code'))
+        assert.deepStrictEqual(
+          views.map((view) => [view.source, view.windows.map((window) => window.usedPercent)]),
+          [
+            ['acp_extension', [35]],
+            ['acp_extension', [35]],
+            ['acp_extension', [35]],
+          ],
+        )
+        assert.strictEqual(answers.length, 0)
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
   it.effect('keeps what a session said over an older answer from the endpoint, as the reader’s own from before it was asked to wait', () =>
     Effect.gen(function* () {
       const layer = withUsage({
