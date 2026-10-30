@@ -1,0 +1,146 @@
+name: stress
+
+# A pull request's new and changed tests, run many times over with no retry: twenty times each on Linux and ten on
+# Windows for a few, fewer for many (packages/testing/src/stress.ts), and its changed end-to-end specs up to five times.
+# A race that shows one run in ten fails here, on the pull request that brought it, rather than on main later, where
+# the retry would only hide it. In the merge queue (queue.yml) it gates the merge.
+on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
+  pull_request:
+    paths:
+      [
+        'packages/*/tests/**',
+        'packages/*/src/**/*.test.*',
+        'apps/*/tests/**',
+        'apps/desktop/e2e/**',
+        'packages/testing/src/stress.ts',
+        '.github/workflows/stress.yml',
+      ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      linux: ${{ steps.plan.outputs.linux }}
+      windows: ${{ steps.plan.outputs.windows }}
+      specs: ${{ steps.plan.outputs.specs }}
+      any-linux: ${{ steps.plan.outputs.any-linux }}
+      any-windows: ${{ steps.plan.outputs.any-windows }}
+      any-specs: ${{ steps.plan.outputs.any-specs }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # What the pull request changes: against its base, or in the queue against the entry ahead of it, or main.
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git diff --name-only --diff-filter=AMR "$BASE" HEAD > "$RUNNER_TEMP/changed"
+      - id: plan
+        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed"
+
+  linux:
+    needs: plan
+    if: needs.plan.outputs.any-linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - env:
+          PLAN: ${{ needs.plan.outputs.linux }}
+        run: bun packages/testing/src/stress.ts run
+
+  windows:
+    needs: plan
+    if: needs.plan.outputs.any-windows == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      # As in desktop.yml: the repositories the tests make write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      # As in desktop.yml: a temporary folder with no short name.
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+      - env:
+          PLAN: ${{ needs.plan.outputs.windows }}
+        run: bun packages/testing/src/stress.ts run
+
+  e2e:
+    name: e2e (${{ matrix.shard }})
+    needs: plan
+    if: needs.plan.outputs.any-specs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.specs).shards }}
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - env:
+          SHARD: ${{ matrix.shard }}
+          RUNS: ${{ fromJSON(needs.plan.outputs.specs).runs }}
+          SPECS: ${{ join(fromJSON(needs.plan.outputs.specs).files, ' ') }}
+        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --repeat-each="$RUNS" --retries=0 --shard="$SHARD" $SPECS'
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: stress-e2e-${{ strategy.job-index }}
+          path: apps/desktop/test-results
+          retention-days: 7

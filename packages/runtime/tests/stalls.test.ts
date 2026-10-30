@@ -36,12 +36,11 @@ const tell = (threadId: string, body: string) =>
   })
 
 /** Waits until a notice whose title passes the check is in the thread: it. */
-const noticeWhere = (threadId: string, check: (title: string) => boolean, limit?: Duration.Duration) =>
+const noticeWhere = (threadId: string, check: (title: string) => boolean) =>
   Effect.map(
     until(
       Effect.map(notices(threadId), (said) => said.filter((notice) => check(notice.title ?? ''))),
       (said) => said.length > 0,
-      limit,
     ),
     (said) => said[0] ?? {},
   )
@@ -90,7 +89,6 @@ const stuckCall = (taskId: string) =>
     const [call] = yield* until(
       sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     return JSON.parse(call?.payload ?? '{}') as { step: string; why: string; detail: string | null; tried?: ReadonlyArray<string> }
   })

@@ -171,7 +171,6 @@ describe('the coordinator attaching a task to a pull request', () => {
       yield* until(
         sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${quick?.taskId ?? ''}`,
         (rows) => rows.length > 0 && rows.every((row) => row.state !== 'running'),
-        Duration.seconds(20),
       )
       const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${quick?.threadId ?? ''}`
       const lead: ToolAccess = {

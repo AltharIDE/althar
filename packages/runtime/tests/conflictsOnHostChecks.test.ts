@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -108,7 +108,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       assert.include(fix[0], 'FAIL limit.test.ts')
       assert.include(fix[0], 'commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to PR #1 too.')
       assert.isFalse(said.some((body) => body.includes('the person looks at it and pushes it')))
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0, Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -122,7 +122,6 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       yield* until(
         notices(threadId),
         (all) => all.filter((notice) => notice.title === 'The checks failed on what Althar pushed to PR #1: test.').length === 2,
-        Duration.seconds(20),
       )
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.attempt], ['failed', 2])
@@ -136,7 +135,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       const said = yield* given(threadId)
       assert.strictEqual(said.filter((body) => body.startsWith('Checks failed')).length, 1)
       // Needs you.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -156,7 +155,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), merge)
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.attempt, round?.pushedHead], ['resolved', 2, merge])
-      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 2, Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 2)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -217,8 +216,8 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       // Listened to again, as opening its pull request again does, a new conflict is the lead's once more.
       yield* sql`UPDATE external_links SET listening = 1 WHERE task_id = ${taskId}`
       moveHostMainOn(working, bare, 'rate limits, again\n')
-      yield* until(rounds(taskId), (all) => all.length === 2, Duration.seconds(20))
-      yield* until(asked(threadId), (all) => all.length === 2, Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all.length === 2)
+      yield* until(asked(threadId), (all) => all.length === 2)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -236,7 +235,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
-      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 4, Duration.seconds(20))
+      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 4)
       assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -248,7 +247,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix] [lead:resolve]')
       // The lead fixed a check and committed it, for the person to push.
       github.setChecks(1, FAILED)
-      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
       const before = git(bare, 'rev-parse', 'althar/add-a-retry')
       moveHostMainOn(working, bare)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt.')
@@ -256,7 +255,7 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
-      const [waiting] = yield* until(cards(projectId), (all) => (all[0]?.change?.unpushed ?? 0) > 1, Duration.seconds(20))
+      const [waiting] = yield* until(cards(projectId), (all) => (all[0]?.change?.unpushed ?? 0) > 1)
       assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

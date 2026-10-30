@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Plans } from '../src/Plans'
@@ -117,7 +117,7 @@ describe('a task of several repositories', () => {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const task = yield* across('Do it. [lead:finish] [review:pass]', true, null)
-      yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded', Duration.seconds(30))
+      yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       const heads = Object.fromEntries(
         Object.entries(task.worktree).map(([name, path]) => [name, git(path, 'rev-parse', 'HEAD').toString().trim().slice(0, 12)]),
       )
@@ -131,7 +131,6 @@ describe('a task of several repositories', () => {
           SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
           WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review%'`,
         (rows) => rows.length === 1,
-        Duration.seconds(30),
       )
       assert.include(told?.body, `Review what changed since, \n- api: \`git diff ${heads.api}\`\n- web: \`git diff ${heads.web}\`.`)
     }).pipe(Effect.provide(withQueries())),

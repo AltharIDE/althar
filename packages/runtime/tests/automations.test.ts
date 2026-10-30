@@ -137,7 +137,6 @@ const leadStarted = (taskId: string) =>
         SELECT s.state FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND h.kind = 'task'`,
     ),
     (sessions) => sessions.length > 0,
-    Duration.seconds(20),
   )
 
 const automationRow = (automationId: string) =>
@@ -163,7 +162,7 @@ describe('automations', () => {
       assert.strictEqual((yield* automations.read(automationId)).nextAt, '2026-10-21T08:00:00.000Z')
 
       clock.set('2026-10-21T08:00:05Z')
-      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made', Duration.seconds(20))
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made')
       assert.deepInclude(ran, { cause: 'schedule', slot: '2026-10-21T09:00', subject: '' })
       const [task] = yield* sql<{ title: string; description: string; request: string }>`
         SELECT title, description, request FROM tasks WHERE id = ${ran?.taskId ?? ''}`
@@ -195,7 +194,7 @@ describe('automations', () => {
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
       // Asleep from Tuesday 8:00 to Wednesday 13:00: Wednesday's 9:00 runs once, Tuesday's never.
       clock.set('2026-10-21T12:00:00Z')
-      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made', Duration.seconds(20))
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made')
       assert.strictEqual(ran?.slot, '2026-10-21T09:00')
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${ran?.taskId ?? ''}`
       assert.include(task?.description, 'It was due at 9:00; it is 13:00, since the computer was asleep or Althar was closed.')
@@ -247,7 +246,7 @@ describe('automations', () => {
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: going, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running', Duration.seconds(20))
+      yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running')
       // Thursday's comes while Wednesday's still goes.
       clock.set('2026-10-22T08:00:05Z')
       const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2)
@@ -314,7 +313,7 @@ describe('automations', () => {
       yield* automations.turnOn(automationId, instance.personId)
       assert.deepInclude(yield* automationRow(automationId), { state: 'on', pausedBy: null, pauseReason: null })
       clock.set('2026-10-23T08:00:05Z')
-      yield* until(occurrencesOf(automationId), (rows) => rows.length === 4 && rows[3]?.state === 'made', Duration.seconds(20))
+      yield* until(occurrencesOf(automationId), (rows) => rows.length === 4 && rows[3]?.state === 'made')
     }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
   })
 
@@ -453,19 +452,18 @@ describe('automations', () => {
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: going, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      const [running] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running', Duration.seconds(20))
+      const [running] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running')
       yield* until(
         sql<{ n: number }>`
           SELECT count(*) AS n FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id
           WHERE h.task_id = ${running?.taskId ?? ''} AND t.delivered_at IS NOT NULL`,
         (rows) => (rows[0]?.n ?? 0) > 0,
-        Duration.seconds(20),
       )
       // Its turns, as if they had gone on for ten minutes.
       yield* sql`
         UPDATE turn_deliveries SET delivered_at = ${new Date(Date.now() - 10 * 60_000).toISOString()}
         WHERE thread_id IN (SELECT id FROM threads WHERE task_id = ${running?.taskId ?? ''})`
-      const [stopped] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'failed', Duration.seconds(20))
+      const [stopped] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'failed')
       assert.strictEqual(stopped?.reason, 'Stopped after 5 minutes of work.')
       yield* until(
         sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${running?.taskId ?? ''}`,
@@ -505,7 +503,7 @@ describe('automations', () => {
         return { on, off }
       }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
       yield* Effect.gen(function* () {
-        yield* until(occurrencesOf(made.on), (rows) => rows[0]?.state === 'made', Duration.seconds(20))
+        yield* until(occurrencesOf(made.on), (rows) => rows[0]?.state === 'made')
         const [failed] = yield* until(occurrencesOf(made.off), (rows) => rows[0]?.state === 'failed')
         assert.strictEqual(failed?.reason, 'Althar stopped before its task started.')
       }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
@@ -525,7 +523,7 @@ describe('automations', () => {
         const projectId = yield* openedOn(at.working)
         const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
         clock.set('2026-10-21T08:00:05Z')
-        const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
+        const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null)
         // Its review says what it found, so the listing says nothing of its own.
         assert.deepInclude(rows[0], { subject: '', state: 'made', reason: null })
         assert.deepInclude(rows[1], { slot: '2026-10-21T09:00', state: 'running', subjectTitle: '#1 Send back' })
@@ -595,7 +593,7 @@ describe('automations', () => {
       yield* (yield* Policies).setAccounts(projectId, { rotate: true }, instance.personId)
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made', Duration.seconds(30))
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made')
       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${ran?.taskId ?? ''} AND kind = 'task'`
       const sessions = yield* sql<{ agentId: string; accountId: string }>`
         SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${thread?.id ?? ''} ORDER BY started_at`
@@ -693,7 +691,6 @@ describe('automations', () => {
         const [made] = yield* until(
           sql<{ state: string; taskId: string | null }>`SELECT state, task_id FROM automation_occurrences WHERE id = ${occurrenceId}`,
           (rows) => rows[0]?.state === 'made',
-          Duration.seconds(20),
         )
         assert.strictEqual(made?.taskId, taskId)
         const kept = yield* sql<{ state: string }>`SELECT state FROM task_plans WHERE task_id = ${taskId}`
@@ -714,12 +711,12 @@ describe('automations', () => {
       const projectId = yield* openedOn(at.working)
       const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running', Duration.seconds(20))
+      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running')
       const taskId = rows[1]?.taskId ?? ''
       // Its lead is at it, and the person stops it before it drafts anything.
       yield* leadStarted(taskId)
       yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', { taskId }), taskId })
-      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed')
       assert.strictEqual(stopped[1]?.reason, 'Its review was stopped before its lead drafted one.')
       // Run now isn't refused as if it still went: it finds nothing new, since a task has had that pull request.
       yield* automations.runNow(automationId, instance.personId)
@@ -740,23 +737,23 @@ describe('automations', () => {
       const projectId = yield* openedOn(at.working)
       const automationId = yield* automations.make({ projectId, definition: review, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running', Duration.seconds(20))
+      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running')
       const taskId = rows[1]?.taskId ?? ''
       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
       const threadId = thread?.id ?? ''
       const lastTurn = sql<{ state: string }>`
         SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
-      yield* until(lastTurn, (turns) => turns[0]?.state === 'delivered', Duration.seconds(20))
+      yield* until(lastTurn, (turns) => turns[0]?.state === 'delivered')
       // The composer's Stop: its turn ends, and its session waits for what the person says next.
       yield* (yield* Sessions).interrupt(threadId)
-      yield* until(lastTurn, (turns) => turns[0]?.state === 'interrupted', Duration.seconds(20))
+      yield* until(lastTurn, (turns) => turns[0]?.state === 'interrupted')
       // Theirs to carry on for now: its run still goes.
       yield* Effect.sleep('500 millis')
       assert.strictEqual((yield* occurrencesOf(automationId))[1]?.state, 'running')
       // Nothing said since, as if for ten minutes: its run is over, and failed.
       yield* sql`
         UPDATE turn_deliveries SET ended_at = ${new Date(Date.now() - 10 * 60_000).toISOString()} WHERE thread_id = ${threadId}`
-      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed')
       assert.strictEqual(stopped[1]?.reason, 'Its review was stopped before its lead drafted one.')
       // Run now isn't refused as if it still went.
       yield* automations.runNow(automationId, instance.personId)
@@ -777,7 +774,7 @@ describe('automations', () => {
       const projectId = yield* openedOn(at.working)
       const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
-      const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
+      const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null)
       // It read them all, and its review says what it found: the listing says nothing of its own.
       assert.deepInclude(rows[0], { subject: '', state: 'made', reason: null })
       assert.strictEqual(rows[1]?.subjectTitle, '#1 Send back')
@@ -785,7 +782,7 @@ describe('automations', () => {
       const taskId = rows[1]?.taskId ?? ''
       yield* leadStarted(taskId)
       yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', { taskId }), taskId })
-      yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed')
       // Four more of the person's: five listings of two read back only so far, and the run says so.
       for (const title of ['Mine five', 'Mine six', 'Mine seven', 'Mine eight'])
         github.addPullRequest({ path: ['meridian', 'api'], title, author: 'you', body: '' })
@@ -799,7 +796,7 @@ describe('automations', () => {
       // A new one by the teammate, the newest: a run that starts its review still says what it couldn't read.
       byTeammate('Their nine', 'nine.ts', 'export const nine = 9\n')
       clock.set('2026-10-23T08:00:05Z')
-      const third = yield* until(occurrencesOf(automationId), (all) => all.length === 5 && all[4]?.taskId !== null, Duration.seconds(20))
+      const third = yield* until(occurrencesOf(automationId), (all) => all.length === 5 && all[4]?.taskId !== null)
       const short = /^Found 1 new pull request\. Only the 6 latest open pull requests of \S+ were looked at; older ones weren’t\.$/
       assert.match(third[3]?.reason ?? '', short)
       // Its history shows that listing beside the review it started; the first morning's, which had nothing to add, it doesn't.

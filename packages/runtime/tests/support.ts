@@ -394,21 +394,8 @@ export const outUntilSoon = () => {
   }
 }
 
-/** Waits until a query returns a row matching the check, reading the store every few milliseconds. */
-export const until = <A, R = SqlClient.SqlClient>(
-  query: Effect.Effect<ReadonlyArray<A>, unknown, R>,
-  check: (rows: ReadonlyArray<A>) => boolean,
-  limit = Duration.seconds(10),
-) =>
-  Effect.gen(function* () {
-    const deadline = Date.now() + Duration.toMillis(limit)
-    for (;;) {
-      const rows = yield* Effect.orDie(query)
-      if (check(rows)) return rows
-      if (Date.now() > deadline) return yield* Effect.die(new Error(`Timed out waiting; last saw ${JSON.stringify(rows)}`))
-      yield* Effect.sleep('20 millis')
-    }
-  })
+/** Waits until a query returns rows that pass the check, as long as its test may take (@althar/testing). */
+export { until } from '@althar/testing/effect'
 
 /** The thread's items, oldest first, with their content parsed. */
 export const items = (threadId: string) =>

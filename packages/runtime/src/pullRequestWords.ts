@@ -1,4 +1,4 @@
-import type { Check, Comment, Review } from '@althar/connectors'
+import type { ChangeRequest, Check, Comment, Review } from '@althar/connectors'
 
 import { keepsTemplate, placeSummary, untick } from './conventions'
 
@@ -42,6 +42,25 @@ export const checksOf = (sha: string, checks: ReadonlyArray<Check>): ChecksSum =
 /** The pull request's name, as people say it: `PR #12`, `MR !4`. */
 export const nameOf = (change: { readonly number: number; readonly words: { readonly short: string; readonly prefix: string } }) =>
   `${change.words.short} ${change.words.prefix}${change.number}`
+
+/** Said in the task's thread as its pull request goes in its target branch's merge queue. */
+export const queuedNote = (name: string, target: string | undefined) =>
+  `${name} is in the merge queue${target === undefined ? '' : ` for ${target}`}. It merges once the queue's checks pass.`
+
+/** Said as the merge queue takes it out unmerged: why, where its host says, and where it went. */
+export const leftQueueNote = (name: string, why: ChangeRequest['leftQueue']) => {
+  const back = "It's back in Needs you, to merge again."
+  switch (why) {
+    case 'removed':
+      return `Someone took ${name} out of the merge queue. ${back}`
+    case 'checks':
+      return `The merge queue took ${name} out: its checks failed there. ${back}`
+    case 'conflict':
+      return `The merge queue took ${name} out: it conflicts with what's ahead of it there. ${back}`
+    default:
+      return `The merge queue took ${name} out. ${back}`
+  }
+}
 
 /** Where a comment is: a line of a file, or the conversation. */
 export const whereOf = (comment: Pick<Comment, 'path' | 'line'>) =>

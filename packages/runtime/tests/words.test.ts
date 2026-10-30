@@ -13,8 +13,10 @@ import {
   descriptionAsk,
   filesLine,
   fromAlthar,
+  leftQueueNote,
   nameOf,
   outsidersLine,
+  queuedNote,
   reviewForLead,
   reviewLine,
   signed,
@@ -87,6 +89,21 @@ describe('what Althar writes about a pull request', () => {
     assert.strictEqual(standing({ state: 'open', draft: true }), 'draft')
     assert.strictEqual(standing({ state: 'open', draft: false }), 'open')
     assert.strictEqual(standing({ state: 'merged', draft: false }), 'merged')
+  })
+
+  it('says it went in its merge queue, and why the queue took it out, and that it is the person’s again', () => {
+    assert.strictEqual(queuedNote('PR #12', undefined), "PR #12 is in the merge queue. It merges once the queue's checks pass.")
+    const back = "It's back in Needs you, to merge again."
+    assert.deepStrictEqual(
+      (['checks', 'conflict', 'removed', 'other', null] as const).map((why) => leftQueueNote('PR #12', why)),
+      [
+        `The merge queue took PR #12 out: its checks failed there. ${back}`,
+        `The merge queue took PR #12 out: it conflicts with what's ahead of it there. ${back}`,
+        `Someone took PR #12 out of the merge queue. ${back}`,
+        `The merge queue took PR #12 out. ${back}`,
+        `The merge queue took PR #12 out. ${back}`,
+      ],
+    )
   })
 
   it('describes it as the lead wrote it, else from what the task built, and never with the review or its evidence', () => {

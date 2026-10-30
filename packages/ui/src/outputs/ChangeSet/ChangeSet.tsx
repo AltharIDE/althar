@@ -83,6 +83,7 @@ export const changeSetText: ChangeSetText = {
     [ChangeState.Draft]: 'Draft',
     [ChangeState.Ready]: 'Ready to accept',
     [ChangeState.Merged]: 'Merged',
+    [ChangeState.Queued]: 'In the merge queue',
     [ChangeState.Branch]: 'On its branch',
   },
   pr: (n) => `PR #${n}`,
@@ -201,7 +202,7 @@ export function ChangeSet({
 function Head({ state, host, prs, remote, t }: Pick<ChangeSetProps, 'state' | 'host' | 'prs' | 'remote'> & { t: ChangeSetText }) {
   const several = prs.length > 1
   const numbered = prs.filter((pr) => pr.number !== undefined)
-  const said = state === ChangeState.Draft || state === ChangeState.Merged ? t.state[state] : null
+  const said = state === ChangeState.Draft || state === ChangeState.Merged || state === ChangeState.Queued ? t.state[state] : null
   if (numbered.length > 0)
     return (
       <div className={s.head}>

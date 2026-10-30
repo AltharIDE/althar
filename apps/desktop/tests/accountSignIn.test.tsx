@@ -161,7 +161,7 @@ describe('the agent’s own login, as it is asked', () => {
     act(() => result.current.reopen())
     expect(open).toHaveBeenCalledWith('https://auth.openai.com/codex/device', '_blank')
     // Asked again a second later, as the window asks while it shows.
-    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2))
     expect(result.current.signingIn?.step).toMatchObject({ kind: 'code', opened: true })
     open.mockRestore()
   })

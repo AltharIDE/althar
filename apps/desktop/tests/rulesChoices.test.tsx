@@ -78,7 +78,7 @@ describe('a project’s rules not read', () => {
       }),
     })
     withServices(<Rules />, client)
-    expect((await screen.findByRole('alert', {}, { timeout: 5000 })).textContent).toContain('The runtime is restarting.')
+    expect((await screen.findByRole('alert')).textContent).toContain('The runtime is restarting.')
   })
 
   it('keeps no change made before they are read', async () => {
