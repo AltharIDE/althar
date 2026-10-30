@@ -2,6 +2,7 @@ import { deadline } from '@althar/testing'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeEach } from 'vitest'
 
+import { forgetFolds } from '../src/renderer/features/board/folds'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
@@ -46,9 +47,11 @@ if (typeof window !== 'undefined') {
   }
   afterEach(() => {
     cleanup()
-    // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window keeps by thread.
+    // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window
+    // keeps by thread and the lanes it keeps where storage wouldn't take them.
     window.localStorage.clear()
     forgetChosenFaces()
+    forgetFolds()
     forgetDrafts()
     forgetSessions()
   })
