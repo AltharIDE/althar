@@ -74,11 +74,15 @@ const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end ==
 const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
   card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
 
-/** The plan's steps as the kit shows them, by model; the agent's id rides on the model's runtime. */
-const launchSteps = (plan: Plan, named: NameModel): ReadonlyArray<LaunchStep> =>
+/**
+ * The plan's steps as the kit shows them, by model; the agent's id rides on
+ * the model's runtime. A review of someone else's pull request has one, its
+ * lead, which reviews.
+ */
+const launchSteps = (plan: Plan, named: NameModel, reviews: boolean): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
-    label: text.label[step.key],
+    label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
     ...(step.key === 'implement' && plan.reason !== null ? { why: plan.reason } : {}),
     optional: step.key === 'review',
@@ -111,13 +115,16 @@ function PlanCard({
     actions.onChange(plan.id, next, nextEnd)
   }
   const from = fromOf(card)
+  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
+  const allowed = plan.agents
+  const agents = allowed === undefined ? actions.agents : actions.agents.filter((agent) => allowed.includes(agent.id))
   return (
     <TaskLaunch
       task={card.slug}
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, named)}
+      steps={launchSteps({ ...plan, steps }, named, card.reviewing != null)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
@@ -127,7 +134,7 @@ function PlanCard({
           planned !== undefined && (
             <ModelChoice
               owner={owner}
-              agents={actions.agents}
+              agents={agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
               {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
@@ -180,10 +187,11 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
-  const steps = stepNames(card.plan?.steps ?? [], card.followUp === true)
+  // A review has no steps to go through: its lead reads and drafts.
+  const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
-  // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
-  const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
+  // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
+  const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
   const status =

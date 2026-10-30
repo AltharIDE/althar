@@ -316,7 +316,7 @@ export const FinishedFolder = Schema.Struct({
   project: Schema.String,
   kind: FolderKind,
   settledAt: Schema.String,
-  /** On disk, in bytes, as `du` counts it, its repositories' folders together; null until measured. */
+  /** What removing it frees, in bytes, its repositories' folders together: what their files hold that nothing outside them shares, not clones or hardlinks of a package manager's store; null until measured. */
   bytes: Schema.NullOr(Schema.Number),
   /** Why it stays; null where nothing holds it. */
   held: Schema.NullOr(FolderHeld),
@@ -334,7 +334,7 @@ export const TaskFolders = Schema.Struct({
 })
 export type TaskFolders = typeof TaskFolders.Type
 
-/** What removing finished tasks' folders freed, measured on the disk after, in bytes; and how many it couldn't remove. */
+/** What removing finished tasks' folders freed, in bytes, as they were measured just before they went; and how many it couldn't remove. */
 export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
 export type FoldersFreed = typeof FoldersFreed.Type
 
@@ -888,6 +888,8 @@ export const ChangeSummary = Schema.Struct({
    * the host hasn't worked it out, or doesn't say.
    */
   conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** In its target branch's merge queue, where accepting it put it: its host merges it once the queue's checks pass. */
+  queued: Schema.optional(Schema.Boolean),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
@@ -1217,6 +1219,12 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    /**
+     * For an agent's turn that failed: why, as the runtime classes it
+     * (`auth_required`, `usage_limit`, `context_full`, `invalid_request`,
+     * `unknown`, `agent_exited`…), so the thread offers the way out that fits.
+     */
+    failure: Schema.optional(Schema.String),
   }),
 })
 
@@ -1555,6 +1563,12 @@ export const TaskCard = Schema.Struct({
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
       end: Schema.NullOr(TaskEnd),
+      /**
+       * Only these agents may take its steps, by id: a review of someone
+       * else's pull request's, those whose session can be held to reading
+       * only. Absent where any may.
+       */
+      agents: Schema.optional(Schema.Array(Schema.String)),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
@@ -1597,6 +1611,13 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Ready, its pull request's checks failing, and its lead brought them to the
+   * person rather than fixing them (broken on its default branch, say), or
+   * spent its tries (ADR-070): why, in a line, with what would fix it. Without
+   * it, its lead sees them through, or they don't fail.
+   */
+  checksBack: Schema.optional(Schema.NullOr(Schema.String)),
   /**
    * Its branch conflicts with its default branch, and Althar didn't ask its
    * lead to resolve it though the rules say it resolves conflicts: why, in a
@@ -2116,6 +2137,8 @@ export const StuckStep = Schema.Struct({
     'refused',
     // Its agent's service kept failing while the computer was online (ADR-060).
     'transient',
+    // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
+    'signed_out',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -2237,7 +2260,9 @@ export const TaskRepositoryHere = Schema.Struct({
    * pushing it without a connection: the remote it goes to, whether the
    * remote has it, how many commits of it the remote doesn't have, and the
    * host's page for a new pull request from it, where that can be told.
-   * None for a repository without a remote.
+   * None for a repository without a remote. How many it doesn't have is
+   * null until the remote says, as the task is looked at, unless this
+   * computer knows it has them all.
    */
   remote: Schema.optional(
     Schema.NullOr(
@@ -2246,7 +2271,7 @@ export const TaskRepositoryHere = Schema.Struct({
         /** The task's branch, as it is named there. */
         branch: Schema.String,
         pushed: Schema.Boolean,
-        ahead: Schema.Number,
+        ahead: Schema.NullOr(Schema.Number),
         newPullRequest: Schema.NullOr(Schema.String),
       }),
     ),
@@ -2342,10 +2367,16 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** Stopped, no agent on it: what stopped its lead, and when, as its card says. Absent while it isn't stopped. */
+    stopped: Schema.optional(
+      Schema.NullOr(Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.String })),
+    ),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why the checks failing on its pull request are the person's, as its card says (ADR-070). */
+    checksBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
     conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */

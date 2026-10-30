@@ -64,7 +64,13 @@ export const needsOf = (
       id: work.taskId,
       kind: readyKindOf(work),
       title: work.title,
-      ...(work.handedBack != null ? { meta: work.handedBack } : meta === undefined ? {} : { meta }),
+      ...(work.checksBack != null
+        ? { meta: work.checksBack }
+        : work.handedBack != null
+          ? { meta: work.handedBack }
+          : meta === undefined
+            ? {}
+            : { meta }),
       ...(work.threadId === here ? { here: true } : {}),
       onOpen: () => onTask(work.threadId),
     }

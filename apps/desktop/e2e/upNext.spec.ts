@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, startTask } from './support'
+import { launch, openFirstProject, planTask, startTask, still } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -43,8 +43,9 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
     await planTask(page, 'Hold this plan')
-    await page.getByRole('button', { name: 'Hold' }).last().click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    // Exactly: the plan up next on the board beside is named for it.
+    await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
     await planTask(page, 'Plan the release')
 
     await page.getByRole('radio', { name: /^Board/ }).click()
@@ -52,11 +53,11 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
     await expect(next.getByText('Starts when an agent is free')).toBeVisible()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-board.png', animations: 'disabled' })
 
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-home.png', animations: 'disabled' })
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
@@ -80,7 +81,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(running.getByRole('button', { name: 'Add a retry' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-started.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

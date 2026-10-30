@@ -60,6 +60,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
+  /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
+  readonly checksOn?: (sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** Whether it lists changes: true unless said, as every host Althar knows does. */
   readonly lists?: boolean
   /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
@@ -157,6 +159,14 @@ export interface FakeControls {
   catchUp(): void
   /** Merges are taken but left open, as Bitbucket answers one that takes long, until `mergeByHand` lands it. */
   landLater(): void
+  /**
+   * Target branches merge through a merge queue, as GitHub's can: a merge
+   * puts a change in it, open and queued, until `mergeByHand` lands it or
+   * `dequeue` takes it out.
+   */
+  mergeQueue(): void
+  /** The merge queue takes a change out unmerged, saying why. */
+  dequeue(number: number, why: NonNullable<ChangeRequest['leftQueue']>): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
@@ -261,6 +271,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let lagged: ReadonlyArray<ChangeRequest> | null = null
   /** Whether a merge is taken but not landed yet. */
   let landsLater = false
+  /** Whether merges go through a merge queue; the changes in it, and why the queue last took each out. */
+  let queues = false
+  const inQueue = new Set<number>()
+  const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
 
   /** Records a call, taking as long as the test said, and fails it if a test asked. */
   const called = (method: string) =>
@@ -369,7 +383,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (change.from !== undefined) forks.set(number, change.from.path.join('/'))
         return Effect.succeed(opened)
       }),
-    change: (_repository, number) =>
+    change: (_repository, number, ask) =>
       Effect.andThen(called('change'), () => {
         const found = (lagged ?? changes).find((change) => change.number === number)
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
@@ -381,6 +395,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(head === null ? {} : { headSha: head }),
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+          ...(ask?.queue === true && queues && found.state === 'open'
+            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null }
+            : {}),
         })
       }),
     listChanges: (repository, query) =>
@@ -458,6 +475,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           )
         if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+        if (queues) {
+          inQueue.add(change.number)
+          return Effect.succeed({ ...changeNumbered(change.number), queued: true })
+        }
         if (!landsLater) update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
@@ -479,6 +500,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
+        const elsewhere = change === undefined ? options.checksOn?.(sha) : undefined
+        if (elsewhere !== undefined)
+          return Effect.succeed(
+            elsewhere.map((check, index): Check => {
+              const id = `check-${sha}-${index}`
+              logs.set(id, check.log ?? null)
+              return { id, name: check.name, state: check.state, url: check.url ?? null, summary: null }
+            }),
+          )
         if (change === undefined || ran === undefined)
           return Effect.succeed(
             change === undefined
@@ -802,13 +832,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }),
       )
     },
-    mergeByHand: (number) => update(number, { state: 'merged' }),
+    mergeByHand: (number) => {
+      inQueue.delete(number)
+      update(number, { state: 'merged' })
+    },
     close: (number) => update(number, { state: 'closed' }),
     reopen: (number) => update(number, { state: 'open' }),
     readyByHand: (number) => update(number, { draft: false }),
     lagReads: () => void (lagged = [...changes]),
     catchUp: () => void (lagged = null),
     landLater: () => void (landsLater = true),
+    mergeQueue: () => void (queues = true),
+    dequeue: (number, why) => {
+      inQueue.delete(number)
+      leftQueue.set(number, why)
+    },
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {
         reason,

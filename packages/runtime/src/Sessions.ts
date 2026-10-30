@@ -98,6 +98,7 @@ import {
 } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
+import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -350,6 +351,9 @@ const PORTS_EVERY = 4
 
 /** The longest a turn waits to read what the agent's tree listens on before it begins. */
 const BASELINE_WITHIN = Duration.seconds(5)
+
+/** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
+const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -852,6 +856,20 @@ export class Sessions extends Context.Service<
                   Effect.orElseSucceed(() => ''),
                 ),
             })
+
+      /** The processes a command it left running runs as, with all they started, while it runs (stopping.ts). */
+      const treeOfLeft = (running: Running, left: LeftRunning) =>
+        left.ended === null ? treeOfCommand(left.outputPath, running.connection.process?.pid) : Effect.succeed([])
+
+      /** Stops what commands it left running run as; logs what wouldn't stop. */
+      const stopTrees = (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) =>
+        Effect.gen(function* () {
+          const outlived = yield* stopProcesses(trees.flat())
+          if (outlived.length > 0)
+            yield* Effect.logWarning('What an agent left running would not stop', { pids: outlived }).pipe(
+              Effect.annotateLogs({ thread: running.thread.threadId }),
+            )
+        })
 
       /**
        * The port one listens on, found from the processes it started: those
@@ -1490,8 +1508,8 @@ export class Sessions extends Context.Service<
            * command's output that grew, as its last lines.
            */
           const streaming = { sentAt: 0, trailing: false }
-          const sendOpen = Effect.suspend(() => {
-            streaming.sentAt = Date.now()
+          const sendOpen = Effect.flatMap(Clock.currentTimeMillis, (now) => {
+            streaming.sentAt = now
             const open = items.current()
             const message =
               open === undefined
@@ -1511,8 +1529,8 @@ export class Sessions extends Context.Service<
               }),
             )
           })
-          const stream = Effect.suspend(() => {
-            const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)
+          const stream = Effect.flatMap(Clock.currentTimeMillis, (now) => {
+            const wait = STREAM_EVERY - (now - streaming.sentAt)
             if (wait <= 0) return sendOpen
             if (streaming.trailing) return Effect.void
             streaming.trailing = true
@@ -1618,7 +1636,11 @@ export class Sessions extends Context.Service<
               {
                 source: 'agent',
                 severity: 'error',
-                title: `${running.entry.definition.name} couldn't answer.`,
+                // Signed out, the agent's own words ("Authentication required") stay as its detail, under a headline that says it plainly.
+                title:
+                  errorClass === 'auth_required'
+                    ? `${running.entry.definition.name} is signed out.`
+                    : `${running.entry.definition.name} couldn't answer.`,
                 ...(typeof said === 'string' && said !== '' ? { description: said } : {}),
                 failure: errorClass,
               },
@@ -1975,7 +1997,8 @@ export class Sessions extends Context.Service<
               launchedAt: yield* timestamp,
             })}`
           }
-          const requestContext: RequestContext = {
+          // Read again once the agent is spawned, before it asks anything: the rules then know its temp folder.
+          let requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
             taskId: thread.role === 'coordinator' ? null : thread.taskId,
@@ -2002,7 +2025,14 @@ export class Sessions extends Context.Service<
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-058): never a review's lead.
-                    ...(thread.role === 'coordinator' ? { trusted: true, reads: thread.folder.reads } : {}),
+                    ...(thread.role === 'coordinator'
+                      ? {
+                          trusted: true,
+                          reads: thread.folder.reads,
+                          // Held by a sandbox it never leaves (sessionMeta's `contained` below), what it writes stays in its copies.
+                          ...(definition.sessionMeta !== undefined && definition.contains?.() === true ? { contained: true } : {}),
+                        }
+                      : {}),
                   },
           }
           // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
@@ -2047,6 +2077,8 @@ export class Sessions extends Context.Service<
                 modeOptionId: definition.options.mode,
                 // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
                 ...heldFor(definition, reads),
+                // The coordinator's every turn is a reply the person reads: a refusal never starts one of its own (ADR-019).
+                ...(thread.role === 'coordinator' ? { refusals: 'withNext' as const } : {}),
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
@@ -2123,6 +2155,10 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
+          // Where its launch made it a temp folder of its own, the rules read `$TMPDIR` in its commands as that.
+          const temp = connection.process?.temp
+          if (temp !== undefined && requestContext.rules.role === 'task')
+            requestContext = { ...requestContext, rules: { ...requestContext.rules, context: { ...requestContext.rules.context, temp } } }
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
@@ -2227,6 +2263,14 @@ export class Sessions extends Context.Service<
             atBreak: false,
           }
           threads.set(thread.threadId, running)
+          // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.gen(function* () {
+              const open = [...running.background.values()].filter((left) => left.ended === null)
+              yield* stopTrees(running, yield* Effect.forEach(open, (left) => treeOfLeft(running, left), { concurrency: 'unbounded' }))
+            }).pipe(Effect.timeout(LEFT_STOPS_WITHIN), Effect.ignore),
+          )
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
           const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
@@ -2747,6 +2791,8 @@ export class Sessions extends Context.Service<
           const [quick] = yield* sql<{
             quick: number
           }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
+          // Settled, its lead was stopped as it settled (LeftBehind.ts): started again, it is told so, so it answers rather than redo it.
+          const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${thread.taskId}`
           const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
           const [plainFirst] = unbranched
           const [first] = thread.repositories
@@ -2763,6 +2809,11 @@ export class Sessions extends Context.Service<
                 ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...(why.kind === 'start' && standing?.state === 'done'
+              ? [
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                ]
+              : []),
             ...askedFor(thread),
             ...(yield* alongside(thread.taskId)),
             several
@@ -2804,7 +2855,7 @@ export class Sessions extends Context.Service<
             // The pull request's description is the lead's too, for a reviewer on the code host: not the person's summary again.
             "Where the task ends in a pull request, write its description as you finish, in finish_step's `descriptions`, in the repository's pull request template where it has one. Your summary and `built` are for the person in Althar; the description is for whoever reviews the pull request on the code host, who hasn't seen your work: why the change exists, what it does, how you went about it and how it was checked, in plain prose, with nothing of the review, your evidence or Althar's workings. finish_step's `descriptions` says more.",
             // Althar reaches the code host for the task (ADR-011).
-            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
+            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks, which push_to_pull_request pushes at once. Where checks fail for a reason that isn't the change's, broken on the default branch already (read_default_branch_checks shows its checks), change nothing to work around it: hand_checks_to_person brings it to the person, with a line on why. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
             'Draft an issue with draft_issue only when the person asks you to track something ("file these follow-ups", "make an issue for that"), never on your own: check find_issues first, so you don\'t draft what is already tracked. Something out of this task\'s scope that you find goes in your report (finish_step or the summary) in a line, so the person or the coordinator can decide; a bug your brief covers is fixed in the task, never handed off as an issue. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person\'s one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don\'t draft for ordinary work of the task, or for something you can fix within it.',
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
@@ -2848,7 +2899,7 @@ export class Sessions extends Context.Service<
                 )
                 .join(
                   '\n',
-                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, what stays inside it runs too, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); write such a command plainly, without \`$?\` or \`eval\`, since one your agent can't read asks, and then only what only looks is allowed. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
+                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, what stays inside it runs too, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); write such a command plainly, without \`$?\` or \`eval\`, since one your agent can't read asks, and then only what only looks is allowed: a loop, an \`if\` or a variable you set runs then where every command in it only looks, or fetches a copy's \`origin\` where your sandbox holds it. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
           [
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
@@ -3207,7 +3258,11 @@ export class Sessions extends Context.Service<
             const left = running?.background.get(id)
             if (running === undefined || left === undefined) return
             // Ended by itself, there is nothing to stop. Gone already as the agent tells it, it goes from the list all the same.
-            if (left.ended === null) yield* running.agent.stopBackground(id)
+            // Stopped through the agent, which ends its shell only: what the shell started is stopped after it (stopping.ts).
+            if (left.ended === null) {
+              const tree = yield* treeOfLeft(running, left)
+              yield* running.agent.stopBackground(id).pipe(Effect.ensuring(stopTrees(running, [tree])))
+            }
             running.background.delete(id)
             yield* toldBackground(running)
           }),

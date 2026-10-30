@@ -65,7 +65,7 @@ const shift = (name: string) => button(name).closest('li')!.style.transform
 const rect = (left: number, width: number) =>
   ({ left, right: left + width, width, top: 0, bottom: 30, height: 30, x: left, y: 0, toJSON: () => ({}) }) as DOMRect
 
-/* Lays out the tabs' list: `shown` pixels wide, scrolled as far as it is. */
+/* Lays out the tabs' list: `shown` pixels wide, scrolled as far as it is, each tab where a drag has it. */
 const layOut = (shown: number) => {
   const element = list()
   let scroll = 0
@@ -78,8 +78,19 @@ const layOut = (shown: number) => {
   })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this === element) return rect(0, shown)
-    if (this.parentElement === element) return rect(Array.from(element.children).indexOf(this) * STEP - scroll, WIDTH)
+    if (this.parentElement === element) {
+      const by = Number.parseFloat(/translateX\((-?[\d.]+)px\)/.exec(this.style.transform)?.[1] ?? '0')
+      return rect(Array.from(element.children).indexOf(this) * STEP - scroll + by, WIDTH)
+    }
     return rect(0, 0)
+  })
+  // Where each tab is laid out in the list, whatever moves it.
+  const place = (one: HTMLElement) => (one.parentElement === element ? Array.from(element.children).indexOf(one) : -1)
+  vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+    return Math.max(0, place(this)) * STEP
+  })
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return place(this) < 0 ? 0 : WIDTH
   })
 }
 
@@ -319,6 +330,32 @@ describe('dragging a project’s tab along the bar', () => {
   })
 })
 
+describe('dragging a tab where the browser animates', () => {
+  // The bar's list moves as a whole (ListMotion) once the browser animates: a drag is its own.
+  let animated: Element[]
+  beforeEach(() => {
+    animated = []
+    Element.prototype.animate = function animate(this: Element) {
+      animated.push(this)
+      return { cancel: vi.fn(), addEventListener: vi.fn() } as unknown as Animation
+    }
+  })
+  afterEach(() => void delete (Element.prototype as Partial<Element>).animate)
+
+  it('lets the tab follow the pointer, and lands it, with nothing of the list’s motion pulling it back', () => {
+    render(<Bar initial={FOUR} />)
+    layOut(600)
+    pointer('pointerDown', 'Meridian', 20)
+    pointer('pointerMove', 'Meridian', 100)
+    pointer('pointerMove', 'Meridian', 180)
+    pointer('pointerMove', 'Meridian', 270)
+    expect(shift('Meridian')).toBe('translateX(250px)')
+    pointer('pointerUp', 'Meridian', 270)
+    expect(order()).toEqual(['Halyard', 'Tessera', 'Meridian', 'Ferrous'])
+    expect(animated).toEqual([])
+  })
+})
+
 describe('moving a project’s tab by key', () => {
   const key = (name: string, key: string, more: Partial<KeyboardEventInit> = {}) =>
     fireEvent.keyDown(button(name), { key, altKey: true, shiftKey: true, ...more })
@@ -369,6 +406,33 @@ describe('moving a project’s tab by key', () => {
 
 describe('more tabs open than fit', () => {
   const MANY = [...FOUR.map((one, i) => (i === 1 ? { ...one, yours: 2 } : one)), extra('ledger', 'Ledger'), extra('infra', 'Infra')]
+
+  it('keeps the tab with the window in sight by where it is laid out, not where it shows while it slides', () => {
+    const tabs = (current: string) => <ProjectTabs tabs={MANY} current={current} lights="none" onSelect={vi.fn()} onClose={vi.fn()} />
+    const { rerender } = render(tabs('meridian'))
+    layOut(250)
+    const element = list()
+    rerender(tabs('infra'))
+    expect(element.scrollLeft).toBe(5 * STEP + WIDTH - 250)
+    rerender(tabs('meridian'))
+    expect(element.scrollLeft).toBe(0)
+  })
+
+  it('leaves tabs that all fit unscrolled, though one sliding into its place shows past the end', () => {
+    const tabs = (current: string) => <ProjectTabs tabs={MANY} current={current} lights="none" onSelect={vi.fn()} onClose={vi.fn()} />
+    const { rerender } = render(tabs('meridian'))
+    layOut(600)
+    const element = list()
+    // The last tab slides in from 100 px further on; the bar stops clear of its fading edge where it can.
+    Object.defineProperty(element, 'scrollWidth', { configurable: true, get: () => 700 })
+    const style = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((one, pseudo) =>
+      one === element ? ({ scrollPaddingInlineStart: '32px' } as CSSStyleDeclaration) : style(one, pseudo),
+    )
+    rerender(tabs('infra'))
+    expect(element.scrollLeft).toBe(0)
+    expect(screen.queryByRole('button', { name: 'All open projects' })).toBeNull()
+  })
 
   it('offers every open project in a menu once they scroll, with what waits on you in each', async () => {
     const onSelect = vi.fn()

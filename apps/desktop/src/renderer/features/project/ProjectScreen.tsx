@@ -7,6 +7,7 @@ import { useBoard } from '../board/useBoard'
 import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { useProjectSettings } from '../projectSettings/useProjectSettings'
+import { useSettingsWays } from '../settings/open'
 import { ProjectView } from './ProjectView'
 import type { ProjectSearch } from './search'
 import { useProject } from './useProject'
@@ -25,6 +26,7 @@ export const ProjectScreen = memo(function ProjectScreen({
   visit: number
 }) {
   const navigate = useNavigate()
+  const ways = useSettingsWays()
   /** The address, changed in place: what a reload opens on. */
   const address = useCallback(
     (change: (was: ProjectSearch) => ProjectSearch) =>
@@ -63,6 +65,7 @@ export const ProjectScreen = memo(function ProjectScreen({
       {...(automation === undefined ? {} : { automation })}
       onAutomationChange={keepAutomation}
       visit={visit}
+      ways={ways}
       model={useProject(projectId)}
       board={useBoard(projectId)}
       connections={useConnections()}
@@ -70,7 +73,7 @@ export const ProjectScreen = memo(function ProjectScreen({
       settings={{
         model: settings,
         ...(section === undefined ? {} : { section }),
-        onConnections: () => void navigate({ to: '/settings/$section', params: { section: 'code-hosts' } }),
+        onConnections: ways.connections,
       }}
     />
   )

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -32,13 +32,12 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('Claude Code').first()).toBeVisible()
     const found = page.getByRole('list', { name: 'Repositories for the project' })
     await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/, /Add a folder/])
-    // Once the launch has played over it.
-    await page.waitForTimeout(2500)
+    await still(page)
     await page.screenshot({ path: 'test-results/start.png' })
     await found.getByRole('checkbox', { name: /meridian/ }).click()
     await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('meridian')
     await expect(found.getByRole('checkbox', { name: /meridian/ })).toBeChecked()
-    await page.waitForTimeout(800)
+    await still(page)
     await page.screenshot({ path: 'test-results/start-forming.png' })
     await page.getByRole('button', { name: /Make the project/ }).click()
 
@@ -51,9 +50,9 @@ test('makes the first project of a repository it found, starts a task, and talks
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // Ready for you; it built nothing, and its Outputs say so, over Althar's light.
+    // Ready to accept, as its card says; it built nothing, and its Outputs say so, over Althar's light.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(page.getByText('Ready for you')).toBeVisible()
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')
@@ -83,12 +82,12 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     // A deploy is kept for the person: it waits in the thread as a call until it is answered.
     await say(page, 'command-choices')
-    await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
-    await expect(page.getByText('Needs your permission')).toBeVisible()
+    await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
     await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
-    await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
+    await expect(shown(page, 'Needs you', { exact: true })).toHaveCount(0)
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
@@ -118,11 +117,11 @@ test('makes the first project of a repository it found, starts a task, and talks
     // The window reloads once the new runtime is up: a mark left on this page goes with it.
     await page.evaluate(() => Object.assign(window, { beforeCrash: true }))
     await electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), killed ?? 0)
-    await expect.poll(runtimePid, { timeout: 20_000 }).not.toBe(killed)
+    await expect.poll(runtimePid).not.toBe(killed)
     // Asked mid-reload, the page has no context to answer from: still reloading.
-    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window).catch(() => true), { timeout: 20_000 }).toBe(false)
+    await expect.poll(() => page.evaluate(() => 'beforeCrash' in window).catch(() => true)).toBe(false)
     // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
-    await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await expect(page.getByText(/Althar restarted/)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
     // Nothing to press to start it, and nothing to stop: what the person says next reaches the new runtime and starts it.
@@ -139,7 +138,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     }
     expect(await stop()).toBe(0)
     await say(page, 'hello')
-    await expect.poll(stop, { timeout: 20_000 }).toBe(1)
+    await expect.poll(stop).toBe(1)
     await page.screenshot({ path: 'test-results/restarted.png' })
   } finally {
     await electronApp.close()
@@ -158,16 +157,17 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
     await box.press('Enter')
 
-    // The plan, with the time it starts on its own; held, it waits.
-    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
+    // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible()
     await expect(page.getByText('It knows the code.')).toBeVisible()
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await expect(page.getByText('Fixed the heading.')).toBeVisible()
     await page.screenshot({ path: 'test-results/ready.png' })
 
@@ -175,7 +175,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     // Ready, it opens on what it made: its branch, merged here as the person says, and the review it passed.
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry', level: 1 })).toBeVisible()
-    await expect(page.getByText('On its branch')).toBeVisible()
+    await expect(page.getByRole('article', { name: 'Add a retry' }).getByText(/^althar\/add-a-retry/)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
@@ -203,7 +203,9 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
+    await page.getByRole('button', { name: 'Made of' }).click()
+    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.keyboard.press('Escape')
     await projectSettings(page, 'Code and issues')
     const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github).toContainText('Not connected')
@@ -243,13 +245,13 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await box.press('Enter')
 
     // The plan ends in a draft pull request, as the project's host allows.
-    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible()
     await expect(page.getByText('Draft PR')).toBeVisible()
     await page.screenshot({ path: 'test-results/plan-end.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Start now' }).click()
 
     // The lead commits nothing itself; Althar commits, pushes and opens the pull request.
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('PR #1')).toBeVisible()
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/pull-request.png', animations: 'disabled' })
     const pushed = execFileSync('git', ['--git-dir', remote, 'branch', '--list'], { encoding: 'utf8' })
@@ -297,7 +299,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     // Back goes to the view it came from, the board.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('radio', { name: 'Board', checked: true })).toBeVisible()
-    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 merged')).toBeVisible()
     await page.screenshot({ path: 'test-results/settled.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
@@ -363,7 +365,7 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
     await catchWhatReachesThem(electronApp)
     await openFirstProject(electronApp, page, repo)
     await startTask(page, 'Add a retry to the checkout call')
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
 
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
@@ -391,7 +393,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
 
     // While a task runs, the Mac is held awake, once; stopped, nothing runs and it is let go.
     await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
     const holds = () => electronApp.evaluate(() => globalThis.awake?.size)
     await expect.poll(holds).toBe(1)
     // On battery it lets go, unless asked to hold then too; plugged in again, it holds again.
@@ -407,7 +409,7 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: 'More for this task' }).click()
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
-    await expect.poll(holds, { timeout: 15_000 }).toBe(0)
+    await expect.poll(holds).toBe(0)
 
     // From Althar's settings, on their tab: no notification for a ready task, and no count on the Dock.
     await page.keyboard.press('ControlOrMeta+Shift+Comma')
@@ -448,10 +450,13 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
       .click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, 'Add a retry to the checkout call')
-    await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible()
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(0)
-    await page.waitForTimeout(1_000)
-    expect(await electronApp.evaluate(() => globalThis.shown)).toEqual([])
+    // A call, which they keep on, does reach them; the ready task said before it, which they turned off, never did.
+    await startTask(page, 'Cache the rates', '[lead:ask]')
+    await expect
+      .poll(() => electronApp.evaluate(() => globalThis.shown?.map((notification) => notification.title)))
+      .toEqual(['Cache the rates'])
   } finally {
     await electronApp.close()
   }

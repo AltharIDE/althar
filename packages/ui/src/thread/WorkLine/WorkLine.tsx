@@ -59,7 +59,12 @@ export function WorkLine({ took, live = false, summary, who, children, className
         {live ? <Spinner size="small" /> : children !== undefined && <Icon name="chevron" size={11} className={s.chevron} />}
       </span>
       <span className={s.took}>{words}</span>
-      {summary !== undefined && summary !== '' && <span className={s.summary}>{summary}</span>}
+      {/* While it works, each new step it names comes in by a fade, not a flip. */}
+      {summary !== undefined && summary !== '' && (
+        <span key={summary} className={cx(s.summary, live && s.relabelled)}>
+          {summary}
+        </span>
+      )}
     </>
   )
   if (children === undefined)

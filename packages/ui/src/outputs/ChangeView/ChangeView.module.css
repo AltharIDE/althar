@@ -3,7 +3,7 @@
   inset: 0;
   z-index: var(--z-dialog);
   background: var(--scrim);
-  animation: in var(--base) var(--ease);
+  animation: in var(--enter) var(--ease-out);
 }
 .dialog {
   position: fixed;
@@ -17,7 +17,7 @@
   box-shadow:
     var(--shadow),
     0 0 0 1px var(--line-2);
-  animation: in var(--base) var(--ease);
+  animation: in var(--enter) var(--ease-out);
 }
 .dialog:focus {
   outline: none;

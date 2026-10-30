@@ -52,7 +52,9 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
+import { readyWordOf } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
+import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
@@ -63,6 +65,7 @@ import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
+import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
@@ -78,7 +81,7 @@ import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
-import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
@@ -137,7 +140,6 @@ export const text = {
   },
   working: 'Working',
   needsYou: 'Needs you',
-  ready: 'Ready for you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
@@ -155,7 +157,6 @@ export const text = {
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
-  stopped: 'Stopped',
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
@@ -176,7 +177,7 @@ export const text = {
 export const statusOf = (
   snapshot: ThreadSnapshot,
   agentName: (id: string) => string = (id) => id,
-): { readonly status: TaskStatus; readonly state: string } => {
+): { readonly status: TaskStatus; readonly state: string; readonly why?: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
   // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
   if (snapshot.task.phase === 'waiting')
@@ -200,24 +201,32 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
-  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
   if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
     return { status: TaskStatus.Yours, state: text.finished }
-  // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
-  if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
+  if (phase === 'ready') {
+    // Said as its card on the board says it: a conflict its lead couldn't resolve, commits for a new pull request, a pull request
+    // with something in its way.
+    const ready = readyWordOf(snapshot.task, latestOf(snapshot.task.changes).latest[0] ?? null)
+    // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
+    if (inMergeQueue(snapshot.task.changes)) return { status: TaskStatus.Running, state: stepText.now[MERGE_QUEUE_STEP] ?? ready }
+    // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
+    return { status: TaskStatus.Yours, state: ready }
+  }
   // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
   if (phase === 'kept') return { status: TaskStatus.Paused, state: text.kept }
   // Abandoned, it says so in place of where it stood, as stopped does.
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  // A recorded session the runtime no longer holds is no lead at work either.
-  if (snapshot.session === null || !snapshot.session.held) return { status: TaskStatus.Stopped, state: text.stopped }
+  // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
+  if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
+    const by = snapshot.task.stopped?.by
+    return { status: TaskStatus.Stopped, state: stepText.stopped, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+  }
   return { status: TaskStatus.Running, state: text.idle }
 }
 
@@ -309,12 +318,18 @@ export function TaskView({
   model,
   onBack,
   onRules,
+  onSignIn,
+  onConnections,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
   /** Opens its project's rules, from a card the project always asks about. */
   onRules?: () => void
+  /** Opens Settings at an agent's sign-in, started, for a lead that is signed out. */
+  onSignIn?: (agentId: string) => void
+  /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
+  onConnections?: () => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -419,6 +434,13 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
+  // Hidden while its screen is kept (`KeptScreens`), it opens again as it shows: a commit made meanwhile with nothing to say so shows.
+  useEffect(
+    () => () => {
+      showed.current = { task: false, outputs: false, changes: false }
+    },
+    [],
+  )
   // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const open = changes.open || abandoning || attaching !== null
   const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0
@@ -493,13 +515,15 @@ export function TaskView({
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
-  const { status, state } = statusOf(snapshot, agentName)
+  const { status, state, why } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
   const took = tookOf(snapshot, now)
   // Its steps as a graph, where the runtime keeps rounds of work for it; without, its face isn't offered.
   const graph = taskGraphOf(snapshot, named, now)
   const shown: Face = face === null || (face === 'graph' && graph === null) ? 'talk' : face
   const busy = session?.turnRunning ?? false
+  // A step that waits on the person: its call, not the thread, has the ways on.
+  const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
@@ -778,7 +802,11 @@ export function TaskView({
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
-                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                  {model.error}{' '}
+                  {model.hostSignedOut && onConnections !== undefined && (
+                    <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
+                  )}{' '}
+                  <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
                 </div>
               )}
               {conflict !== null && (
@@ -849,6 +877,8 @@ export function TaskView({
         agents={model.agents}
         agentName={agentName}
         onAnswer={model.answerStuck}
+        {...(onSignIn === undefined ? {} : { onSignIn })}
+        {...(onConnections === undefined ? {} : { onConnect: onConnections })}
         {...(reportProblem === undefined
           ? {}
           : {
@@ -891,6 +921,7 @@ export function TaskView({
             title={snapshot.task.title}
             status={status}
             state={state}
+            {...(why === undefined ? {} : { why })}
             // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
             steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
             {...(took === null ? {} : { took })}
@@ -1036,6 +1067,9 @@ export function TaskView({
                 {...(openFile === undefined ? {} : { openFile })}
                 session={session}
                 project={snapshot.project.name}
+                // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                 onPassOn={(words) => void model.send(words)}
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}

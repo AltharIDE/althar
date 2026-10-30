@@ -1,4 +1,4 @@
-import type { Check, Comment, Review } from '@althar/connectors'
+import type { ChangeRequest, Check, Comment, Review } from '@althar/connectors'
 
 import { keepsTemplate, placeSummary, untick } from './conventions'
 
@@ -42,6 +42,25 @@ export const checksOf = (sha: string, checks: ReadonlyArray<Check>): ChecksSum =
 /** The pull request's name, as people say it: `PR #12`, `MR !4`. */
 export const nameOf = (change: { readonly number: number; readonly words: { readonly short: string; readonly prefix: string } }) =>
   `${change.words.short} ${change.words.prefix}${change.number}`
+
+/** Said in the task's thread as its pull request goes in its target branch's merge queue. */
+export const queuedNote = (name: string, target: string | undefined) =>
+  `${name} is in the merge queue${target === undefined ? '' : ` for ${target}`}. It merges once the queue's checks pass.`
+
+/** Said as the merge queue takes it out unmerged: why, where its host says, and where it went. */
+export const leftQueueNote = (name: string, why: ChangeRequest['leftQueue']) => {
+  const back = "It's back in Needs you, to merge again."
+  switch (why) {
+    case 'removed':
+      return `Someone took ${name} out of the merge queue. ${back}`
+    case 'checks':
+      return `The merge queue took ${name} out: its checks failed there. ${back}`
+    case 'conflict':
+      return `The merge queue took ${name} out: it conflicts with what's ahead of it there. ${back}`
+    default:
+      return `The merge queue took ${name} out. ${back}`
+  }
+}
 
 /** Where a comment is: a line of a file, or the conversation. */
 export const whereOf = (comment: Pick<Comment, 'path' | 'line'>) =>
@@ -108,8 +127,8 @@ export const bodyOf = (input: {
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
   if (input.automation !== undefined && input.automation !== null)
-    parts.push(`<sub>Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.</sub>`)
-  else if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
+    parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
+  else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')
   return parts.join('\n\n')
 }
 
@@ -179,15 +198,77 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   ].join('\n\n')
 
 /**
- * What the lead is told when the checks fail on a change the person hasn't
- * seen yet (ADR-040): the checks are its to see through, its fix goes up as it
- * pushes, and how many tries are left before the change is the person's.
+ * What the lead is told when the checks fail on its open pull request,
+ * whether or not the person has looked (ADR-040, ADR-070): the checks are its
+ * to see through, it decides what broke them, a fix goes up as it pushes, and
+ * how many tries are left before the change is the person's.
  */
-export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, left: number) =>
+export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, left: number, base: string) =>
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    `The person hasn't seen this change yet, so its checks are yours to see through: fix what broke and commit it, then call push_to_pull_request, which pushes it at once, and the checks run again. ${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Or, if it isn't the task's to fix, say why. read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
+    [
+      'Their checks are yours to see through, without the person: work out what broke them, then',
+      '- where this change broke them, fix it and commit it, then call push_to_pull_request, which pushes a fix for failing checks at once, and the checks run again;',
+      '- where one failed by chance (a flaky test, a runner that went away), run it again with rerun_check, once;',
+      `- where it is broken on ${base}, or fails for a reason that has nothing to do with this change, as when the same check fails the same way on ${base}'s latest commit (read_default_branch_checks shows its checks): change nothing on the branch to work around it, and call hand_checks_to_person with one short line saying so, such as "Fails on ${base} too: test times out in limit.test.ts", and what would fix it;`,
+      '- where it needs the person to decide, call hand_checks_to_person with what they are to decide.',
+    ].join('\n'),
+    `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
+  ].join('\n\n')
+
+/**
+ * What the lead is told when the checks fail again after its last try
+ * (ADR-070): the change is the person's, and it says what it tried and why
+ * they still fail, rather than trying again.
+ */
+export const checksSpentForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, tries: number) =>
+  [
+    `Checks failed on ${name} again: ${sum.failing.join(', ')}.`,
+    ...logs,
+    `That was the last of your ${tries} tries, so the change goes to the person now. Don't change the branch: call hand_checks_to_person with what you tried and why the checks still fail, in a line or two.`,
+  ].join('\n\n')
+
+/**
+ * What the lead is told when its turn ends with the checks it was to see
+ * through still failing, and nothing done with them (ADR-070): no fix pushed,
+ * no rerun, no line for the person. Once.
+ */
+export const checksUnsettledForLead = (name: string, failing: ReadonlyArray<string>) =>
+  `Your turn ended, but the checks on ${name} still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}), and you haven't pushed a fix, run them again or brought them to the person. Do one of those now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. Ending your turn again without one, the change goes to the person with only that they still fail.`
+
+/**
+ * What the lead is told, started again, when its agent went on its own
+ * after it was told the checks it was to see through failed, before it did
+ * anything with them (ADR-070). Once.
+ */
+export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) =>
+  `Your agent stopped on its own before you dealt with the checks on ${name}, which still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}). Do one of these now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. If your agent stops again first, the change goes to the person with only that they still fail.`
+
+/**
+ * Why the checks that fail on a change are the person's, as its card says,
+ * where its lead ended its turns, or its agent stopped on its own, without a
+ * fix or a reason.
+ */
+export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'gone' = 'ended') =>
+  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'}, and ${how === 'gone' ? "the lead's agent stopped on its own" : 'the lead stopped'} without a fix or a reason. Tell it what to do.`
+
+/** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
+export const spentLine = (failing: ReadonlyArray<string>, tries: number) =>
+  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'} after ${tries} fixes by the lead.`
+
+/** The checks on the default branch's latest commit, as `read_default_branch_checks` tells the lead (ADR-070). */
+export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyArray<string>) =>
+  [
+    `The checks on ${base}'s latest commit, ${sum.sha.slice(0, 7)}: ${
+      sum.total === 0
+        ? `none have run. Some repositories run their checks on pull requests only, so this says nothing of whether ${base} is broken.`
+        : `${sum.passed} passed, ${sum.failed} failed, ${sum.running} running.`
+    }`,
+    ...(sum.total === 0
+      ? []
+      : [sum.list.map((check) => `- ${check.name}: ${check.state}${check.summary === null ? '' : ` (${check.summary})`}`).join('\n')]),
+    ...logs,
   ].join('\n\n')
 
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */

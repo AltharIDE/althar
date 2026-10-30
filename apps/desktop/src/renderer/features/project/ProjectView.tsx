@@ -14,8 +14,7 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  ProjectFront,
-  type ProjectFrontProps,
+  ProjectHeader,
   Running,
 } from '@althar/ui'
 
@@ -44,9 +43,10 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
-import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
+import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import type { ConnectionsModel } from '../connections/useConnections'
@@ -58,19 +58,20 @@ import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
-import { nextRoom, ProjectBar } from './ProjectBar'
+import { partsOf, tasksOf, trackersOf } from './front'
+import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 
 /*
- * A project: its front page across the top, then the conversation with its
- * coordinator, the board of its work, or both side by side, the conversation
- * as wide as the person drags it (b steps through them); or its automations,
- * or its settings, in their place, a violet dot in the bar on Automations
- * where one paused itself, and on Settings where a connection waits on the
- * person. The front page says how the project stands (what needs you:
- * pointed at, what it is; clicked, the first of it) and what it is made of.
+ * A project: its header across the top, the bar a task has, then the
+ * conversation with its coordinator, the board of its work, or both side by
+ * side, the conversation as wide as the person drags it (b steps through
+ * them); or its automations, or its settings, in their place, a violet dot on
+ * Automations where one paused itself, and on Settings where a connection
+ * waits on the person. The header says how the project stands (what needs
+ * you: pointed at, what it is; clicked, the first of it), holds its views,
+ * runs it, and lists what it is made of under ⋯.
  * The coordinator answers questions itself and turns changes into tasks:
  * there is no task to start without it. What you open from the board opens
  * its task.
@@ -93,7 +94,9 @@ export const text = {
   queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
-  needsAgent: 'No agent is signed in. Sign one in from Settings, then come back.',
+  signIn: 'Sign in again',
+  needsAgent: 'No agent is signed in.',
+  signOneIn: 'Sign one in',
   earlier: 'Earlier',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
@@ -104,8 +107,11 @@ export const text = {
   width: 'Width of the conversation',
 }
 
-/** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
-const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480 } as const
+/**
+ * How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches.
+ * `lane` is the least of the board worth leaving beside a file open over it.
+ */
+const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
 const storedWidth = (): number => {
   try {
@@ -116,7 +122,7 @@ const storedWidth = (): number => {
   }
 }
 
-/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room. */
+/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room; `room`, the window's. */
 const useBothWidth = () => {
   const [width, setWidth] = useState(storedWidth)
   const [room, setRoom] = useState(() => window.innerWidth)
@@ -134,14 +140,7 @@ const useBothWidth = () => {
       // Not kept; it still holds for this window.
     }
   }
-  return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
-}
-
-/** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
-function Front({ lanes, ...front }: Omit<ProjectFrontProps, 'last'> & { lanes: Lanes | null }) {
-  const now = useNow(true, 60_000)
-  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
-  return <ProjectFront {...front} {...(last === undefined ? {} : { last })} />
+  return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
 /** The project's settings, and where they lead out of the project. */
@@ -171,6 +170,7 @@ export function ProjectView({
   automation: openingAutomation = null,
   onAutomationChange,
   visit,
+  ways,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -188,6 +188,8 @@ export function ProjectView({
   onAutomationChange?: (automation: string | null) => void
   /** Counts the times its address asked for it, the screen kept in between: each time, it goes to the view, automation or section asked. */
   visit?: number
+  /** Where in Althar's settings an error is put right: an agent's sign-in, or the agents. */
+  ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
@@ -365,9 +367,14 @@ export function ProjectView({
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
       </>
     ) : (session === null || !session.held) && model.agents.length === 0 ? (
-      text.needsAgent
+      <>
+        {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
+      </>
     ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
-      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+      <>
+        {text.signedOut(suggested.agentName, agentName(chosen.agentId))}{' '}
+        {ways !== undefined && <LinkButton onClick={() => ways.signIn(suggested.agentId)}>{text.signIn}</LinkButton>}
+      </>
     ) : null
 
   const composer = (
@@ -442,7 +449,7 @@ export function ProjectView({
     if (first !== null) onTask(first)
   }
 
-  // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
+  // The header: its name and ink as the person last chose them, how it stands, its views, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
   const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
@@ -455,15 +462,18 @@ export function ProjectView({
     setAutomation(id)
     setRoom(Room.Automations)
   }
-  const front = (
-    <Front
-      lanes={lanes}
+  const header = (
+    <ProjectHeader
       name={kept.name ?? name}
       seed={projectId}
       ink={kitInk(kept.ink ?? model.project?.ink ?? 'clay')}
-      yours={yours}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
+      // Until the board is read, where it stands isn't said, rather than said wrong.
+      {...(lanes === null ? {} : { yours, needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
       onYours={openYours}
+      room={room}
+      onRoom={setRoom}
+      settingsNeedYou={settingsNeedYou}
+      automationsNeedYou={automations.needsYou}
       parts={partsOf({
         repositories: model.repositories,
         names: model.project?.repositories ?? [],
@@ -494,8 +504,7 @@ export function ProjectView({
 
   return (
     <div className={s.window}>
-      <ProjectBar room={room} onRoom={setRoom} settingsNeedYou={settingsNeedYou} automationsNeedYou={automations.needsYou} />
-      {front}
+      {header}
       {room === Room.Automations ? (
         <AutomationsView
           projectId={projectId}
@@ -575,7 +584,8 @@ export function ProjectView({
                         )}
                         threadId={coordinator.threadId}
                         session={session}
-                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain() })}
+                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                        {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                         automation={(card, itemId) => (
@@ -618,11 +628,15 @@ export function ProjectView({
               )}
             </div>
           )}
-          {/* Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far edge. */}
+          {/*
+           * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+           * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+           */}
           {room === Room.Both &&
             talking &&
             shown.workbench(null, {
-              max: Math.max(360, window.innerWidth - both.width - 48),
+              room: both.room - both.width,
+              keep: WIDTH.lane,
               className: s.over,
               style: { left: both.width },
             })}

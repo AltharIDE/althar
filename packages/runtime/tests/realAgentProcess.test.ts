@@ -56,7 +56,6 @@ describe('an agent run as its own process', () => {
       const [told] = yield* until(
         Effect.map(notices(created.threadId), (said) => said.filter((notice) => notice.about === 'stall')),
         (said) => said.length > 0,
-        Duration.seconds(15),
       )
       assert.match(
         told?.title ?? '',
@@ -86,7 +85,6 @@ describe('an agent run as its own process', () => {
         const [idle] = yield* until(
           Effect.map(busy.now, (now) => (now.busy === 0 ? [now] : [])),
           (rows) => rows.length === 1,
-          Duration.seconds(15),
         )
         assert.strictEqual(idle?.busy, 0)
       }).pipe(Effect.provide(runtime(':memory:', {}, { busy: { sample: Duration.millis(100), quiet: Duration.millis(500) } }))),

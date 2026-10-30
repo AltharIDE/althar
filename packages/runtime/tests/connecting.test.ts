@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { type Credential, type Fetch, type ProductInfo, products } from '@althar/connectors'
+import { budget } from '@althar/testing'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -28,8 +29,9 @@ import { fakeConnectors, HOST, hosted, repository, runtime } from './support'
 describe('connecting', () => {
   it.live('reads no sign-in of gh or glab for a host they aren’t signed in to, or where they aren’t installed', () =>
     Effect.gen(function* () {
-      assert.isNull(yield* cliToken('gh', 'nowhere.invalid'))
-      assert.isNull(yield* cliToken('glab', 'nowhere.invalid'))
+      // The real tools, which can be slow to start on a slow machine: they have a small test's time to answer.
+      assert.isNull(yield* cliToken('gh', 'nowhere.invalid', budget.small))
+      assert.isNull(yield* cliToken('glab', 'nowhere.invalid', budget.small))
     }),
   )
 

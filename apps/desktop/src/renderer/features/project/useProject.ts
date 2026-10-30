@@ -42,7 +42,7 @@ const GATHER = 25
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
-  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  /** Its repositories as this Mac has them, each with its remote: what its header says it is made of. */
   readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
@@ -132,7 +132,15 @@ export const useProject = (projectId: string): ProjectModel => {
     [cache, projectId],
   )
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  // Hidden while its screen is kept (`KeptScreens`) as well as gone: the read it gathered for goes, and so does the timer,
+  // or shown again it would gather what it hears for a read that never comes.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      timer.current = undefined
+    },
+    [],
+  )
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 

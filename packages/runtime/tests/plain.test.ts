@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -81,13 +81,12 @@ const gitIn = (cwd: string, ...args: ReadonlyArray<string>) => {
 }
 
 /** The task's card once `check` holds of it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean, limit = 20) =>
+const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
       Effect.map(queries.card(taskId), (one) => [one]),
       ([one]) => one !== undefined && check(one),
-      Duration.seconds(limit),
     )
     return card ?? assert.fail('no card')
   })
@@ -99,7 +98,6 @@ const branchedOnce = (taskId: string) =>
     yield* until(
       sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces WHERE task_id = ${taskId}`,
       (rows) => rows[0]?.branchedAt != null,
-      Duration.seconds(20),
     )
     return yield* worktreeOf(taskId)
   })
@@ -109,6 +107,21 @@ const say = (threadId: string, body: string) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+  })
+
+/**
+ * What the person says to a task once it is done: its lead stopped as it settled, so the task's screen starts it again
+ * after queuing what they said, as it does for any thread no agent is on.
+ */
+const sayAfterDone = (threadId: string, body: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    yield* until(
+      Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
+      (gone) => gone.length === 1,
+    )
+    yield* say(threadId, body)
+    yield* sessions.startLast(threadId)
   })
 
 describe('a plain task', () => {
@@ -203,7 +216,7 @@ describe('a plain task', () => {
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
       // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task waits in Needs you again, to be settled.
-      yield* say(task.threadId, 'And the v2 ones?')
+      yield* sayAfterDone(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
         (rows) => rows.length === 1,
@@ -212,13 +225,16 @@ describe('a plain task', () => {
       yield* until(
         sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
         (rows) => (rows[0]?.n ?? 0) === 1,
-        Duration.seconds(20),
       )
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
-        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', { blank: (prompt) => prompt.endsWith('And the v2 ones?') }, { idle: { blank: Duration.millis(100) } }),
+          ),
+        ),
       ),
     ),
   )
@@ -328,11 +344,10 @@ describe('a plain task', () => {
         const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
         yield* until(state, (rows) => rows[0]?.state === 'done')
         // A question: the follow-up changes nothing, and it waits in Needs you, not settled again, still with no branch.
-        yield* say(task.threadId, 'And the v2 ones?')
+        yield* sayAfterDone(task.threadId, 'And the v2 ones?')
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
           (rows) => (rows[0]?.n ?? 0) === 1,
-          Duration.seconds(20),
         )
         assert.strictEqual((yield* state)[0]?.state, 'open')
         assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
@@ -381,11 +396,10 @@ describe('a plain task', () => {
         assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'settled'), { kind: 'plain', branch: worktree.branch })
         // Asked for more, it commits again in a round of its own, Finished again: nothing offers a pull request for it.
-        yield* say(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
+        yield* sayAfterDone(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state = 'succeeded'`,
           (rows) => rows[0]?.n === 1,
-          Duration.seconds(20),
         )
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'ready'), { kind: 'plain', unshipped: null })
         assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'pull request')
@@ -709,7 +723,7 @@ describe('making a quick task a change', () => {
       assert.lengthOf(github.changes, 0)
       // The person likes it, and asks its lead to make it a real thing: it does, then reports, and the review comes first.
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
       // Its thread says when it became a change, between what the quick task showed and what the change did, and the
       // description its lead wrote for the pull request, which its Outputs says it is with.
@@ -794,7 +808,6 @@ describe('making a quick task a change', () => {
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 1,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(
         github.changes.map((change) => [change.title, change.draft]),
@@ -850,7 +863,7 @@ describe('making a quick task a change', () => {
       const place = yield* opened
       // Its lead commits, and is asked at once, in the words its task was given.
       const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'review'])
       // One run, its plan's, with the review and no more of staying here; its graph patched with the review.

@@ -377,6 +377,57 @@ const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', requ
 /** What GitHub answers a merge: whether it merged, and its commit. */
 const MergeAnswer = Schema.Struct({ merged: Schema.optional(Schema.Boolean), sha: Schema.optional(Schema.NullOr(Schema.String)) })
 
+/** Whether a pull request's target branch merges through a merge queue, whether it is in it, and why the queue last took it out. */
+const QUEUE = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      isMergeQueueEnabled
+      isInMergeQueue
+      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } }
+    }
+  }
+}`
+
+const QueueAnswer = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      pullRequest: Schema.NullOr(
+        Schema.Struct({
+          isMergeQueueEnabled: Schema.Boolean,
+          isInMergeQueue: Schema.Boolean,
+          timelineItems: Schema.Struct({
+            nodes: Schema.Array(Schema.NullOr(Schema.Struct({ reason: Schema.optional(Schema.NullOr(Schema.String)) }))),
+          }),
+        }),
+      ),
+    }),
+  ),
+})
+
+/** Puts a pull request in its merge queue, only at the head Althar last saw where it saw one. */
+const ENQUEUE = `mutation($id: ID!, $head: GitObjectID) {
+  enqueuePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head }) { mergeQueueEntry { position } }
+}`
+
+/** Why GitHub's merge queue took a pull request out, in Althar's words: its checks there failed, it conflicted, someone took it out, or it merged. */
+export const leftQueueOf = (reason: string | null | undefined): NonNullable<ChangeRequest['leftQueue']> | null => {
+  switch (reason?.toLowerCase()) {
+    case undefined:
+    case '':
+      return null
+    case 'merged':
+      return 'merged'
+    case 'failed_checks':
+      return 'checks'
+    case 'merge_conflict':
+      return 'conflict'
+    case 'manual':
+      return 'removed'
+    default:
+      return 'other'
+  }
+}
+
 const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
@@ -464,6 +515,20 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     login: user.login,
     name: user.name ?? null,
   }))
+
+  /** Where a pull request stands with its target branch's merge queue, as GraphQL alone says: asked only where that matters. */
+  const queueOf = (repository: Repository, number: number) =>
+    Effect.gen(function* () {
+      const answer = yield* http.graphql(QueueAnswer, graphqlUrl, QUEUE, { owner: repository.path[0], name: repository.path[1], number })
+      const pull = answer.repository?.pullRequest
+      if (pull == null)
+        return yield* new ConnectorFailed({
+          product,
+          reason: 'not_found',
+          message: `No pull request #${number} in ${repository.path.join('/')}`,
+        })
+      return pull
+    })
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
   const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
@@ -624,7 +689,13 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
               ),
           ),
         ),
-    change: (repository, number) => Effect.map(http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`), changeOf),
+    change: (repository, number, ask) =>
+      Effect.gen(function* () {
+        const change = changeOf(yield* http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`))
+        if (ask?.queue !== true || change.state !== 'open') return change
+        const queue = yield* queueOf(repository, number)
+        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
+      }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
         const q = searchOf(repository.path, query)
@@ -661,11 +732,29 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     merge: (repository, change) =>
       Effect.gen(function* () {
         const { conflicts: _, ...seen } = change
-        const answer = yield* http.json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
-          merge_method: repository.merges[0] ?? 'merge',
-          // Only the head Althar last saw: a push since then isn't merged unseen.
-          ...(change.headSha === null ? {} : { sha: change.headSha }),
-        })
+        const answer = yield* http
+          .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+            merge_method: repository.merges[0] ?? 'merge',
+            // Only the head Althar last saw: a push since then isn't merged unseen.
+            ...(change.headSha === null ? {} : { sha: change.headSha }),
+          })
+          .pipe(
+            // A branch that merges through a merge queue refuses a merge as one it can't make (405), in words that vary: asked,
+            // GitHub says which, and the pull request goes in the queue, which merges it once the queue's checks pass.
+            Effect.catchIf(
+              (error) => error.status === 405,
+              (refused) =>
+                Effect.gen(function* () {
+                  const queue = yield* queueOf(repository, change.number).pipe(Effect.mapError(() => refused))
+                  if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
+                  if (!queue.isInMergeQueue)
+                    yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+                  return null
+                }),
+            ),
+          )
+        if (answer === null)
+          return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         if (answer.merged === true)
           return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))

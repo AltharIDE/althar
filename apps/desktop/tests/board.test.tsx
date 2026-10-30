@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { Activity, useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
@@ -327,6 +327,33 @@ describe('the board’s lanes', () => {
         await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
         expect(region('Up next').queryByText('Going on x')).toBeNull()
       })
+      it('lets go once its screen hides with the pointer on it, as kept (`KeptScreens`), and moves as it shows again', async () => {
+        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        const after = lanesOf(
+          board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
+        )
+        let change: (lanes: typeof before) => void = () => undefined
+        let hide: (hidden: boolean) => void = () => undefined
+        function Kept() {
+          const [lanes, setLanes] = useState(before)
+          const [hidden, setHidden] = useState(false)
+          change = setLanes
+          hide = setHidden
+          return (
+            <Activity mode={hidden ? 'hidden' : 'visible'}>
+              <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+            </Activity>
+          )
+        }
+        withServices(<Kept />, fakeClient().client)
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        // Its card pressed, its task opens: the board hides with the pointer on Up next, and the task starts meanwhile.
+        await userEvent.hover(region('Up next').getByText('Going on x'))
+        act(() => hide(true))
+        act(() => change(after))
+        act(() => hide(false))
+        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
+      })
     })
 
     it('moves to running by itself once an agent frees and it starts', () => {
@@ -650,6 +677,14 @@ describe('the board’s lanes', () => {
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
   })
+
+  it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
+    const why = 'Fails on main too: test times out in limit.test.ts.'
+    const lanes = lanesOf(
+      board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
+    )
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+  })
 })
 
 describe('the board', () => {
@@ -669,10 +704,10 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // On the front page: three things that need you, one in progress, and what settled last; nothing says what runs.
-    expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
-    const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
-    expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
+    // In the header, where it stands is one chip: three things that need you, a way into them; what runs isn't said beside it.
+    const header = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header') as HTMLElement
+    expect(within(header).getByRole('button', { name: '3 need you' })).toBeTruthy()
+    expect(header.textContent).not.toMatch(/in progress|running|merged/)
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
@@ -938,6 +973,25 @@ describe('the board', () => {
       expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
+    })
+
+    it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
+      const queued = board({
+        tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: change({ queued: true }) } : one)),
+      })
+      const getBoard = vi.fn(async () => queued)
+      const { client, emit } = fakeClient({ getBoard })
+      withServices(<Project />, client)
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      // Read so, as after a restart, with nothing pressed in this window: at work, and saying where.
+      expect(await lane('Running').findByText('In the merge queue')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The queue took it out: it is the person's to merge again.
+      getBoard.mockImplementation(async () => board())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('In the merge queue')).toBeNull()
     })
 
     it('is the person’s again once its pull request merged and another of its own is open', async () => {
@@ -1977,27 +2031,66 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).toHaveBeenCalledWith('th-s4')
   })
 
-  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
-    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
-    // Stopped, it is among what waits on the person, not ready: its card says it there.
+  it('shows a stopped task in conflict as stopped: what stopped it and when, the conflict a line under it, and Carry on settles both', async () => {
+    // An automation's run Althar stopped two days ago, out of its minutes: on its branch, no pull request, and a conflict Althar
+    // didn't ask its lead about, as it is stopped.
     tasks = [
-      {
-        ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),
-        phase: 'stopped' as const,
-        startedAt: '2026-10-01T07:30:00.000Z',
-        conflictUnsent: why,
-      },
+      task({
+        taskId: 's9',
+        threadId: 'th-s9',
+        title: 'Nightly dependency check, 27 Oct',
+        kind: 'change',
+        phase: 'stopped',
+        step: null,
+        branch: 'althar/nightly-dependency-check-27-oct',
+        changed: { files: 3, add: 287, del: 375 },
+        startedAt: '2026-09-29T08:00:00.000Z',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z' },
+        conflictUnsent: 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
+        automation: { id: 'au1', name: 'Nightly dependency check' },
+      }),
     ]
-    const onOpen = vi.fn()
+    const send = vi.fn(async () => {})
+    const resumeTask = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
-    const card = await cardOf('Stopped in conflict')
-    // Still stopped, with why its lead wasn't asked in one line, in place of its foot.
+    const base = snapshot()
+    // Its run suspended, the task's own screen would resume it.
+    const getThread = vi.fn(async () =>
+      snapshot({
+        session: null,
+        task: { ...base.task, actions: ['resume', 'abandon'], lead: { agentId: 'claude-code', model: null, account: null } },
+      }),
+    )
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ send, resumeTask, startSession, getThread, resolveConflictsNow, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Nightly dependency check, 27 Oct')
+    // In Needs you, stopped, with what stopped it and when; never under way, with a step and a running clock.
+    const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+    expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
-    expect(card.getByText(why)).toBeTruthy()
-    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(card.getByText('Stopped by Althar')).toBeTruthy()
+    expect(card.getByText('Sep 29')).toBeTruthy()
+    expect(card.queryByText(/^\d+d \d+h$/)).toBeNull()
+    // The conflict is one quiet line, not why it waits, and not that the person stopped it.
+    expect(card.getByText('Conflicts with the default branch')).toBeTruthy()
+    expect(card.queryByText(/stopped, so Althar/)).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    // One action covers both: the lead is told to merge the default branch in, then go on, and its run carries on.
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        threadId: 'th-s9',
+        body: 'Carry on. Your branch conflicts with the default branch: merge it in and settle the conflict first.',
+        disposition: 'after_current',
+      }),
+    )
+    await waitFor(() => expect(resumeTask).toHaveBeenCalledWith({ taskId: 's9' }))
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
@@ -2011,6 +2104,22 @@ describe('a ready card’s next step, done from the card', () => {
     expect(card.getByText(why)).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
     expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+  })
+
+  it('shows only what fails where its lead brought its failing checks to the person', async () => {
+    const why = 'Fails on main too: test times out in limit.test.ts. Fixing it on main brings this one green.'
+    tasks = [{ ...ready('s13', 'Broken on main', { checks: change().checks }), checksBack: why }]
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
+    const card = await cardOf('Broken on main')
+    // One fact, with its glyph: the lead's line is in its task, not on the card.
+    expect(card.queryByText(why)).toBeNull()
+    const failed = card.getByText(/ failed$/)
+    expect(failed.closest('[class*="factLine"]')?.textContent).toBe(failed.textContent)
+    expect(failed.querySelector('svg')).not.toBeNull()
+    // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
+    expect(card.queryByText('Ask the lead to fix it')).toBeNull()
+    expect(card.queryByText('Merge conflict')).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
   })
 
   it('says where Althar couldn’t look for a conflict, and keeps its next step', async () => {

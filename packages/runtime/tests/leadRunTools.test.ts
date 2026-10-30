@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { Screenshot, Shot } from '../src/Config'
@@ -99,7 +99,7 @@ describe('install_dependencies', () => {
     () =>
       Effect.gen(function* () {
         const { task, lead } = yield* taskIn(repository(), SETUP)
-        yield* until(setUps(task.taskId), (rows) => rows.length > 0 && rows.every((row) => row !== null), Duration.seconds(30))
+        yield* until(setUps(task.taskId), (rows) => rows.length > 0 && rows.every((row) => row !== null))
         assert.strictEqual(readFileSync(join(task.worktree, 'installs.txt'), 'utf8'), '1')
 
         // As it ran when the worktree was made: the kept setup, which went through, with what it printed.
@@ -127,7 +127,7 @@ describe('install_dependencies', () => {
     Effect.gen(function* () {
       // Nothing to install: no setup kept, and no manifest.
       const bare = yield* taskIn(repository())
-      yield* until(setUps(bare.task.taskId), (rows) => rows.every((row) => row !== null), Duration.seconds(30))
+      yield* until(setUps(bare.task.taskId), (rows) => rows.every((row) => row !== null))
       assert.match(
         yield* callTool(bare.lead, 'install_dependencies', {}),
         /^The repository has no setup kept, and nothing Althar can tell to install/,

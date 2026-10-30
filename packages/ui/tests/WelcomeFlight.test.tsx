@@ -84,7 +84,7 @@ afterEach(() => {
     delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
 })
 
-describe('the welcome’s camera between stops', { timeout: 30000 }, () => {
+describe('the welcome’s camera between stops', () => {
   it('lands only where the latest flight goes when an earlier one reports its end late', async () => {
     render(<Welcome defaultStep={1} onDone={() => {}} />)
     await run(4000)

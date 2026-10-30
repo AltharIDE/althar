@@ -122,6 +122,23 @@ describe('finished tasks’ folders under Work on this computer', () => {
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Clean up' })).toBeNull()
   })
 
+  it('gives no total while some of its folders aren’t measured, never a part of it, and one once they are', async () => {
+    const [goes, held] = FOLDERS.folders
+    const partly: TaskFolders = {
+      ...FOLDERS,
+      measuring: true,
+      folders: [{ ...goes!, bytes: 0.5 * 1024 ** 2 }, { ...goes!, taskId: 't3', bytes: null }, held!],
+    }
+    const getTaskFolders = vi.fn(async () => partly)
+    const { client } = fakeClient({ getTaskFolders })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    expect(await within(page).findByRole('button', { name: /^Can go now Measuring…\s*Held back 2\.3 GB/ })).toBeTruthy()
+    expect(within(page).queryByText(/MB/)).toBeNull()
+    getTaskFolders.mockResolvedValue({ ...partly, measuring: false, folders: [partly.folders[0]!, held!] })
+    expect(await within(page).findByRole('button', { name: /^Can go now under 1 MB\s*Held back 2\.3 GB/ })).toBeTruthy()
+  })
+
   it('says so where more would be lost than it said, and reads the folders again', async () => {
     const said = 'What is in the task’s folder changed since you looked at it, so it stays. Have another look before you remove it.'
     const { client } = fakeClient({

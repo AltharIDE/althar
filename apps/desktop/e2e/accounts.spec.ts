@@ -46,12 +46,12 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     // The coordinator on Codex, from the composer: on Claude Code, the first agent, it would run out itself and
     // move on, and the task's lead would then go to Codex before it ever tried Claude Code's usual account.
     await page.getByRole('button', { name: /^Coordinator:/ }).click()
-    await page.getByRole('radio', { name: /, via Codex$/ }).click()
+    await page.getByRole('radio', { name: /, via Codex\b/ }).click()
     await page.keyboard.press('Escape')
     await startTask(page, 'Add a retry to the checkout call')
 
     // The project doesn't rotate: Codex took the step over and finished it.
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(

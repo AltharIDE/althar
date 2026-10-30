@@ -18,8 +18,6 @@ import { launch, openFirstProject, say } from './support'
  */
 
 test('makes an automation by asking the coordinator, turns it on from its card, and keeps it on its own page', async () => {
-  // A run made by hand goes all the way through its task.
-  test.setTimeout(180_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page } = await launch(home)
   try {
@@ -28,13 +26,13 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
 
     // Proposed on a card: nothing runs until the person turns it on.
     const proposed = page.getByText('Nothing runs until you turn it on.')
-    await expect(proposed).toBeVisible({ timeout: 30_000 })
+    await expect(proposed).toBeVisible()
     const card = page.locator('[data-rhythm="card"]').filter({ has: proposed })
     await card.screenshot({ path: 'test-results/automations-1-proposed.png', animations: 'disabled', scale: 'css' })
     await card.getByRole('button', { name: 'Turn on' }).click()
     // Once on, the card folds to a line, with the way to its page.
     const folded = page.getByText(/is on\. It runs next/).locator('xpath=..')
-    await expect(folded).toBeVisible({ timeout: 15_000 })
+    await expect(folded).toBeVisible()
     const line = await folded.boundingBox()
     if (line !== null) {
       const clip = { x: line.x - 16, y: line.y - 16, width: line.width + 32, height: line.height + 32 }
@@ -73,28 +71,28 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
     await page.getByPlaceholder('What should each run do?').fill('Write the changelog from what merged. [lead:finish] [lead:terse]')
     await page.getByRole('button', { name: 'Turn on' }).click()
     const runNow = page.getByRole('button', { name: 'Run now' })
-    await expect(runNow).toBeVisible({ timeout: 15_000 })
+    await expect(runNow).toBeVisible()
 
     // Run now: its run is on its page as it goes, until it made something.
     await runNow.click()
     const runs = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Runs' }) })
     // A run's row is named for its time, then how it went.
     const made = runs.getByRole('button', { name: /Made something: Changelog, / })
-    await expect(made).toBeVisible({ timeout: 90_000 })
+    await expect(made).toBeVisible()
     await runs.screenshot({ path: 'test-results/automations-6-ran.png', animations: 'disabled', scale: 'css' })
 
     // Its run opens its task: an ordinary task, named for the automation and its day.
     await made.click()
-    await expect(page.getByText(/^Changelog, \d+ \w+$/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/^Changelog, \d+ \w+$/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/automations-7-task.png', animations: 'disabled', scale: 'css' })
 
-    // Back from its task, on the project's Automations view; paused from its
-    // page, nothing of it starts until it is turned on again.
+    // Back from its task, on the project's Automations view, on its page as
+    // it was left; paused from there, nothing of it starts until it is turned on again.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: /^Automations/ })).toBeChecked()
-    await page.getByRole('button', { name: 'Changelog', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Changelog', level: 2 })).toBeVisible()
     await page.getByRole('switch', { name: 'On' }).click()
-    await expect(page.getByText('Paused', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Paused', { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('switch', { name: 'On' })).not.toBeChecked()
   } finally {
     await electronApp.close()

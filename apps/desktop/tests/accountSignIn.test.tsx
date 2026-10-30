@@ -161,7 +161,7 @@ describe('the agent’s own login, as it is asked', () => {
     act(() => result.current.reopen())
     expect(open).toHaveBeenCalledWith('https://auth.openai.com/codex/device', '_blank')
     // Asked again a second later, as the window asks while it shows.
-    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2))
     expect(result.current.signingIn?.step).toMatchObject({ kind: 'code', opened: true })
     open.mockRestore()
   })
@@ -324,5 +324,22 @@ describe('an agent whose maker warns about signing in from another app', () => {
         'Google’s terms may count signing in to Antigravity from another app as a breach, which can suspend the account.',
       ),
     ).toBeTruthy()
+  })
+})
+
+describe('Settings opened to sign an agent in again, from its error', () => {
+  it('opens that agent, its signed-out account’s sign-in started and focused, once', async () => {
+    const out = usual('acc_out', 'signed_out')
+    const { client } = fakeClient({ status: vi.fn(async () => codexWith(['browser'], usualCodex, out)) })
+    function Asked() {
+      const [section, setSection] = useState<Section>('agents')
+      return <SettingsPage start={useStart()} section={section} onSection={setSection} signIn="codex" />
+    }
+    withServices(<Asked />, client)
+    // The ways to sign in again, in the line of the account that is signed out, with focus in them.
+    const again = await screen.findByRole('button', { name: 'Sign in again' })
+    await waitFor(() => expect(document.activeElement?.contains(again)).toBe(true))
+    expect(screen.getByRole('tab', { name: /Codex/, selected: true })).toBeTruthy()
+    expect(client.addAccount).not.toHaveBeenCalled()
   })
 })

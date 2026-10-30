@@ -6,7 +6,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Images dropped on a composer, in a real window with the fake agents: shown
@@ -107,13 +107,13 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-task-composer.png' })
     await say(page, 'What is off here?')
-    // What the lead was sent: the picture as drawn smaller, in its thread alone.
-    await expect(page.getByText(/saw images: image\/png \d+ B/).last()).toBeVisible()
+    // What the lead was sent: the picture as drawn smaller, in its thread alone. The coordinator's, kept hidden, has its own.
+    await expect(shown(page, /saw images: image\/png \d+ B/).last()).toBeVisible()
     // On the message, from the store, it opens full size, as wide as it was sent.
     await page.getByRole('button', { name: 'View wide.png' }).click()
     const dialog = page.getByRole('dialog')
     await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(2000)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/images-sent.png' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)

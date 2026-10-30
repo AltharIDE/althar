@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react'
 import { userEvent } from 'storybook/test'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NextLine, SETTLE } from '../src/board/NextLine/NextLine'
 
@@ -99,5 +99,39 @@ describe('the line up next, put in the person’s order', () => {
     // The runtime's next word: the person moved b first from its own view.
     rerender(draw(['b', 'c', 'e'], move.onMove))
     expect(shown()).toEqual(['1: Task b', '2: Task c', '3: Task e'])
+  })
+})
+
+describe('the line up next, moving as a whole', () => {
+  // Each row stands where its place puts it, 50 px apart, and what the browser is asked to animate is kept.
+  let played: Array<{ el: Element; keyframes: Keyframe[] }>
+  beforeEach(() => {
+    played = []
+    Element.prototype.animate = function animate(this: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes | null) {
+      played.push({ el: this, keyframes: keyframes as Keyframe[] })
+      return { cancel: vi.fn(), addEventListener: vi.fn() } as unknown as Animation
+    }
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
+      const items = [...(this.parentElement?.children ?? [])]
+      return this.tagName === 'LI' ? new DOMRect(0, items.indexOf(this) * 50, 280, 40) : new DOMRect(0, 0, 0, 0)
+    })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    delete (Element.prototype as Partial<Element>).animate
+  })
+  const slid = (id: string) => played.filter((one) => (one.el as HTMLElement).dataset.row === id).map((one) => one.keyframes[0])
+
+  it('slides a row moved by key to its place, and back where the move is refused', async () => {
+    const move = pending()
+    render(draw(['a', 'b', 'c'], move.onMove))
+    screen.getByRole('button', { name: 'Move Task a in the line' }).focus()
+    await userEvent.keyboard('{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}')
+    expect(shown()).toEqual(['1: Task b', '2: Task a', '3: Task c'])
+    expect(slid('a')).toEqual([{ translate: '0px -50px' }])
+    expect(slid('b')).toEqual([{ translate: '0px 50px' }])
+    await move.refuse()
+    expect(shown()).toEqual(['1: Task a', '2: Task b', '3: Task c'])
+    expect(slid('a')).toEqual([{ translate: '0px -50px' }, { translate: '0px 50px' }])
   })
 })

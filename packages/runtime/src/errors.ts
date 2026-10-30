@@ -132,7 +132,7 @@ export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('Ou
  */
 export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChangeToOpen', {
   taskId: Schema.String,
-  why: Schema.Literals(['working', 'stopped', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
+  why: Schema.Literals(['working', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
   detail: Schema.optional(Schema.String),
 }) {}
 
@@ -253,16 +253,7 @@ export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused'
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals([
-    'merged',
-    'branch_gone',
-    'abandoned',
-    'no_title',
-    'title_too_long',
-    'left_running',
-    'folder_in_use',
-    'folder_in_way',
-  ]),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'folder_in_use', 'folder_in_way']),
 }) {}
 
 /** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */

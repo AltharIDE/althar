@@ -1,0 +1,59 @@
+name: e2e
+
+# The desktop app's end-to-end run: the built app, with the fake agent, in four parts by file, each on a machine of its
+# own (about seven minutes each, against twenty-five as one). A pull request that changes the app or what it builds on
+# runs it (desktop.yml), so a change that breaks a spec fails there; the merge queue runs it again, on main as it will
+# be (queue.yml), and post-merge.yml once more, for the release.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    # A few times a part's usual run, so a hang fails here, not at the limit.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/4, 2/4, 3/4, 4/4]
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
+      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
+      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - env:
+          SHARD: ${{ matrix.shard }}
+        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard="$SHARD"'
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: desktop-e2e-${{ strategy.job-index }}
+          path: apps/desktop/test-results
+          retention-days: 7
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky

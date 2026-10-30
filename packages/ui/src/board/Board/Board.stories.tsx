@@ -13,7 +13,8 @@ import {
   REVIEW_DRAFTED,
   REVIEW_RUNNING,
 } from '../../fixtures/kinds'
-import { BoardLane, Outcome, Wait } from '../../foundations/vocabulary'
+import { BoardLane, Outcome, TaskStatus, Wait } from '../../foundations/vocabulary'
+import { Button } from '../../primitives/Button/Button'
 import { States, statesOn } from '../../storybook/States'
 import { AcceptCard } from '../AcceptCard/AcceptCard'
 import { BoardCard } from '../BoardCard/BoardCard'
@@ -333,6 +334,118 @@ function Finishing() {
   )
 }
 
+/* What moves on the board, a press each: a task starting, finishing and merged, one more up next, the line put in another order. */
+interface Moved {
+  readonly id: string
+  readonly title: string
+  readonly lane: BoardLane
+}
+
+const MOVING: ReadonlyArray<Moved> = [
+  { id: 'm1', title: 'Shorten long commands in running pills', lane: BoardLane.Next },
+  { id: 'm2', title: 'Keep the composer’s draft across restarts', lane: BoardLane.Next },
+  { id: 'm3', title: 'Let a long dictation finish while you work', lane: BoardLane.Next },
+  { id: 'm4', title: 'Find why the dock flickers on resize', lane: BoardLane.Running },
+  { id: 'm5', title: 'Name the branch after the task', lane: BoardLane.Running },
+  { id: 'm6', title: 'Fix the failing CI', lane: BoardLane.Yours },
+  { id: 'm7', title: 'Plan usage: every agent, steer work, and prototypes', lane: BoardLane.Settled },
+]
+
+function MovingBoard() {
+  const [tasks, setTasks] = useState(MOVING)
+  const [made, setMade] = useState(0)
+  const of = (lane: BoardLane) => tasks.filter((one) => one.lane === lane)
+  // Into its new lane: at the foot, but Settled, where the latest is at the head.
+  const send = (from: BoardLane, lane: BoardLane) =>
+    setTasks((all) => {
+      const task = all.find((one) => one.lane === from)
+      if (task === undefined) return all
+      const rest = all.filter((one) => one !== task)
+      return lane === BoardLane.Settled ? [{ ...task, lane }, ...rest] : [...rest, { ...task, lane }]
+    })
+  const ways = [
+    { label: 'Start the next', act: () => send(BoardLane.Next, BoardLane.Running) },
+    { label: 'Finish one', act: () => send(BoardLane.Running, BoardLane.Yours) },
+    { label: 'Merge one', act: () => send(BoardLane.Yours, BoardLane.Settled) },
+    {
+      label: 'Add one up next',
+      act: () => {
+        setMade(made + 1)
+        setTasks((all) => [...all, { id: `new${made}`, title: `A new task, ${made + 1}`, lane: BoardLane.Next }])
+      },
+    },
+    {
+      label: 'Put the last up next first',
+      act: () =>
+        setTasks((all) => {
+          const last = all.findLast((one) => one.lane === BoardLane.Next)
+          return last === undefined ? all : [last, ...all.filter((one) => one !== last)]
+        }),
+    },
+    {
+      label: 'Clear one settled',
+      act: () => setTasks((all) => all.filter((one) => one !== all.find((it) => it.lane === BoardLane.Settled))),
+    },
+  ]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 12 }}>
+        {ways.map((way) => (
+          <Button key={way.label} size="small" onClick={way.act}>
+            {way.label}
+          </Button>
+        ))}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Board label="Meridian’s work">
+          <BoardColumn lane={BoardLane.Next} count={of(BoardLane.Next).length}>
+            {/* Its grip's menu, or ⌥⇧↑ and ⌥⇧↓ on it, moves a row in the line. */}
+            <NextLine
+              rows={of(BoardLane.Next)}
+              render={(id, place) => (
+                <NextRow
+                  data-move={id}
+                  place={place}
+                  task=""
+                  text={UNNAMED}
+                  title={tasks.find((one) => one.id === id)?.title ?? ''}
+                  wait={Wait.Workers}
+                  reason="Starts when an agent is free"
+                />
+              )}
+              onMove={(id, to) =>
+                setTasks((all) => {
+                  const task = all.find((one) => one.id === id)!
+                  const line = of(BoardLane.Next).filter((one) => one !== task)
+                  const rest = all.filter((one) => one.lane !== BoardLane.Next)
+                  return [...line.slice(0, to), task, ...line.slice(to), ...rest]
+                })
+              }
+            />
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Running} count={of(BoardLane.Running).length}>
+            {of(BoardLane.Running).map((one) => (
+              <BoardCard key={one.id} data-move={one.id} status={TaskStatus.Running} word="Implement" title={one.title} />
+            ))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Yours} count={of(BoardLane.Yours).length}>
+            {of(BoardLane.Yours).map((one) => (
+              <BoardCard key={one.id} data-move={one.id} status={TaskStatus.Yours} word="Ready to accept" title={one.title} />
+            ))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Settled} count={of(BoardLane.Settled).length}>
+            <BoardList>
+              {of(BoardLane.Settled).map((one) => (
+                <SettledRow key={one.id} data-move={one.id} outcome={Outcome.Merged} task="" text={UNNAMED} title={one.title} at="now" />
+              ))}
+            </BoardList>
+          </BoardColumn>
+        </Board>
+      </div>
+    </div>
+  )
+}
+
 const meta = {
   title: 'Board/Board',
   component: Meridian,
@@ -476,4 +589,30 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/**
+ * What moves, a press each: a card slides to its new place, travels to another
+ * lane above the board, comes in and fades out (ListMotion); up next, a row's
+ * grip moves it in the line. Nothing is pressed for you here, so each can be
+ * watched.
+ */
+export const Moving: Story = { render: () => <MovingBoard /> }
+
+/** Merged, a card ends in Settled; one more up next, and it is in the line; moved by key, a row takes its new place. */
+export const MovingByAPress: Story = {
+  render: () => <MovingBoard />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Merge one' }))
+    const settled = canvasElement.querySelector<HTMLElement>(`[data-lane="${BoardLane.Settled}"]`)!
+    await expect(within(settled).getByText('Fix the failing CI')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add one up next' }))
+    await expect(c.getByText('A new task, 1')).toBeInTheDocument()
+    // Moved by key on its grip, a row takes its new place in the line.
+    c.getByRole('button', { name: 'Move Shorten long commands in running pills in the line' }).focus()
+    await userEvent.keyboard('{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}')
+    const next = canvasElement.querySelector<HTMLElement>(`[data-lane="${BoardLane.Next}"]`)!
+    await expect([...next.querySelectorAll<HTMLElement>('[data-row]')].map((one) => one.dataset.row)).toEqual(['m2', 'm1', 'm3', 'new0'])
+  },
 }

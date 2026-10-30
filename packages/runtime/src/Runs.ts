@@ -14,7 +14,7 @@ import {
   transition,
 } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Order } from './Busy'
@@ -58,11 +58,12 @@ import {
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { summarize } from './words'
+import { signedOutWords, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -159,6 +160,13 @@ export const PlanParameters = Schema.Struct({
    * (make_it_a_change), which the person asked to end in a pull request.
    */
   publishes: Schema.optional(Schema.Boolean),
+  /**
+   * A review of someone else's pull request (`review_pull_request`): its one
+   * step is the review's lead, which reads a read-only copy, so only an
+   * agent its session holds to reading may take it. It has no run: started,
+   * its lead starts in the task's thread (Reviews.lead).
+   */
+  reads: Schema.optional(Schema.Boolean),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -304,6 +312,7 @@ type Store =
   | Questions
   | Artifacts
   | Connectivity
+  | LeftBehind
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -325,6 +334,8 @@ export type StuckWhy =
   | 'refused'
   /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-060). */
   | 'transient'
+  /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
+  | 'signed_out'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -541,6 +552,7 @@ export class Runs extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -926,6 +938,31 @@ export class Runs extends Context.Service<
        * next (ADR-034), whatever another repository's pull request is doing;
        * a merged task with such commits is open again for it.
        */
+      /**
+       * Whether an agent is at work on a task, or on its way to it, as the
+       * task's card counts it under way: a turn of its lead or reviewer
+       * running, a session starting, a step admitted, or what carries on by
+       * itself: a step held for a place, a reset or the connection, its lead
+       * about to be asked about a conflict, an answer kept for a place, or a
+       * thread waiting for one.
+       */
+      const atWork = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ coming: number }>`
+            SELECT (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND s.state = 'starting')
+              + (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND r.state = 'running' AND a.state IN ('admitted', 'held'))
+              + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = ${taskId} AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+              + (SELECT count(*) FROM attention_requests x WHERE x.task_id = ${taskId} AND x.kind = 'question' AND x.state = 'answered'
+                AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL)
+              + (SELECT count(*) FROM threads h WHERE h.task_id = ${taskId} AND h.waits_for_place IS NOT NULL) AS coming`
+          if ((row?.coming ?? 0) > 0) return true
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          const live = yield* Effect.forEach(threads, (thread) => sessions.running(thread.id))
+          return live.some((session) => Option.exists(session, (one) => one.turnRunning))
+        })
+
       const publish = (taskId: string) =>
         changes.exclusive(
           taskId,
@@ -945,9 +982,14 @@ export class Runs extends Context.Service<
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
             JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
             WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-            if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
+            // Work under way opens its pull request as it ends; work that stopped short, stopped or failed, opens it now, as a draft:
+            // so does a run whose lead's turn was cut short, as the person interrupting it leaves it, with no agent at work on it.
+            if (
+              last === undefined ||
+              !['succeeded', 'suspended', 'failed', 'cancelled', 'running'].includes(last.state) ||
+              (last.state === 'running' && (yield* atWork(taskId)))
+            )
               return yield* new NoChangeToOpen({ taskId, why: 'working' })
-            if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
             if (opened.length > 0 && after.length === 0)
               return yield* new NoChangeToOpen({ taskId, why: opened.some((change) => change.state === 'open') ? 'opened' : 'nothing' })
             // Its new work going out, a merged task is open again, until that merges too: before it goes, so a try that opens
@@ -1094,9 +1136,12 @@ export class Runs extends Context.Service<
        * them, and a call in the task says why. A run has one such call open at
        * a time.
        */
-      const stuck = (run: RunRow, attempt: { readonly id: string } | null, info: StuckInfo) =>
+      const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
+          const info: StuckInfo =
+            asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
           const opened = yield* sql.withTransaction(
             Effect.gen(function* () {
               const [open] = yield* sql<{ id: string }>`
@@ -1426,7 +1471,9 @@ export class Runs extends Context.Service<
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
           // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
-          // Refused, it won't go on however it's reminded.
+          // Signed out, or refused, it won't go on however it's reminded.
+          if (event.errorClass === 'auth_required')
+            return yield* stuck(on.run, { id: on.attemptId }, info('signed_out', event.failure ?? null))
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
           // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
           const continued = output.continued ?? 0
@@ -1886,6 +1933,8 @@ export class Runs extends Context.Service<
             payload: { round: run.runId, back: true },
             actorId: instance.systemId,
           })
+          // Settled again, its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(run.taskId)
         })
 
       /**
@@ -2210,9 +2259,10 @@ export class Runs extends Context.Service<
           const model = yield* limits.modelFor({ agentId: next, projectId: run.projectId, planned })
           const [from, to] = [yield* limits.named(planned.agentId, null), yield* limits.named(next, model)]
           const instead = { ...to, ownWork: next === other }
+          const now = yield* Clock.currentTimeMillis
           const said = Option.isSome(low)
-            ? lowWords({ from: from.agent, room: low.value, step, to: instead })
-            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, step, to: instead })
+            ? lowWords({ from: from.agent, room: low.value, now, step, to: instead })
+            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, now, step, to: instead })
           if (!quiet) yield* sayOut(run.threadId, run.projectId, said)
           return { agentId: next, model, said }
         })
@@ -2274,7 +2324,13 @@ export class Runs extends Context.Service<
           const [from, to] = [yield* limits.named(agentId, null, accountId), yield* limits.named(agentId, null, next.id)]
           return Option.some({
             accountId: next.id,
-            said: lowWords({ from: from.agent, room: room.value, step, to: { agent: to.agent, model: null } }),
+            said: lowWords({
+              from: from.agent,
+              room: room.value,
+              now: yield* Clock.currentTimeMillis,
+              step,
+              to: { agent: to.agent, model: null },
+            }),
           })
         })
 
@@ -2421,6 +2477,7 @@ export class Runs extends Context.Service<
               const said = outWords({
                 from: (yield* limits.named(agentId, null, accountId)).agent,
                 resetsAt: out?.resetsAt ?? null,
+                now: yield* Clock.currentTimeMillis,
                 ...(step === undefined ? {} : { step }),
                 to: { ...(yield* limits.named(next, model, to)), ownWork: next === other },
               })
@@ -2472,8 +2529,15 @@ export class Runs extends Context.Service<
             on.run.threadId,
             on.run.projectId,
             low === undefined
-              ? outWords({ from, resetsAt, ...(step === undefined ? {} : { step }), waits: 'step', nothingFree })
-              : lowWords({ from, room: low, ...(step === undefined ? {} : { step }) }),
+              ? outWords({
+                  from,
+                  resetsAt,
+                  now: yield* Clock.currentTimeMillis,
+                  ...(step === undefined ? {} : { step }),
+                  waits: 'step',
+                  nothingFree,
+                })
+              : lowWords({ from, room: low, now: yield* Clock.currentTimeMillis, ...(step === undefined ? {} : { step }) }),
           )
           yield* touchCard(on.run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -2518,13 +2582,13 @@ export class Runs extends Context.Service<
                 threadId,
                 agentId: next,
                 ...(model === null ? {} : { model }),
-                said: outWords({ from, resetsAt, to: yield* limits.named(next, model, to) }),
+                said: outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, to: yield* limits.named(next, model, to) }),
                 about: 'limit',
               })
               return
             }
           }
-          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, waits: 'message' }))
+          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, waits: 'message' }))
           // Back at its reset, it takes what waits: the same loop as a held step's, so after a restart too.
           yield* Queue.offer(holdsChanged, undefined)
         })
@@ -3510,7 +3574,7 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until)}, when ${from} is back, as you said.`,
+            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until, yield* Clock.currentTimeMillis)}, when ${from} is back, as you said.`,
           })
           yield* touchCard(current.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -4353,7 +4417,7 @@ export class Runs extends Context.Service<
             yield* Queue.take(holdsChanged)
             continue
           }
-          const wait = next.at - Date.now()
+          const wait = next.at - (yield* Clock.currentTimeMillis)
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(holdsChanged), Effect.sleep(Duration.millis(wait)))
             continue

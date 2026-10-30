@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, projectSettings, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -33,7 +33,7 @@ const openReady = async (page: Page, title: string) => {
 const shots = process.env.ALTHAR_SHOTS
 
 const shoot = async (page: Page, name: string) => {
-  await page.waitForTimeout(400)
+  await still(page)
   if (shots) await page.screenshot({ path: join(shots, name) })
 }
 
@@ -120,8 +120,8 @@ test('allows everything on a task or a project, clearing what waits, and says so
     // Its own screen shows what went ahead.
     await cardOf('Tag the release').getByRole('button', { name: 'Tag the release' }).click()
     await toConversation(page)
-    await expect(page.getByText('chosen=allow_once,allow_once')).toBeVisible()
-    await expect(page.getByText('Needs your permission')).toHaveCount(0)
+    await expect(page.getByText('chosen=allow_once,allow_once', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toHaveCount(0)
     await shoot(page, 'app-project-allowed-task.png')
   } finally {
     await electronApp.close()

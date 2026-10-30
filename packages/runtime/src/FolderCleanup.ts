@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
-import { statfs } from 'node:fs/promises'
+import { lstat, readdir, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
 
@@ -139,14 +139,91 @@ const GRAVITY: ReadonlyArray<FolderHeld['why']> = ['uncommitted', 'unreadable', 
 const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): FolderHeld | null =>
   running ? { why: 'running', count: null } : (lost ?? (opened ? { why: 'opened', count: null } : null))
 
-/** A folder's size on the disk, as `du` counts it, in bytes; null where it can't say. */
-const sizeOf = (path: string) =>
-  Effect.callback<number | null>((resume) => {
-    execFile('du', ['-sk', path], { timeout: 120_000 }, (error, stdout) => {
-      const kb = /^(\d+)/.exec(stdout)?.[1]
-      resume(Effect.succeed(error !== null && kb === undefined ? null : kb === undefined ? null : Number(kb) * 1024))
-    })
-  })
+/**
+ * On APFS, what a task's folders hold that nothing outside them shares, in
+ * bytes, by getattrlist through the perl every Mac has. bun installs
+ * `node_modules` as clones of its cache: `du` and Finder count them in full,
+ * but removing them frees next to nothing. A file counts its private size
+ * (ATTR_CMNEXT_PRIVATESIZE), what a package built or changed after it was
+ * installed. Blocks a clone shares count nothing, even where every clone of
+ * them is among the folders: APFS can't say so, as editing a clone gives it
+ * a clone ID of its own and drops it from its source's count while it still
+ * shares their blocks. So clones made of each other inside the folders count
+ * short, never what removing them doesn't free. A file hardlinked from
+ * outside them counts nothing; one whose links are all inside, once. What it
+ * can't read fails it: a part is not the whole.
+ */
+const PRIVATE = String.raw`
+use strict; use warnings; use File::Find;
+my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x8);
+my ($total, $failed, %seen) = (0, 0);
+local $SIG{__WARN__} = sub { $failed = 1 };
+find({ no_chdir => 1, wanted => sub {
+  my @st = lstat $_;
+  unless (@st) { $failed = 1 unless $!{ENOENT}; return }
+  my $own = $st[12] * 512;
+  if (-f _) {
+    return if $st[3] > 1 && ++$seen{"$st[0]:$st[1]"} != $st[3];
+    my $buf = "\0" x 64;
+    if (syscall(220, $_, $list, $buf, 64, 0x21) == 0 && unpack('L', $buf) >= 32) {
+      $own = unpack('q', substr($buf, 24, 8));
+    }
+  }
+  $total += $own;
+}}, @ARGV);
+exit 1 if $failed;
+print "$total\n";
+`
+
+/**
+ * What folders' files hold that nothing outside them shares, in bytes: a file
+ * hardlinked from outside them, as bun and pnpm install `node_modules` on
+ * Linux and Windows, counts nothing; one whose links are all inside, once.
+ * Where the disk says no blocks, a file's length. What it can't read throws:
+ * a part is not the whole.
+ */
+export const ownedBytes = async (roots: ReadonlyArray<string>): Promise<number> => {
+  let total = 0
+  const seen = new Map<string, number>()
+  const gone = (error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return null
+  }
+  const walk = async (path: string): Promise<void> => {
+    const stats = await lstat(path, { bigint: true }).catch(gone)
+    if (stats === null) return
+    if (stats.isDirectory()) {
+      for (const name of (await readdir(path).catch(gone)) ?? []) await walk(join(path, name))
+    }
+    if (stats.nlink > 1n && stats.isFile()) {
+      const key = `${stats.dev}:${stats.ino}`
+      const count = (seen.get(key) ?? 0) + 1
+      seen.set(key, count)
+      if (BigInt(count) !== stats.nlink) return
+    }
+    total += Number(stats.blocks > 0n ? stats.blocks * 512n : stats.isFile() ? stats.size : 0n)
+  }
+  for (const root of roots) await walk(root)
+  return total
+}
+
+/** What removing folders together frees, in bytes, by what their files hold that nothing outside them shares; null where it can't say. */
+const sizeOf = (paths: ReadonlyArray<string>) =>
+  process.platform !== 'darwin'
+    ? Effect.tryPromise(() => ownedBytes(paths)).pipe(Effect.orElseSucceed(() => null))
+    : Effect.callback<number | null>((resume) => {
+        execFile('/usr/bin/perl', ['-e', PRIVATE, ...paths], { timeout: 300_000 }, (error, stdout) => {
+          const bytes = /^(\d+)\s*$/.exec(stdout)?.[1]
+          resume(
+            error === null && bytes !== undefined
+              ? Effect.succeed(Number(bytes))
+              : // perl ran and couldn't read it all: so can't Node
+                error !== null && typeof error.code === 'number'
+                ? Effect.succeed(null)
+                : Effect.tryPromise(() => ownedBytes(paths)).pipe(Effect.orElseSucceed(() => null)),
+          )
+        })
+      })
 
 /** The disk a folder is on, in bytes: its size and what is free; null where it can't be read. */
 export const diskOf = (path: string) =>
@@ -161,10 +238,11 @@ export const diskOf = (path: string) =>
     ),
   )
 
-/** A size for the thread: 2.3 GB, 14 GB, 640 MB. */
+/** A size for the thread: 2.3 GB, 14 GB, 640 MB, under 1 MB. */
 export const sizeWords = (bytes: number) => {
   const gb = bytes / 1024 ** 3
-  if (gb < 1) return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
+  if (bytes < 1024 ** 2) return bytes === 0 ? '0 MB' : 'under 1 MB'
+  if (gb < 1) return `${Math.round(bytes / 1024 ** 2)} MB`
   return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
 }
 
@@ -328,10 +406,14 @@ export class FolderCleanup extends Context.Service<
         })
       })
 
-      /** Something runs from a task's folder, or is starting to; an agent works in it; or it is coming back, not set up again yet. */
+      /**
+       * Something runs from a task's folder that the person started since it settled, or is starting to; an agent works in it;
+       * or it is coming back, not set up again yet. What it ran before it settled holds nothing: settling stops it (LeftBehind.ts),
+       * and one that outlived that goes with the folder.
+       */
       const runningFrom = (candidate: Candidate) =>
         Effect.gen(function* () {
-          if (yield* launches.using(candidate.taskId)) return true
+          if (yield* launches.using(candidate.taskId, candidate.settledAt)) return true
           const working = (yield* sessions.onTasks).some(
             (session) => session.taskId === candidate.taskId && (session.turnRunning || session.background),
           )
@@ -339,7 +421,8 @@ export class FolderCleanup extends Context.Service<
         })
 
       /** Opened from Althar within the day. */
-      const openedLately = (candidate: Candidate) => candidate.opened !== null && Date.now() - candidate.opened < OPENED
+      const openedLately = (candidate: Candidate) =>
+        Effect.map(Clock.currentTimeMillis, (now) => candidate.opened !== null && now - candidate.opened < OPENED)
 
       /**
        * What of what is in a task's folders would be lost with them, the
@@ -380,19 +463,15 @@ export class FolderCleanup extends Context.Service<
           } satisfies FolderHeld
         })
 
-      /** What a task's folders take on the disk, as `du` counts them, their review copies too; null where it can't say. */
-      const sizeOfAll = (candidate: Candidate) =>
-        Effect.gen(function* () {
-          let bytes = 0
-          for (const workspace of candidate.workspaces) {
-            if (!existsSync(workspace.path)) continue
-            const size = yield* sizeOf(workspace.path)
-            if (size === null) return null
-            const copy = reviewCopyOf(workspace.path)
-            bytes += size + (workspace.access === 'write' && existsSync(copy) ? ((yield* sizeOf(copy)) ?? 0) : 0)
-          }
-          return bytes
-        })
+      /** What removing a task's folders frees, their review copies too, measured together; null where it can't say. */
+      const sizeOfAll = (candidate: Candidate) => {
+        const paths = candidate.workspaces.flatMap((workspace) => [
+          workspace.path,
+          ...(workspace.access === 'write' ? [reviewCopyOf(workspace.path)] : []),
+        ])
+        const present = paths.filter((path) => existsSync(path))
+        return present.length === 0 ? Effect.succeed(0) : sizeOf(present)
+      }
 
       /** A merged change with commits after its pull request: not finished after all. */
       const unshippedOf = (candidate: Candidate) =>
@@ -408,7 +487,7 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const bytes = yield* sizeOfAll(candidate)
           const lost = yield* lostWith(candidate)
-          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: Date.now() }
+          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: yield* Clock.currentTimeMillis }
           facts.set(candidate.taskId, measured)
           return measured
         })
@@ -416,7 +495,8 @@ export class FolderCleanup extends Context.Service<
       /** Measures, in the background, the folders whose facts are missing or old; one round at a time. */
       const measureLater = (all: ReadonlyArray<Candidate>) =>
         Effect.gen(function* () {
-          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < Date.now() - KEPT_FOR)
+          const now = yield* Clock.currentTimeMillis
+          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < now - KEPT_FOR)
           if (stale.length === 0 || measuring) return
           measuring = true
           yield* Effect.forkIn(
@@ -446,7 +526,7 @@ export class FolderCleanup extends Context.Service<
             kind: candidate.kind,
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
-            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, openedLately(candidate)),
+            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, yield* openedLately(candidate)),
           })
         }
         return {
@@ -460,7 +540,7 @@ export class FolderCleanup extends Context.Service<
       const staysBy = (candidate: Candidate) =>
         Effect.gen(function* () {
           if (yield* runningFrom(candidate)) return true
-          if (holdOf(false, yield* lostWith(candidate), openedLately(candidate)) !== null) return true
+          if (holdOf(false, yield* lostWith(candidate), yield* openedLately(candidate)) !== null) return true
           return yield* unshippedOf(candidate)
         })
 
@@ -523,13 +603,12 @@ export class FolderCleanup extends Context.Service<
        * open them or start running from them: by itself, one held stays; by
        * hand, one something runs from is refused, as is one where more would
        * be lost than the person was told. An idle lead held on it stops
-       * first. What went, in bytes as `du` counted it; null where nothing
-       * did, as when the task went back to work meanwhile; the refusal, by
-       * hand.
+       * first. What went, its size measured just before it went, null where it
+       * couldn't be; null where nothing did, as when the task went back to
+       * work meanwhile; the refusal, by hand.
        */
       const removeTask = ({ candidate, why, days, seen = null }: Chosen, actorId: ActorId) =>
         Effect.gen(function* () {
-          const bytes = facts.get(candidate.taskId)?.bytes ?? (yield* sizeOfAll(candidate))
           const held = (yield* sessions.onTasks).filter((session) => session.taskId === candidate.taskId)
           if (held.some((session) => session.turnRunning || session.background))
             return why === 'hand' ? new TaskRefused({ taskId: candidate.taskId, why: 'folder_in_use' }) : null
@@ -545,8 +624,12 @@ export class FolderCleanup extends Context.Service<
                 if (yield* runningFrom(now)) return new TaskRefused({ taskId: now.taskId, why: 'folder_in_use' })
                 if (lost !== null && (lost.why !== seen?.why || lost.count !== seen.count))
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
-              } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
+              } else if ((yield* runningFrom(now)) || holdOf(false, lost, yield* openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
+              // What still runs from them, from before it settled, stops first.
+              yield* launches.stopAll(now.projectId, now.taskId)
+              // Measured again, as it is now: what it holds may have changed since it was listed.
+              const bytes = yield* sizeOfAll(now)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
               facts.delete(now.taskId)
               const thread = yield* taskThreadOf(now.taskId)
@@ -558,7 +641,7 @@ export class FolderCleanup extends Context.Service<
                   description: null,
                   role: 'folder',
                 })
-              return bytes ?? 0
+              return { bytes }
             }),
           )
           // Nothing starts on the task's thread while its folders go.
@@ -566,14 +649,18 @@ export class FolderCleanup extends Context.Service<
         })
 
       /**
-       * Removes what it is given, one by one, by what the disk says it freed;
-       * how many couldn't go, as a folder that stays. A refusal, by hand, is
-       * said instead.
+       * Removes what it is given, one by one; what it freed, the sizes of
+       * what went as they were measured, and how many couldn't go, as a
+       * folder that stays. The disk's free space says what it freed only
+       * where a size couldn't be measured: other writes move it by as much as
+       * a worktree frees. A refusal, by hand, is said instead.
        */
       const removeAll = (chosen: ReadonlyArray<Chosen>, actorId: ActorId, enough?: () => Effect.Effect<boolean>) =>
         Effect.gen(function* () {
           const before = yield* diskAt(config.worktreeRoot)
           let failed = 0
+          let measured = 0
+          let unknown = false
           for (const one of chosen) {
             if (enough !== undefined && (yield* enough())) break
             const went = yield* removeTask(one, actorId).pipe(
@@ -584,17 +671,22 @@ export class FolderCleanup extends Context.Service<
             )
             if (went === 'failed') failed += 1
             else if (went instanceof TaskRefused || went instanceof ChangedSinceSeen) return yield* went
+            else if (went !== null) {
+              if (went.bytes === null) unknown = true
+              else measured += went.bytes
+            }
           }
+          if (!unknown) return { freed: measured, failed } satisfies FoldersFreed
           const after = yield* diskAt(config.worktreeRoot)
-          const freed = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
-          return { freed, failed } satisfies FoldersFreed
+          const onDisk = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
+          return { freed: Math.max(measured, onDisk), failed } satisfies FoldersFreed
         })
 
       const sweep = one.withPermits(1)(
         Effect.gen(function* () {
           const chosen = yield* wait
           if (chosen === 'never') return
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const oldest = (yield* candidates).toSorted((a, b) => a.clock - b.clock)
           const up = oldest.filter((candidate) => candidate.clock + waitDays(chosen, candidate.kind) * DAY <= now)
           yield* removeAll(yield* free(up, 'wait', chosen), instance.systemId)

@@ -34,10 +34,12 @@ test('shows on the plan the effort the coordinator picked for its lead, which th
 
     // The lead at the coordinator's effort, on its card with the time it starts.
     const lead = page.getByRole('button', { name: /^Lead for this task: .*Large High$/ })
-    await expect(lead).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible()
+    await expect(lead).toBeVisible()
+    // Up next on the board beside says the same.
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible()
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
     const plan = page.locator('div[data-rhythm]', { has: lead }).last()
     await plan.screenshot({ path: 'test-results/plan-effort.png', animations: 'disabled' })
     await page.screenshot({ path: 'test-results/plan-effort-window.png', animations: 'disabled' })
@@ -51,7 +53,7 @@ test('shows on the plan the effort the coordinator picked for its lead, which th
     // Started, its card says what its lead is on.
     await page.getByRole('button', { name: 'Start', exact: true }).click()
     const task = page.getByRole('article', { name: 'Rework how the cache expires' })
-    await expect(task.getByText('Low', { exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(task.getByText('Low', { exact: true })).toBeVisible()
     await expect(task.getByText(/Large/)).toBeVisible()
     await task.screenshot({ path: 'test-results/task-effort.png', animations: 'disabled' })
   } finally {

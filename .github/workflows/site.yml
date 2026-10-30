@@ -1,14 +1,21 @@
 name: site
 
 on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
   push:
     branches: [main]
-    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/site.yml']
+    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/site.yml']
   pull_request:
-    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/site.yml']
+    paths: ['apps/site/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/site.yml']
 
 permissions:
   contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
   group: site-${{ github.ref }}
@@ -39,3 +46,6 @@ jobs:
           name: site
           path: apps/site/dist
           retention-days: 7
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
