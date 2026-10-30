@@ -7,6 +7,7 @@ import {
   CHANGE_FAILED,
   CHANGE_HELD,
   CHANGE_MERGED,
+  CHANGE_NIGHTLY,
   CHANGE_ONE_REPO,
   CHANGE_QUEUED,
   CHANGE_READY,
@@ -15,15 +16,20 @@ import {
 import { States, statesParameters } from '../../storybook/States'
 import { ChangeState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
-import { ChangeSet, foldersOf } from './ChangeSet'
+import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
 const accept = fn()
 const push = fn()
+const open = fn()
+
+/** As wide as it is beside what a task made; `alone`, as wide as the page gives it with nothing beside it. */
+const SIDE = 360
+const ALONE = 700
 
 const meta = {
   title: 'Outputs/ChangeSet',
   component: ChangeSet,
-  decorators: [(Story) => <div style={{ maxWidth: 360 }}>{Story()}</div>],
+  decorators: [(Story, { parameters }) => <div style={{ maxWidth: (parameters.width as number | undefined) ?? SIDE }}>{Story()}</div>],
   args: {
     ...CHANGE_READY,
     actions: (
@@ -41,6 +47,8 @@ type Story = StoryObj<typeof meta>
 
 /** Every check passed, and its review: the button is what's left. */
 export const Ready: Story = {}
+/** Alone on the page: the button beside what it acts on, at its own width. */
+export const ReadyAlone: Story = { parameters: { width: ALONE } }
 /** A draft: its checks still running, said in a line. */
 export const Draft: Story = { args: { ...CHANGE_DRAFT, actions: <Button>Mark ready for review</Button> } }
 /** Just opened: its checks haven't started, and it says so rather than counting none. */
@@ -73,6 +81,13 @@ export const Failed: Story = {
   },
 }
 export const Merged: Story = { args: { ...CHANGE_MERGED, actions: undefined } }
+/** Merged where no check ran: none will now, so nothing is said of them. */
+export const MergedNoChecks: Story = {
+  args: { ...CHANGE_MERGED, checks: [], review: undefined, actions: undefined },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('No checks have run yet')).toBeNull()
+  },
+}
 /** Accepted on a branch that merges through a merge queue: in it, with nothing to press, until its host merges it. */
 export const Queued: Story = {
   args: { ...CHANGE_QUEUED, actions: undefined },
@@ -90,18 +105,6 @@ export const OneRepository: Story = {
     await expect(c.getAllByRole('link')).toHaveLength(1)
   },
 }
-/** Ended on its branch, with no pull request: merging it here, or opening one, is the choice. */
-export const OnItsBranch: Story = {
-  args: {
-    ...CHANGE_BRANCH,
-    actions: (
-      <>
-        <Button variant="signal">Open a pull request</Button>
-        <Button>Merge into main here</Button>
-      </>
-    ),
-  },
-}
 
 export const Accepting: Story = {
   play: async ({ args, canvasElement }) => {
@@ -110,28 +113,115 @@ export const Accepting: Story = {
     await expect(accept).toHaveBeenCalled()
     await userEvent.click(c.getByRole('button', { name: /Review the diff/ }))
     await expect(args.onReviewDiff).toHaveBeenCalledOnce()
-    // A folder opens to its files, each by its path in it, opening its diff by its whole path.
-    await userEvent.click(c.getByRole('button', { name: /^src\/auth/ }))
+    // A few files are each there to press, opening its diff by its whole path.
     await userEvent.click(c.getByRole('button', { name: 'Open the diff of src/auth/session.ts' }))
     await expect(args.onOpenFile).toHaveBeenCalledWith('src/auth/session.ts')
   },
 }
 
-/** On its branch, its remote not having it yet: the page gives Push, with the person's own git. */
-export const BranchNotPushed: Story = {
+/** Ended on its branch, with no pull request: opening its draft pull request, or merging it here, is the choice. */
+export const OnItsBranch: Story = {
   args: {
     ...CHANGE_BRANCH,
-    remote: { name: 'origin', pushed: false, ahead: 2 },
-    actions: <Button variant="signal">Push the branch to origin</Button>,
+    actions: (
+      <>
+        <Button variant="signal" onClick={open}>
+          Open a draft pull request
+        </Button>
+        <Button>Merge into main here</Button>
+      </>
+    ),
   },
-  play: async ({ canvasElement }) => {
+  parameters: { width: ALONE },
+}
+
+/**
+ * A nightly check its lead stopped, alone on the page: its branch by name, the two commits since it was pushed, and its draft pull
+ * request the one thing to do. Each file is listed with its lines: a heading over each lone manifest would only repeat its path.
+ */
+export const NightlyCheck: Story = {
+  args: {
+    ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
+    push: (
+      <Button variant="quiet" size="small" onClick={push}>
+        Push to origin
+      </Button>
+    ),
+    actions: (
+      <Button variant="signal" onClick={open}>
+        Open a draft pull request
+      </Button>
+    ),
+  },
+  parameters: { width: ALONE },
+  play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Not on origin yet')).toBeInTheDocument()
-    await expect(c.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    await expect(c.getByText('althar/nightly-dependency-check-27-oct')).toBeInTheDocument()
+    await expect(c.getByText('2 commits not pushed')).toBeInTheDocument()
+    await expect(c.queryByText(/Not on origin/)).toBeNull()
+    await expect(c.queryByText(/Top level|more folders/)).toBeNull()
+    await expect(groupsOf(CHANGE_NIGHTLY.prs[0]?.files ?? [])).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Open the diff of apps/cli/package.json' }))
+    await expect(args.onOpenFile).toHaveBeenCalledWith('apps/cli/package.json')
+    await userEvent.click(c.getByRole('button', { name: 'Open a draft pull request' }))
+    await expect(open).toHaveBeenCalled()
   },
 }
 
-/** Pushed: the host's page for a pull request from it is a press away. */
+/** The same beside what a task made: the button under the facts, as wide as the card. */
+export const NightlyCheckBeside: Story = { args: NightlyCheck.args }
+
+/**
+ * The nightly check once all of it is on origin, GitHub connected: nothing said of where it stands, and Althar's own button opens
+ * its pull request, never GitHub's page for one.
+ */
+export const NightlyCheckPushed: Story = {
+  args: {
+    ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
+    remote: { name: 'origin', pushed: true, ahead: 0 },
+    actions: (
+      <Button variant="signal" onClick={open}>
+        Open a draft pull request
+      </Button>
+    ),
+  },
+  parameters: { width: ALONE },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('althar/nightly-dependency-check-27-oct')).toBeInTheDocument()
+    await expect(c.queryByText(/pushed|origin|so far/)).toBeNull()
+    await expect(c.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Open a draft pull request' }))
+    await expect(open).toHaveBeenCalled()
+  },
+}
+
+/** Althar can't open its pull request until GitHub is connected: connecting is the button, pushing it alone stays quiet. */
+export const NotConnected: Story = {
+  args: {
+    ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
+    remote: { name: 'origin', pushed: false, ahead: 2 },
+    note: 'Althar opens its pull request once GitHub is connected.',
+    push: (
+      <Button variant="quiet" size="small">
+        Push to origin
+      </Button>
+    ),
+    actions: <Button variant="signal">Connect GitHub</Button>,
+  },
+  parameters: { width: ALONE },
+}
+
+/**
+ * All of it pushed and committed: nothing said of it. With no connection, connecting is the button, and the host's own page for its
+ * pull request is a press away.
+ */
 export const BranchPushed: Story = {
   args: {
     ...CHANGE_BRANCH,
@@ -143,11 +233,18 @@ export const BranchPushed: Story = {
       },
     ],
     remote: { name: 'origin', pushed: true, ahead: 0 },
-    actions: <Button variant="signal">Merge into main here</Button>,
+    note: 'Althar opens its pull request once GitHub is connected.',
+    actions: (
+      <>
+        <Button variant="signal">Connect GitHub</Button>
+        <Button>Merge into main here</Button>
+      </>
+    ),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('On origin')).toBeInTheDocument()
+    await expect(c.queryByText(/pushed|origin/)).toBeNull()
+    await expect(c.getByRole('button', { name: 'Connect GitHub' })).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /Open a pull request on GitHub/ })).toHaveAttribute(
       'href',
       'https://github.com/meridian/api/compare/main...althar/return-409-on-reuse?expand=1',
@@ -155,11 +252,11 @@ export const BranchPushed: Story = {
   },
 }
 
-/** Pushed, and the lead committed more since: the remote is behind. */
-export const BranchBehind: Story = {
-  args: { ...BranchPushed.args, remote: { name: 'origin', pushed: true, ahead: 1 } },
+/** Pushed, with changes the lead never committed: said, since no push takes them. */
+export const Uncommitted: Story = {
+  args: { ...CHANGE_BRANCH, remote: { name: 'origin', pushed: true, ahead: 0 }, uncommitted: 2, actions: undefined },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('1 commit not on origin yet')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('Uncommitted changes in 2 files')).toBeInTheDocument()
   },
 }
 
@@ -189,6 +286,34 @@ export const BranchPushedSeveral: Story = {
   },
 }
 
+/**
+ * Drafts in two repositories, each with commits to push and to mark ready, and a new one to open: more than two buttons, so
+ * they get a row of their own under what they act on, each at its own width, wrapping, just past where the card turns wide.
+ */
+export const SeveralActing: Story = {
+  args: {
+    ...CHANGE_DRAFT,
+    actions: [
+      <Button key="push-api" variant="signal">
+        Push 2 commits to meridian-api
+      </Button>,
+      <Button key="push-web" variant="signal">
+        Push 1 commit to meridian-web
+      </Button>,
+      <Button key="ready-api">Mark meridian-api ready for review</Button>,
+      <Button key="ready-web">Mark meridian-web ready for review</Button>,
+      <Button key="open">Open a new draft pull request</Button>,
+    ],
+  },
+  parameters: { width: 560 },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('article')
+    const edge = card.getBoundingClientRect().right
+    for (const button of within(card).getAllByRole('button', { name: /^(Push|Mark|Open a new)/ }))
+      await expect(button.getBoundingClientRect().right).toBeLessThanOrEqual(edge)
+  },
+}
+
 /** Merged on this Mac, not on its remote yet: a line says so, and the page gives the push. */
 export const MergedHere: Story = {
   args: {
@@ -201,6 +326,31 @@ export const MergedHere: Story = {
     const c = within(canvasElement)
     await expect(c.getByText('Into main on this Mac. origin doesn’t have it yet.')).toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Push main to origin' })).toBeInTheDocument()
+  },
+}
+
+const GROUPED = [
+  { path: 'README.md', add: 4, del: 1 },
+  { path: 'src/refunds/create.ts', add: 21, del: 7 },
+  { path: 'src/refunds/idempotency.ts', add: 9, del: 2 },
+  { path: 'src/refunds/limits.ts', add: 34, del: 0 },
+  { path: 'src/refunds/partners.ts', add: 12, del: 3 },
+  { path: 'test/refunds/idempotency.test.ts', add: 18, del: 0 },
+  { path: 'test/refunds/limits.test.ts', add: 41, del: 0 },
+  { path: 'test/refunds/partners.test.ts', add: 22, del: 0 },
+]
+
+/** A few files, several to a folder: each folder a quiet heading over its files, the top of the repository under its name. */
+export const GroupedFiles: Story = {
+  args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: GROUPED }] },
+  parameters: { width: ALONE },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(groupsOf(GROUPED)?.map((folder) => folder.path)).toEqual(['', 'src/refunds', 'test/refunds'])
+    await expect(c.getByText('meridian-api')).toBeInTheDocument()
+    await expect(c.getByText('src/refunds')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Open the diff of test/refunds/limits.test.ts' }))
+    await expect(args.onOpenFile).toHaveBeenCalledWith('test/refunds/limits.test.ts')
   },
 }
 
@@ -221,17 +371,19 @@ const MANY = [
   { path: 'README.md', add: 1, del: 1 },
 ]
 
-/** A change of 116 files stays short: its folders, the most first, six of them and the rest a press away. */
+/** A change of 116 files stays short: its folders, the most first, each with how much changed in it, six and the rest a press away. */
 export const ManyFiles: Story = {
   args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: MANY }] },
+  parameters: { width: ALONE },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText('116 files')).toBeInTheDocument()
-    const folders = c.getAllByRole('button', { name: /^(apps|packages|docs|scripts|Top level)/ })
-    await expect(folders[0]).toHaveTextContent('apps/desktop56')
+    const folders = c.getAllByRole('button', { name: /^(apps|packages|docs|scripts|meridian-api)/ })
+    await expect(folders[0]).toHaveTextContent(/^apps\/desktop.*56 files$/)
     await expect(folders).toHaveLength(6)
     await userEvent.click(c.getByRole('button', { name: '4 more folders' }))
-    await expect(c.getByRole('button', { name: /^Top level/ })).toBeInTheDocument()
+    // The top of the repository is under its name.
+    await expect(c.getByRole('button', { name: /^meridian-api/ })).toBeInTheDocument()
     await expect(foldersOf(MANY).map((folder) => folder.path)).toEqual([
       'apps/desktop',
       'packages/ui',
@@ -261,8 +413,11 @@ export const AllStates: Story = {
         { state: 'in the merge queue', node: <ChangeSet {...args} {...Queued.args} /> },
         { state: 'one repository', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
-        { state: 'on its branch, not pushed', node: <ChangeSet {...args} {...BranchNotPushed.args} /> },
-        { state: 'on its branch, pushed', node: <ChangeSet {...args} {...BranchPushed.args} /> },
+        { state: 'on its branch, commits not pushed', node: <ChangeSet {...args} {...NightlyCheck.args} /> },
+        { state: 'on its branch, not connected', node: <ChangeSet {...args} {...NotConnected.args} /> },
+        { state: 'on its branch, pushed', node: <ChangeSet {...args} {...NightlyCheckPushed.args} /> },
+        { state: 'on its branch, pushed, not connected', node: <ChangeSet {...args} {...BranchPushed.args} /> },
+        { state: 'on its branch, uncommitted', node: <ChangeSet {...args} {...Uncommitted.args} /> },
         { state: 'merged here, not pushed', node: <ChangeSet {...args} {...MergedHere.args} /> },
         { state: 'accept failed', node: <ChangeSet {...args} error="GitHub refused the merge: meridian-web is behind main." /> },
         { state: 'a host without a mark', node: <ChangeSet {...args} host={{ name: 'Gitea' }} /> },

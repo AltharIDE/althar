@@ -68,6 +68,7 @@ import { forkOf } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
+  branchOn,
   commitOf,
   commitsAhead,
   commitsOf,
@@ -643,6 +644,14 @@ export class Changes extends Context.Service<
      * agent), not a code host's: what they would run themselves.
      */
     pushHere(taskId: string): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
+    /**
+     * Asks the remote of each of a task's branches with no pull request
+     * where that branch is, as the person looks at it, in the background:
+     * the task's screens read it again once it says (`askedAt`).
+     */
+    askRemotes(taskId: string): Effect.Effect<void>
+    /** The commit a task's worktree was at when its branch's remote last said where that branch is, this launch; null before. */
+    askedAt(worktree: string, branch: string): Effect.Effect<string | null>
     /** Pushes a task's branch to each of its repositories' remotes, with the person's own git, up to the commits they saw. */
     pushBranch(
       taskId: string,
@@ -2449,6 +2458,64 @@ export class Changes extends Context.Service<
         return Effect.fail(failed)
       }
 
+      /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
+      const remotesAsked = new Map<string, string>()
+      const asking = new Set<string>()
+
+      /**
+       * Asks the remote of each of a task's branches with no pull request
+       * where that branch is: through its host where Althar is connected,
+       * else with the person's own git. The branch's ref for that remote here
+       * then says what it said, fetched where the remote has commits this
+       * computer doesn't, gone where it has no such branch; what isn't
+       * pushed is counted from that, not from a ref that never saw a push
+       * made elsewhere. What it says holds while the worktree stays where it
+       * was asked at. Where none answers, nothing changes.
+       */
+      const askRemotes = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; branch: string }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
+          const asked = yield* Effect.forEach(
+            repositories,
+            (repository) =>
+              Effect.gen(function* () {
+                const { root, branch } = repository
+                const remote = yield* remoteOf(root, repository.base)
+                const [head = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+                if (remote === null || head === null) return false
+                const url = (yield* namedRemotes(root)).find((one) => one.name === remote)?.url
+                const found = url === undefined ? null : yield* connections.hostOf([url]).pipe(Effect.orElseSucceed(() => null))
+                const signed =
+                  found === null
+                    ? null
+                    : yield* Effect.flatMap(found.host.repository(found.path), (repo) => found.host.pushTarget(repo)).pipe(
+                        Effect.orElseSucceed(() => null),
+                      )
+                const ref = `refs/remotes/${remote}/${branch}`
+                for (const source of [...(signed === null ? [] : [signed]), { url: remote, header: null }]) {
+                  const tip = yield* branchOn(root, source, branch)
+                  if (tip === undefined) continue
+                  if (tip === null) yield* git(root, 'update-ref', '-d', ref)
+                  else if ((yield* commitsOf(root, [tip]))[0] == null) {
+                    if ((yield* fetchInto(root, source, branch, ref)) === null) continue
+                  } else yield* git(root, 'update-ref', ref, tip)
+                  remotesAsked.set(`${repository.worktree} ${branch}`, head)
+                  return true
+                }
+                return false
+              }).pipe(Effect.orElseSucceed(() => false)),
+            { concurrency: 'unbounded' },
+          )
+          if (asked.includes(true)) yield* touchTask(taskId)
+        }).pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => asking.delete(taskId))))
+
       /**
        * Pushes a task's branch, in each repository without a pull request, to
        * the remote that repository's work goes to, as the person would from a
@@ -2495,7 +2562,10 @@ export class Changes extends Context.Service<
             )
             yield* settle
             // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
+            // That is as good as asking it, at where the worktree is now.
             yield* gitWithin(10_000, repository.root, 'update-ref', `refs/remotes/${remote}/${repository.branch}`, sent).pipe(Effect.ignore)
+            const [now = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+            if (now !== null) remotesAsked.set(`${repository.worktree} ${repository.branch}`, now)
             pushed.push({ branch: repository.branch, remote })
           }
           if (pushed.length === 0) return yield* new NotFound({ kind: 'remote', id: taskId })
@@ -5737,6 +5807,14 @@ export class Changes extends Context.Service<
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
         mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
         pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
+        // Once at a time for a task, whoever looks.
+        askRemotes: (taskId) =>
+          Effect.suspend(() => {
+            if (asking.has(taskId)) return Effect.void
+            asking.add(taskId)
+            return Effect.asVoid(Effect.forkIn(provide(askRemotes(taskId)), scope))
+          }),
+        askedAt: (worktree, branch) => Effect.sync(() => remotesAsked.get(`${worktree} ${branch}`) ?? null),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),

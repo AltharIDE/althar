@@ -119,5 +119,32 @@ export const CHANGE_ONE_REPO: Data = {
 export const CHANGE_BRANCH: Data = {
   prs: [{ repo: 'meridian-api', files: PR_416[0]?.files ?? [] }],
   state: ChangeState.Branch,
+  branch: 'althar/return-409-on-reuse',
   review: { state: CheckState.Passed, by: [SONNET] },
+}
+
+/** A nightly dependency check's files: the lockfile, and a manifest in nearly every folder. */
+export const NIGHTLY_FILES = [
+  { path: 'bun.lock', add: 214, del: 263 },
+  { path: 'package.json', add: 9, del: 9 },
+  { path: '.github/workflows/ci.yml', add: 2, del: 2 },
+  { path: 'apps/cli/package.json', add: 3, del: 3 },
+  { path: 'apps/desktop/package.json', add: 11, del: 11 },
+  { path: 'apps/report/package.json', add: 2, del: 2 },
+  { path: 'apps/site/package.json', add: 4, del: 4 },
+  { path: 'brand/package.json', add: 1, del: 1 },
+  { path: 'packages/connectors/package.json', add: 2, del: 2 },
+  { path: 'packages/contracts/package.json', add: 1, del: 1 },
+  { path: 'packages/provider-adapters/package.json', add: 3, del: 3 },
+  { path: 'packages/runtime/package.json', add: 4, del: 4 },
+  { path: 'packages/ui/package.json', add: 8, del: 8 },
+  { path: 'patches/@agentclientprotocol%2Fclaude-agent-acp@0.99.0.patch', add: 164, del: 195 },
+]
+
+/** A nightly check its lead stopped, on its branch: pushed once, two commits since, no pull request yet. */
+export const CHANGE_NIGHTLY: Data = {
+  prs: [{ repo: 'althar', files: NIGHTLY_FILES }],
+  state: ChangeState.Branch,
+  branch: 'althar/nightly-dependency-check-27-oct',
+  remote: { name: 'origin', pushed: true, ahead: 2 },
 }
