@@ -14,6 +14,7 @@ import { applyMerge, applyMerges, checkedOut, conflictsOf, planMerge, undoMerge 
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { words } from '../src/words'
 import { notices, repository, runtime } from './support'
 
 /** Windows, where what some tests stand on isn't (each says what). */
@@ -220,6 +221,23 @@ describe('merging a task here', () => {
       assert.strictEqual(git(remote, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'))
       assert.notInclude(git(remote, 'log', '-1', '--format=%B', branch), 'noreply@anthropic.com')
       assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+      // A remote that won't let this account push says so by its host's name, with all git said kept aside for Details.
+      const more = commit(worktree, 'again.ts', 'again\n')
+      writeFileSync(
+        join(remote, 'hooks', 'pre-receive'),
+        '#!/bin/sh\necho "You are not allowed to push code to this project." >&2\nexit 1\n',
+        {
+          mode: 0o755,
+        },
+      )
+      const forbidden = yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: more }]))
+      assert.deepInclude(forbidden, { _tag: 'PushRefused', why: 'forbidden', host: 'GitHub' })
+      assert.strictEqual(
+        words(forbidden, String).message,
+        'Your account can’t push to this repository on GitHub, so nothing was pushed. Push to a fork of it, or ask its owners for access.',
+      )
+      assert.include(words(forbidden, String).detail, 'remote: You are not allowed to push code to this project.')
+      rmSync(join(remote, 'hooks', 'pre-receive'))
       // The task stays as it was: pushing isn't merging.
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
     }).pipe(Effect.provide(withQueries())),
@@ -323,11 +341,13 @@ describe('merging a task here', () => {
       // Merged, but following nothing: nowhere to push it, and nothing said of a push.
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
       assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join(' '), 'Pushed')
-      // Following a remote that isn't there any more: git's own failure, not a guess at why.
+      // Following a remote that isn't there any more: git's own words under Details, not a guess at why.
       git(root, 'remote', 'add', 'origin', join(tmpdir(), `althar-gone-${Date.now()}`))
       git(root, 'config', 'branch.main.remote', 'origin')
       git(root, 'config', 'branch.main.merge', 'refs/heads/main')
-      assert.strictEqual(((yield* Effect.flip(changes.pushHere(task.taskId))) as { _tag?: string })._tag, 'GitFailed')
+      const gone = yield* Effect.flip(changes.pushHere(task.taskId))
+      assert.deepInclude(gone, { _tag: 'PushRefused', why: 'failed' })
+      assert.include(words(gone, String).detail ?? '', 'does not appear to be a git repository')
     }).pipe(Effect.provide(withQueries())),
   )
 

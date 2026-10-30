@@ -1,5 +1,7 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
 import { doing, type Doing } from './actions'
+import { Failure } from './Failure'
+import type { ErrorMore } from './useTask'
 import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade, modKey } from '@althar/ui'
 import type { ReactNode } from 'react'
 
@@ -148,6 +150,7 @@ export function Outputs({
   pending,
   doing: acting = null,
   error,
+  errorMore = null,
   onAccept,
   onMergeHere,
   onOpenChange,
@@ -168,6 +171,8 @@ export function Outputs({
   /** Which action is on its way, where one is: only its button shows as working; the others wait. */
   doing?: Doing | null
   error: string | null
+  /** Where the error is a failed push, or git's: why, for its way out, and all git said, for Details. */
+  errorMore?: ErrorMore | null
   /** The files merging it here conflicts in, after a merge refused for that. */
   conflict?: string | null
   /** Asks the lead to bring its branch up to date, settling the conflict. */
@@ -209,6 +214,14 @@ export function Outputs({
   // Each card is read out by the task's title, as what it changed; and opens what it changed, or a file of it.
   const files = { onReviewDiff: () => onOpenFile(), diffKey: text.diffKey, onOpenFile }
   const label = { label: task.title }
+  // What went wrong, in the card it went wrong in: Try again where that may be all it takes, and all git said behind Details.
+  // Connecting, where it changes how the work goes up, is the branch card's own action already.
+  const failure = (onRetry?: () => void) =>
+    error === null
+      ? {}
+      : {
+          error: <Failure message={error} more={errorMore} onRetry={onRetry} />,
+        }
   // Only the button pressed shows as working; while it does, the others wait.
   const pressed = (key: Doing) => ({ busy: acting === key, disabled: pending && acting !== key })
 
@@ -295,7 +308,7 @@ export function Outputs({
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(error === null ? {} : { error })}
+              {...failure()}
               text={{
                 ...label,
                 pr: (n) => `${first.short} ${first.prefix}${n}`,
@@ -340,7 +353,7 @@ export function Outputs({
               ),
             }
           : {})}
-        {...(error === null ? {} : { error })}
+        {...failure(onPushHere)}
         text={label}
       />
     ) : null
@@ -433,13 +446,7 @@ export function Outputs({
               {...(first === undefined && review !== undefined ? { review } : {})}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(first !== undefined
-                ? {}
-                : conflict !== null && onResolve !== undefined
-                  ? { error: conflicted }
-                  : error === null
-                    ? {}
-                    : { error })}
+              {...(first !== undefined ? {} : conflict !== null && onResolve !== undefined ? { error: conflicted } : failure(onPushBranch))}
               text={label}
             />
           )

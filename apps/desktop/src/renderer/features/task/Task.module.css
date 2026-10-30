@@ -64,6 +64,22 @@
   font-size: 13px;
   color: var(--t-3);
 }
+/* A failed push's Details: quiet beside its sentence, and all git said under it, wrapping however long its refs and hashes */
+.failureMore {
+  font-size: inherit;
+}
+.failureDetail {
+  display: block;
+  margin-top: 6px;
+  max-height: 14em;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .external {
   font-size: 12.5px;
   color: var(--t-1);
