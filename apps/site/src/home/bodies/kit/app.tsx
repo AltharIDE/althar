@@ -10,12 +10,9 @@ import {
   type IslandSaying,
   NextRow,
   ProjectTabs,
-  Review,
   SettledRow,
   TaskLaunch,
   type LaunchStep,
-  Verdict,
-  FindingState,
   WorkCard,
   type WorkCardProps,
   ModelPick,
@@ -29,7 +26,6 @@ import {
   EDGE_NEEDS,
   EDGE_WORK,
   edgeLineOf,
-  FINDINGS,
   FROM_231,
   MARKED,
   NEXT,
@@ -37,9 +33,7 @@ import {
   PLAN_432,
   PROJECT,
   READY_TWO_REPOS,
-  reviewDoc,
   SETTLED,
-  STEPS,
 } from './world'
 
 /*
@@ -206,35 +200,6 @@ export function BoardAtWork({ beat }: { beat: number }) {
         </BoardList>
       </BoardColumn>
     </Board>
-  )
-}
-
-/* ---- two labs' review of the lead's work ---- */
-
-/** The usual review, simpler: two findings the lead fixed on the second round, and the one the reviewers disagree on, which is yours. */
-const FINDINGS_ONE_YOURS = FINDINGS.map((f) =>
-  f.id === 'f2'
-    ? {
-        ...f,
-        state: FindingState.Yours,
-        ask: 'Sonnet and Gemini disagree, and nothing on the task settles it. One budget, or a bucket for refunds?',
-      }
-    : { ...f, state: FindingState.Fixed, round: 2 },
-)
-
-export function TwoLabReview() {
-  return (
-    <Review
-      n={3}
-      of={6}
-      reviewers={[{ model: SONNET }, { model: GEMINI_PRO }]}
-      verdict={Verdict.Changes}
-      took="4m 20s"
-      thread={STEPS.review}
-      instructions={{ path: '.althar/review.md', ...reviewDoc }}
-      defaultFindings={FINDINGS_ONE_YOURS}
-      defaultOpen
-    />
   )
 }
 

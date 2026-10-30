@@ -1,26 +1,18 @@
-import { TwoLabReview } from '../kit/app'
-import { Shot } from '../kit/Shot'
+import { Fragment } from './Fragment'
 import s from './Review.module.css'
+import review from './styled/d-review.html?raw'
 
 /*
- * The work reviewing itself: every change reviewed by models from other
- * labs, fixed by its lead, and reviewed again until it is clean, before a
- * pull request reaches you. Large, on the section's own dark. Until its
- * drawing is made, the app's own review of task 432.
+ * The work reviewing itself: task 432's change goes to two other labs,
+ * their findings land on a list, the lead fixes two and sets one aside with
+ * its reason, round 2 comes back clean, and only then does the pull request
+ * reach you. Drawn as an interface lit by one light, large, on the
+ * section's own dark.
  */
 export function Review() {
   return (
     <div className={s.wrap}>
-      <Shot
-        w={740}
-        maxScale={1.15}
-        label="A review by Sonnet 5 and Gemini 3 Pro: three findings, two fixed by the lead, one waiting for your call"
-        frame={s.card}
-      >
-        <div className={s.pad}>
-          <TwoLabReview />
-        </div>
-      </Shot>
+      <Fragment source={review} tone="dark" className={s.stage} />
     </div>
   )
 }

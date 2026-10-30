@@ -1,8 +1,16 @@
-/* The review, large and down the middle of its dark section. */
-.wrap { max-width: 1100px; margin: 64px auto 0; padding: 0 var(--gut); }
-.card { border-radius: 16px; background: var(--n-1); box-shadow: 0 0 0 1px rgba(255, 248, 240, 0.08), 0 40px 90px rgba(0, 0, 0, 0.5); }
-.pad { padding: 18px; background: var(--n-1); }
+/* The review, large and down the middle of its dark section, its ground the section's own. */
+.wrap { max-width: 1160px; margin: 56px auto 0; padding: 0 var(--gut); }
+.stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  container-type: inline-size;
+  /* Its edges melt into the section, so the drawing's own ground shows no frame. */
+  mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(transparent, #000 5%, #000 95%, transparent);
+  mask-composite: intersect;
+}
 
 @media (max-width: 700px) {
-  .wrap { margin-top: 40px; padding: 0 12px; }
+  .wrap { margin-top: 32px; padding: 0; }
 }

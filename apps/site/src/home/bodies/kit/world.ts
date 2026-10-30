@@ -47,4 +47,4 @@ export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
 export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
-export const { FINDINGS, PROJECT, reviewDoc, STEPS } = renamed({ ...review })
+export const { PROJECT } = renamed({ ...review })

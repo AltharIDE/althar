@@ -1,0 +1,1168 @@
+<style>
+.s-d-review {
+  /* Dark tone (default). Every colour lives here; the light tone below overrides them. */
+  --ink: #efebe4;
+  --ink2: #a39d93;
+  --ink3: #6f695f;
+  --warm: #d8933f;
+  --green: #62c47e;
+  --accent: #c3c8ff;
+  --accent-dot: #8a93ff;
+  --accent-glow: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
+  --bg: #0e0b09;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 50% 30%, rgba(255, 226, 196, 0.04), transparent 70%),
+    radial-gradient(ellipse 100% 85% at 50% 38%, #1a1511 0%, #13100d 50%, #0c0a08 100%);
+  --dot: rgba(255, 238, 220, 0.15);
+  --dots-o: 0.7;
+  --card-bg: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1.2cqw 2.6cqw -0.8cqw rgba(0, 0, 0, 0.8), 0 0.2cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  --card-edge: linear-gradient(180deg, rgba(255, 244, 232, 0.16), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+  --card-edge-on: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  --card-lit: radial-gradient(90% 55% at 50% 0%, rgba(86, 98, 255, 0.12), rgba(86, 98, 255, 0) 70%);
+  --hair: rgba(255, 244, 232, 0.075);
+  --chip-bg: rgba(255, 244, 232, 0.045);
+  --chip-edge: rgba(255, 244, 232, 0.1);
+  --row-new: rgba(86, 98, 255, 0.075);
+  --skel: rgba(255, 244, 232, 0.06);
+  --skel-hi: rgba(255, 244, 232, 0.13);
+  --bar-ctx: rgba(255, 244, 232, 0.075);
+  --bar-add: rgba(132, 142, 255, 0.42);
+  --bar-del: rgba(255, 244, 232, 0.16);
+  --mk: rgba(240, 236, 229, 0.88);
+  --pr-glow: 0 0 2.4cqw rgba(76, 90, 255, 0.28);
+  --you-bg: radial-gradient(circle at 50% 25%, #2c2620 0%, #1a1612 60%, #110e0b 100%);
+  --you-ring: rgba(255, 244, 232, 0.22);
+  --grain-o: 0.065;
+  --grain-blend: overlay;
+  --vig: radial-gradient(ellipse 82% 80% at 50% 46%, rgba(6, 5, 4, 0) 60%, rgba(6, 5, 4, 0.48) 100%);
+
+  --fs-xs: max(7px, 1.1cqw);
+  --fs-s: max(7.5px, 1.2cqw);
+  --fs-m: max(8px, 1.36cqw);
+  --fs-l: max(9px, 1.6cqw);
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+[data-tone='light'] .s-d-review {
+  --ink: #141417;
+  --ink2: #45454c;
+  --ink3: #6f6f77;
+  --warm: #c9822f;
+  --green: #2e8c46;
+  --accent: #2b3bff;
+  --accent-dot: #2b3bff;
+  --accent-glow: 0 0 0 0.2em rgba(43, 59, 255, 0.13), 0 0 0.6em rgba(43, 59, 255, 0.45);
+  --bg: #f4f2ec;
+  --ground:
+    radial-gradient(ellipse 60% 50% at 50% 30%, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 70%),
+    radial-gradient(ellipse 100% 90% at 50% 36%, #fcfbf8 0%, #f8f6f1 52%, #f4f2ec 100%);
+  --dot: rgba(20, 20, 28, 0.15);
+  --dots-o: 0.65;
+  --card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.93) 100%);
+  --card-shadow:
+    inset 0 1px 0 #ffffff,
+    0 0.1cqw 0.25cqw rgba(64, 44, 20, 0.06),
+    0 0.6cqw 1.3cqw -0.3cqw rgba(64, 44, 20, 0.08),
+    0 1.6cqw 3.2cqw -1.4cqw rgba(64, 44, 20, 0.15);
+  --card-edge: linear-gradient(180deg, rgba(20, 20, 28, 0.065), rgba(20, 20, 28, 0.1) 35%, rgba(20, 20, 28, 0.12));
+  --card-edge-on: linear-gradient(180deg, rgba(43, 59, 255, 0.5), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.06));
+  --card-lit: radial-gradient(90% 55% at 50% 0%, rgba(43, 59, 255, 0.05), rgba(43, 59, 255, 0) 70%);
+  --hair: rgba(20, 20, 28, 0.08);
+  --chip-bg: rgba(20, 20, 28, 0.03);
+  --chip-edge: rgba(20, 20, 28, 0.1);
+  --row-new: rgba(43, 59, 255, 0.05);
+  --skel: rgba(20, 20, 28, 0.05);
+  --skel-hi: rgba(20, 20, 28, 0.1);
+  --bar-ctx: rgba(20, 20, 28, 0.07);
+  --bar-add: rgba(43, 59, 255, 0.32);
+  --bar-del: rgba(20, 20, 28, 0.16);
+  --mk: #141417;
+  --pr-glow: 0 0 2.2cqw rgba(43, 59, 255, 0.16);
+  --you-bg: radial-gradient(circle at 50% 25%, #ffffff 0%, #fbfaf7 60%, #f1eee8 100%);
+  --you-ring: rgba(20, 20, 28, 0.14);
+  --grain-o: 0.025;
+  --grain-blend: multiply;
+  --vig: radial-gradient(ellipse 84% 82% at 50% 46%, rgba(120, 96, 60, 0) 62%, rgba(120, 96, 60, 0.07) 100%);
+  -webkit-font-smoothing: auto;
+}
+.s-d-review * { box-sizing: border-box; }
+.s-d-review .s-d-review__ground { position: absolute; inset: 0; background: var(--ground); }
+.s-d-review .s-d-review__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--dot) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 66% 72% at 50% 44%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 84%);
+  mask-image: radial-gradient(ellipse 66% 72% at 50% 44%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 84%);
+  opacity: var(--dots-o);
+}
+
+/* Header: the task, and the round indicator. */
+.s-d-review .s-d-review__head {
+  position: absolute;
+  left: 3.5cqw;
+  right: 3.5cqw;
+  top: 2.6cqw;
+  height: 4.4cqw;
+  display: flex;
+  align-items: center;
+  gap: 1.1cqw;
+  z-index: 2;
+}
+.s-d-review .s-d-review__task {
+  flex: none;
+  font: 500 var(--fs-xs)/1 var(--mono);
+  color: var(--ink2);
+  padding: 0.42cqw 0.7cqw;
+  border-radius: 0.55cqw;
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+  font-variant-numeric: tabular-nums;
+}
+.s-d-review .s-d-review__title {
+  min-width: 0;
+  font-size: var(--fs-l);
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s-d-review .s-d-review__repo { flex: none; font: 400 var(--fs-xs)/1 var(--mono); color: var(--ink3); }
+.s-d-review .s-d-review__rounds {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75cqw;
+  font-size: var(--fs-s);
+  color: var(--ink3);
+}
+.s-d-review .s-d-review__rd { display: flex; align-items: center; gap: 0.5em; white-space: nowrap; transition: color 0.6s var(--ease); }
+.s-d-review .s-d-review__rd i {
+  position: relative;
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--ink3);
+  transition: background 0.5s var(--ease), box-shadow 0.5s var(--ease);
+}
+.s-d-review .s-d-review__rdl { width: 2.6cqw; height: 1px; background: var(--hair); position: relative; overflow: hidden; }
+.s-d-review .s-d-review__rdl b {
+  position: absolute;
+  inset: 0;
+  background: var(--accent-dot);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  transition: transform 0.7s var(--ease);
+}
+.s-d-review .s-d-review__rounds[data-r="1"] .s-d-review__rd--1,
+.s-d-review .s-d-review__rounds[data-r="2"] .s-d-review__rd--2 { color: var(--ink); }
+.s-d-review .s-d-review__rounds[data-r="1"] .s-d-review__rd--1 i,
+.s-d-review .s-d-review__rounds[data-r="2"] .s-d-review__rd--2 i { background: var(--accent-dot); box-shadow: var(--accent-glow); }
+.s-d-review .s-d-review__rounds[data-r="2"] .s-d-review__rd--1,
+.s-d-review .s-d-review__rounds[data-r="3"] .s-d-review__rd--1,
+.s-d-review .s-d-review__rounds[data-r="3"] .s-d-review__rd--2 { color: var(--ink2); }
+.s-d-review .s-d-review__rounds[data-r="2"] .s-d-review__rd--1 i,
+.s-d-review .s-d-review__rounds[data-r="3"] .s-d-review__rd--1 i { background: var(--ink3); box-shadow: none; }
+.s-d-review .s-d-review__rounds[data-r="3"] .s-d-review__rd--2 i { background: var(--green); box-shadow: none; }
+.s-d-review .s-d-review__rounds[data-r="2"] .s-d-review__rdl b,
+.s-d-review .s-d-review__rounds[data-r="3"] .s-d-review__rdl b { transform: none; }
+
+/* Cards. */
+.s-d-review .s-d-review__card {
+  position: absolute;
+  border-radius: 1.3cqw;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+  z-index: 2;
+}
+.s-d-review .s-d-review__card::before,
+.s-d-review .s-d-review__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-d-review .s-d-review__card::before { background: var(--card-edge); }
+.s-d-review .s-d-review__card::after { background: var(--card-edge-on); opacity: 0; transition: opacity 0.8s var(--ease); }
+.s-d-review .s-d-review__card[data-on="1"]::after { opacity: 1; }
+.s-d-review .s-d-review__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--card-lit);
+  opacity: 0;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-d-review .s-d-review__card[data-on="1"] .s-d-review__lit { opacity: 1; }
+.s-d-review .s-d-review__mk { display: block; flex: none; fill: currentColor; color: var(--mk); width: max(10px, 1.85cqw); height: max(10px, 1.85cqw); }
+.s-d-review .s-d-review__who { position: relative; display: flex; align-items: center; gap: 0.75cqw; }
+.s-d-review .s-d-review__name { font-size: var(--fs-l); font-weight: 600; letter-spacing: -0.012em; white-space: nowrap; line-height: 1.15; }
+.s-d-review .s-d-review__tag {
+  margin-left: auto;
+  font: 500 var(--fs-xs)/1 var(--mono);
+  color: var(--ink3);
+  letter-spacing: 0.02em;
+}
+.s-d-review .s-d-review__lab { position: relative; margin-top: 0.45cqw; font-size: var(--fs-s); color: var(--ink2); white-space: nowrap; }
+.s-d-review .s-d-review__x { position: absolute; left: 0; top: 0; white-space: nowrap; opacity: 0; transform: translateY(0.35em); transition: opacity 0.45s ease, transform 0.7s var(--ease); }
+
+/* The lead. */
+.s-d-review .s-d-review__lead { left: 3.5cqw; top: 11cqw; width: 19.5cqw; height: 12.6cqw; padding: 1.5cqw 1.5cqw 1.35cqw; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__state { position: relative; margin-top: auto; height: max(10px, 1.8cqw); font-size: var(--fs-s); line-height: max(10px, 1.8cqw); color: var(--ink2); }
+.s-d-review .s-d-review__state .s-d-review__x { display: flex; align-items: center; gap: 0.55em; }
+.s-d-review .s-d-review__state .s-d-review__x i { width: 0.46em; height: 0.46em; border-radius: 50%; background: var(--ink3); }
+.s-d-review .s-d-review__state .s-d-review__x--work { color: var(--accent); }
+.s-d-review .s-d-review__state .s-d-review__x--work i { background: var(--accent-dot); box-shadow: var(--accent-glow); }
+.s-d-review .s-d-review__lead[data-st="send"] .s-d-review__x--send,
+.s-d-review .s-d-review__lead[data-st="wait"] .s-d-review__x--wait,
+.s-d-review .s-d-review__lead[data-st="work"] .s-d-review__x--work,
+.s-d-review .s-d-review__lead[data-st="open"] .s-d-review__x--open,
+.s-d-review .s-d-review__lead[data-st="done"] .s-d-review__x--done { opacity: 1; transform: none; }
+
+/* The change. */
+.s-d-review .s-d-review__diff { left: 3.5cqw; top: 25.3cqw; width: 19.5cqw; height: 23.2cqw; padding: 1.45cqw 1.5cqw; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__dl { position: relative; font-size: var(--fs-xs); color: var(--ink3); letter-spacing: 0.01em; }
+.s-d-review .s-d-review__file { position: relative; margin-top: 0.55cqw; font: 500 var(--fs-xs)/1.3 var(--mono); color: var(--ink); white-space: nowrap; letter-spacing: -0.02em; }
+.s-d-review .s-d-review__counts { position: relative; margin-top: 0.35cqw; display: flex; gap: 0.8cqw; font: 500 var(--fs-xs)/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.s-d-review .s-d-review__counts b { font-weight: 500; color: var(--accent); }
+.s-d-review .s-d-review__counts s { text-decoration: none; color: var(--ink3); }
+.s-d-review .s-d-review__bars { position: relative; margin-top: auto; display: flex; flex-direction: column; gap: 0.62cqw; }
+.s-d-review .s-d-review__bars i { display: flex; align-items: center; gap: 0.7cqw; height: 0.5cqw; }
+.s-d-review .s-d-review__bars i::before { content: ''; flex: none; width: 0.5cqw; height: 100%; border-radius: 1px; background: var(--bar-ctx); }
+.s-d-review .s-d-review__bars i::after { content: ''; height: 100%; border-radius: 1px; width: var(--w); background: var(--bar-ctx); }
+.s-d-review .s-d-review__bars .s-d-review__a::before,
+.s-d-review .s-d-review__bars .s-d-review__a::after { background: var(--bar-add); }
+.s-d-review .s-d-review__bars .s-d-review__d::after { background: var(--bar-del); }
+
+/* Findings. */
+.s-d-review .s-d-review__list { left: 28cqw; top: 11cqw; width: 40cqw; height: 37.5cqw; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__lh {
+  position: relative;
+  flex: none;
+  height: 4.3cqw;
+  padding: 0 1.6cqw;
+  display: flex;
+  align-items: center;
+  gap: 0.8cqw;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.s-d-review .s-d-review__lh > b { font-size: var(--fs-m); font-weight: 600; letter-spacing: -0.01em; }
+.s-d-review .s-d-review__lhs { position: relative; flex: 1; height: max(10px, 1.8cqw); font-size: var(--fs-s); line-height: max(10px, 1.8cqw); color: var(--ink2); font-variant-numeric: tabular-nums; }
+.s-d-review .s-d-review__lhs .s-d-review__x { left: auto; right: 0; }
+.s-d-review .s-d-review__lhs .s-d-review__x--rv1,
+.s-d-review .s-d-review__lhs .s-d-review__x--rv2 { color: var(--accent); }
+.s-d-review .s-d-review__lhs .s-d-review__x--clean { color: var(--green); }
+.s-d-review .s-d-review__list[data-st="rv1"] .s-d-review__x--rv1,
+.s-d-review .s-d-review__list[data-st="f1"] .s-d-review__x--f1,
+.s-d-review .s-d-review__list[data-st="f2"] .s-d-review__x--f2,
+.s-d-review .s-d-review__list[data-st="f3"] .s-d-review__x--f3,
+.s-d-review .s-d-review__list[data-st="res"] .s-d-review__x--res,
+.s-d-review .s-d-review__list[data-st="rv2"] .s-d-review__x--rv2,
+.s-d-review .s-d-review__list[data-st="clean"] .s-d-review__x--clean { opacity: 1; transform: none; }
+.s-d-review .s-d-review__rows { position: relative; flex: 1; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__skel {
+  position: absolute;
+  inset: 1.6cqw 1.6cqw auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2cqw;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.s-d-review .s-d-review__list[data-skel="1"] .s-d-review__skel { opacity: 1; }
+.s-d-review .s-d-review__skel i {
+  height: 0.75cqw;
+  border-radius: 0.4cqw;
+  background: linear-gradient(90deg, var(--skel) 0%, var(--skel) 35%, var(--skel-hi) 50%, var(--skel) 65%, var(--skel) 100%);
+  background-size: 300% 100%;
+  background-position: var(--shx, 100%) 0;
+}
+.s-d-review .s-d-review__skel i:nth-child(1) { width: 82%; }
+.s-d-review .s-d-review__skel i:nth-child(2) { width: 64%; }
+.s-d-review .s-d-review__skel i:nth-child(3) { width: 73%; }
+.s-d-review .s-d-review__row {
+  position: relative;
+  flex: 1;
+  padding: 1.15cqw 1.6cqw 1cqw;
+  display: flex;
+  flex-direction: column;
+  box-shadow: inset 0 -1px 0 var(--hair);
+  transition: background-color 0.9s var(--ease);
+}
+.s-d-review .s-d-review__row:last-child { box-shadow: none; border-radius: 0 0 1.3cqw 1.3cqw; }
+.s-d-review .s-d-review__row > * { transition: opacity 0.55s ease, transform 0.8s var(--ease); }
+.s-d-review .s-d-review__row[data-st="off"] > * { opacity: 0; transform: translateX(1.2cqw); }
+.s-d-review .s-d-review__row[data-st="off"] { box-shadow: none; }
+.s-d-review .s-d-review__row[data-st="new"] { background-color: var(--row-new); }
+.s-d-review .s-d-review__meta { display: flex; align-items: center; gap: 0.8cqw; height: max(11px, 1.9cqw); }
+.s-d-review .s-d-review__sev {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 0.18cqw 0.55cqw;
+  border-radius: 0.45cqw;
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+  color: var(--ink);
+  transition: opacity 0.7s var(--ease);
+}
+.s-d-review .s-d-review__sev i { width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--ink3); }
+.s-d-review .s-d-review__sev--high i { background: var(--warm); }
+.s-d-review .s-d-review__sev--med i { background: var(--warm); opacity: 0.55; }
+.s-d-review .s-d-review__loc { font: 400 var(--fs-s)/1 var(--mono); color: var(--ink2); white-space: nowrap; letter-spacing: -0.02em; }
+.s-d-review .s-d-review__by { margin-left: auto; font-size: var(--fs-xs); color: var(--ink3); white-space: nowrap; }
+.s-d-review .s-d-review__text {
+  margin-top: 0.5cqw;
+  font-size: var(--fs-m);
+  line-height: 1.36;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.s-d-review .s-d-review__row[data-st="fixed"] .s-d-review__text,
+.s-d-review .s-d-review__row[data-st="aside"] .s-d-review__text { color: var(--ink3); }
+.s-d-review .s-d-review__row[data-st="fixed"] .s-d-review__sev,
+.s-d-review .s-d-review__row[data-st="aside"] .s-d-review__sev { opacity: 0.6; }
+.s-d-review .s-d-review__res { position: relative; margin-top: auto; height: max(10px, 1.75cqw); font-size: var(--fs-s); line-height: max(10px, 1.75cqw); }
+.s-d-review .s-d-review__res .s-d-review__x { display: flex; align-items: center; gap: 0.5em; color: var(--ink2); }
+.s-d-review .s-d-review__res .s-d-review__x b { font-weight: 500; color: var(--ink); }
+.s-d-review .s-d-review__res svg { flex: none; width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__row[data-st="fixed"] .s-d-review__x--fixed,
+.s-d-review .s-d-review__row[data-st="aside"] .s-d-review__x--aside { opacity: 1; transform: none; }
+.s-d-review .s-d-review__short { display: none; }
+.s-d-review .s-d-review__file .s-d-review__long { color: var(--ink3); }
+
+/* Reviewers. */
+.s-d-review .s-d-review__rev { left: 73cqw; width: 20.5cqw; height: 17.9cqw; padding: 1.5cqw 1.5cqw 1.1cqw; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__rev--1 { top: 11cqw; }
+.s-d-review .s-d-review__rev--2 { top: 30.6cqw; }
+.s-d-review .s-d-review__rsk { position: relative; margin-top: auto; display: flex; flex-direction: column; gap: 0.75cqw; padding-bottom: 1.3cqw; }
+.s-d-review .s-d-review__rsk i {
+  height: 0.5cqw;
+  border-radius: 0.3cqw;
+  background: linear-gradient(90deg, var(--skel) 0%, var(--skel) 35%, var(--skel-hi) 50%, var(--skel) 65%, var(--skel) 100%);
+  background-size: 300% 100%;
+  background-position: var(--shx, 100%) 0;
+  opacity: 0.55;
+  transition: opacity 0.6s ease;
+}
+.s-d-review .s-d-review__card[data-on="1"] .s-d-review__rsk i { opacity: 1; }
+.s-d-review .s-d-review__rsk i:nth-child(1) { width: 88%; }
+.s-d-review .s-d-review__rsk i:nth-child(2) { width: 70%; }
+.s-d-review .s-d-review__rsk i:nth-child(3) { width: 80%; }
+.s-d-review .s-d-review__tbl { position: relative; display: flex; flex-direction: column; }
+.s-d-review .s-d-review__tr {
+  display: flex;
+  align-items: center;
+  height: max(13px, 2.5cqw);
+  font-size: var(--fs-s);
+  color: var(--ink3);
+  box-shadow: inset 0 1px 0 var(--hair);
+}
+.s-d-review .s-d-review__tv { position: relative; flex: 1; height: 100%; }
+.s-d-review .s-d-review__tv .s-d-review__x { left: auto; right: 0; top: 50%; margin-top: -0.65em; line-height: 1.3; display: flex; align-items: center; gap: 0.45em; color: var(--ink2); }
+.s-d-review .s-d-review__tv .s-d-review__x--rev { color: var(--accent); }
+.s-d-review .s-d-review__tv .s-d-review__x--rev i { width: 0.46em; height: 0.46em; border-radius: 50%; background: var(--accent-dot); box-shadow: var(--accent-glow); }
+.s-d-review .s-d-review__tv .s-d-review__x--clean { color: var(--green); }
+.s-d-review .s-d-review__tv svg { width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__tv[data-v="none"] .s-d-review__x--none,
+.s-d-review .s-d-review__tv[data-v="rev"] .s-d-review__x--rev,
+.s-d-review .s-d-review__tv[data-v="found"] .s-d-review__x--found,
+.s-d-review .s-d-review__tv[data-v="clean"] .s-d-review__x--clean { opacity: 1; transform: none; }
+.s-d-review .s-d-review__tv[data-v="found"] .s-d-review__x--found { color: var(--ink); }
+
+/* The pull request on its way, and you. */
+.s-d-review .s-d-review__pr {
+  position: absolute;
+  left: 3.5cqw;
+  top: 52.1cqw;
+  height: 5cqw;
+  padding: 0 1.3cqw;
+  display: flex;
+  align-items: center;
+  gap: 0.75cqw;
+  border-radius: 1.1cqw;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow), var(--pr-glow);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+  z-index: 4;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.s-d-review .s-d-review__pr::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--card-edge-on);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.s-d-review .s-d-review__pr svg { flex: none; width: 1.2em; height: 1.2em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-review .s-d-review__pr b { font-weight: 600; }
+.s-d-review .s-d-review__pr em { font-style: normal; color: var(--ink2); display: flex; align-items: center; gap: 0.45em; }
+.s-d-review .s-d-review__pr em svg { color: var(--green); width: 1.05em; height: 1.05em; stroke-width: 1.8; }
+.s-d-review .s-d-review__pr .s-d-review__sep { width: 1px; height: 1.4em; background: var(--hair); }
+.s-d-review .s-d-review__you {
+  position: absolute;
+  left: 79.6cqw;
+  top: 52.7cqw;
+  display: flex;
+  align-items: center;
+  gap: 1.1cqw;
+  z-index: 4;
+}
+.s-d-review .s-d-review__yn {
+  position: relative;
+  flex: none;
+  width: 3.8cqw;
+  height: 3.8cqw;
+  border-radius: 50%;
+  background: var(--you-bg);
+  box-shadow: var(--card-shadow), inset 0 0 0 1px var(--you-ring);
+}
+.s-d-review .s-d-review__yn::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  margin: -0.55cqw 0 0 -0.55cqw;
+  border-radius: 50%;
+  background: var(--ink3);
+  transition: background 0.6s var(--ease), transform 0.8s var(--ease);
+}
+.s-d-review .s-d-review__you[data-st="ready"] .s-d-review__yn::after { background: var(--green); transform: scale(1.15); }
+.s-d-review .s-d-review__yl { display: flex; flex-direction: column; gap: 0.25cqw; }
+.s-d-review .s-d-review__yl b { font-size: var(--fs-m); font-weight: 600; }
+.s-d-review .s-d-review__yl span { position: relative; height: max(10px, 1.7cqw); font-size: var(--fs-s); line-height: max(10px, 1.7cqw); }
+.s-d-review .s-d-review__yl .s-d-review__x { color: var(--green); }
+.s-d-review .s-d-review__you[data-st="ready"] .s-d-review__yl .s-d-review__x { opacity: 1; transform: none; }
+
+.s-d-review .s-d-review__fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+.s-d-review .s-d-review__grain { position: absolute; inset: 0; background-size: 64px 64px; opacity: var(--grain-o); mix-blend-mode: var(--grain-blend); z-index: 6; pointer-events: none; }
+.s-d-review .s-d-review__vig { position: absolute; inset: 0; background: var(--vig); z-index: 7; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .s-d-review * { transition: none !important; }
+}
+@container (max-width: 560px) {
+  .s-d-review .s-d-review__repo,
+  .s-d-review .s-d-review__text,
+  .s-d-review .s-d-review__by,
+  .s-d-review .s-d-review__tag,
+  .s-d-review .s-d-review__long { display: none; }
+  .s-d-review .s-d-review__bars { gap: 0.55cqw; }
+  .s-d-review .s-d-review__short { display: inline; }
+  .s-d-review .s-d-review__rounds { gap: 0.6cqw; }
+  .s-d-review .s-d-review__rdl { width: 1.6cqw; }
+  .s-d-review .s-d-review__row { padding: 1.1cqw 1.6cqw; justify-content: center; gap: 0.6cqw; }
+  .s-d-review .s-d-review__res { margin-top: 0; }
+  .s-d-review .s-d-review__lead,
+  .s-d-review .s-d-review__diff { left: 3cqw; width: 17cqw; padding: 1.4cqw; }
+  .s-d-review .s-d-review__lead .s-d-review__state { display: none; }
+  .s-d-review .s-d-review__list { left: 23.5cqw; width: 39.5cqw; }
+  .s-d-review .s-d-review__rev { left: 66.5cqw; width: 26cqw; padding: 1.4cqw 1.4cqw 1cqw; }
+  .s-d-review .s-d-review__who { gap: 0.55cqw; }
+  .s-d-review .s-d-review__rsk { display: none; }
+  .s-d-review .s-d-review__tbl { margin-top: auto; }
+  .s-d-review .s-d-review__head { left: 3cqw; right: 3cqw; }
+  .s-d-review .s-d-review__you { left: 73cqw; }
+  .s-d-review .s-d-review__pr { left: 3cqw; }
+}
+</style>
+<div class="s-d-review" aria-hidden="true">
+  <div class="s-d-review__ground"></div>
+  <div class="s-d-review__dots"></div>
+  <div class="s-d-review__head">
+    <span class="s-d-review__task">Task 432</span>
+    <span class="s-d-review__title">Backfill idempotency keys on refunds</span>
+    <span class="s-d-review__repo">tally-api</span>
+    <div class="s-d-review__rounds" data-r="1"><span class="s-d-review__rd s-d-review__rd--1"><i></i>Round 1</span><span class="s-d-review__rdl"><b></b></span><span class="s-d-review__rd s-d-review__rd--2"><i></i>Round 2</span></div>
+  </div>
+
+  <div class="s-d-review__card s-d-review__lead" data-st="wait">
+    <div class="s-d-review__lit"></div>
+    <div class="s-d-review__who"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="claude"><path fill-rule="evenodd"/></svg><span class="s-d-review__name">Opus 5</span><span class="s-d-review__tag">Lead</span></div>
+    <div class="s-d-review__lab">Anthropic</div>
+    <div class="s-d-review__state">
+      <span class="s-d-review__x s-d-review__x--send"><i></i>Sending for review</span>
+      <span class="s-d-review__x s-d-review__x--wait"><i></i>Waiting on review</span>
+      <span class="s-d-review__x s-d-review__x--work"><i></i>Working through findings</span>
+      <span class="s-d-review__x s-d-review__x--open"><i></i>Opening a draft PR</span>
+      <span class="s-d-review__x s-d-review__x--done"><i></i>Draft PR opened</span>
+    </div>
+  </div>
+
+  <div class="s-d-review__card s-d-review__diff">
+    <div class="s-d-review__lit"></div>
+    <div class="s-d-review__dl">Change</div>
+    <div class="s-d-review__file"><span class="s-d-review__long">src/refunds/</span>limit.ts</div>
+    <div class="s-d-review__counts"><b>+12</b><s>−4</s></div>
+    <div class="s-d-review__bars">
+      <i style="--w:54%"></i>
+      <i style="--w:70%"></i>
+      <i class="s-d-review__d" style="--w:48%"></i>
+      <i class="s-d-review__d" style="--w:62%"></i>
+      <i class="s-d-review__a" style="--w:76%"></i>
+      <i class="s-d-review__a" style="--w:58%"></i>
+      <i class="s-d-review__a" style="--w:84%"></i>
+      <i class="s-d-review__a" style="--w:44%"></i>
+      <i style="--w:40%"></i>
+      <i class="s-d-review__d" style="--w:66%"></i>
+      <i class="s-d-review__a" style="--w:72%"></i>
+      <i class="s-d-review__a" style="--w:52%"></i>
+    </div>
+  </div>
+
+  <div class="s-d-review__card s-d-review__list" data-st="rv1" data-skel="1">
+    <div class="s-d-review__lh">
+      <b>Findings</b>
+      <span class="s-d-review__lhs">
+        <span class="s-d-review__x s-d-review__x--rv1">Reviewing</span>
+        <span class="s-d-review__x s-d-review__x--f1">1 finding</span>
+        <span class="s-d-review__x s-d-review__x--f2">2 findings</span>
+        <span class="s-d-review__x s-d-review__x--f3">3 findings</span>
+        <span class="s-d-review__x s-d-review__x--res">2 fixed · 1 set aside</span>
+        <span class="s-d-review__x s-d-review__x--rv2">Reviewing again</span>
+        <span class="s-d-review__x s-d-review__x--clean">Clean</span>
+      </span>
+    </div>
+    <div class="s-d-review__rows">
+      <div class="s-d-review__skel"><i></i><i></i><i></i></div>
+      <div class="s-d-review__row" data-st="off">
+        <div class="s-d-review__meta"><span class="s-d-review__sev s-d-review__sev--high"><i></i>High</span><span class="s-d-review__loc"><span class="s-d-review__long">src/refunds/</span>router.ts:21</span><span class="s-d-review__by">GPT-5.2 Codex</span></div>
+        <div class="s-d-review__text">The limiter runs after the idempotency lookup, so a replayed request spends budget without doing anything.</div>
+        <div class="s-d-review__res">
+          <span class="s-d-review__x s-d-review__x--fixed"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg><span class="s-d-review__long">Fixed in round 2</span><span class="s-d-review__short">Fixed</span></span>
+        </div>
+      </div>
+      <div class="s-d-review__row" data-st="off">
+        <div class="s-d-review__meta"><span class="s-d-review__sev s-d-review__sev--med"><i></i>Medium</span><span class="s-d-review__loc"><span class="s-d-review__long">src/charges/</span>limit.ts:42</span><span class="s-d-review__by">Both reviewers</span></div>
+        <div class="s-d-review__text">Refunds share the charges bucket, so a busy partner will have refunds refused.</div>
+        <div class="s-d-review__res">
+          <span class="s-d-review__x s-d-review__x--aside"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M5.4 8h5.2"/></svg><span class="s-d-review__long"><b>Set aside:</b> one budget per partner is the spec.</span><span class="s-d-review__short">Set aside</span></span>
+        </div>
+      </div>
+      <div class="s-d-review__row" data-st="off">
+        <div class="s-d-review__meta"><span class="s-d-review__sev s-d-review__sev--low"><i></i>Low</span><span class="s-d-review__loc"><span class="s-d-review__long">src/refunds/</span>limit.test.ts:52</span><span class="s-d-review__by">Gemini 3 Pro</span></div>
+        <div class="s-d-review__text">The reset test waits on the wall clock; use fake timers.</div>
+        <div class="s-d-review__res">
+          <span class="s-d-review__x s-d-review__x--fixed"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg><span class="s-d-review__long">Fixed in round 2</span><span class="s-d-review__short">Fixed</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="s-d-review__card s-d-review__rev s-d-review__rev--1">
+    <div class="s-d-review__lit"></div>
+    <div class="s-d-review__who"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="codex"><path fill-rule="evenodd"/></svg><span class="s-d-review__name">GPT-5.2 Codex</span></div>
+    <div class="s-d-review__lab">OpenAI · reviewer</div>
+    <div class="s-d-review__rsk"><i></i><i></i><i></i></div>
+    <div class="s-d-review__tbl">
+      <div class="s-d-review__tr"><span>Round 1</span><span class="s-d-review__tv" data-v="none"><span class="s-d-review__x s-d-review__x--none">–</span><span class="s-d-review__x s-d-review__x--rev"><i></i>Reviewing</span><span class="s-d-review__x s-d-review__x--found">2 findings</span><span class="s-d-review__x s-d-review__x--clean"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span></span></div>
+      <div class="s-d-review__tr"><span>Round 2</span><span class="s-d-review__tv" data-v="none"><span class="s-d-review__x s-d-review__x--none">–</span><span class="s-d-review__x s-d-review__x--rev"><i></i>Reviewing</span><span class="s-d-review__x s-d-review__x--found">2 findings</span><span class="s-d-review__x s-d-review__x--clean"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span></span></div>
+    </div>
+  </div>
+  <div class="s-d-review__card s-d-review__rev s-d-review__rev--2">
+    <div class="s-d-review__lit"></div>
+    <div class="s-d-review__who"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="hex"><path fill-rule="evenodd"/></svg><span class="s-d-review__name">Gemini 3 Pro</span></div>
+    <div class="s-d-review__lab">Google · reviewer</div>
+    <div class="s-d-review__rsk"><i></i><i></i><i></i></div>
+    <div class="s-d-review__tbl">
+      <div class="s-d-review__tr"><span>Round 1</span><span class="s-d-review__tv" data-v="none"><span class="s-d-review__x s-d-review__x--none">–</span><span class="s-d-review__x s-d-review__x--rev"><i></i>Reviewing</span><span class="s-d-review__x s-d-review__x--found">2 findings</span><span class="s-d-review__x s-d-review__x--clean"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span></span></div>
+      <div class="s-d-review__tr"><span>Round 2</span><span class="s-d-review__tv" data-v="none"><span class="s-d-review__x s-d-review__x--none">–</span><span class="s-d-review__x s-d-review__x--rev"><i></i>Reviewing</span><span class="s-d-review__x s-d-review__x--found">2 findings</span><span class="s-d-review__x s-d-review__x--clean"><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>Clean</span></span></div>
+    </div>
+  </div>
+
+  <canvas class="s-d-review__fx"></canvas>
+
+  <div class="s-d-review__pr"><svg viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="12.4" r="1.7"/><path d="M4.5 5.3v5.4M11.5 10.7V6.6c0-1.2-.9-2.1-2.1-2.1H7.6"/><path d="M8.9 3.2L7.6 4.5l1.3 1.3"/></svg><b>Draft PR #1191</b><span class="s-d-review__sep"></span><em><svg viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-6.8"/></svg>checks passed</em></div>
+  <div class="s-d-review__you" data-st="idle"><i class="s-d-review__yn"></i><div class="s-d-review__yl"><b>You</b><span><span class="s-d-review__x">Ready to accept</span></span></div></div>
+
+  <div class="s-d-review__grain"></div>
+  <div class="s-d-review__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-d-review')) return
+  const MARKS = {
+    claude: 'M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z',
+    codex: 'M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z',
+    hex: 'M12 1.6l9.01 5.2v10.4L12 22.4l-9.01-5.2V6.8zM12 5.06L5.99 8.53v6.94L12 18.94l6.01-3.47V8.53z',
+  }
+  root.querySelectorAll('svg[data-mk]').forEach((s) => s.firstElementChild.setAttribute('d', MARKS[s.dataset.mk]))
+
+  // Tone: dark by default, light when an ancestor says so. Read once.
+  const tone = root.closest('[data-tone]')
+  const LIGHT = !!tone && tone.dataset.tone === 'light'
+  const ADD = LIGHT ? 'source-over' : 'lighter'
+  const GA = LIGHT ? 0.6 : 1
+  const PAL = LIGHT
+    ? {
+        dormant: 'rgba(20,20,28,0.11)', port: 'rgba(20,20,28,0.3)', lit: 'rgb(43,59,255)', litGlow: 0.07, residue: 0.4,
+        beamTail: [122, 63, 240], beamMid: [43, 59, 255], beamHead: [92, 108, 255],
+        cob: [43, 59, 255], vio: [122, 63, 240], hot: [255, 255, 255], green: [46, 140, 70],
+      }
+    : {
+        dormant: 'rgba(255,242,228,0.075)', port: 'rgba(255,242,228,0.22)', lit: 'rgb(132,142,255)', litGlow: 0.13, residue: 0.45,
+        beamTail: [128, 76, 244], beamMid: [78, 96, 255], beamHead: [226, 230, 255],
+        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255], green: [98, 196, 126],
+      }
+
+  const $ = (s) => root.querySelector(s)
+  const $$ = (s) => Array.from(root.querySelectorAll(s))
+  const el = {
+    rounds: $('.s-d-review__rounds'),
+    lead: $('.s-d-review__lead'),
+    diff: $('.s-d-review__diff'),
+    list: $('.s-d-review__list'),
+    rows: $$('.s-d-review__row'),
+    revs: $$('.s-d-review__rev'),
+    tv: $$('.s-d-review__rev').map((r) => Array.from(r.querySelectorAll('.s-d-review__tv'))),
+    pr: $('.s-d-review__pr'),
+    you: $('.s-d-review__you'),
+    yn: $('.s-d-review__yn'),
+    head: $('.s-d-review__head'),
+    skel: $('.s-d-review__skel'),
+  }
+  const cv = $('.s-d-review__fx')
+  const ctx = cv.getContext('2d')
+
+  // Film grain, generated once.
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    $('.s-d-review__grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  function sprite([r, g, b], core) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(PAL.cob, 0.18)
+  const SP_VIO = sprite(PAL.vio, 0.16)
+  const SP_HOT = sprite(PAL.hot, 0.12)
+  const SP_GRN = sprite(PAL.green, 0.16)
+
+  const NB = 26
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  const mix = (a, b, f) => a.map((v, i) => Math.round(v + (b[i] - v) * f))
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    const c = t < 0.62 ? mix(PAL.beamTail, PAL.beamMid, t / 0.62) : mix(PAL.beamMid, PAL.beamHead, (t - 0.62) / 0.38)
+    BEAM_COL.push(`rgb(${c[0]},${c[1]},${c[2]})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const out3 = (t) => 1 - Math.pow(1 - t, 3)
+  // Smooth on/off window: rises over fi after a, falls over fo before b.
+  const win = (t, a, b, fi, fo) => clamp((t - a) / fi) * clamp((b - t) / fo)
+
+  // The story, in seconds.
+  const LOOP = 16.6
+  const OUT = [[0.4, 1.55], [8.8, 9.95]]                 // the change goes out to the reviewers, round 1 and 2
+  const FIND = [                                           // [reviewer, row, launch, land]
+    [0, 0, 3.2, 3.85],
+    [0, 1, 3.95, 4.6],
+    [1, 1, 3.95, 4.6],
+    [1, 2, 4.7, 5.35],
+  ]
+  const RES = [[0, 5.9, 6.45], [1, 6.75, 7.3], [2, 7.6, 8.15]] // [row, launch, land]
+  const CLEAN = [11.3, 11.6]
+  const PR = [12.0, 12.25, 13.95]                          // appear, start gliding, arrive
+  const RESET = 16.0
+
+  // Geometry, measured on resize (CSS px, relative to the root).
+  let W = 0, H = 0, U = 1, dpr = 1
+  const R = {}
+  const box = () => ({ x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 })
+  R.lead = box(); R.diff = box(); R.list = box(); R.rev = [box(), box()]; R.rows = [box(), box(), box()]
+  let prBase = 0, prEnd = 0, prW = 0, prH = 0
+  let prTx = 0, prShownTx = -1, prShownO = -1
+  const you = { x: 0, y: 0, r: 0 }
+  const routes = {}
+  const OUTF = new Float32Array([0.9, 1])
+  const LANDED = [0, 1, 2].map((row) => Math.min(...FIND.filter((f) => f[1] === row).map((f) => f[3])))
+  const LAST = [0, 1].map((v) => Math.max(...FIND.filter((f) => f[0] === v).map((f) => f[2])))
+  const LASTLAND = [0, 1].map((v) => Math.max(...FIND.filter((f) => f[0] === v).map((f) => f[3])))
+  const outArrive = (v, k) => OUT[k][0] + (OUT[k][1] - OUT[k][0]) * OUTF[v]
+
+  function rectOf(node, rb, out, tx) {
+    const b = node.getBoundingClientRect()
+    out.x = b.left - rb.left - (tx || 0)
+    out.y = b.top - rb.top
+    out.w = b.width
+    out.h = b.height
+    return out
+  }
+  function edge(o, rad) {
+    // The border's centre line, for beams.
+    o.bx = o.x + 0.5; o.by = o.y + 0.5; o.bw = o.w - 1; o.bh = o.h - 1; o.br = Math.max(1, rad - 0.5)
+    o.per = 2 * (o.bw - 2 * o.br) + 2 * (o.bh - 2 * o.br) + 2 * Math.PI * o.br
+  }
+
+  // A route: dense points from a list of pieces, resampled by arc length.
+  const M = 160
+  function makeRoute(pieces) {
+    const xs = [], ys = []
+    for (const p of pieces) {
+      const n = 48
+      for (let i = xs.length ? 1 : 0; i <= n; i++) {
+        const t = i / n
+        if (p.length === 4) { xs.push(p[0] + (p[2] - p[0]) * t); ys.push(p[1] + (p[3] - p[1]) * t) }
+        else if (p.length === 6) {
+          const m = 1 - t
+          xs.push(m * m * p[0] + 2 * m * t * p[2] + t * t * p[4]); ys.push(m * m * p[1] + 2 * m * t * p[3] + t * t * p[5])
+        } else {
+          const m = 1 - t
+          xs.push(m * m * m * p[0] + 3 * m * m * t * p[2] + 3 * m * t * t * p[4] + t * t * t * p[6])
+          ys.push(m * m * m * p[1] + 3 * m * m * t * p[3] + 3 * m * t * t * p[5] + t * t * t * p[7])
+        }
+      }
+    }
+    const L = [0]
+    for (let i = 1; i < xs.length; i++) L.push(L[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]))
+    const len = L[L.length - 1]
+    const rx = new Float32Array(M), ry = new Float32Array(M)
+    let s = 0
+    for (let i = 0; i < M; i++) {
+      const want = (i / (M - 1)) * len
+      while (s < xs.length - 2 && L[s + 1] < want) s++
+      const span = L[s + 1] - L[s] || 1
+      const f = clamp((want - L[s]) / span)
+      rx[i] = xs[s] + (xs[s + 1] - xs[s]) * f
+      ry[i] = ys[s] + (ys[s + 1] - ys[s]) * f
+    }
+    return { xs: rx, ys: ry, len }
+  }
+  // An orthogonal polyline with rounded corners, as pieces.
+  function ortho(pts, rad) {
+    const out = []
+    let cx = pts[0][0], cy = pts[0][1]
+    for (let i = 1; i < pts.length; i++) {
+      const [x, y] = pts[i]
+      if (i < pts.length - 1) {
+        const [nx, ny] = pts[i + 1]
+        const d1 = Math.hypot(x - cx, y - cy), d2 = Math.hypot(nx - x, ny - y)
+        const r = Math.min(rad, d1 / 2, d2 / 2)
+        const ax = x - ((x - cx) / d1) * r, ay = y - ((y - cy) / d1) * r
+        const bx = x + ((nx - x) / d2) * r, by = y + ((ny - y) / d2) * r
+        out.push([cx, cy, ax, ay])
+        out.push([ax, ay, x, y, bx, by])
+        cx = bx; cy = by
+      } else out.push([cx, cy, x, y])
+    }
+    return out
+  }
+  const sCurve = (x0, y0, x1, y1) => [[x0, y0, x0 + (x1 - x0) * 0.55, y0, x1 - (x1 - x0) * 0.55, y1, x1, y1]]
+
+  function measure() {
+    const rb = root.getBoundingClientRect()
+    W = rb.width; H = rb.height; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    const rad = parseFloat(getComputedStyle(el.lead).borderTopLeftRadius) || 10
+    rectOf(el.lead, rb, R.lead); edge(R.lead, rad)
+    rectOf(el.diff, rb, R.diff); edge(R.diff, rad)
+    rectOf(el.list, rb, R.list)
+    el.revs.forEach((n, i) => { rectOf(n, rb, R.rev[i]); edge(R.rev[i], rad) })
+    el.rows.forEach((n, i) => rectOf(n, rb, R.rows[i]))
+    const yb = el.yn.getBoundingClientRect()
+    you.x = yb.left - rb.left + yb.width / 2; you.y = yb.top - rb.top + yb.height / 2; you.r = yb.width / 2
+    prBase = el.pr.offsetLeft; prW = el.pr.offsetWidth; prH = el.pr.offsetHeight
+    prEnd = you.x - you.r - U * 1.6 - (prBase + prW)
+
+    const L = R.lead, D = R.diff, r1 = R.rev[0], r2 = R.rev[1]
+    const railY = L.y - (L.y - (el.head.getBoundingClientRect().bottom - rb.top)) * 0.48
+    const trunkX = r1.x + r1.w + U * 2.4
+    const lx = L.x + L.w * 0.5
+    const yR1 = r1.y + r1.h * 0.32, yR2 = r2.y + r2.h * 0.32
+    const cr = U * 1.1
+    routes.out = [
+      makeRoute(ortho([[lx, L.y], [lx, railY], [trunkX, railY], [trunkX, yR1], [r1.x + r1.w, yR1]], cr)),
+      makeRoute(ortho([[lx, L.y], [lx, railY], [trunkX, railY], [trunkX, yR2], [r2.x + r2.w, yR2]], cr)),
+    ]
+    const rowY = R.rows.map((r) => r.y + r.h * 0.5)
+    const lx2 = R.list.x, rx2 = R.list.x + R.list.w
+    const fy = [[r1.y + r1.h * 0.58, r1.y + r1.h * 0.76], [r2.y + r2.h * 0.58, r2.y + r2.h * 0.76]]
+    routes.find = FIND.map(([rv, row], i) => {
+      const r = R.rev[rv]
+      const y0 = rv === 0 ? (row === 0 ? fy[0][0] : fy[0][1]) : (row === 1 ? fy[1][0] : fy[1][1])
+      return makeRoute(sCurve(r.x, y0, rx2, rowY[row]))
+    })
+    routes.res = [0, 1, 2].map((row) => makeRoute(sCurve(L.x + L.w, L.y + L.h * (0.42 + row * 0.18), lx2, rowY[row])))
+    const railBY = el.pr.offsetTop + prH / 2
+    const dx = D.x + D.w * 0.5
+    const rail = makeRoute(ortho([[dx, D.y + D.h], [dx, railBY], [you.x - you.r, railBY]], cr))
+    // Where the horizontal run starts, so the card's position maps to a distance along the rail.
+    let h0 = 0
+    while (h0 < M - 1 && Math.abs(rail.ys[h0] - railBY) > 0.5) h0++
+    rail.h0 = h0
+    rail.s0 = (h0 / (M - 1)) * rail.len
+    routes.rail = rail
+    // Both outgoing packets share one clock, so they ride together until the trunk splits.
+    const l1 = routes.out[1].len
+    OUTF[0] = Math.acos(1 - 2 * Math.min(1, routes.out[0].len / l1)) / Math.PI
+    OUTF[1] = 1
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  function at(rt, s) {
+    const f = clamp(s / rt.len) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = rt.xs[i] + (rt.xs[i + 1] - rt.xs[i]) * t
+    PT[1] = rt.ys[i] + (rt.ys[i + 1] - rt.ys[i]) * t
+  }
+  function rrPoint(o, s) {
+    const x = o.bx, y = o.by, w = o.bw, h = o.bh, r = o.br
+    s %= o.per
+    if (s < 0) s += o.per
+    const q = (Math.PI * r) / 2
+    let L = w / 2 - r
+    if (s < L) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= L
+    if (s < q) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= L
+    if (s < q) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = w - 2 * r
+    if (s < L) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= L
+    if (s < q) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= L
+    if (s < q) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q
+    PT[0] = x + r + s; PT[1] = y
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+  function bead(x, y, r, a) {
+    if (a <= 0.003) return
+    if (!LIGHT) { glow(SP_HOT, x, y, r, a); return }
+    glow(SP_COB, x, y, r * 2.2, a * 0.22)
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.fillStyle = '#2b3bff'
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1.6, r * 0.42), 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(x, y, Math.max(0.7, r * 0.18), 0, Math.PI * 2); ctx.fill()
+  }
+
+  // A comet of light: along a route (pos = at) or a card border (pos = rrPoint).
+  function comet(pos, obj, s, len, a, s0) {
+    if (a <= 0.004 || len < 1) return
+    const seg = len / NB
+    ctx.lineWidth = 1.5
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const sa = s - len + i * seg
+      if (s0 != null && sa + seg < s0) continue
+      pos(obj, Math.max(s0 == null ? -1e9 : s0, sa))
+      const ax = PT[0], ay = PT[1]
+      pos(obj, sa + seg + 0.35)
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(PT[0], PT[1]); ctx.stroke()
+    }
+    ctx.globalCompositeOperation = ADD
+    for (let i = 0; i < 9; i++) {
+      const t = 0.25 + (i / 8) * 0.75
+      const sp = s - len * (1 - t)
+      if (s0 != null && sp < s0) continue
+      pos(obj, sp)
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1], U * 1.9, a * 0.2 * t * t * GA)
+    }
+    pos(obj, s)
+    const hx = PT[0], hy = PT[1]
+    glow(SP_VIO, hx, hy, U * 5, a * 0.15 * GA)
+    glow(SP_COB, hx, hy, U * 2.9, a * 0.42 * GA)
+    bead(hx, hy, U * 0.85, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  // A plain lit stretch of a route.
+  function lit(rt, s0, s1, a) {
+    if (a <= 0.004 || s1 - s0 < 0.5) return
+    const i0 = Math.ceil((s0 / rt.len) * (M - 1)), i1 = Math.floor((s1 / rt.len) * (M - 1))
+    ctx.beginPath()
+    at(rt, s0); ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
+    at(rt, s1); ctx.lineTo(PT[0], PT[1])
+    ctx.strokeStyle = PAL.lit
+    ctx.globalCompositeOperation = ADD
+    ctx.globalAlpha = a * PAL.litGlow
+    ctx.lineWidth = Math.max(3, U * 0.55)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * 0.9
+    ctx.lineWidth = 1.15
+    ctx.stroke()
+  }
+  function dormant(rt) {
+    ctx.beginPath()
+    ctx.moveTo(rt.xs[0], rt.ys[0])
+    for (let i = 1; i < M; i++) ctx.lineTo(rt.xs[i], rt.ys[i])
+    ctx.stroke()
+  }
+  function port(x, y) {
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, U * 0.2), 0, Math.PI * 2); ctx.fill()
+  }
+  // A packet at distance s along a route (its trail behind it); after arrival, a brief flash at the end.
+  // The stretch it has covered stays lit (residue) while `keep` > 0.
+  function packetAt(rt, s, fadeIn, sinceArrive, keep) {
+    if (keep > 0) lit(rt, 0, Math.min(s, rt.len), keep * PAL.residue)
+    if (s < rt.len) comet(at, rt, s, Math.min(rt.len * 0.55, U * 14), fadeIn, 0)
+    else {
+      const f = Math.exp(-Math.pow(sinceArrive / 0.18, 2))
+      if (f > 0.01) {
+        at(rt, rt.len)
+        ctx.globalCompositeOperation = ADD
+        glow(SP_COB, PT[0], PT[1], U * 4, f * 0.5 * GA)
+        bead(PT[0], PT[1], U * 1.1, f)
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    }
+  }
+  function packet(rt, t, t0, t1, keep) {
+    if (t < t0) return
+    packetAt(rt, iosine(clamp((t - t0) / (t1 - t0))) * rt.len, clamp((t - t0) / 0.12), t - t1, keep)
+  }
+
+  // DOM writes only when something changes.
+  const shown = new Map()
+  function put(node, key, val) {
+    const k = shown.get(node) || {}
+    if (k[key] === val) return
+    k[key] = val
+    shown.set(node, k)
+    if (key === 'text') node.textContent = val
+    else node.dataset[key] = val
+  }
+  function render(T) {
+    if (!W) return
+    const reset = T >= RESET
+    const r2 = T >= OUT[1][0] - 0.1 && !reset
+    // Round indicator.
+    put(el.rounds, 'r', reset ? '1' : T >= CLEAN[1] ? '3' : r2 ? '2' : '1')
+    // Lead.
+    const leadSt = reset ? 'wait' : T < OUT[0][1] ? 'send' : T < RES[0][1] - 0.3 ? 'wait' : T < RES[2][2] + 0.2 ? 'work' : T < OUT[1][1] ? 'send' : T < PR[0] ? 'wait' : T < PR[2] ? 'open' : 'done'
+    put(el.lead, 'st', leadSt)
+    put(el.lead, 'on', leadSt === 'work' || leadSt === 'open' ? '1' : '0')
+    put(el.diff, 'on', !reset && T > RES[0][1] - 0.3 && T < RES[2][2] + 0.2 ? '1' : '0')
+    // Rows.
+    let nFound = 0
+    for (let i = 0; i < 3; i++) {
+      const lt = LANDED[i]
+      let st = 'off'
+      if (!reset && T >= lt) {
+        nFound++
+        st = T < lt + 0.7 ? 'new' : 'found'
+        if (T >= RES[i][2]) st = i === 1 ? 'aside' : 'fixed'
+      }
+      put(el.rows[i], 'st', st)
+    }
+    // List header.
+    let ls = 'rv1'
+    if (reset) ls = 'rv1'
+    else if (T >= CLEAN[1]) ls = 'clean'
+    else if (T >= OUT[1][0]) ls = 'rv2'
+    else if (T >= RES[2][2]) ls = 'res'
+    else if (nFound) ls = 'f' + nFound
+    put(el.list, 'st', ls)
+    put(el.list, 'skel', !reset && nFound === 0 && T > OUT[0][0] ? '1' : '0')
+    // Reviewers.
+    for (let v = 0; v < 2; v++) {
+      const arrive1 = outArrive(v, 0)
+      const arrive2 = outArrive(v, 1)
+      const v1 = reset || T < arrive1 ? 'none' : T < LASTLAND[v] ? 'rev' : 'found'
+      const v2 = reset || T < arrive2 ? 'none' : T < CLEAN[v] ? 'rev' : 'clean'
+      put(el.tv[v][0], 'v', v1)
+      put(el.tv[v][1], 'v', v2)
+      const on = v1 === 'rev' || v2 === 'rev'
+      put(el.revs[v], 'on', on ? '1' : '0')
+      if (on) el.revs[v].style.setProperty('--shx', (100 - (((T + v * 0.6) * 60) % 200)).toFixed(1) + '%')
+    }
+    // You.
+    put(el.you, 'st', !reset && T >= PR[2] ? 'ready' : 'idle')
+    // The pull request card glides along the rail.
+    const prO = reset ? 1 - clamp((T - RESET) / 0.4) : clamp((T - PR[0]) / 0.3)
+    const g = io(clamp((T - PR[1]) / (PR[2] - PR[1])))
+    prTx = g * prEnd
+    const sc = 0.96 + 0.04 * out3(clamp((T - PR[0]) / 0.4))
+    if (Math.abs(prTx - prShownTx) > 0.05 || Math.abs(prO - prShownO) > 0.005) {
+      el.pr.style.transform = `translate3d(${prTx.toFixed(2)}px,0,0) scale(${sc.toFixed(4)})`
+      el.pr.style.opacity = prO.toFixed(3)
+      prShownTx = prTx; prShownO = prO
+    }
+    // Skeleton shimmer.
+    if (el.list.dataset.skel === '1') el.skel.style.setProperty('--shx', (100 - ((T * 55) % 200)).toFixed(1) + '%')
+
+    // Light.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1
+    ctx.strokeStyle = PAL.dormant
+    dormant(routes.out[0]); dormant(routes.out[1]); dormant(routes.rail)
+    ctx.fillStyle = PAL.port
+    port(routes.out[0].xs[0], routes.out[0].ys[0])
+    port(routes.out[0].xs[M - 1], routes.out[0].ys[M - 1])
+    port(routes.out[1].xs[M - 1], routes.out[1].ys[M - 1])
+    port(routes.rail.xs[0], routes.rail.ys[0])
+
+    // The change goes out, each round.
+    for (let k = 0; k < 2; k++) {
+      const [t0, t1] = OUT[k]
+      if (T < t0 || T > t1 + 1.2 || reset) continue
+      const keep = 1 - clamp((T - t1) / 1.0)
+      const sMain = iosine(clamp((T - t0) / (t1 - t0))) * routes.out[1].len
+      for (let v = 0; v < 2; v++) packetAt(routes.out[v], sMain, clamp((T - t0) / 0.12), T - outArrive(v, k), keep * 0.8)
+    }
+    // Findings travel from reviewers to the list; their wires stay lit until the round-2 review is clean.
+    FIND.forEach(([v, row, t0, t1], i) => {
+      if (reset) return
+      const keep = T < t1 ? 1 : 1 - 0.55 * clamp((T - t1) / 0.8) - 0.45 * clamp((T - CLEAN[v]) / 0.8)
+      packet(routes.find[i], T, t0, t1, keep)
+    })
+    // The lead settles each row.
+    RES.forEach(([row, t0, t1]) => {
+      if (reset) return
+      const keep = T < t1 ? 1 : 1 - 0.55 * clamp((T - t1) / 0.8) - 0.45 * clamp((T - CLEAN[1]) / 0.8)
+      packet(routes.res[row], T, t0, t1, keep)
+    })
+    // Border beams: reviewers while reviewing, the change while the lead works.
+    const beamOn = (o, a, t0) => {
+      if (a <= 0.004) return
+      const v = o.per / 2.6
+      comet(rrPoint, o, v * (T - t0), Math.min(o.per * 0.28, U * 15), a)
+    }
+    for (let v = 0; v < 2; v++) {
+      const a1 = outArrive(v, 0)
+      const last = LAST[v]
+      const a2 = outArrive(v, 1)
+      if (!reset) {
+        beamOn(R.rev[v], win(T, a1, last + 0.2, 0.25, 0.35), a1)
+        beamOn(R.rev[v], win(T, a2, CLEAN[v], 0.25, 0.3), a2)
+      }
+      // Clean: a soft green breath on the card.
+      const c = reset ? 0 : Math.exp(-Math.pow((T - CLEAN[v] - 0.15) / 0.35, 2))
+      if (c > 0.01) {
+        ctx.globalCompositeOperation = ADD
+        const o = R.rev[v]
+        glow(SP_GRN, o.x + o.w * 0.8, o.y + o.h * 0.82, U * 5, c * 0.35 * GA)
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    }
+    if (!reset) beamOn(R.diff, win(T, RES[0][1] - 0.3, RES[2][2] + 0.25, 0.3, 0.35), RES[0][1] - 0.3)
+    // The rail: lit behind the pull request as it travels, and to you once it arrives.
+    if (T >= PR[0]) {
+      const rt = routes.rail
+      const fade = reset ? 1 - clamp((T - RESET) / 0.4) : 1
+      const xLeft = prBase + prTx
+      const sLeft = Math.min(rt.len, rt.s0 + Math.max(0, xLeft - rt.xs[rt.h0]))
+      const sGrow = clamp((T - PR[0]) / 0.35) * rt.s0
+      lit(rt, 0, Math.max(sGrow, sLeft), 0.75 * fade)
+      if (T >= PR[2] - 0.2) {
+        const k = clamp((T - PR[2] + 0.2) / 0.4)
+        lit(rt, 0, rt.len, 0.75 * k * fade)
+      }
+      // Glow round you on arrival, green for ready.
+      const arr = T >= PR[2] ? Math.exp(-Math.pow((T - PR[2] - 0.2) / 0.4, 2)) * fade : 0
+      const steady = T >= PR[2] ? clamp((T - PR[2]) / 0.6) * fade : 0
+      ctx.globalCompositeOperation = ADD
+      glow(SP_GRN, you.x, you.y, U * 6, (0.4 * arr + 0.16 * steady) * GA)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+    ctx.globalAlpha = 1
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let T = 2.9
+  const STILL = 13.05 // round 2, both clean, all three settled, the PR on its way to you
+  let raf = 0, last = 0, onScreen = false, ready = false
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    T = (T + dt) % LOOP
+    render(T)
+    raf = requestAnimationFrame(frame)
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) render(STILL)
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) render(mq.matches ? STILL : T)
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>
