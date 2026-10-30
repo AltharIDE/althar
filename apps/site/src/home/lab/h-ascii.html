@@ -1,8 +1,898 @@
 <style>
-.h-ascii { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; text-align: center; background: #0e0b09; font: 500 15px Inter, system-ui, sans-serif; color: rgba(255, 248, 240, 0.7); }
-.h-ascii h1 { font-size: 28px; font-weight: 650; color: #fff; }
+.h-ascii{position:absolute;inset:0;overflow:hidden;background:#0e0b09;color:#efe6da;--cw:9px;--ch:18px;--fs:15px;--bh:2;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.h-ascii canvas{position:absolute;left:0;top:0;display:block;pointer-events:none}
+.h-ascii .h-ascii-bg{image-rendering:pixelated}
+.h-ascii .h-ascii-gl{mix-blend-mode:screen;opacity:.6}
+.h-ascii .h-ascii-h1{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.h-ascii .h-ascii-copy{position:absolute;left:0;top:0;font-size:var(--fs);line-height:var(--ch);font-weight:400;letter-spacing:0;font-kerning:none;font-variant-ligatures:none}
+.h-ascii .h-ascii-sub{margin:0;color:#d8ccbd;font:inherit}
+.h-ascii .h-ascii-ln{display:block;white-space:pre}
+.h-ascii .h-ascii-ln[data-off]{visibility:hidden}
+.h-ascii .h-ascii-cta{display:flex;gap:calc(var(--cw)*3);margin-top:var(--ch)}
+.h-ascii .h-ascii-cta[data-off]{visibility:hidden}
+.h-ascii .h-ascii-btn{display:inline-flex;align-items:center;justify-content:space-between;box-sizing:border-box;height:calc(var(--ch)*var(--bh));padding:0 var(--cw);white-space:pre;text-decoration:none;font:700 var(--fs)/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#fff;background:#2b3bff;box-shadow:var(--cw) calc(var(--ch)/2) 0 #040302;outline:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.h-ascii .h-ascii-btn .h-ascii-br{color:#a9b0ff;font-weight:400}
+.h-ascii .h-ascii-btn.h-ascii-gh{background:#2a211a;color:#f3ebe0}
+.h-ascii .h-ascii-btn.h-ascii-gh .h-ascii-br{color:#d0893a}
+.h-ascii .h-ascii-btn:hover,.h-ascii .h-ascii-btn:focus-visible{background:#f4ede2;color:#0e0b09}
+.h-ascii .h-ascii-btn:hover .h-ascii-br,.h-ascii .h-ascii-btn:focus-visible .h-ascii-br{color:#2b3bff}
+.h-ascii .h-ascii-btn:focus-visible{box-shadow:var(--cw) calc(var(--ch)/2) 0 #040302,0 0 0 2px #0e0b09,0 0 0 4px #f4ede2}
+.h-ascii .h-ascii-btn:active{transform:translate(var(--cw),calc(var(--ch)/2));box-shadow:none}
+.h-ascii[data-phone] .h-ascii-cta{gap:calc(var(--cw)*2)}
+.h-ascii[data-phone] .h-ascii-btn{flex:1 1 0}
+.h-ascii[data-phone] .h-ascii-btn.h-ascii-gh{flex-grow:1.45}
 </style>
-<div class="h-ascii"><h1>Building software has never felt so fast.</h1><p>This style is still being drawn.</p></div>
+<div class="h-ascii">
+  <canvas class="h-ascii-bg" aria-hidden="true"></canvas>
+  <canvas class="h-ascii-fg" aria-hidden="true"></canvas>
+  <canvas class="h-ascii-gl" aria-hidden="true"></canvas>
+  <h1 class="h-ascii-h1">Building software has never felt so <span>fast.</span></h1>
+  <div class="h-ascii-copy">
+    <p class="h-ascii-sub">Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.</p>
+    <div class="h-ascii-cta">
+      <a class="h-ascii-btn h-ascii-dl" href="https://github.com/AltharIDE/althar/releases"><span class="h-ascii-br" aria-hidden="true">[ </span>Download<span class="h-ascii-br" aria-hidden="true"> ]</span></a>
+      <a class="h-ascii-btn h-ascii-gh" href="https://github.com/AltharIDE/althar"><span class="h-ascii-br" aria-hidden="true">[ </span>Star on GitHub<span class="h-ascii-br" aria-hidden="true"> ]</span></a>
+    </div>
+  </div>
+</div>
 <script>
-;(() => {})()
+(() => {
+  'use strict';
+  const root = document.currentScript.previousElementSibling;
+  if (!root) return;
+  const q = (s) => root.querySelector(s);
+  const cBg = q('.h-ascii-bg'), cFg = q('.h-ascii-fg'), cGl = q('.h-ascii-gl');
+  const xb = cBg.getContext('2d'), xf = cFg.getContext('2d'), xg = cGl.getContext('2d');
+  const copy = q('.h-ascii-copy'), sub = q('.h-ascii-sub'), cta = q('.h-ascii-cta');
+  const SUBTXT = sub.textContent.replace(/\s+/g, ' ').trim();
+  const L1 = 'Building software has never felt so';
+  const FAM = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+  const LH = 1.2;
+  const mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  let reduced = !!(mq && mq.matches);
+
+  // ---------- small helpers
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const sm = (a, b, v) => { v = clamp((v - a) / (b - a), 0, 1); return v * v * (3 - 2 * v); };
+  const cl = (v) => (v <= 0 ? 0 : v >= 255 ? 255 : v | 0);
+  const pk = (r, g, b) => (cl(r) << 16) | (cl(g) << 8) | cl(b);
+  const HXC = {};
+  const HX = (s) => { const v = HXC[s]; return v !== undefined ? v : (HXC[s] = parseInt(s.slice(1), 16)); };
+  const mix = (a, b, k) => {
+    const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+    return pk(ar + (((b >> 16) & 255) - ar) * k, ag + (((b >> 8) & 255) - ag) * k, ab + ((b & 255) - ab) * k);
+  };
+  const mul = (a, k) => pk(((a >> 16) & 255) * k, ((a >> 8) & 255) * k, (a & 255) * k);
+  const HEXS = []; for (let i = 0; i < 256; i++) HEXS[i] = (i < 16 ? '0' : '') + i.toString(16);
+  const hex = (v) => '#' + HEXS[(v >> 16) & 255] + HEXS[(v >> 8) & 255] + HEXS[v & 255];
+  function lut(stops, n) {
+    const o = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = i / (n - 1); let j = 0;
+      while (j < stops.length - 2 && p > stops[j + 1][0]) j++;
+      const a = stops[j], b = stops[j + 1];
+      o[i] = mix(HX(a[1]), HX(b[1]), clamp((p - a[0]) / (b[0] - a[0]), 0, 1));
+    }
+    return o;
+  }
+  function hh(x, y, s) {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  const PERM = new Uint8Array(512), RV = new Float32Array(256);
+  {
+    let s = 20261030; const rnd = () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296);
+    for (let i = 0; i < 256; i++) { PERM[i] = i; RV[i] = rnd(); }
+    for (let i = 255; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = PERM[i]; PERM[i] = PERM[j]; PERM[j] = t; }
+    for (let i = 0; i < 256; i++) PERM[i + 256] = PERM[i];
+  }
+  function vn(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf_ = x - xi, yf = y - yi, X = xi & 255, Y = yi & 255;
+    const a = RV[PERM[PERM[X] + Y]], b = RV[PERM[PERM[X + 1] + Y]], c = RV[PERM[PERM[X] + Y + 1]], d = RV[PERM[PERM[X + 1] + Y + 1]];
+    const u = xf_ * xf_ * (3 - 2 * xf_), v = yf * yf * (3 - 2 * yf);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  function wrap(s, w) {
+    const out = []; let line = '';
+    for (const word of s.split(' ')) {
+      if (!line) line = word;
+      else if (line.length + 1 + word.length <= w) line += ' ' + word;
+      else { out.push(line); line = word; }
+    }
+    if (line) out.push(line);
+    return out;
+  }
+
+  // ---------- palettes
+  const FIRE = lut([[0, '#0c0605'], [0.12, '#2c0a04'], [0.27, '#6a1705'], [0.41, '#b3330a'], [0.55, '#ec600e'], [0.69, '#ff962c'], [0.81, '#ffc45c'], [0.91, '#ffe8a4'], [1, '#fffaf0']], 256);
+  const EXT = lut([[0, '#2a190f'], [0.22, '#4f1a09'], [0.45, '#a52a08'], [0.7, '#f26a12'], [0.88, '#ff963a'], [1, '#ffbb5c']], 256);
+  const SKY = ['#a9d3ff', '#86bbfa', '#649ff2', '#4886e7', '#336fd8', '#285ec6', '#204dae', '#1b4096', '#17357f', '#132b6b', '#102359', '#0e1d4c'].map(HX);
+  const RAMP = Array.from(' .:-=+*#%@', (c) => c.codePointAt(0));
+  const QUAD = [32, 0x2598, 0x259d, 0x2580, 0x2596, 0x258c, 0x259e, 0x259b, 0x2597, 0x259a, 0x2590, 0x259c, 0x2584, 0x2599, 0x259f, 0x2588];
+  const QM = {}; QUAD.forEach((c, i) => { QM[c] = i; });
+  const BOX = { 0x2500: [1, 1, 0, 0], 0x2502: [0, 0, 1, 1], 0x250c: [0, 1, 0, 1], 0x2510: [1, 0, 0, 1], 0x2514: [0, 1, 1, 0], 0x2518: [1, 0, 1, 0], 0x251c: [0, 1, 1, 1], 0x2524: [1, 0, 1, 1], 0x252c: [1, 1, 0, 1], 0x2534: [1, 1, 1, 0], 0x253c: [1, 1, 1, 1], 0x2501: [2, 2, 0, 0], 0x2503: [0, 0, 2, 2] };
+  const ARC = { 0x256d: 0, 0x256e: 1, 0x256f: 2, 0x2570: 3 };
+  const STR = new Map();
+  const str = (c) => { let s = STR.get(c); if (!s) { s = String.fromCodePoint(c); STR.set(c, s); } return s; };
+  const CP = (s) => s.codePointAt(0);
+  const C_FULL = 0x2588, C_TOP = 0x2580, C_BOT = 0x2584, C_S1 = 0x2591, C_S2 = 0x2592, C_S3 = 0x2593;
+
+  // ---------- "fast." : a heavy lowercase bitmap face, 12px tall, drawn in cells
+  const GL = {
+    f: ['..####', '.#####', '.##...', '.##...', '#####.', '#####.', '.##...', '.##...', '.##...', '.##...', '.##...', '.##...'],
+    a: ['.......', '.......', '.......', '.......', '######.', '#######', '.....##', '.######', '#######', '##...##', '#######', '.######'],
+    s: ['.......', '.......', '.......', '.......', '.######', '#######', '##.....', '######.', '.######', '.....##', '#######', '######.'],
+    t: ['......', '.##...', '.##...', '.##...', '#####.', '#####.', '.##...', '.##...', '.##...', '.##...', '.#####', '..####'],
+    '.': ['..', '..', '..', '..', '..', '..', '..', '..', '..', '..', '##', '##'],
+  };
+  const BW = 32, BH = 12, BM = new Uint8Array(BW * BH);
+  { let x0 = 0; for (const k of 'fast.') { const g = GL[k], w = g[0].length; for (let y = 0; y < BH; y++) for (let x = 0; x < w; x++) if (g[y][x] === '#') BM[y * BW + x0 + x] = 1; x0 += w + 1; } }
+  const bm = (x, y) => (x >= 0 && y >= 0 && x < BW && y < BH ? BM[y * BW + x] : 0);
+
+  // ---------- metrics (measured once the font is in)
+  let adv = 0.6, gA = 0.94, gD = 0.25;
+  function measure() {
+    xf.font = `400 100px ${FAM}`;
+    const m = xf.measureText('M'); if (m.width > 30) adv = m.width / 100;
+    const b = xf.measureText('█');
+    if (b.actualBoundingBoxAscent > 10) { gA = b.actualBoundingBoxAscent / 100; gD = b.actualBoundingBoxDescent / 100; }
+  }
+
+  // ---------- layout state
+  let dpr = 1, cw = 9, ch = 18, font = 15, lw = 1, C = 0, R = 0, ox = 0, oy = 0, N = 0, phone = false;
+  let fN = '', fB = '', fBig = '', fSh = '', baseN = 0, baseBig = 0, baseSh = 0;
+  const G = {};
+  const M = 4; let SW = 0, SH = 0;
+  let sReg, sD, sQ, sCh, sA, sB, sL, sK;
+  let lT, lB, lY, lHs, lHalo;
+  let chA, flA, fgA, bgA, glA, pCh, pFl, pFg, bgImg, glImg, bgU, glU;
+  let lineEls = [];
+  const WALL = 0, GLASS = 1, EDGE = 2, FRAME = 3, CONS = 4;
+
+  function sdf(x, y) {
+    const qx = Math.abs(x - G.cx) - (G.hw - G.rad), qy = Math.abs(y - G.cy) - (G.hh - G.rad);
+    const ax = qx > 0 ? qx : 0, ay = qy > 0 ? qy : 0;
+    return Math.sqrt(ax * ax + ay * ay) + Math.min(Math.max(qx, qy), 0) - G.rad;
+  }
+
+  function layout() {
+    const W = root.clientWidth, Hh = root.clientHeight;
+    if (!W || !Hh) return false;
+    dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const Wd = Math.round(W * dpr), Hd = Math.round(Hh * dpr);
+    const tgt = W < 640 ? 8.5 : clamp(W / 160, 9, 11);
+    cw = Math.max(7, Math.round(tgt * dpr));
+    font = cw / adv; ch = Math.round(font * LH);
+    C = Math.ceil(Wd / cw); R = Math.ceil(Hd / ch);
+    ox = Math.floor((Wd - C * cw) / 2); oy = Hd - R * ch;
+    lw = Math.max(1, Math.round(cw * 0.11));
+    N = C * R; phone = C < 72;
+    fN = `400 ${font}px ${FAM}`; fB = `700 ${font}px ${FAM}`; fBig = `700 ${font * 2}px ${FAM}`;
+    baseN = Math.round((ch - (gA + gD) * font) / 2 + gA * font);
+    baseBig = Math.round((2 * ch - (gA + gD) * 2 * font) / 2 + gA * 2 * font);
+    // shade glyphs are scaled to fill the cell exactly, so dithers tile without hairlines
+    const shs = (ch + 0.8) / (gA + gD);
+    fSh = `400 ${shs}px ${FAM}`; baseSh = (ch - (gA + gD) * shs) / 2 + gA * shs;
+    for (const cv of [cBg, cFg, cGl]) {
+      cv.style.left = ox / dpr + 'px'; cv.style.top = oy / dpr + 'px';
+      cv.style.width = (C * cw) / dpr + 'px'; cv.style.height = (R * ch) / dpr + 'px';
+    }
+    cFg.width = C * cw; cFg.height = R * ch;
+    cBg.width = C; cBg.height = R; cGl.width = C; cGl.height = R;
+    xf.textBaseline = 'alphabetic';
+    chA = new Uint32Array(N); flA = new Uint8Array(N); fgA = new Uint32Array(N); bgA = new Uint32Array(N); glA = new Uint32Array(N);
+    pCh = new Uint32Array(N).fill(0xffffffff); pFl = new Uint8Array(N); pFg = new Uint32Array(N);
+    bgImg = xb.createImageData(C, R); glImg = xg.createImageData(C, R);
+    bgU = new Uint32Array(bgImg.data.buffer); glU = new Uint32Array(glImg.data.buffer);
+    bgU.fill(1); glU.fill(1);
+
+    // --- the copy pane (terminal output + buttons), from the bottom up
+    const safe = Math.ceil((76 * dpr - oy) / ch);
+    const firstFull = oy < -ch * 0.35 ? 1 : 0;
+    let subW, pad, paneL, paneW, btnRows;
+    if (!phone) { subW = Math.min(52, C - 16); pad = 3; paneW = subW + 2 * pad + 2; paneL = Math.floor((C - paneW) / 2); btnRows = 2; }
+    else { paneL = C >= 44 ? 2 : 1; paneW = C - 2 * paneL; pad = 1; subW = paneW - 2 - 2 * pad; btnRows = Math.max(2.5, 46 / (ch / dpr)); }
+    const lines = wrap(SUBTXT, subW);
+    const paneH = 3 + lines.length + Math.ceil(btnRows + 0.5) + (phone ? 1 : 0) + 1;
+    const paneBot = R - (phone ? 3 : 4), paneTop = paneBot - paneH + 1;
+    Object.assign(G, { safe, subW, pad, paneL, paneW, paneTop, paneBot, lines, btnRows, textCol: paneL + 1 + pad, textRow: paneTop + 2 });
+    G.btnRow = G.textRow + lines.length + 1;
+
+    // --- the window
+    const fT = (phone ? 0.95 : 2.1) * ch;
+    const fTc = Math.ceil(fT / cw), fTr = Math.ceil(fT / ch);
+    const gTop = Math.max(firstFull + fTr, safe - (phone ? 2 : 3));
+    const gBot = paneTop - fTr - (phone ? 1 : 2);
+    const marg = phone ? 1 : Math.max(4, Math.round(C * 0.05));
+    const gL = marg + fTc, gR = C - 1 - marg - fTc;
+    Object.assign(G, { fT, fTc, fTr, gTop, gBot, gL, gR, marg });
+    G.cx = ((gL + gR + 1) / 2) * cw; G.cy = ((gTop + gBot + 1) / 2) * ch;
+    G.hw = ((gR - gL + 1) / 2) * cw; G.hh = ((gBot - gTop + 1) / 2) * ch;
+    G.rad = Math.min(G.hw, G.hh) * (phone ? 0.5 : 0.55);
+    G.consTop = gBot + fTr + 1;
+
+    // --- the headline: one double-size terminal line, then the forged word
+    const innerW = gR - gL + 1, innerH = gBot - gTop + 1;
+    const l1Max = Math.floor((innerW - 4) / 2);
+    const l1 = phone || L1.length > l1Max ? wrap(L1, Math.min(l1Max, phone ? l1Max : 18)) : [L1];
+    const l1Rows = l1.length * 2;
+    let s = 1;
+    if (32 * 3 <= innerW * 0.68 && l1Rows + 1 + 18 <= innerH * 0.64) s = 3;
+    else if (32 * 2 <= innerW * 0.82 && l1Rows + 1 + 12 <= innerH - 2) s = 2;
+    const blockH = l1Rows + 1 + 6 * s;
+    const top = Math.max(safe, gTop + Math.round((innerH - blockH) * (phone ? 0.36 : 0.32)));
+    G.s = s; G.l1 = [];
+    let gi = 0;
+    for (let k = 0; k < l1.length; k++) {
+      const txt = l1[k];
+      G.l1.push({ txt, row: top + k * 2, col: Math.floor(gL + (innerW - txt.length * 2) / 2), g0: gi });
+      gi += txt.length;
+    }
+    G.lr = top + l1Rows + 1; G.lc = Math.floor(gL + (innerW - BW * s) / 2);
+    G.limb0 = gTop + innerH * (phone ? 0.74 : 0.73);
+    G.sag = phone ? 1.6 : 3.6;
+    // typing schedule
+    G.tType = []; let tt = 0.45;
+    for (let k = 0; k < L1.length; k++) { G.tType.push(tt); const c = L1[k]; tt += 0.021 + hh(k, 3, 9) * 0.022 + (c === ' ' ? 0.03 : 0); }
+    G.tTyped = tt;
+    G.nSparks = Math.round(clamp((innerW * innerH) / 12, 60, 320));
+
+    buildStatic(); buildLetters(); placeDom();
+    return true;
+  }
+
+  function placeDom() {
+    root.toggleAttribute('data-phone', phone);
+    root.style.setProperty('--cw', cw / dpr + 'px');
+    root.style.setProperty('--ch', ch / dpr + 'px');
+    root.style.setProperty('--fs', font / dpr + 'px');
+    root.style.setProperty('--bh', String(G.btnRows));
+    copy.style.left = (ox + G.textCol * cw) / dpr + 'px';
+    copy.style.top = (oy + G.textRow * ch) / dpr + 'px';
+    copy.style.width = ((G.subW + 0.5) * cw) / dpr + 'px';
+    cta.style.width = phone ? ((G.subW - 1) * cw) / dpr + 'px' : '';
+    sub.textContent = '';
+    lineEls = G.lines.map((ln, k) => {
+      const e = document.createElement('span'); e.className = 'h-ascii-ln';
+      e.textContent = ln + (k < G.lines.length - 1 ? ' ' : '');
+      sub.appendChild(e); return e;
+    });
+    domState = '';
+  }
+
+  // ---------- static scene: cabin wall, window frame, console
+  function buildStatic() {
+    SW = C + 2 * M; SH = R + 2 * M; const n = SW * SH;
+    sReg = new Uint8Array(n); sD = new Float32Array(n); sQ = new Uint8Array(n); sCh = new Uint32Array(n);
+    sA = new Uint32Array(n); sB = new Uint32Array(n); sL = new Float32Array(n); sK = new Uint8Array(n);
+    const fT = G.fT, lam = (phone ? 120 : 190) * dpr;
+    const wallA = HX('#3b3029'), wallB = HX('#15100c'), seamA = HX('#54463b');
+    const conA = HX('#2e251f'), conB = HX('#120d0a');
+    for (let sr = -M; sr < R + M; sr++) {
+      for (let sc = -M; sc < C + M; sc++) {
+        const i = (sr + M) * SW + (sc + M);
+        const x = (sc + 0.5) * cw, y = (sr + 0.5) * ch;
+        const d = sdf(x, y); sD[i] = d / fT;
+        let k = 0;
+        for (let q = 0; q < 4; q++) if (sdf((sc + 0.25 + (q & 1) * 0.5) * cw, (sr + 0.25 + (q >> 1) * 0.5) * ch) >= 0) k |= 1 << q;
+        const out = d > fT ? d - fT : 0;
+        sL[i] = Math.exp(-out / lam);
+        if (k === 0) { sReg[i] = GLASS; continue; }
+        if (k !== 15 && d < fT * 0.5) { sReg[i] = EDGE; sQ[i] = k; sA[i] = HX('#d2b89e'); continue; }
+        if (d < fT) {
+          sReg[i] = FRAME;
+          const f = d / fT;
+          const ax = Math.abs(x - G.cx), ay = Math.abs(y - G.cy);
+          const onTB = ax < G.hw - G.rad * 0.9, onLR = ay < G.hh - G.rad * 0.9;
+          if (f < 0.34) { sCh[i] = C_FULL; sA[i] = HX('#a99079'); }
+          else if (f < 0.74) { sCh[i] = C_S3; sA[i] = HX('#6e5b4b'); sB[i] = HX('#211913'); }
+          else { sCh[i] = C_S2; sA[i] = HX('#4e4036'); sB[i] = HX('#17110d'); }
+          if (!phone && ((onTB && f > 0.36 && f < 0.72 && (sc - G.gL) % 7 === 3) || (onLR && f > 0.44 && f < 0.66 && sr % 3 === 1))) { sCh[i] = 0x2022; sA[i] = HX('#e8d3bd'); sB[i] = HX('#2a2019'); }
+          continue;
+        }
+        // wall / console
+        if (sr >= G.consTop) {
+          sReg[i] = CONS; sB[i] = conB; sA[i] = conA; sCh[i] = 32;
+          if (sr === G.consTop) { sCh[i] = C_BOT; sA[i] = HX('#6d5a4a'); sB[i] = HX('#1d1611'); }
+          else if (sr === G.consTop + 1) { sCh[i] = C_TOP; sA[i] = HX('#2c231c'); }
+          else if ((sc + sr * 3) % 11 === 0 && hh(sc, sr, 4) < 0.5) { sCh[i] = C_S1; sA[i] = HX('#2a221c'); }
+        } else {
+          sReg[i] = WALL; sB[i] = wallB; sA[i] = wallA; sCh[i] = C_S1;
+          if (hh(sc, sr, 2) < 0.18) sCh[i] = 32;
+        }
+      }
+    }
+    // panel seams on the side walls and ceiling
+    const seamCols = phone ? [] : [Math.round(G.marg / 2), C - 1 - Math.round(G.marg / 2)];
+    for (const scn of seamCols) for (let sr = -M; sr < G.consTop; sr++) {
+      const i = (sr + M) * SW + (scn + M); if (sReg[i] !== WALL) continue;
+      sCh[i] = (sr % 4 === 2) ? 0x2022 : 0x2502; sA[i] = seamA;
+    }
+    // console instruments (desktop): spectrum bars left, a lamp bank right
+    G.inst = [];
+    if (!phone) {
+      const zL0 = G.marg + 1, zL1 = G.paneL - 4, zR0 = G.paneL + G.paneW + 3, zR1 = C - 2 - G.marg;
+      const r0 = G.consTop + 3, r1 = Math.min(R - 4, r0 + 5);
+      const boxes = [];
+      if (zL1 - zL0 >= 14 && r1 - r0 >= 4) boxes.push({ c0: zL0 + 2, c1: zL1 - 1, r0, r1, kind: 1 });
+      if (zR1 - zR0 >= 14 && r1 - r0 >= 4) boxes.push({ c0: zR0 + 1, c1: zR1 - 2, r0, r1, kind: 2 });
+      for (const b of boxes) {
+        for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) {
+          const i = (r + M) * SW + (c + M);
+          const edgeR = r === b.r0 || r === b.r1, edgeC = c === b.c0 || c === b.c1;
+          sA[i] = HX('#4d3f35'); sB[i] = HX('#0d0a08');
+          if (edgeR && edgeC) sCh[i] = r === b.r0 ? (c === b.c0 ? 0x256d : 0x256e) : (c === b.c0 ? 0x2570 : 0x256f);
+          else if (edgeR) sCh[i] = 0x2500;
+          else if (edgeC) sCh[i] = 0x2502;
+          else { sCh[i] = 32; sK[i] = b.kind; }
+        }
+        G.inst.push(b);
+      }
+    }
+  }
+
+  function buildLetters() {
+    lT = new Uint8Array(N); lB = new Uint8Array(N); lY = new Float32Array(N); lHs = new Float32Array(N); lHalo = new Uint8Array(N);
+    const s = G.s, lc = G.lc, lr = G.lr;
+    const r0 = lr - 3, r1 = lr + 6 * s + 3, c0 = lc - 3, c1 = lc + BW * s + 3;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      if (r < 0 || c < 0 || r >= R || c >= C) continue;
+      const i = r * C + c, px = Math.floor((c - lc) / s);
+      for (let k = 0; k < 2; k++) {
+        const hr = 2 * (r - lr) + k, py = Math.floor(hr / s);
+        let ty = 0;
+        if (bm(px, py)) ty = 1; else if (bm(px - 1, py - 1)) ty = 2;
+        if (k === 0) { lT[i] = ty; if (ty === 1) lY[i] = py / (BH - 1); }
+        else { lB[i] = ty; if (ty === 1 && lT[i] !== 1) lY[i] = py / (BH - 1); }
+      }
+      lHs[i] = hh(c, r, 11);
+    }
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      if (r < 0 || c < 0 || r >= R || c >= C) continue;
+      const i = r * C + c; if (lT[i] || lB[i]) continue;
+      let best = 0;
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+        const rr = r + dr, cc = c + dc; if (rr < 0 || cc < 0 || rr >= R || cc >= C) continue;
+        const j = rr * C + cc;
+        if (lT[j] || lB[j]) { const d = Math.max(Math.abs(dr), Math.abs(dc)); if (!best || d < best) best = d; }
+      }
+      lHalo[i] = best;
+    }
+  }
+
+  // ---------- timeline
+  const fireI = (t) => { const g = 0.13 * sm(0.05, 1.0, t); return g + (1 - g) * Math.pow(sm(0.45, 3.9, t), 1.35); };
+  const flowD = (t) => 60 * t + 150 * Math.pow(Math.max(0, t - 0.4), 2.1) + (t > 4.45 ? 2400 * (t - 4.45) * (t - 4.45) : 0);
+  function shakeA(t) {
+    if (t < 0.6 || t > 5.4) return 0;
+    let a = Math.pow(sm(0.6, 3.9, t), 1.7);
+    if (t > 3.86 && t < 4.06) a = 1.35;
+    if (t > 4.5) a *= 1 - sm(4.5, 5.3, t);
+    if (t > 4.56 && t < 4.7) a = 1.15;
+    return a;
+  }
+  function readouts(t) {
+    if (reduced) return [0.24, 38];
+    const k = clamp((t - 4.9) / 5.1, 0, 1), e = 1 - Math.pow(1 - k, 2.6);
+    let v = 7.8 + (0.24 - 7.8) * e, a = 122 + (38 - 122) * e;
+    if (t > 10) { const z = 1 - Math.exp(-(t - 10) / 2400); v -= 0.03 * z; a -= 5 * z; }
+    return [v, a];
+  }
+
+  // ---------- scene composition
+  const BAR = HX('#0e0b09');
+  let lxCol = null;
+  const FACE_T = HX('#fffcf5'), FACE_B = HX('#ffd9a6'), HOT_T = HX('#ffffff'), HOT_B = HX('#fff1b3');
+  const WHITE = 0xffffff;
+
+  function render(t) {
+    if (!C) return;
+    const fi = Math.floor(t * 30);
+    const I = fireI(t);
+    const D = flowD(t);
+    const tear = sm(4.4, 4.64, t);
+    const plasAmp = t < 4.45 ? I : I * (1 - sm(4.45, 5.2, t));
+    const skyK = sm(4.55, 4.7, t);
+    const flash = t < 4.52 ? 0 : t < 4.64 ? sm(4.52, 4.64, t) : 1 - sm(4.64, 5.1, t);
+    const fade = sm(0, 0.95, t);
+    const F = sm(3.5, 3.92, t);
+    const tau = 1 - sm(4.7, 7.6, t);
+    const dayK = sm(4.6, 5.6, t);
+    const hot = t > 3.6 && t < 4.75;
+    // shake by whole cells, re-rolled at 15 Hz
+    const A = reduced ? 0 : shakeA(t), tk = Math.floor(t * 15);
+    let dx = 0, dy = 0;
+    if (A > 0.02) {
+      dx = Math.round((hh(tk, 1, 7) * 2 - 1) * A * 2.4);
+      if (hh(tk, 2, 7) < A * 0.55) dy = hh(tk, 3, 7) < 0.5 ? -1 : 1;
+    }
+    // light thrown into the cabin
+    const flick = 0.82 + 0.36 * vn(t * 11, 0.5);
+    const fl = I * flick * (t < 4.6 ? 1 : 1 - sm(4.6, 5.1, t));
+    const LR = fl * 1.25 + dayK * 0.42 + flash * 1.4, LG = fl * 0.62 + dayK * 0.56 + flash * 1.35, LBl = fl * 0.24 + dayK * 0.78 + flash * 1.3;
+    const amb = 0.3 + 0.08 * dayK;
+    // firelight wavers across the cabin, column by column
+    if (!lxCol || lxCol.length !== C + 2 * M) lxCol = new Float32Array(C + 2 * M);
+    for (let k = 0; k < C + 2 * M; k++) lxCol[k] = fl > 0.01 ? 1 + 0.35 * (vn((k - M) * 0.05 + t * 3, 7.7) - 0.5) * clamp(fl * 2, 0, 1) : 1;
+    // sky / earth motion: a calm sway, stepped like a terminal (1/8 cell for the horizon, 2 Hz for the clouds)
+    const ghw0 = (G.gR - G.gL + 1) / 2;
+    const bob = Math.round((0.35 * Math.sin(t * 0.55) + 0.15 * Math.sin(t * 0.21 + 1)) * 8) / 8;
+    const tilt = Math.round(0.012 * Math.sin(t * 0.37 + 0.6) * ghw0 * 8) / (8 * ghw0);
+    const t2 = Math.floor(t * 2) / 2, drift = t2 * 0.012;
+    const cssCw = cw / dpr, cssCh = ch / dpr;
+    const gcxC = (G.gL + G.gR + 1) / 2, ghw = (G.gR - G.gL + 1) / 2;
+    const hwCss = G.hw / dpr, hhCss = G.hh / dpr;
+    const earthBot = G.gBot + 1;
+    const lcL = G.lc, lrL = G.lr, sL_ = G.s;
+    const glintPh = t > 9 ? ((t - 9) % 8) / 1.5 : 9;
+    const glintX = lcL - 8 + glintPh * (BW * sL_ + 16);
+
+    for (let r = 0; r < R; r++) {
+      for (let c = 0; c < C; c++) {
+        const sc = c - dx, sr = r - dy;
+        const si = (sr + M) * SW + (sc + M);
+        const reg = sReg[si];
+        let code = 32, flg = 0, fg = 0, bg = 0, gl = 0;
+        if (reg === GLASS || reg === EDGE) {
+          // ---- outside the window
+          const Xc = ((sc + 0.5) * cw - G.cx) / dpr, Yc = ((sr + 0.5) * ch - G.cy) / dpr;
+          const inS = sc >= 0 && sr >= 0 && sc < C && sr < R;
+          const li = inS ? sr * C + sc : -1;
+          const halo = li >= 0 ? lHalo[li] : 0;
+          let val = 0;
+          if (plasAmp > 0.004) {
+            const v = Xc * 0.34 - Yc * 0.94, u = Xc * 0.94 + Yc * 0.34 + 14 * Math.sin((v - D * 0.8) / 120) + 8 * Math.sin(v / 47 + t * 2.3);
+            const n = (vn(u / 24, (v - D) / 150) * 0.55 + vn(u / 8.5 + 31.7, (v - D * 1.3) / 52) * 0.32 + vn(Xc / 75 + 3.1, (Yc + D * 0.45) / 75) * 0.38) / 1.25;
+            const n2 = (n - 0.5) * 2.3 + 0.5 + (Yc / hhCss) * 0.12;
+            val = n2 * (0.3 + 0.7 * plasAmp) + (plasAmp - 0.6) * 0.25;
+            val += (hh(sc, sr, fi) - 0.5) * 0.12 * plasAmp;
+            val *= clamp(0.55 + 1.2 * plasAmp + 0.45 * Yc / hhCss, 0, 1);
+            if (tear > 0) { const m = vn(Xc / 55 + 9, (Yc - D * 0.05) / 40); val *= clamp((m + 0.2 - tear * 1.25) * 3, 0, 1); }
+            if (hot && halo) val *= halo === 1 ? 0.18 : 0.5;
+            val = clamp(val, 0, 1);
+          }
+          // the sky (behind everything, revealed at the break)
+          let sCode = 32, sFg = 0, sBg = 0x0a0605;
+          if (skyK > 0) {
+            const xr = sc + 0.5 - gcxC, xn = xr / ghw;
+            const yl = G.limb0 + bob + tilt * xr + G.sag * xn * xn;
+            if (sr + 1 <= yl) {
+              const h = yl - (sr + 0.5);
+              let tp = (1 - Math.exp(-h / 7)) * 12.6; if (tp > 11) tp = 11;
+              const band = Math.floor(tp), fr = tp - band, c0 = SKY[band], c1 = SKY[band < 11 ? band + 1 : 11];
+              sBg = c0;
+              if (fr > 0.82) sBg = c1; else if (fr > 0.62) { sCode = C_S3; sFg = c1; } else if (fr > 0.42) { sCode = C_S2; sFg = c1; } else if (fr > 0.22) { sCode = C_S1; sFg = c1; }
+              if (h > 9 && hh(sc, sr, 5) > 0.986) { sCode = hh(sc, sr, 6) > 0.6 ? 0x2b : 0x2e; sFg = mix(sBg, 0xdfe8ff, hh(sc, sr, Math.floor(t / 2.5 + hh(sc, sr, 7) * 9)) > 0.75 ? 0.75 : 0.4); }
+            } else if (sr >= yl) {
+              // the cloud deck far below, projected onto a ground plane
+              const dd = sr + 0.5 - yl;
+              const Z = 3.2 / (dd + 0.35);
+              let nx = xr * cssCw * Z * 0.0075 + drift, nz = Z * 1.6 - t2 * 0.012;
+              const wx = vn(nx * 0.7 + 11, nz * 0.7) - 0.5, wz = vn(nx * 0.7 + 3, nz * 0.7 + 7) - 0.5;
+              nx += wx * 1.1; nz += wz * 1.1;
+              const n = vn(nx, nz) * 0.56 + vn(nx * 2.1 + 5.3, nz * 2.1 + 1.7) * 0.3 + vn(nx * 4.3 + 2, nz * 4.3 + 9) * 0.14;
+              const haze = Math.exp(-dd * 0.9);
+              sBg = mix(mix(HX('#0a2858'), HX('#2a64a8'), Math.exp(-dd * 0.35)), HX('#cde6fb'), haze * 0.85);
+              const cvv = (n - 0.5) * 2.6 * (1 - haze);
+              if (cvv > 0.03) {
+                const kk = clamp(cvv * 1.15, 0, 0.999);
+                sCode = kk < 0.3 ? C_S1 : kk < 0.56 ? C_S2 : kk < 0.8 ? C_S3 : C_FULL;
+                sFg = mix(HX('#aac2e0'), HX('#f7fbff'), Math.sqrt(kk));
+                sBg = mix(sBg, HX('#6a89b5'), Math.min(1, kk * 0.9));
+              } else if (dd > 2.5 && hh(sc, sr, 8) < 0.07) { sCode = 0x7e; sFg = mix(sBg, HX('#6c9ad6'), 0.55); }
+            } else {
+              const fr = sr + 1 - yl, e8 = Math.round(fr * 8);
+              sBg = SKY[0];
+              if (e8 > 0) { sCode = e8 >= 8 ? C_FULL : 0x2580 + e8; sFg = HX('#eef8ff'); }
+            }
+            if (skyK < 1) { sFg = mul(sFg, skyK); sBg = mix(0x0a0605, sBg, skyK); }
+          } else {
+            const gw = Math.sqrt(plasAmp) * clamp(Yc / hhCss * 0.45 + 0.55, 0, 1);
+            sBg = mix(0x0a0605, FIRE[clamp(Math.round(gw * 120), 0, 255)], 0.95);
+          }
+          if (val > 0.06) {
+            const vi = val * 0.999;
+            code = RAMP[1 + Math.floor(vi * 9)];
+            fg = FIRE[Math.round(clamp(val * 1.02, 0, 1) * 255)];
+            const pres = clamp(val * 2.2, 0, 1);
+            bg = mix(sBg, FIRE[Math.round(val * val * 120)], pres * 0.85);
+            gl = mul(FIRE[Math.round(val * 255)], val * val * 0.9);
+          } else { code = sCode; fg = sFg; bg = sBg; if (sCode >= 0x2581 && sCode <= 0x2588) gl = mul(HX('#9fd0ff'), 0.25 * skyK); }
+          if (flash > 0) {
+            // white-out, then the white burns off in a dither
+            const th = vn(sc * 0.13, sr * 0.29) * 0.65 + hh(sc, sr, 41) * 0.35;
+            const k = flash * 1.45 - th * 0.45;
+            if (k > 0.05) {
+              const FL = HX('#fffaf0');
+              if (k > 0.8) { code = C_FULL; fg = FL; bg = FL; }
+              else { code = k > 0.55 ? C_S3 : k > 0.3 ? C_S2 : C_S1; fg = FL; }
+            }
+            gl = mix(gl, WHITE, flash * 0.8);
+          }
+          // the forged word
+          if (li >= 0 && F > 0) {
+            const a = lT[li], b = lB[li];
+            if (a || b) {
+              const fp = clamp((F - lHs[li] * 0.62) / 0.32, 0, 1);
+              const isFace = a === 1 || b === 1;
+              if (fp > 0 && fp < 1 && isFace) {
+                code = RAMP[1 + Math.floor(fp * 8.99)]; fg = mix(HX('#ffb347'), WHITE, fp); bg = mix(bg, 0x1a0804, 0.5);
+              } else if (fp >= 1) {
+                let face = mix(mix(FACE_T, FACE_B, lY[li]), mix(HOT_T, HOT_B, lY[li]), tau);
+                if (t > 3.88 && t < 4.05) face = WHITE;
+                if (hot) face = mix(face, HX('#fff8dc'), 0.3 * hh(sc, sr, fi));
+                if (glintPh < 1 && isFace) { const gd = Math.abs((sc - glintX) + (sr - lrL) * 1.1); if (gd < 2.2) face = mix(face, HX('#ffffff'), 1 - gd / 2.2); }
+                const ext = EXT[Math.round(clamp(tau * 1.05 - 0.02 * hh(sc, sr, fi), 0, 1) * 255)];
+                const extD = mul(ext, 0.62);
+                if (a === 1 && b === 1) { code = C_FULL; fg = face; }
+                else if (a === 1) { code = C_TOP; fg = face; if (b === 2) bg = ext; }
+                else if (b === 1) { code = C_BOT; fg = face; if (a === 2) bg = ext; }
+                else if (a === 2 && b === 2) { code = C_S3; fg = ext; bg = extD; }
+                else if (a === 2) { code = C_TOP; fg = ext; }
+                else { code = C_BOT; fg = ext; }
+                gl = isFace ? mul(face, 0.15 + 0.6 * tau * tau) : mul(ext, 0.5 * tau);
+              }
+            } else if (halo && t > 4.6 && tau > 0.05 && F >= 1) {
+              const heat = tau * tau * (halo === 1 ? 1 : 0.45);
+              if (heat > 0.04) { code = halo === 1 ? C_S2 : C_S1; fg = mix(bg, HX('#ff7a1a'), clamp(heat * 1.4, 0, 1)); gl = mul(HX('#ff6a10'), heat * 0.6); }
+            }
+          }
+          if (reg === EDGE) {
+            // the lip of the frame, drawn in quadrants over the view
+            const lf = 1 + 0.9 * sL[si];
+            fg = pk(((sA[si] >> 16) & 255) * (amb + LR * 0.75 * lf) * 0.8, ((sA[si] >> 8) & 255) * (amb + LG * 0.75 * lf) * 0.8, (sA[si] & 255) * (amb + LBl * 0.75 * lf) * 0.8);
+            code = QUAD[sQ[si]]; flg = 0;
+          }
+        } else {
+          // ---- cabin: frame, wall, console, all lit by the window
+          code = sCh[si];
+          const al = sA[si], ba = sB[si], f = sL[si];
+          const lx = lxCol[sc + M];
+          let kr = amb + LR * f * lx, kg = amb + LG * f * lx, kb = amb + LBl * f * lx;
+          if (reg === FRAME) { const inner = clamp(1 - sD[si], 0, 1); kr += LR * inner * 0.6; kg += LG * inner * 0.6; kb += LBl * inner * 0.6; }
+          fg = pk(((al >> 16) & 255) * kr, ((al >> 8) & 255) * kg, (al & 255) * kb);
+          bg = pk(((ba >> 16) & 255) * (0.8 + kr * 0.35), ((ba >> 8) & 255) * (0.8 + kg * 0.35), (ba & 255) * (0.8 + kb * 0.35));
+          const kd = sK[si];
+          if (kd) {
+            // instruments
+            const ins = kd === 1 ? G.inst[0] : G.inst[G.inst.length - 1];
+            const h = ins.r1 - ins.r0 - 1, rr = sr - ins.r0 - 1, cc = sc - ins.c0 - 1;
+            if (kd === 1) {
+              const sp = Math.floor(t * (t < 5 ? 12 : 3));
+              const lvl = clamp(0.25 + 0.5 * vn(cc * 0.45, sp * 0.37) * (0.6 + I * 0.8) + 0.18 * Math.sin(cc * 0.6 + sp * 0.3), 0.05, 1) * h;
+              const fromB = h - rr;
+              if (cc % 2 === 0) {
+                if (fromB <= Math.floor(lvl)) { code = C_FULL; fg = rr < h * 0.3 ? HX('#ffb04a') : HX('#c9822f'); }
+                else if (fromB === Math.floor(lvl) + 1) { const e8 = Math.round((lvl % 1) * 8); if (e8 > 0) { code = 0x2580 + e8; fg = HX('#c9822f'); } }
+              }
+              fg = mul(fg, 0.55 + 0.25 * fade);
+            } else {
+              if (rr % 2 === 0 && cc % 3 === 1) {
+                const id = (rr >> 1) * 40 + ((cc / 3) | 0);
+                const on = hh(id, Math.floor((t + hh(id, 1, 1) * 9) / (t < 5 ? 0.25 : 2.6)), 3) > 0.45;
+                code = 0x2022; fg = on ? (hh(id, 2, 2) < 0.3 ? HX('#5b6bff') : HX('#ffae4a')) : HX('#3a2f27');
+                if (on) gl = mul(fg, 0.25);
+              }
+            }
+          }
+        }
+        // the scene comes up out of the dark, cell by cell
+        if (fade < 1) {
+          if ((reg === WALL || reg === CONS) && hh(c, r, 77) > fade * 1.2) code = 32;
+          const k = 0.15 + 0.85 * fade; fg = mul(fg, k); bg = mul(bg, k);
+        }
+        const i = r * C + c;
+        chA[i] = code; flA[i] = flg; fgA[i] = fg; bgA[i] = bg; glA[i] = gl;
+      }
+    }
+
+    sparks(t, dx, dy, I);
+    ui(t);
+    flush();
+    dom(t);
+  }
+
+  function inGlass(sc, sr) {
+    if (sc < -M || sr < -M || sc >= C + M || sr >= R + M) return false;
+    return sReg[(sr + M) * SW + (sc + M)] === GLASS;
+  }
+  function putScene(sc, sr, dx, dy, code, fg, gl) {
+    const c = sc + dx, r = sr + dy;
+    if (c < 0 || r < 0 || c >= C || r >= R || !inGlass(sc, sr)) return;
+    if (sc >= 0 && sr >= 0 && sc < C && sr < R) { const li = sr * C + sc; if (lT[li] === 1 || lB[li] === 1) return; }
+    const i = r * C + c; chA[i] = code; fgA[i] = fg; flA[i] = 0; glA[i] = gl;
+  }
+
+  function sparks(t, dx, dy, I) {
+    const cssCw = cw / dpr, cssCh = ch / dpr;
+    const gw = G.gR - G.gL, gh = G.gBot - G.gTop;
+    if (t > 0.6 && t < 5.4) {
+      const n = G.nSparks;
+      for (let k = 0; k < n; k++) {
+        const t0 = 0.7 + 4.3 * Math.sqrt(k / n) + hh(k, 1, 3) * 0.1;
+        const life = 0.22 + hh(k, 2, 3) * 0.4;
+        const age = t - t0; if (age < 0 || age > life) continue;
+        const x0 = G.gL + hh(k, 3, 3) * gw, y0 = G.gTop + (0.3 + hh(k, 4, 3) * 0.8) * gh;
+        const sp = (260 + hh(k, 5, 3) * 520) * (0.4 + I) * (t > 4.5 ? 1.8 : 1);
+        const ang = -1.22 + (hh(k, 6, 3) - 0.5) * 0.35;
+        const vx = (Math.cos(ang) * sp) / cssCw, vy = (Math.sin(ang) * sp) / cssCh;
+        const hx = x0 + vx * age, hy = y0 + vy * age;
+        const L = Math.hypot(vx, vy), ux = vx / L, uy = vy / L;
+        const b = 1 - age / life;
+        putScene(Math.round(hx - ux * 2), Math.round(hy - uy * 2), dx, dy, 0x2e, mix(0x5a1a08, HX('#d0601a'), b), 0);
+        putScene(Math.round(hx - ux), Math.round(hy - uy), dx, dy, hy - Math.round(hy) > 0 ? 0x27 : 0x3a, mix(HX('#a8400e'), HX('#ffb347'), b), mul(HX('#ff8a1e'), 0.4 * b));
+        putScene(Math.round(hx), Math.round(hy), dx, dy, b > 0.5 ? 0x2a : 0x2b, mix(HX('#ffc870'), WHITE, b), mul(HX('#ffd27a'), 0.9 * b));
+      }
+    }
+    // embers at rest, now and then
+    if (t > 5.6) {
+      const per = 6.5, e0 = Math.max(0, Math.floor((t - 5.6) / per) - 1);
+      for (let e = e0; e <= e0 + 1; e++) {
+        const t0 = 5.6 + e * per + hh(e, 1, 21) * 2.5, life = 3.2;
+        const age = t - t0; if (age < 0 || age > life) continue;
+        const x = G.gL + 3 + hh(e, 2, 21) * (gw - 6) + Math.sin(age * 2.2 + e) * 1.4;
+        const y = G.gBot - 1 - age * (gh / life) * 0.7;
+        const b = Math.sin((age / life) * Math.PI) * (0.65 + 0.35 * vn(t * 6, e));
+        putScene(Math.round(x), Math.round(y), 0, 0, b > 0.55 ? 0x2a : 0xb7, mix(HX('#3a1a0a'), HX('#ffb04a'), b), mul(HX('#ff8a1e'), b * 0.5));
+      }
+    }
+  }
+
+  // ---------- the terminal layer: typed line, cursor, pane, status line (never shakes)
+  function cell(c, r, code, fg, bg, flg) {
+    if (c < 0 || r < 0 || c >= C || r >= R) return;
+    const i = r * C + c; chA[i] = code; fgA[i] = fg; flA[i] = flg || 0; if (bg !== undefined && bg !== null) bgA[i] = bg;
+  }
+  function dimCell(c, r, k, to) {
+    if (c < 0 || r < 0 || c >= C || r >= R) return;
+    const i = r * C + c; fgA[i] = mix(fgA[i], to, k); bgA[i] = mix(bgA[i], to, k); glA[i] = mul(glA[i], 1 - k);
+  }
+  function text(c, r, s, fg, bg, flg) { for (let k = 0; k < s.length; k++) cell(c + k, r, s.charCodeAt(k), fg, bg, flg); }
+
+  function ui(t) {
+    const TXT = HX('#fff3e2'), CUR = HX('#f4ede2');
+    // --- headline, line one: double-width, double-height (DECDHL), typed
+    const typed = reduced ? L1.length : G.tType.filter((x) => x <= t).length;
+    const alpha = reduced ? 0.24 : t < 4.6 ? 0.86 : 0.86 - 0.62 * sm(4.6, 6.5, t);
+    let curC = -1, curR = -1;
+    if (typed > 0 || t > 0.45) {
+      for (const ln of G.l1) {
+        const n = clamp(typed - ln.g0, 0, ln.txt.length);
+        const showCur = typed >= ln.g0 && (typed < ln.g0 + ln.txt.length || ln === G.l1[G.l1.length - 1]);
+        const w = n + (showCur && t < 3.9 ? 1 : 0);
+        if (w <= 0) continue;
+        for (let rr = 0; rr < 2; rr++) for (let cc = -1; cc <= w * 2; cc++) dimCell(ln.col + cc, ln.row + rr, alpha, BAR);
+        for (let k = 0; k < n; k++) {
+          const code = ln.txt.charCodeAt(k), cc = ln.col + k * 2;
+          if (code === 32) { for (let q = 0; q < 4; q++) cell(cc + (q & 1), ln.row + (q >> 1), 32, TXT); continue; }
+          for (let q = 0; q < 4; q++) cell(cc + (q & 1), ln.row + (q >> 1), code, TXT, null, 2 | ((q >> 1) ? 4 : 0) | ((q & 1) ? 8 : 0));
+        }
+        if (showCur && n < ln.txt.length + 1 && (typed < ln.g0 + ln.txt.length || ln === G.l1[G.l1.length - 1])) { curC = ln.col + n * 2; curR = ln.row; }
+      }
+    }
+    // cursor: on while typing, blinking after; after the word is forged it waits behind "fast."
+    if (!reduced && t < 3.9 && curC >= 0) {
+      const on = t < G.tTyped + 0.05 || ((t - G.tTyped) % 1.06) < 0.53;
+      if (on) for (let q = 0; q < 4; q++) cell(curC + (q & 1), curR + (q >> 1), C_FULL, CUR);
+    } else if (t >= 4.0 || reduced) {
+      const on = reduced || t < 4.6 || ((t - 4.6) % 1.2) < 0.6;
+      if (on) {
+        const s = G.s, c0 = G.lc + BW * s + Math.max(1, s), r0 = G.lr + 5 * s;
+        for (let rr = 0; rr < s; rr++) for (let cc = 0; cc < s; cc++) cell(c0 + cc, r0 + rr, C_FULL, mix(CUR, HX('#ffb04a'), 0.5 * (1 - sm(4.6, 7, t))));
+        if (s === 1) { const i = r0 * C + c0; if (i >= 0 && i < N) chA[i] = C_BOT; }
+      }
+    }
+
+    // --- the pane: a rounded terminal box with a TUI drop shadow
+    const pT = G.paneTop, pB = G.paneBot, pL = G.paneL, pR = G.paneL + G.paneW - 1;
+    const prog = reduced ? 1 : sm(0.95, 1.35, t);
+    if (prog > 0) {
+      const FR = HX('#6a584a'), PB = HX('#110d0a');
+      const perim = 2 * (pR - pL) + 2 * (pB - pT);
+      const rowsBg = Math.ceil(prog * (pB - pT + 1));
+      if (!phone) {
+        for (let r = pT + 1; r <= pB + 1; r++) for (let c = pR + 1; c <= pR + 2; c++) dimCell(c, r, 0.62 * prog, 0x030202);
+        for (let c = pL + 2; c <= pR; c++) dimCell(c, pB + 1, 0.62 * prog, 0x030202);
+      }
+      for (let r = pT; r <= pB; r++) for (let c = pL; c <= pR; c++) {
+        let p;
+        if (r === pT) p = (c - pL);
+        else if (c === pR) p = (pR - pL) + (r - pT);
+        else if (r === pB) p = (pR - pL) + (pB - pT) + (pR - c);
+        else if (c === pL) p = 2 * (pR - pL) + (pB - pT) + (pB - r);
+        else p = -1;
+        if (p < 0) { if (r - pT < rowsBg) cell(c, r, 32, 0, PB); continue; }
+        if (p / perim > prog) { if (r - pT < rowsBg) { const i = r * C + c; bgA[i] = PB; } continue; }
+        let code = 0x2500;
+        if (r === pT && c === pL) code = 0x256d; else if (r === pT && c === pR) code = 0x256e;
+        else if (r === pB && c === pL) code = 0x2570; else if (r === pB && c === pR) code = 0x256f;
+        else if (c === pL || c === pR) code = 0x2502;
+        cell(c, r, code, FR, PB);
+      }
+      // small lamp row in the top border
+      if (prog >= 1 && G.paneW > 20) {
+        cell(pL + 2, pT, 32, 0, PB);
+        cell(pL + 3, pT, 0x2022, HX('#d0893a'), PB); cell(pL + 4, pT, 32, 0, PB); cell(pL + 5, pT, 0x2022, HX('#5b6bff'), PB);
+        cell(pL + 6, pT, 32, 0, PB);
+      }
+      for (let r = pT; r <= pB; r++) for (let c = pL; c <= pR; c++) { const i = r * C + c; if (i >= 0 && i < N) glA[i] = 0; }
+    }
+
+    // --- status line: readouts
+    const sr = R - 2;
+    const sp = reduced ? 1 : sm(0.75, 1.05, t);
+    if (sp > 0) {
+      const SB = HX('#18120e'), LAB = HX('#9c8a76'), VAL = HX('#f7efe4');
+      const lim = Math.round(sp * C);
+      const [v, a] = readouts(t);
+      const vs = v.toFixed(3), as = a.toFixed(2).padStart(6, ' ');
+      for (let c = 0; c < C; c++) { cell(c, sr, 32, 0, SB); glA[sr * C + c] = 0; }
+      const bar = (c0, n, frac, col) => {
+        const fill = clamp(frac, 0, 1) * n;
+        for (let k = 0; k < n; k++) {
+          const f = fill - k, TR = HX('#2d241d');
+          if (f >= 1) cell(c0 + k, sr, C_FULL, col, TR);
+          else if (f > 0.06) cell(c0 + k, sr, 0x2590 - Math.max(1, Math.round(f * 8)), col, TR);
+          else cell(c0 + k, sr, 32, 0, TR);
+        }
+      };
+      if (!phone) {
+        const bw = clamp(Math.floor((C - 60) / 6), 8, 18);
+        let c = 2;
+        text(c, sr, 'Velocity', LAB, SB); text(c + 10, sr, vs, VAL, SB, 1); text(c + 15, sr, ' km/s', LAB, SB);
+        bar(c + 22, bw, v / 7.8, HX('#5c6aff'));
+        const w = 8 + 2 + 6 + 3 + 2 + bw; c = C - 2 - w;
+        text(c, sr, 'Altitude', LAB, SB); text(c + 10, sr, as, VAL, SB, 1); text(c + 16, sr, ' km', LAB, SB);
+        bar(c + 21, bw, a / 122, HX('#c9822f'));
+      } else {
+        const m = C >= 44 ? 2 : 1;
+        text(m, sr, 'Velocity', LAB, SB); text(m + 9, sr, vs, VAL, SB, 1); text(m + 14, sr, ' km/s', LAB, SB);
+        const c = C - 1 - m - 17;
+        text(c, sr, 'Altitude', LAB, SB); text(c + 9, sr, as.trim().padStart(6, ' '), VAL, SB, 1); text(c + 15, sr, ' km', LAB, SB);
+      }
+      if (lim < C) for (let c = lim; c < C; c++) { const i = sr * C + c; chA[i] = 32; bgA[i] = mix(bgA[i], 0, 0); }
+    }
+  }
+
+  // ---------- drawing
+  function block(code, px, py) {
+    if (code === C_FULL) { xf.fillRect(px, py, cw, ch); return; }
+    if (code === C_TOP) { xf.fillRect(px, py, cw, Math.round(ch / 2)); return; }
+    if (code > 0x2580 && code < 0x2588) { const h = Math.round((ch * (code - 0x2580)) / 8); xf.fillRect(px, py + ch - h, cw, h); return; }
+    if (code >= 0x2589 && code <= 0x258f) { xf.fillRect(px, py, Math.max(1, Math.round((cw * (0x2590 - code)) / 8)), ch); return; }
+    if (code === 0x2590) { const w = Math.round(cw / 2); xf.fillRect(px + cw - w, py, w, ch); return; }
+    if (code === 0x2594) { xf.fillRect(px, py, cw, Math.max(1, Math.round(ch / 8))); return; }
+    if (code === 0x2595) { const w = Math.max(1, Math.round(cw / 8)); xf.fillRect(px + cw - w, py, w, ch); return; }
+    const m = QM[code];
+    if (m !== undefined) {
+      const hw = Math.round(cw / 2), hhh = Math.round(ch / 2);
+      if (m & 1) xf.fillRect(px, py, hw, hhh);
+      if (m & 2) xf.fillRect(px + hw, py, cw - hw, hhh);
+      if (m & 4) xf.fillRect(px, py + hhh, hw, ch - hhh);
+      if (m & 8) xf.fillRect(px + hw, py + hhh, cw - hw, ch - hhh);
+    }
+  }
+  function box(code, px, py) {
+    const b = BOX[code];
+    if (b) {
+      const th = b[0] === 2 || b[1] === 2 ? lw * 2 : lw, tv = b[2] === 2 || b[3] === 2 ? lw * 2 : lw;
+      const vx = px + ((cw - tv) >> 1), hy = py + ((ch - th) >> 1);
+      if (b[0]) xf.fillRect(px, hy, vx + tv - px, th);
+      if (b[1]) xf.fillRect(vx, hy, px + cw - vx, th);
+      if (b[2]) xf.fillRect(vx, py, tv, hy + th - py);
+      if (b[3]) xf.fillRect(vx, hy, tv, py + ch - hy);
+      return true;
+    }
+    const a = ARC[code];
+    if (a === undefined) return false;
+    const t = lw, vx = px + ((cw - t) >> 1), hy = py + ((ch - t) >> 1), lx = vx + t / 2, ly = hy + t / 2, r = Math.max(2, Math.floor(cw / 2) - 0.5);
+    xf.strokeStyle = xf.fillStyle; xf.lineWidth = t; xf.beginPath();
+    if (a === 0) { xf.arc(lx + r, ly + r, r, Math.PI, 1.5 * Math.PI); xf.fillRect(lx + r, hy, px + cw - lx - r, t); xf.fillRect(vx, ly + r, t, py + ch - ly - r); }
+    else if (a === 1) { xf.arc(lx - r, ly + r, r, 1.5 * Math.PI, 2 * Math.PI); xf.fillRect(px, hy, lx - r - px, t); xf.fillRect(vx, ly + r, t, py + ch - ly - r); }
+    else if (a === 2) { xf.arc(lx - r, ly - r, r, 0, 0.5 * Math.PI); xf.fillRect(px, hy, lx - r - px, t); xf.fillRect(vx, py, t, ly - r - py); }
+    else { xf.arc(lx + r, ly - r, r, 0.5 * Math.PI, Math.PI); xf.fillRect(lx + r, hy, px + cw - lx - r, t); xf.fillRect(vx, py, t, ly - r - py); }
+    xf.stroke();
+    return true;
+  }
+  function drawRow(r) {
+    const o = r * C, y = r * ch, Wd = C * cw;
+    xf.save(); xf.beginPath(); xf.rect(0, y, Wd, ch); xf.clip();
+    xf.clearRect(0, y, Wd, ch);
+    let col = -1, fnt = '';
+    for (let c = 0; c < C; c++) {
+      const i = o + c, code = chA[i], fl = flA[i], fg = fgA[i];
+      pCh[i] = code; pFl[i] = fl; pFg[i] = fg;
+      if (code === 32 || code === 0) continue;
+      if (fg !== col) { col = fg; xf.fillStyle = hex(fg); }
+      const px = c * cw;
+      if (fl & 2) {
+        if (fl & 8) continue;
+        if (fnt !== fBig) { fnt = fBig; xf.font = fBig; }
+        xf.fillText(str(code), px, y - (fl & 4 ? ch : 0) + baseBig);
+        continue;
+      }
+      if (code >= 0x2580 && code <= 0x259f && code !== C_S1 && code !== C_S2 && code !== C_S3) { block(code, px, y); continue; }
+      if (code >= 0x2500 && code <= 0x257f && box(code, px, y)) continue;
+      if (code >= C_S1 && code <= C_S3) { if (fnt !== fSh) { fnt = fSh; xf.font = fSh; } xf.fillText(str(code), px, y + baseSh); continue; }
+      const f = fl & 1 ? fB : fN; if (fnt !== f) { fnt = f; xf.font = f; }
+      xf.fillText(str(code), px, y + baseN);
+    }
+    xf.restore();
+  }
+  function flush() {
+    for (let r = 0; r < R; r++) {
+      const o = r * C; let d = false;
+      for (let c = 0; c < C; c++) { const i = o + c; if (chA[i] !== pCh[i] || fgA[i] !== pFg[i] || flA[i] !== pFl[i]) { d = true; break; } }
+      if (d) drawRow(r);
+    }
+    let nb = false, ng = false;
+    for (let i = 0; i < N; i++) {
+      const v = bgA[i], p = (0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >>> 16) & 255)) >>> 0;
+      if (bgU[i] !== p) { bgU[i] = p; nb = true; }
+      const g = glA[i], pg = (0xff000000 | ((g & 255) << 16) | (g & 0xff00) | ((g >>> 16) & 255)) >>> 0;
+      if (glU[i] !== pg) { glU[i] = pg; ng = true; }
+    }
+    if (nb) xb.putImageData(bgImg, 0, 0);
+    if (ng) xg.putImageData(glImg, 0, 0);
+  }
+
+  // ---------- the real text follows the same clock
+  let domState = '';
+  function dom(t) {
+    const L = lineEls.length, t0 = 1.3;
+    let shown = reduced ? L : 0;
+    if (!reduced) for (let k = 0; k < L; k++) if (t >= t0 + k * 0.07) shown = k + 1;
+    const btn = reduced || t >= t0 + L * 0.07 + 0.12;
+    const st = shown + (btn ? 'b' : '');
+    if (st === domState) return;
+    domState = st;
+    lineEls.forEach((e, k) => e.toggleAttribute('data-off', k >= shown));
+    cta.toggleAttribute('data-off', !btn);
+  }
+
+  // ---------- one clock
+  let T = 0, base = performance.now(), raf = 0, onScreen = true, lastKey = -1, ready = false;
+  const fpsAt = (t) => (t < 10.5 ? 30 : 8);
+  function frame(now) {
+    raf = 0;
+    if (!running()) return;
+    T = (now - base) / 1000;
+    const fps = fpsAt(T), key = Math.floor(T * fps) + (fps === 8 ? 1e7 : 0);
+    if (key !== lastKey) { lastKey = key; render(Math.floor(T * fps) / fps); }
+    raf = requestAnimationFrame(frame);
+  }
+  const running = () => ready && !reduced && onScreen && document.visibilityState !== 'hidden';
+  function sync() {
+    if (running()) { if (!raf) { base = performance.now() - T * 1000; raf = requestAnimationFrame(frame); } }
+    else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }
+  function rebuild() {
+    if (!layout()) return;
+    ready = true; lastKey = -1;
+    render(reduced ? 14 : T);
+    sync();
+  }
+  root.addEventListener('h-seek', (e) => {
+    T = Math.max(0, +e.detail || 0); base = performance.now() - T * 1000; lastKey = -1;
+    if (ready) render(reduced ? 14 : T);
+  });
+  measure();
+  rebuild();
+  if (document.fonts && document.fonts.load) {
+    Promise.all([document.fonts.load(`400 20px "JetBrains Mono"`), document.fonts.load(`700 20px "JetBrains Mono"`)])
+      .then(() => { const a0 = adv, g0 = gA; measure(); if (a0 !== adv || g0 !== gA) rebuild(); else if (ready) { pCh.fill(0xffffffff); render(reduced ? 14 : T); } })
+      .catch(() => {});
+  }
+  if ('IntersectionObserver' in window) new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync(); }).observe(root);
+  document.addEventListener('visibilitychange', sync);
+  if ('ResizeObserver' in window) {
+    let rw = root.clientWidth, rh = root.clientHeight, pend = 0;
+    new ResizeObserver(() => {
+      if (pend) return;
+      pend = requestAnimationFrame(() => { pend = 0; if (root.clientWidth !== rw || root.clientHeight !== rh) { rw = root.clientWidth; rh = root.clientHeight; rebuild(); } });
+    }).observe(root);
+  }
+  if (mq && mq.addEventListener) mq.addEventListener('change', () => { reduced = mq.matches; rebuild(); });
+})();
 </script>
