@@ -69,8 +69,8 @@
 }
 .grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.55; mix-blend-mode: overlay; }
 
-/* The instruments along the top: the clock and the launch at the left, what's next and what's current at the right, the window's nameplate between. */
-.deck { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 24px; width: 100%; }
+/* The instruments along the top: the clock and the launch at the left, what's next and what's current at the right. */
+.deck { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px; width: 100%; }
 .pair { display: flex; gap: 44px; }
 .pair.end { justify-content: flex-end; }
 
@@ -86,8 +86,8 @@
 .meter { display: flex; gap: 3px; }
 .meter span { width: 2px; height: 11px; border-radius: 1px; background: var(--lit); box-shadow: 0 0 6px rgba(70, 86, 255, 0.8); }
 
-/* The window's nameplate: the page's name, engraved small. */
-.plate { padding: 7px 13px 6px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.14); font: 500 10.5px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 248, 240, 0.82); white-space: nowrap; }
+/* The page's name, for assistive technology and search: the nav shows it. */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* The newest release, shown: when it went out, what it gives you, why, and the picture. */
 .lead { display: grid; justify-items: center; gap: 14px; max-width: 1100px; margin-top: 40px; text-align: center; }
@@ -337,11 +337,6 @@ a.v:hover { color: var(--lit); }
   .ahead::before { -webkit-mask: linear-gradient(180deg, #000 30%, transparent 95%); mask: linear-gradient(180deg, #000 30%, transparent 95%); }
   .ahead { padding: 30px 28px 40px; }
   .plot { margin-top: 28px; padding-left: 6px; }
-}
-
-@media (max-width: 960px) {
-  .deck { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); row-gap: 22px; }
-  .plate { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
 }
 
 @media (max-width: 640px) {

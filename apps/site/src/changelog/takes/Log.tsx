@@ -190,6 +190,7 @@ function Window() {
 
   return (
     <header className={s.window}>
+      <h1 className={s.sr}>Changelog</h1>
       <div className={s.sky} aria-hidden="true">
         <div className={s.haze} />
         <div className={s.limb} />
@@ -204,7 +205,6 @@ function Window() {
             <b>{dated(FIRST.date)}</b>
           </Readout>
         </div>
-        <h1 className={s.plate}>Changelog</h1>
         <div className={cx(s.pair, s.end)}>
           <Readout label="Next release" href="#on-main">
             <b>
