@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * The code an agent names, in a real window with the fake agents, which say
@@ -60,7 +60,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     const peek = page.getByRole('dialog', { name: 'README.md:1' })
     await expect(peek).toBeVisible()
     await expect(peek.getByText('# meridian')).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await peek.screenshot({ path: 'test-results/code-peek.png', scale: 'css' })
 
     // Pressed, the whole file beside the conversation, on main.
@@ -69,7 +69,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     await expect(panel).toBeVisible()
     await expect(panel.getByText('main', { exact: true })).toBeVisible()
     await page.mouse.move(10, 400)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/code-coordinator.png', scale: 'css' })
 
     // In the person's editor, from the person's own checkout, at its line.
@@ -100,7 +100,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     await page.getByRole('button', { name: 'Open README.md:1' }).last().click()
     await expect(page.getByRole('complementary', { name: 'README.md' })).toBeVisible()
     await page.mouse.move(10, 400)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/code-beside-board.png', scale: 'css' })
     await page.keyboard.press('Escape')
     await page.getByRole('radio', { name: 'Conversation' }).click()
@@ -119,7 +119,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     await file.getByRole('radio', { name: /^Change/ }).click()
     await expect(file.getByRole('group', { name: 'change.txt' })).toBeVisible()
     await page.mouse.move(10, 400)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/code-task-change.png', scale: 'css' })
 
     // In the editor, from the task's worktree, not the person's checkout, at its line.

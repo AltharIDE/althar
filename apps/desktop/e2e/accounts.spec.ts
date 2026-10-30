@@ -51,7 +51,7 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     await startTask(page, 'Add a retry to the checkout call')
 
     // The project doesn't rotate: Codex took the step over and finished it.
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(

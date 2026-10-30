@@ -25,10 +25,10 @@ test('opens a change on its outputs and a quick task on its conversation', async
 
     await planTask(page, 'Retry webhook deliveries with backoff', '[lead:finish] [lead:edit]')
     await page.getByRole('button', { name: 'Start now' }).last().click()
-    await expect(work.getByText('Ready to accept')).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Ready to accept')).toBeVisible()
 
     await say(page, 'Sketch a status page prototype [coordinator:start] [lead:finish] [lead:edit]')
-    await expect(work.getByText('Finished', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Finished', { exact: true })).toBeVisible()
 
     await work.getByRole('button', { name: 'Sketch a status page prototype' }).click()
     await expect(page.getByRole('heading', { name: 'Sketch a status page prototype', level: 1 })).toBeVisible()

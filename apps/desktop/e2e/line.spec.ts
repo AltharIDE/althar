@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, startTask } from './support'
+import { connectGitHub, launch, openFirstProject, say, startTask, still } from './support'
 
 /*
  * The line up next, in a real window with the fake agent and the fake
@@ -63,16 +63,16 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
 
     // A task whose server keeps the one place, then three reviews and a quick task, all waiting for it.
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     for (const [index] of PULLS.entries()) {
       await say(page, `Review https://github.test/meridian/api/pull/${index + 1} [coordinator:review]`)
       // A review starts from a plan of its lead alone: started at once, not after its countdown.
-      await page.getByRole('button', { name: 'Start now' }).last().click({ timeout: 20_000 })
-      await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1, { timeout: 20_000 })
+      await page.getByRole('button', { name: 'Start now' }).last().click()
+      await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1)
     }
     // The quick task's lead keeps at it once it starts, so it keeps the place.
     await say(page, 'Try the double jump. [coordinator:start] [lead:wait]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4, { timeout: 20_000 })
+    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4)
 
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
@@ -88,7 +88,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(running.getByRole('article')).toHaveCount(0)
     await expect(next.getByText('Drag to change the order')).toHaveCount(0)
     await page.mouse.move(1400, 880)
-    await page.waitForTimeout(400)
+    await still(page)
     await work.screenshot({ path: 'test-results/line-board.png', scale: 'css', animations: 'disabled' })
 
     // No shot of the line mid-drag: a shot has the window report the pointer as the system has it, which no button holds, and
@@ -123,7 +123,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(1)).toContainText(PULLS[0] ?? '')
     await expect(rows.nth(1)).toContainText('2nd in line')
     await page.mouse.move(1400, 880)
-    await page.waitForTimeout(400)
+    await still(page)
     await next.screenshot({ path: 'test-results/line-dropped.png', scale: 'css', animations: 'disabled' })
 
     // Presses a row's grip, to drag it from there.
@@ -141,15 +141,15 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     }
     const reviews = PULLS.map((title, index) => `Review #${index + 1}: ${title}`)
 
-    // Down across the whole line: it goes to the back, and stays there once the runtime says the order.
+    // Down across the whole line: it goes to the back. The line shows an order put until the runtime's list says it, and then
+    // the runtime's (NextLine, and its tests): that the runtime keeps each order put shows once the line starts, in that order.
     const bottom = await rows.nth(3).boundingBox()
     if (bottom === null) throw new Error('The line isn’t laid out')
     const down = await grab(JUMP)
     await glide(down, { x: down.x, y: bottom.y + bottom.height - 4 })
     await inOrder([...reviews, JUMP])
     await page.mouse.up()
-    await page.waitForTimeout(2500)
-    await inOrder([...reviews, JUMP])
+    await expect(rows.nth(3)).toContainText(JUMP)
     await expect(rows.nth(3)).toContainText('4th in line')
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
@@ -159,7 +159,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await glide(up, { x: 4, y: above.y - 30 })
     await inOrder([JUMP, ...reviews])
     await page.mouse.up()
-    await page.waitForTimeout(2500)
+    await expect(rows.nth(0)).toContainText(JUMP)
     await inOrder([JUMP, ...reviews])
 
     // Escape mid-drag puts the row back; the release after it, and hovering the grips later, move nothing.
@@ -173,7 +173,6 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.mouse.up()
     await glide({ x: cancelled.x, y: first.y + 4 }, { x: cancelled.x, y: cancelled.y })
     await glide({ x: cancelled.x, y: cancelled.y }, { x: cancelled.x, y: first.y + 4 })
-    await page.waitForTimeout(2500)
     await inOrder([JUMP, ...reviews])
     await expect(page.getByRole('region', { name: 'Up next' })).toBeVisible()
 
@@ -182,11 +181,11 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       .nth(3)
       .getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })
       .click()
-    await page.getByRole('button', { name: /^Waiting for a place/ }).click({ timeout: 15_000 })
+    await page.getByRole('button', { name: /^Waiting for a place/ }).click()
     const behind = page.getByRole('dialog', { name: 'Behind this task' })
     const front = behind.getByRole('button', { name: 'Move to the front of the line' })
     await expect(front).toBeVisible()
-    await page.waitForTimeout(300)
+    await still(page)
     await behind.screenshot({ path: 'test-results/line-task.png', scale: 'css', animations: 'disabled' })
     await front.click()
     await expect(front).toHaveCount(0)
@@ -201,14 +200,14 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       .click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
-    await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible({ timeout: 20_000 })
-    await expect(running.getByRole('button', { name: /^Try the double jump/ })).toBeVisible({ timeout: 20_000 })
+    await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible()
+    await expect(running.getByRole('button', { name: /^Try the double jump/ })).toBeVisible()
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0)).toContainText(PULLS[0] ?? '')
     await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(1)).toContainText(PULLS[1] ?? '')
     await page.mouse.move(1400, 880)
-    await page.waitForTimeout(400)
+    await still(page)
     await work.screenshot({ path: 'test-results/line-started.png', scale: 'css', animations: 'disabled' })
   } finally {
     await electronApp.close()

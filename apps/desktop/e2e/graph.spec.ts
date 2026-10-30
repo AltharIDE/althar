@@ -35,8 +35,8 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
 
     // Planned with a review that finds something: implemented, reviewed, settled, reviewed again, its draft opened.
     await say(page, 'Add a retry to the checkout call. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 60_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
 
     // Its Graph face, from the header's switch: the lead's lane, the reviewer's, Althar's; five steps in the order they ran.
@@ -75,7 +75,7 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await say(page, 'Also log each retry. [lead:finish]')
     // From the switch: the composer has focus, and a face's letter there is only a letter.
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
-    await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible({ timeout: 10_000 })
+    await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible()
     await expect(graph.getByRole('button', { name: /^Follow-up/ })).toBeVisible()
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-follow-up.png', animations: 'disabled', scale: 'css' })
@@ -85,14 +85,14 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await say(page, 'run make deploy')
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
     const asking = graph.getByRole('button', { name: /waits on you/ })
-    await expect(asking).toBeVisible({ timeout: 20_000 })
+    await expect(asking).toBeVisible()
     await asking.click()
     const permission = page.getByRole('dialog')
     await expect(permission.getByText('make deploy').first()).toBeVisible()
     await expect(permission.locator('input[type="radio"]:checked')).toBeFocused()
     await page.screenshot({ path: 'test-results/graph-permission.png', animations: 'disabled', scale: 'css' })
     await page.keyboard.press('Enter')
-    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0, { timeout: 10_000 })
+    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0)
     await toConversation(page)
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
   } finally {

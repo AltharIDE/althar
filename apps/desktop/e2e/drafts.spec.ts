@@ -20,8 +20,6 @@ import { launch, openFirstProject } from './support'
 const SLOW = 3_000
 
 test('keeps the draft through the home and back, and dictation finishes while the person is away', async () => {
-  // Three slow writings down, and a wait on the home: more than a quick spec's time on a busy machine.
-  test.setTimeout(120_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const meridian = repository(home, 'meridian')
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_SPEECH: '1', ALTHAR_FAKE_SPEECH_SLOW: String(SLOW) })
@@ -49,35 +47,36 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await page.getByRole('button', { name: 'Dictate', exact: true }).click()
     await page.getByRole('group', { name: 'Dictation' }).getByRole('button', { name: 'Download' }).click()
     const stop = page.getByRole('button', { name: /^Stop dictating/ })
-    await expect(stop).toBeVisible({ timeout: 10_000 })
-    await expect(stop).toHaveAccessibleName('Stop dictating, 0:02', { timeout: 5_000 })
+    await expect(stop).toBeVisible()
+    await expect(stop).toHaveAccessibleName('Stop dictating, 0:02')
     await stop.click()
     const writing = page.getByRole('button', { name: 'Writing down what you said' })
     await expect(writing).toBeVisible()
     await page.screenshot({ path: 'test-results/drafts-4-writing.png', animations: 'disabled' })
 
-    // Away while it is written down; it lands meanwhile.
+    // Away while it is written down; it lands meanwhile, in the composer the window keeps hidden behind the home.
+    const both = 'Before the PR, look at why checkout is slow. Also check the webhook retry path.'
     await toHome()
     await expect(box).toBeHidden()
-    await page.waitForTimeout(SLOW * 2)
+    await expect(page.getByRole('textbox', { name: /^Tell .* something/, includeHidden: true })).toHaveValue(both)
     await toProject()
-    await expect(box).toHaveValue('Before the PR, look at why checkout is slow. Also check the webhook retry path.')
+    await expect(box).toHaveValue(both)
     await expect(page.getByText('What you said was written down while you were away.')).toBeVisible()
     await page.screenshot({ path: 'test-results/drafts-5-landed-while-away.png', animations: 'disabled' })
 
     // Away while it listens: it goes on listening, carried in a pill at the window's foot, saying whose it is.
     await box.fill('')
     await page.keyboard.press('Control+Shift+KeyD')
-    await expect(stop).toHaveAccessibleName('Stop dictating, 0:01', { timeout: 5_000 })
+    await expect(stop).toHaveAccessibleName('Stop dictating, 0:01')
     await toHome()
     await expect(box).toBeHidden()
     const pill = page.getByRole('group', { name: 'To the coordinator · meridian' })
     await expect(pill).toBeVisible()
-    await expect(pill).toContainText('0:03', { timeout: 5_000 })
+    await expect(pill).toContainText('0:03')
     const width = (await pill.boundingBox())?.width
     await pill.screenshot({ path: 'test-results/drafts-6-carried-on-home.png', scale: 'css', animations: 'disabled' })
     // Its width holds as it goes on.
-    await expect(pill).toContainText('0:04', { timeout: 5_000 })
+    await expect(pill).toContainText('0:04')
     expect((await pill.boundingBox())?.width).toBe(width)
 
     // Stopped from the pill: it is written down, and opens to read, change and send.
@@ -86,7 +85,7 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await pill.screenshot({ path: 'test-results/drafts-7-writing-on-home.png', scale: 'css', animations: 'disabled' })
     const card = page.getByRole('region', { name: 'To the coordinator · meridian' })
     const said = card.getByRole('textbox', { name: 'What you said' })
-    await expect(said).toHaveValue('Also check the webhook retry path.', { timeout: SLOW * 4 })
+    await expect(said).toHaveValue('Also check the webhook retry path.')
     await card.screenshot({ path: 'test-results/drafts-8-written-on-home.png', scale: 'css', animations: 'disabled' })
 
     // Sent from the home, to the coordinator: there in its conversation, and the composer empty.

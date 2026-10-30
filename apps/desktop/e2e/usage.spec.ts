@@ -71,7 +71,7 @@ test('sends usage data while its switch is on, named events only, and nothing on
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done']))
     await startTask(page, 'Add a retry to the checkout call')
-    await expect.poll(names, { timeout: 20_000 }).toContain('task_started')
+    await expect.poll(names).toContain('task_started')
 
     // Each as this install, anonymous, with the app's version and system; nothing names the project, its folder, the task or
     // what was said.
@@ -100,10 +100,25 @@ test('sends usage data while its switch is on, named events only, and nothing on
       .getByRole('navigation', { name: 'Projects' })
       .getByRole('button', { name: /^meridian/ })
       .click()
+    const off = fake.events.length
     await startTask(page, 'Name the limits better')
     await expect(page.getByRole('button', { name: /Open task/ })).toHaveCount(2)
-    await page.waitForTimeout(3_000)
+
+    // On again, the next task started is sent: the one started while it was off would have gone before it, and never does.
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
+    await usage.click()
+    await expect(usage).toHaveAttribute('aria-checked', 'true')
     expect(fake.requests.slice(before)).toEqual([])
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
+    await page
+      .getByRole('navigation', { name: 'Projects' })
+      .getByRole('button', { name: /^meridian/ })
+      .click()
+    await startTask(page, 'Log the refunds')
+    const started = () => fake.events.slice(off).filter((event) => event.event === 'task_started')
+    await expect.poll(() => started().length).toBeGreaterThan(0)
+    expect(started()).toHaveLength(1)
   } finally {
     await electronApp.close()
     await fake.close()

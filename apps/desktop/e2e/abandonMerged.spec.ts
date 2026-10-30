@@ -38,8 +38,8 @@ test('a merged task with a commit after its pull request needs the person, and a
 
     // Its plan runs and its pull request opens; accepted, GitHub merges it, squashed into main, and the task settles.
     await say(page, 'Cap parallel agents per machine. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
@@ -51,7 +51,7 @@ test('a merged task with a commit after its pull request needs the person, and a
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
-    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 merged')).toBeVisible()
 
     // As DEV-58's lead did, with no follow-up: it brings main in, as this Mac has it, and commits the slider after.
     git(repo, 'pull', '-q', '--ff-only', remote, 'main')
@@ -69,7 +69,7 @@ test('a merged task with a commit after its pull request needs the person, and a
     // Read again, as the window reads it after a restart: the board keeps it in Needs you, ready for a new pull request.
     await page.reload()
     const card = work.getByRole('button', { name: 'Cap parallel agents per machine' })
-    await expect(work.getByText('Ready for a new pull request')).toBeVisible({ timeout: 20_000 })
+    await expect(work.getByText('Ready for a new pull request')).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/abandon-merged-board.png', animations: 'disabled', scale: 'css' })
 
@@ -95,16 +95,16 @@ test('a merged task with a commit after its pull request needs the person, and a
     await dialog.getByRole('button', { name: 'Abandon task' }).click()
 
     // Abandoned, it is settled again and merged still, the commit on its branch, and the thread says so.
-    await expect(page.getByText('One commit after PR #1 isn’t in a pull request yet.')).toHaveCount(0, { timeout: 10_000 })
+    await expect(page.getByText('One commit after PR #1 isn’t in a pull request yet.')).toHaveCount(0)
     await page
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Conversation/ })
       .click()
-    await expect(page.getByText('Abandoned 1 commit after PR #1.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Abandoned 1 commit after PR #1.')).toBeVisible()
     await page.screenshot({ path: 'test-results/abandon-merged-left.png', animations: 'disabled', scale: 'css' })
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(work.getByText('Ready for a new pull request')).toHaveCount(0)
-    await expect(work.getByText('PR #1 merged')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 merged')).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/abandon-merged-settled-board.png', animations: 'disabled', scale: 'css' })
     expect(git(worktree, 'log', '-1', '--format=%s')).toBe('Agents at once as the agreed notched slider')

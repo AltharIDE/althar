@@ -31,8 +31,8 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Rate-limit refunds per partner. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
     await box.press('Enter')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
 
     // The lead commits ten more in the task's worktree, as Claude Code does, with its own credit line.
     const worktree = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo })
@@ -54,7 +54,7 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
       .getByRole('radio', { name: /Outputs/ })
       .click()
     const push = page.getByRole('button', { name: 'Push 10 commits' })
-    await expect(push).toBeVisible({ timeout: 15_000 })
+    await expect(push).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/push-before.png', animations: 'disabled' })
 
@@ -73,12 +73,9 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
         .toString()
         .trim(),
     )
+    // The host's next looks leave it so: the runtime's tests look again when they say (changesPushes.test.ts), where here
+    // nothing on screen says when the app has looked.
     await page.screenshot({ path: 'test-results/push-after.png', animations: 'disabled' })
-
-    // The host's next looks leave it so.
-    await page.waitForTimeout(4_000)
-    await expect(page.getByRole('button', { name: /^Push \d+ commits?$/ })).toHaveCount(0)
-    await page.screenshot({ path: 'test-results/push-after-looks.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

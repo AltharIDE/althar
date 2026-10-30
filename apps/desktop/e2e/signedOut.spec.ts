@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * A signed-out agent's error, in a real window with the fake agent
@@ -42,21 +42,20 @@ const opened = async () => {
 }
 
 test('a signed-out coordinator leads to its sign-in in Settings, and back to trying again', async () => {
-  test.setTimeout(120_000)
   const { electronApp, page } = await opened()
   try {
     const conversation = page.getByRole('region', { name: 'Conversation' })
     await say(page, 'Why is checkout slow? [signed-out]')
-    await expect(conversation.getByText(/is signed out\./)).toBeVisible({ timeout: 15_000 })
-    await page.waitForTimeout(300)
+    await expect(conversation.getByText(/is signed out\./)).toBeVisible()
+    await still(page)
     await shootTurn(page, conversation, 'coordinator')
 
     await conversation.getByRole('button', { name: 'Sign in again' }).click()
     // Settings, on the agent, its sign-in started where its account is.
     await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible()
     const accounts = page.getByRole('list', { name: /accounts$/ })
-    await expect(accounts.getByRole('button', { name: 'Cancel signing in' })).toBeVisible({ timeout: 10_000 })
-    await page.waitForTimeout(300)
+    await expect(accounts.getByRole('button', { name: 'Cancel signing in' })).toBeVisible()
+    await still(page)
     await shoot(page.getByRole('tabpanel', { name: /Claude Code/ }), 'settings')
 
     // Back on the project, where it was, Try again sends what the person said again.
@@ -68,7 +67,7 @@ test('a signed-out coordinator leads to its sign-in in Settings, and back to try
     await conversation.getByRole('button', { name: 'Try again' }).click()
     // Still signed out here, the fake agent fails the turn again: it went again, with what the person said, and the first try
     // folds into the turn's work.
-    await expect(conversation.getByText(/^Worked for/)).toBeVisible({ timeout: 15_000 })
+    await expect(conversation.getByText(/^Worked for/)).toBeVisible()
     await expect(conversation.getByRole('button', { name: 'Sign in again' })).toBeVisible()
   } finally {
     await electronApp.close()
@@ -76,7 +75,6 @@ test('a signed-out coordinator leads to its sign-in in Settings, and back to try
 })
 
 test('a step whose lead is signed out asks at once, with Sign in again first', async () => {
-  test.setTimeout(120_000)
   const { electronApp, page } = await opened()
   try {
     await startTask(page, 'Fix the heading', '[lead:signed-out]')
@@ -84,10 +82,10 @@ test('a step whose lead is signed out asks at once, with Sign in again first', a
     await toConversation(page)
     const thread = page.getByRole('region', { name: 'Thread' })
     const call = thread.getByRole('button', { name: 'Sign in again' })
-    await expect(call).toBeVisible({ timeout: 30_000 })
+    await expect(call).toBeVisible()
     // Signed out, its lead can't be told anything.
     await expect(thread.getByRole('button', { name: 'Tell the lead' })).toHaveCount(0)
-    await page.waitForTimeout(300)
+    await still(page)
     // Down to the call's own buttons, under the round, across the thread.
     const from = await thread.getByRole('article', { name: /^You/ }).last().boundingBox()
     const across = await thread.boundingBox()
