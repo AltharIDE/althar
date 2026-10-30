@@ -462,8 +462,9 @@ in two layers:
      CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
      percentage moves. Where no session has said for a quarter of an hour, as
      on an idle account: Anthropic's `/api/oauth/usage`, at most every five
-     minutes, waiting as long as it asks, and never over what a session said
-     since.
+     minutes, waiting as long as it asks. Its answer is dated when it was
+     asked, so it never replaces what a session said after that, however
+     often the reader gives it again.
    - Codex: app-server's `account/rateLimits/read` and
      `account/rateLimits/updated` (`usage.ts`), started in the account's
      home; ChatGPT's `wham/usage` where it can't answer.
