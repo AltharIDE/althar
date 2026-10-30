@@ -1,7 +1,13 @@
 import { appendFileSync } from 'node:fs'
 import { relative } from 'node:path'
 
-/** A test that failed, then passed when it ran again. */
+/** The label of a flaky test's issue (report.ts), and of the tests in quarantine while it is open (quarantine.ts). */
+export const LABEL = 'flaky'
+
+/**
+ * A test that failed, then passed when it ran again; or, with `quarantined`, one that failed every time while its
+ * flaky issue was open, so it didn't fail its job (quarantine.ts).
+ */
 export interface Flaky {
   /** Its file, from the repository's root. */
   readonly file: string
@@ -10,7 +16,12 @@ export interface Flaky {
   readonly runner: 'vitest' | 'playwright'
   /** What it failed with the first time, cut short: what a fix starts from. */
   readonly error?: string | undefined
+  /** The number of the open issue it is quarantined under, when it failed every time. */
+  readonly quarantined?: number | undefined
 }
+
+/** The title of a test's issue: how report.ts files it, and how quarantine finds it. */
+export const titleOf = (test: { readonly file: string; readonly name: string }) => `Flaky: ${test.file} › ${test.name}`.slice(0, 250)
 
 /* A terminal's colours, which Playwright's messages carry. */
 // eslint-disable-next-line no-control-regex -- a terminal's colours are control characters
@@ -24,14 +35,17 @@ export const said = (error: { readonly message?: string; readonly stack?: string
 }
 
 /**
- * Says a test was flaky, out loud: as a warning on the CI run, which GitHub shows on the run and its pull request,
- * and as a line in the file `FLAKY_REPORT` names, from which CI files an issue for the test (report.ts).
+ * Says a test was flaky, or failed in quarantine, out loud: as a warning on the CI run, which GitHub shows on the run
+ * and its pull request, and as a line in the file `FLAKY_REPORT` names, from which CI files or comments on the test's
+ * issue (report.ts).
  */
 export const record = (test: Flaky) => {
   const first = test.error === undefined ? '' : `\n${test.error}`
-  process.stdout.write(
-    `::warning file=${test.file},title=Flaky test::${escape(`${test.name} failed, then passed on its retry.${first}`)}\n`,
-  )
+  const [title, what] =
+    test.quarantined === undefined
+      ? ['Flaky test', 'failed, then passed on its retry.']
+      : ['Quarantined test', `failed, and doesn't fail the job: it is quarantined while #${test.quarantined} is open.`]
+  process.stdout.write(`::warning file=${test.file},title=${title}::${escape(`${test.name} ${what}${first}`)}\n`)
   const report = process.env.FLAKY_REPORT
   if (report) appendFileSync(report, `${JSON.stringify(test)}\n`)
 }

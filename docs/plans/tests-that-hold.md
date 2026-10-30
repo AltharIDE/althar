@@ -183,6 +183,10 @@ that reports and doesn't gate.
 
 - In CI a failed test runs once more, and one that passes only then gets an
   issue labelled `flaky` (#409).
+- While that issue is open, the test is quarantined: it runs in every CI job,
+  but its failures go on its issue and the job's summary rather than failing
+  the job, and it gates again once the issue closes. The summary warns when
+  more than ten are. `stress` and `nightly` don't quarantine.
 - A pull request's new and changed tests run 20 times, on Linux and Windows,
   and its changed end-to-end specs 5 times; a flake fails the pull request.
 - Every night the whole suite runs shuffled, and five times over on Windows.
