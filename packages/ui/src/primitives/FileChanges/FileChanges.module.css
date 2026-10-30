@@ -28,14 +28,24 @@ button.file:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the folder gives way from its left, keeping its last slash beside the name; never narrower than "…/" */
 .dir {
   flex: 0 1 auto;
-  min-width: 0;
+  min-width: 2ch;
+  direction: rtl;
   color: var(--t-3);
 }
+.dirText {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+/* the name whole, until even it doesn't fit: then it gives way at its end */
 .name {
   flex: none;
   max-width: 100%;
+}
+.inDir {
+  max-width: calc(100% - 2ch);
 }
 .delta {
   display: inline-flex;

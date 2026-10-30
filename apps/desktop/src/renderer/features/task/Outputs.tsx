@@ -60,7 +60,9 @@ export const text = {
   /** Beside the commits its remote doesn't have: its branch, pushed alone, with the person's own git. */
   pushBranch: (remote: string) => `Push to ${remote}`,
   openOn: (host: string) => `Open on ${host}`,
-  conflicts: (into: string, files: string) => `It conflicts with ${into} as it is now, in ${files}.`,
+  conflicts: (into: string, files: string) => `It conflicts with ${into} in ${fewOf(files.split(', '))}.`,
+  /** Merging here stays on this computer: the button says so, under what isn't pushed. */
+  mergeHere: (label: string) => `${label} on ${device.this}`,
   /** Merged and pushed, with nothing left between it and its base: said in a line. */
   mergedAll: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
     const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
@@ -107,6 +109,12 @@ export const conflictsOf = (conflict: string, here: ReadonlyArray<{ readonly nam
       ? { name: null, branch: here[0]?.branch ?? 'main', files: part }
       : { name: repository.name, branch: repository.branch, files: part.slice(at + 2) }
   })
+
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
 
 /** A repository by its name alone: `web` for `meridian/web`. */
 const nameOf = (repository: string) => repository.slice(repository.lastIndexOf('/') + 1)
@@ -386,7 +394,7 @@ export function Outputs({
                     {...pressed(doing.mergeHere)}
                     onClick={onMergeHere}
                   >
-                    {mergeHereLabel(task.here, first !== undefined)}
+                    {text.mergeHere(mergeHereLabel(task.here, first !== undefined))}
                   </Button>,
                 ]
               : []),

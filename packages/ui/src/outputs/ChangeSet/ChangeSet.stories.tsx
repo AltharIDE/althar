@@ -11,6 +11,7 @@ import {
   CHANGE_ONE_REPO,
   CHANGE_QUEUED,
   CHANGE_READY,
+  CHANGE_REDIRECTS,
   PR_416,
 } from '../../fixtures/outputs'
 import { States, statesParameters } from '../../storybook/States'
@@ -251,6 +252,38 @@ export const BranchPushed: Story = {
     )
   },
 }
+
+/**
+ * Merging it here refused, beside what it made: why in a line, and the paths, each file's name whole where the card is too narrow
+ * for its folder.
+ */
+export const RefusedHere: Story = {
+  args: {
+    ...CHANGE_REDIRECTS,
+    checks: undefined,
+    push: (
+      <Button variant="quiet" size="small" onClick={push}>
+        Push to origin
+      </Button>
+    ),
+    actions: <Button variant="signal">Merge into main on this Mac</Button>,
+    error: 'Your main checkout has uncommitted changes to middleware.ts.',
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('alert')).toHaveTextContent('Your main checkout has uncommitted changes to middleware.ts.')
+    // Each file's name whole, apart from its folder, which keeps its slash and gives way first; the whole path on hover. Where
+    // there is layout (Storybook, not jsdom), the name isn't cut either.
+    const name = c.getByText('middleware.test.js')
+    await expect(name.previousElementSibling).toHaveTextContent(/^tests\/unit\/$/)
+    await expect(name.closest('[title]')).toHaveAttribute('title', 'tests/unit/middleware.test.js')
+    await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
+    await expect(c.getByText('middleware.ts').previousElementSibling).toBeNull()
+  },
+}
+
+/** The same alone on the page: every path whole. */
+export const RefusedHereAlone: Story = { args: RefusedHere.args, parameters: { width: ALONE } }
 
 /** Pushed, with changes the lead never committed: said, since no push takes them. */
 export const Uncommitted: Story = {
