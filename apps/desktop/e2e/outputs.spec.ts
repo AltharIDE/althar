@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, shown, startTask } from './support'
+import { connectGitHub, launch, openFirstProject, shown, sizeWindow, startTask, still } from './support'
 
 /*
  * A task's outputs in a real window, with the fake agent and the fake GitHub,
@@ -75,15 +75,15 @@ const shoot = async (electronApp: ElectronApplication, page: Page, name: string)
       [WIDE, 'wide'],
       [NARROW, 'narrow'],
     ] as const) {
-      await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), width)
+      await sizeWindow(electronApp, page, width, 900)
       await page.mouse.move(width - 10, 890)
-      await page.waitForTimeout(400)
+      await still(page)
       const shot = `${prefix}-${name}-${size}${scheme === 'dark' ? '-dark' : ''}.png`
       await page.screenshot({ path: join(SHOTS, shot), scale: 'css', animations: 'disabled' })
     }
   }
   await page.emulateMedia({ colorScheme: 'light' })
-  await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), WIDE)
+  await sizeWindow(electronApp, page, WIDE, 900)
 }
 
 const toOutputs = (page: Page) =>
@@ -93,7 +93,6 @@ const toOutputs = (page: Page) =>
     .click()
 
 test('a stopped branch with no pull request opens its draft one; a pull request open, and merged; wide and narrow', async () => {
-  test.setTimeout(240_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const remote = join(home, 'api.git')
@@ -119,7 +118,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
   git(repo, 'push', '-q', remote, 'main')
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE: remote })
   try {
-    await (await electronApp.browserWindow(page)).evaluate((window, x) => window.setSize(x, 900), WIDE)
+    await sizeWindow(electronApp, page, WIDE, 900)
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await connectGitHub(page)
@@ -127,7 +126,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     // The check's lead works until it is stopped; meanwhile it commits the update, which reaches GitHub, then brings main in after.
     await startTask(page, 'Nightly dependency check, 27 Oct', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
     const nightly = worktreeOf(repo, /branch refs\/heads\/althar\/nightly/)
     for (const [n, path] of MANIFESTS.entries())
       write(
@@ -152,19 +151,19 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     git(nightly.path, 'commit', '-q', '-am', 'Install from the lockfile as it is')
     // The person interrupts its lead: its run is still going, with no agent at work on it.
     await page.getByRole('button', { name: 'Interrupt the lead' }).click()
-    await expect(shown(page, 'Stopped', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Stopped', { exact: true })).toBeVisible()
     await toOutputs(page)
     // GitHub has the first commit, though nothing here noted it: asked as the person looks, it says so, and only the second counts.
     const branch = page.getByRole('article', { name: 'Nightly dependency check, 27 Oct' })
     await expect(branch.getByText(nightly.branch, { exact: true })).toBeVisible()
-    await expect(branch.getByText('1 commit not pushed')).toBeVisible({ timeout: 15_000 })
+    await expect(branch.getByText('1 commit not pushed')).toBeVisible()
     await expect(branch.getByText('2 commits not pushed')).toBeHidden()
     await expect(branch.getByRole('button', { name: 'Open the diff of apps/cli/package.json' })).toBeVisible()
     await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
     await shoot(electronApp, page, 'branch')
     // All of it pushed: nothing to say of it, and Althar opens its pull request, never GitHub's own page for one.
     await branch.getByRole('button', { name: 'Push to origin' }).click()
-    await expect(branch.getByText(/not pushed/)).toBeHidden({ timeout: 15_000 })
+    await expect(branch.getByText(/not pushed/)).toBeHidden()
     await expect(branch.getByRole('link', { name: /Open a pull request/ })).toHaveCount(0)
     await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
     await shoot(electronApp, page, 'branch-pushed')
@@ -172,7 +171,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     // A pull request: opened as the lead finishes, then four more files the lead committed, pushed.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await startTask(page, 'Rate-limit refunds per partner', '[lead:finish] [lead:edit]')
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('PR #1')).toBeVisible()
     const refunds = worktreeOf(repo, /branch refs\/heads\/althar\/rate-limit/)
     write(refunds.path, 'src/refunds/create.ts', 'export const create = () => limit()\n')
     write(refunds.path, 'src/refunds/limits.ts', 'export const limit = () => 10\nexport const window = 60\n')
@@ -191,13 +190,13 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
       .click()
     await toOutputs(page)
     await page.getByRole('button', { name: 'Push 1 commit' }).click()
-    await expect(page.getByRole('button', { name: 'Push 1 commit' })).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Push 1 commit' })).toHaveCount(0)
     await shoot(electronApp, page, 'pull-request')
 
     // Accepted: GitHub merges it.
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
-    await expect(shown(page, 'Merged', { exact: true }).first()).toBeVisible({ timeout: 20_000 })
+    await expect(shown(page, 'Merged', { exact: true }).first()).toBeVisible()
     await shoot(electronApp, page, 'merged')
 
     // Stopped, the check's branch still opens its draft pull request, at what it has.
@@ -209,7 +208,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await toOutputs(page)
     await branch.getByRole('button', { name: 'Open a draft pull request' }).click()
     const opened = page.getByRole('article', { name: 'Nightly dependency check, 27 Oct' })
-    await expect(opened.getByText('PR #2')).toBeVisible({ timeout: 20_000 })
+    await expect(opened.getByText('PR #2')).toBeVisible()
     await expect(opened.getByText('Draft', { exact: true })).toBeVisible()
     expect(git(remote, 'rev-parse', nightly.branch)).toBe(git(nightly.path, 'rev-parse', 'HEAD'))
   } finally {

@@ -56,7 +56,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })
     const open = card.getByRole('button', { name: /^Open localhost:\d+$/ })
-    await expect(open).toBeVisible({ timeout: 30_000 })
+    await expect(open).toBeVisible()
     const address = (await open.getAttribute('aria-label'))?.replace('Open ', '') ?? ''
     expect(await (await fetch(`http://${address}`)).text()).toBe('meridian')
     // The pill over the composer has it too, with where it runs.
@@ -81,9 +81,7 @@ test('runs the default branch from the project’s front, leaves its card in the
         .getByRole('article', { name: 'Run of main' })
         .last()
         .getByRole('button', { name: /^Open localhost:\d+$/ }),
-    ).toBeVisible({
-      timeout: 30_000,
-    })
+    ).toBeVisible()
 
     // More to run: Storybook, picked from package.json, runs beside it, each answering where it says.
     await page.getByRole('button', { name: 'Everything to run' }).click()
@@ -99,7 +97,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     await list.getByRole('menuitemcheckbox', { name: 'Storybook' }).click()
     await expect(list.getByRole('menuitemcheckbox', { name: 'Storybook' })).toHaveAttribute('aria-checked', 'true')
     await expect(list.getByRole('menuitemcheckbox', { name: 'npm run dev' })).toHaveAttribute('aria-checked', 'true')
-    await expect(list.getByText(/^localhost:\d+$/)).toHaveCount(2, { timeout: 30_000 })
+    await expect(list.getByText(/^localhost:\d+$/)).toHaveCount(2)
     await page.screenshot({ path: 'test-results/run-many.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
 

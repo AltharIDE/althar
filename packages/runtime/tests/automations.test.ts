@@ -469,7 +469,31 @@ describe('automations', () => {
         sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${running?.taskId ?? ''}`,
         (rows) => rows[0]?.state === 'suspended',
       )
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+      // Its card says Althar stopped it, and when: as the run stopped, not as a turn its lead was sent after without the run
+      // carried on (as the board's Carry on once did) ended.
+      const cardOf = Effect.map(Effect.orDie((yield* Queries).coordinator(projectId)), (snapshot) =>
+        snapshot.items.flatMap((item) => (item.kind === 'task' && item.content.taskId === running?.taskId ? [item.content] : [])),
+      )
+      const [attempt] = yield* sql<{ endedAt: string }>`
+        SELECT a.ended_at AS ended_at FROM run_attempts a JOIN runs r ON r.id = a.run_id WHERE r.task_id = ${running?.taskId ?? ''}`
+      const [card] = yield* until(cardOf, (cards) => cards[0]?.phase === 'stopped')
+      assert.deepStrictEqual(card?.stopped, { by: 'althar', at: attempt?.endedAt ?? '' })
+      const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${running?.taskId ?? ''} AND kind = 'task'`
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: thread?.id ?? '',
+        body: 'Carry on. [lead:finish]',
+      })
+      yield* sessions.startLast(thread?.id ?? '')
+      yield* until(
+        sql<{ n: number }>`
+          SELECT count(*) AS n FROM turn_deliveries WHERE thread_id = ${thread?.id ?? ''} AND state = 'completed' AND requested_at > ${attempt?.endedAt ?? ''}`,
+        (rows) => (rows[0]?.n ?? 0) > 0,
+      )
+      const [after] = yield* until(cardOf, (cards) => cards[0]?.phase === 'stopped')
+      assert.deepStrictEqual(after?.stopped, { by: 'althar', at: attempt?.endedAt ?? '' })
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options })))))
   })
 
   it.live('start a run Althar stopped before its task was made, once it is back, and fail one whose automation is off by then', () => {

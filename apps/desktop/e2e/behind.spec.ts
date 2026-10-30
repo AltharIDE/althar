@@ -31,8 +31,8 @@ test('shows over the composer the server its lead left running and the pull requ
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Rate-limit refunds per partner. [coordinator:plan-no-review] [coordinator:plan] [lead:serve] [lead:finish] [lead:edit]')
     await box.press('Enter')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
 

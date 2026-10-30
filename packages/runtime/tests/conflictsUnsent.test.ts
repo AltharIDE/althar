@@ -15,6 +15,7 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { hosted, notices, repository, runtime, until } from './support'
 import {
   asked,
@@ -133,13 +134,40 @@ describe('a conflicting task whose run didn’t succeed', () => {
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
       )
-      assert.strictEqual(why, 'You stopped it, so Althar doesn’t start its lead for a conflict.')
+      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])
       // Resolve now: asked, and the card says nothing more of why not.
       yield* (yield* Changes).resolveNow({ taskId }, true)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
       assert.isNull(yield* unsentOf(projectId))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a stopped task its lead was told to carry on, its run still suspended', () => {
+  it.live('isn’t said to be stopped while its lead is at work, nor its conflict put to the person', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      yield* runIs(taskId, 'suspended')
+      // Told to go on, as Carry on did before it resumed the run: its lead works, its run still suspended.
+      yield* (yield* Sessions).send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'Carry on. [lead:wait]' })
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'running')
+      moveHostMainOn(working, bare)
+      yield* Effect.sleep('2 seconds')
+      const [card] = yield* cards(projectId)
+      assert.strictEqual(card?.phase, 'running')
+      assert.isNull(card?.conflictUnsent ?? null)
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      // Once its lead stops, it is stopped again: why its conflict wasn't asked shows.
+      yield* (yield* Sessions).interrupt(threadId)
+      const [why] = yield* until(
+        Effect.map(unsentOf(projectId), (one) => [one]),
+        ([one]) => one !== null,
+      )
+      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
@@ -349,7 +377,7 @@ describe('a branch merging here, with no pull request', () => {
       moveMainOn(working)
       yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
-        ([one]) => one === 'You stopped it, so Althar doesn’t start its lead for a conflict.',
+        ([one]) => one === 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
       )
       // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
       rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })
