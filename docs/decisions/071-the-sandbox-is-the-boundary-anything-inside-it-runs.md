@@ -90,7 +90,7 @@
   - **Every ask and refusal is counted by its kind** (`tallyKindOf`): one
     of the project's kinds, what the rules can't read, a command the project
     named, credentials, the code host, what a reader may not do, and the
-    rest. The kind goes on the decision (`decisions.kind`, migration 0048)
+    rest. The kind goes on the decision (`decisions.kind`, migration 0049)
     and on the card (`counted`). The project's rules say, under "Last 14
     days", how each kind went: how often it asked and was allowed, was
     refused, and was worked around (`tally.ts`). A kind that mostly gets
@@ -102,10 +102,12 @@
     lead, which reads someone else's code. Git's guard holds for every
     lead, everywhere.
 - **Alternatives considered:**
-  - **Reading more of the shell** (the two tasks in flight on 2026-10-29).
-    Each script read is one more case. Where a sandbox holds the command,
-    reading it says nothing the sandbox doesn't, so it is kept only where
-    none does.
+  - **Reading more of the shell** (#410, the coordinator's loops, and #411,
+    allow-everything going ahead with what it can't read, both on
+    2026-10-29). Each script read is one more case. Where a sandbox holds
+    the command, reading it says nothing the sandbox doesn't, so their
+    reading holds only where none does. #410's refusal that goes with the
+    next prompt stays, for agents that don't read a refusal in the call.
   - **The coordinator judging what crosses.** A judgment is up to a minute
     of waiting on every command, a disturbance of its own.
   - **Catching pushes by reading scripts for `push`.** That reads words, not

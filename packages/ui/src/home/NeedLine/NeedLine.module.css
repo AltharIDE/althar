@@ -150,15 +150,20 @@
 /* narrow: whose it is under the title, the answers beside both */
 @container (max-width: 620px) {
   .line {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      'kind actions'
-      'main actions'
-      'whose actions';
+      'kind'
+      'main'
+      'whose'
+      'actions';
     gap: 3px 12px;
   }
   .kind {
     padding: 0;
+  }
+  .actions {
+    justify-self: start;
+    margin-top: 4px;
   }
 }
 
@@ -172,7 +177,8 @@
     grid-template-areas:
       'kind whose whose'
       'title title title'
-      'brief brief actions';
+      'brief brief brief'
+      'actions actions actions';
     gap: 3px 8px;
     min-height: 0;
     padding: 10px 12px 11px;
@@ -194,6 +200,11 @@
   }
   .glance .brief {
     grid-area: auto;
+  }
+  /* the answers on a row of their own, from the left edge, never beside the brief */
+  .actions {
+    justify-self: start;
+    margin-top: 4px;
   }
   .kind,
   .whose {

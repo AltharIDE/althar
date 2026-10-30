@@ -192,7 +192,8 @@ export const guardEnv = (input: {
 export const passGuard = (sessionId: string, at: Guard | undefined = made): void => {
   if (at === undefined) return
   try {
-    writeFileSync(passOf(sessionId, at), new Date().toISOString())
+    // Its file's own time is what the hook reads, so writing it again starts the two minutes again.
+    writeFileSync(passOf(sessionId, at), sessionId)
   } catch {
     // A pass that can't be written leaves the guard as it is: the command says what stopped it.
   }

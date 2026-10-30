@@ -96,9 +96,10 @@ describe('a command its sandbox holds', () => {
     for (const mode of ['rules', 'coordinator', 'ask', 'allow'] as const)
       for (const [name, line] of Object.entries(TODAY))
         assert.deepStrictEqual(decideInside(command(line), context(mode)), { verdict: 'allow' }, `${mode}: ${name}`)
-    // As they were before, read: asked about, everything allowed or not.
-    assert.strictEqual(decide(command(TODAY.patch), context('allow')).verdict, 'ask')
-    assert.strictEqual(decide(command(TODAY.variable), context('allow')).verdict, 'ask')
+    // Where no sandbox holds it, the rules read it: what they can't read asks, but with everything allowed, where it goes ahead (ADR-067).
+    assert.strictEqual(decide(command(TODAY.patch), context('ask')).verdict, 'ask')
+    assert.strictEqual(decide(command(TODAY.variable), context('ask')).verdict, 'ask')
+    assert.strictEqual(decide(command(TODAY.variable), context('allow')).verdict, 'allow')
   })
 
   it('runs unread for the coordinator: the loops and substitutions its reader rules refused', () => {
@@ -256,10 +257,12 @@ describe('a lead whose sandbox Althar holds', () => {
           taskId: null,
           rules: { role: 'reader', trusted: true, cwd: '/work/meridian/.coordinator' },
         }
-        for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution]) {
+        const { sandbox: _, ...unheld } = reader
+        for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution, TODAY.heredoc]) {
           assert.strictEqual((yield* permissions.decide({ ...reader, sandbox: coordinator }, command(line))).decision, 'allow', line)
-          const { sandbox: _, ...unheld } = reader
-          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, 'reject', line)
+          // Where none holds it, its reader rules read it: a loop of reads runs, what they can't follow is refused.
+          const read = [TODAY.loop, TODAY.substitution].includes(line) ? 'allow' : 'reject'
+          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, read, line)
         }
       }).pipe(Effect.provide(runtime())),
     // Seven seconds alone; more while other tests share the machine.

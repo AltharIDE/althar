@@ -416,6 +416,24 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live(
+      "asks for the person's words sent with the runtime's reminder to report, before it or after, as the fake does what they ask",
+      () =>
+        Effect.gen(function* () {
+          const reminded = yield* turn(
+            `Your step isn't done until you call Althar's finish_step tool. Call it now.\n\n${scenarios.tool}`,
+            allow,
+          )
+          assert.strictEqual(text(reminded.events), 'chosen=allow-once')
+          // Written as the turn ended, the person's words are queued before the reminder, and come first.
+          const first = yield* turn(
+            `${scenarios.tool}\n\nYour step isn't done until you call Althar's finish_step tool. Call it now.`,
+            allow,
+          )
+          assert.strictEqual(text(first.events), 'chosen=allow-once')
+        }),
+    )
+
     it.live('never allows always: with no one-time allow on offer, the request is cancelled', () =>
       Effect.gen(function* () {
         const { events, permissions } = yield* turn(scenarios.toolAlwaysOnly, allow)
@@ -577,6 +595,67 @@ describe('AgentConnection', () => {
             assert.strictEqual(stopReason(events), 'end_turn')
           }),
         () => Effect.succeed({ decision: 'reject', reason: "It would write outside the task's worktree.", decidedBy: 'rules' }),
+      ),
+    )
+
+    /** Two turns of a session that explains refusals with its next prompt, as the coordinator's does. */
+    const twoTurns = (first: string, decide: Decide) =>
+      withConnection(
+        fake,
+        (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', refusals: 'withNext' })
+            const one = yield* Stream.runCollect(session.prompt(first))
+            const two = yield* Stream.runCollect(session.prompt('what next?'))
+            return { one, two }
+          }),
+        decide,
+      )
+    const rules: Decide = () => Effect.succeed({ decision: 'reject', reason: 'edits wait for review', decidedBy: 'rules' })
+
+    it.live('starts no turn for a refusal the agent carried on past, and drops it, where refusals go with the next prompt', () =>
+      Effect.gen(function* () {
+        const { one, two } = yield* twoTurns(scenarios.commandChoices, rules)
+        assert.lengthOf(find(one, 'Resumed'), 0)
+        assert.deepStrictEqual(find(one, 'AgentMessage').length, 1)
+        assert.strictEqual(stopReason(one), 'end_turn')
+        assert.strictEqual(text(two), 'echo: what next?')
+      }),
+    )
+
+    it.live('starts no turn for a refusal that stopped the turn, and says it before the next prompt', () =>
+      Effect.gen(function* () {
+        const { one, two } = yield* twoTurns(scenarios.fileEdit, rules)
+        assert.lengthOf(find(one, 'Resumed'), 0)
+        assert.deepStrictEqual(tags(one), ['ToolCall', 'PermissionAnswered', 'ToolCallUpdate', 'AgentMessage', 'TurnEnded'])
+        assert.strictEqual(
+          text(two),
+          "echo: (From Althar, about your last turn: Althar's rules refused this (Edit app.ts): edits wait for review. Carry on without it.)\n\nwhat next?",
+        )
+      }),
+    )
+
+    it.live('carries nothing to the next prompt after the person cancels, where refusals go with it', () =>
+      withConnection(
+        fake,
+        (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', refusals: 'withNext' })
+            const events: Array<SessionEvent> = []
+            const pending = yield* Effect.forkChild(
+              Stream.runForEach(session.prompt(scenarios.deniedThenWait), (event) =>
+                Effect.sync(() => {
+                  events.push(event)
+                }),
+              ),
+            )
+            while (!events.some((event) => event._tag === 'AgentMessage' && event.text === 'chosen=decline'))
+              yield* Effect.sleep('5 millis')
+            yield* session.interrupt
+            yield* Fiber.join(pending)
+            assert.strictEqual(text(yield* Stream.runCollect(session.prompt('what next?'))), 'echo: what next?')
+          }),
+        () => Effect.succeed({ decision: 'reject', reason: 'Outside the task.', decidedBy: 'coordinator' }),
       ),
     )
 

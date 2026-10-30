@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, say } from './support'
+import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, say, still } from './support'
 
 /*
  * A project made in a tab of its own, named first and then given its
@@ -165,7 +165,7 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await expect(read.getByText(/is on GitLab, which isn’t connected/)).toBeVisible()
     await expect(read.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
     await expect(folders.getByRole('listitem')).toHaveCount(2)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/new-project.png' })
 
     // Away and back, it is as it was.

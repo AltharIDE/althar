@@ -95,6 +95,7 @@ export interface RequestContext {
         readonly offline?: boolean
         readonly cwd?: string
         readonly trusted?: boolean
+        readonly contained?: boolean
         readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
       }
   /** How the session's sandbox holds its shell commands, where it has one Althar relies on (ADR-071). */
@@ -587,13 +588,14 @@ export class Permissions extends Context.Service<
             const inside = requestContext.sandbox !== undefined && runsInside(request, requestContext.sandbox)
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const { offline, cwd, trusted, reads } = requestContext.rules
+              const { offline, cwd, trusted, contained, reads } = requestContext.rules
               const read = inside
                 ? decideInside(request)
                 : decideReader(request, {
                     offline: offline === true,
                     ...(cwd === undefined ? {} : { cwd }),
                     ...(trusted === true ? { trusted } : {}),
+                    ...(contained === true ? { contained } : {}),
                     ...(reads === undefined ? {} : { reads }),
                   })
               const decision: PermissionDecision =

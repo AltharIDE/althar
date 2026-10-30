@@ -23,6 +23,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Context, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
+import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { copyTo, measure, wordsOf } from '../src/attachments'
@@ -82,16 +83,6 @@ const connected = (options: { readonly each?: Readonly<Record<string, FakeAgentO
     return { client, grant, worktreeRoot, sql: Context.get(context, SqlClient.SqlClient) }
   })
 
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
-  })
-
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
 const said = (items: ReadonlyArray<ThreadItem>) => items.flatMap((item) => (item.kind === 'agent_message' ? [item.content.text] : []))
 const messages = (items: ReadonlyArray<ThreadItem>) => items.flatMap((item) => (item.kind === 'user_message' ? [item] : []))
@@ -102,7 +93,7 @@ const taskWithLead = (setup: Effect.Success<ReturnType<typeof connected>>) =>
     const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
     const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Read the spec' })
     yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
-    yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+    yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
     const [worktree] = yield* setup.sql<{ path: string }>`SELECT path FROM workspaces`
     return { project, task, worktree: worktree?.path ?? '' }
   })
@@ -121,7 +112,7 @@ describe('files sent with a message', () => {
           { grant: yield* grant(join(from, 'logs')) },
         ]
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: 'Read these', disposition: 'after_current', files })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: Read these')),
         )
         // The agent opened each copy by its path, as it would with its own tools.
@@ -170,7 +161,7 @@ describe('files sent with a message', () => {
           disposition: 'after_current',
           files: [{ kept: kept[0]?.id ?? '' }],
         })
-        const again = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const again = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: Again')),
         )
         assert.strictEqual(messages(again.items)[1]?.content.files[0]?.path, kept[0]?.path)
@@ -182,7 +173,7 @@ describe('files sent with a message', () => {
           disposition: 'after_current',
           files: [{ grant: yield* grant(join(from, 'logs', 'linked.pdf')) }],
         })
-        const alone = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const alone = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.startsWith('saw files: linked.pdf (linked')),
         )
         const linkedCopy = messages(alone.items)[2]?.content.files[0]?.path ?? ''
@@ -206,7 +197,7 @@ describe('files sent with a message', () => {
           disposition: 'after_current',
           files: [{ grant: yield* grant(join(from, 'build.log')) }, { grant: yield* grant(join(from, 'logs')) }],
         })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: Why?')),
         )
         assert.include(said(thread.items).join('\n'), 'saw files: build.log (embedded): error: the build broke; logs (linked folder)')
@@ -228,7 +219,7 @@ describe('files sent with a message', () => {
           disposition: 'after_current',
           files: [{ grant: yield* grant(join(from, 'spec.pdf')) }],
         })
-        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const heard = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           said(snapshot.items).some((text) => text.includes('saw files')),
         )
         assert.include(said(heard.items).join('\n'), 'saw files: spec.pdf (linked, application/pdf, 18 B): %PDF-1.7')
@@ -236,7 +227,7 @@ describe('files sent with a message', () => {
         assert.isTrue(path.startsWith(worktreeRoot) && path.includes(join('.coordinator', '.althar', 'attachments')), path)
         // Its next turn makes its copies afresh, and the file stays.
         yield* client.Send({ commandId: commandId(), threadId: coordinator.threadId, body: 'And?', disposition: 'after_current' })
-        yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) => said(snapshot.items).length > 1)
+        yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) => said(snapshot.items).length > 1)
         assert.isTrue(existsSync(path))
       }),
     ),
@@ -369,19 +360,17 @@ describe('what the person sent with a message a task is made from', () => {
         images: [{ data: SCREENSHOT_PNG, name: 'bug.png' }],
         files: [{ grant: yield* grant(join(from, 'build.log')) }],
       })
-      const [made] = yield* eventually(
+      const [made] = yield* until(
         sql<{ threadId: string }>`SELECT id AS thread_id FROM threads WHERE kind = 'task'`,
         (rows) => rows.length === 1,
       )
       const threadId = made?.threadId ?? ''
       // A plan the coordinator proposed waits for the person to start it.
       if (`${body}${cues}`.includes('[coordinator:plan]')) {
-        const [plan] = yield* eventually(sql<{ id: string }>`SELECT id FROM task_plans`, (rows) => rows.length === 1)
+        const [plan] = yield* until(sql<{ id: string }>`SELECT id FROM task_plans`, (rows) => rows.length === 1)
         yield* client.StartPlan({ commandId: commandId(), planId: plan?.id ?? '' })
       }
-      const thread = yield* eventually(client.GetThread({ threadId }), (value) =>
-        said(value.items).some((text) => text.includes('saw files')),
-      )
+      const thread = yield* until(client.GetThread({ threadId }), (value) => said(value.items).some((text) => text.includes('saw files')))
       const sent = messages((yield* client.GetCoordinator({ projectId: project.id })).items)[0]?.content
       const [brief] = yield* sql<{
         prompt: string

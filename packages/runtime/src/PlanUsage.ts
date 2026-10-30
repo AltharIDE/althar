@@ -69,7 +69,7 @@ export interface PlanUsageOptions {
   /** An agent's version as its CLI says it; as it is, unless a test says. OpenCode is listed only on a version known to list its sign-ins. */
   readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
   /** How a provider's usage endpoint is read with an account's sign-in (ADR-062); the package's reader, unless a test says. */
-  readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
+  readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
   /** How often accounts are read on their own while the runtime runs: five minutes. Zero turns it off. */
@@ -133,9 +133,12 @@ export class PlanUsage extends Context.Service<
         const live = yield* Live
         const scope = yield* Effect.scope
         const options = (yield* RuntimeConfig).usage ?? {}
+        // The runtime's clock, for the readers outside any effect, which read the windows' resets by it.
+        const nowAsDate = yield* Clock.clockWith((clock) => Effect.succeed(() => new Date(clock.currentTimeMillisUnsafe())))
         const readAgent =
           options.readAgent ??
-          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) => readAgentUsage(agent, { node: adapterNode(), home }))
+          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
+            readAgentUsage(agent, { node: adapterNode(), home, now: nowAsDate }))
         const readCredentials =
           options.readCredentials ??
           ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
@@ -266,13 +269,17 @@ export class PlanUsage extends Context.Service<
                 const named = env[variable] ?? process.env[variable]
                 const version = yield* versionOf(definition)
                 const got = yield* Effect.promise(() =>
-                  readEndpoint(sourceId, {
-                    agent: definition.id,
-                    provider,
-                    home: env[variable] ?? definition.home.usual(process.env, homedir()),
-                    named: named !== undefined && named !== '',
-                    ...(version === undefined ? {} : { agentVersion: version }),
-                  }).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
+                  readEndpoint(
+                    sourceId,
+                    {
+                      agent: definition.id,
+                      provider,
+                      home: env[variable] ?? definition.home.usual(process.env, homedir()),
+                      named: named !== undefined && named !== '',
+                      ...(version === undefined ? {} : { agentVersion: version }),
+                    },
+                    nowAsDate,
+                  ).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
                 )
                 if (got.kind === 'usage') return yield* read(got.usage)
                 if (got.kind === 'none') return yield* keep(account.id, none)
@@ -338,7 +345,7 @@ export class PlanUsage extends Context.Service<
         const readAll = (force: boolean) =>
           Effect.gen(function* () {
             yield* hydrate
-            const now = Date.now()
+            const now = yield* Clock.currentTimeMillis
             let read = 0
             for (const entry of agents.list) {
               // Each account at once: one agent slow to answer (up to its timeout) holds up none of the others.

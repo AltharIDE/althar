@@ -77,8 +77,8 @@ export interface PermissionRequest {
 /**
  * Althar's permission decision. A refusal by the project's rules or the coordinator is explained in the refused call's
  * own result where the agent reads it there (`PermissionMeanings.reasonInBand`), else at the next turn boundary, even
- * when the provider's rejection carries on: the agent's own message says only that the person refused. No `decidedBy`
- * is the person's answer on a card.
+ * when the provider's rejection carries on: the agent's own message says only that the person refused (a session's
+ * `refusals` says how). No `decidedBy` is the person's answer on a card.
  */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
@@ -254,7 +254,19 @@ export interface NewSessionOptions {
    * the session takes no more prompts.
    */
   readonly held?: Readonly<Record<string, string>>
+  /**
+   * How a refusal is explained (ADR-019): `resume`, the default, sends it at
+   * the turn's end as a turn of its own, which the agent answers. `withNext`
+   * never starts a turn for it, for an agent that talks with the person, whose
+   * every turn is a reply they read: a refusal that stopped the turn goes
+   * before the next prompt's text, and one the agent carried on past is
+   * dropped, as it has worked around it.
+   */
+  readonly refusals?: 'resume' | 'withNext'
 }
+
+/** A refusal `withNext` carries, as it goes before the next prompt's text. */
+export const carriedRefusal = (said: string, text: string): string => `(From Althar, about your last turn: ${said})\n\n${text}`
 
 type Failure = AgentRequestFailed | AgentExited
 
@@ -295,6 +307,8 @@ export interface ProcessInfo {
   readonly pid: number
   readonly osStartedAt?: string
   readonly environmentDigest: string
+  /** Its temporary folder, which `$TMPDIR`, `$TMP` and `$TEMP` name in its commands, where its launch made it one of its own. */
+  readonly temp?: string
   /** Completes once the connection's scope has stopped the process group, with what it took. */
   readonly stopped: Effect.Effect<StopReport>
 }
@@ -367,6 +381,8 @@ interface Turn {
   readonly done: Deferred.Deferred<void>
   /** A stopping rejection or coordinator denial to explain at the next turn boundary. */
   resumeWith: string | undefined
+  /** A rejection that stopped the turn was among those explained. */
+  stoppedByRefusal: boolean
   resumes: number
   cancelled: boolean
   failure: Classified | undefined
@@ -375,7 +391,7 @@ interface Turn {
 /** What reaches a session from the agent, in the order it arrived. */
 type Inbound =
   | { readonly _tag: 'Update'; readonly update: acp.SessionUpdate }
-  | { readonly _tag: 'Event'; readonly event: SessionEvent; readonly resumeWith?: string }
+  | { readonly _tag: 'Event'; readonly event: SessionEvent; readonly resumeWith?: string; readonly stops?: boolean }
   | { readonly _tag: 'Stopped'; readonly response: acp.PromptResponse }
   | { readonly _tag: 'PromptFailed'; readonly cause: unknown }
 
@@ -458,7 +474,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
-          ...(explain ? { resumeWith: refusalSaid(request.title, decided) } : {}),
+          ...(explain ? { resumeWith: refusalSaid(request.title, decided), stops: chosen.stopsTurn } : {}),
         })
         return chosen.optionId === null
           ? CANCELLED
@@ -990,10 +1006,17 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             )
           })
 
+        /** A refusal kept for the next prompt (`refusals: 'withNext'`). */
+        let carried: string | undefined
+
         /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
-            if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
+            if (sessionOptions.refusals === 'withNext') {
+              // No turn of its own: one that stopped the turn goes with the next prompt, one it carried on past is dropped.
+              carried = !turn.cancelled && turn.stoppedByRefusal ? turn.resumeWith : undefined
+              turn.resumeWith = undefined
+            } else if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
               const reason = turn.resumeWith
               turn.resumeWith = undefined
               turn.resumes += 1
@@ -1030,11 +1053,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   for (const event of yield* interpret(inbound.update)) yield* deliver(event)
                   return
                 case 'Event':
-                  if (turn !== undefined && inbound.resumeWith !== undefined)
+                  if (turn !== undefined && inbound.resumeWith !== undefined) {
                     turn.resumeWith = [turn.resumeWith, inbound.resumeWith]
                       .filter((line) => line !== undefined)
                       .join('\n')
                       .slice(0, 8000)
+                    if (inbound.stops === true) turn.stoppedByRefusal = true
+                  }
                   return yield* deliver(inbound.event)
                 case 'Stopped':
                   if (turn !== undefined) yield* stopped(turn, inbound.response)
@@ -1066,6 +1091,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 queue: yield* Queue.unbounded<SessionEvent, Failure | Cause.Done>(),
                 done: yield* Deferred.make<void>(),
                 resumeWith: undefined,
+                stoppedByRefusal: false,
                 resumes: 0,
                 cancelled: false,
                 failure: undefined,
@@ -1076,7 +1102,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (!idle) return yield* new TurnInProgress({ sessionId })
               // A new turn: what it says before a question is of this turn only.
               said.delete(sessionId)
-              yield* send(text, parts)
+              const note = carried
+              carried = undefined
+              yield* send(note === undefined ? text : carriedRefusal(note, text), parts)
               yield* started
               return Stream.fromQueue(turn.queue)
             }),
@@ -1121,6 +1149,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               pid: owned.pid,
               ...(owned.osStartedAt === undefined ? {} : { osStartedAt: owned.osStartedAt }),
               environmentDigest: owned.environmentDigest,
+              ...(owned.temp === undefined ? {} : { temp: owned.temp }),
               stopped: Deferred.await(owned.stopped),
             },
           }),

@@ -232,7 +232,7 @@ describe('a task', () => {
     expect(screen.getByRole('heading', { name: 'Nothing changed yet' })).toBeTruthy()
     await userEvent.keyboard('c')
     // Work under way has no pull request to open yet.
-    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
     expect(screen.getByText('Idle')).toBeTruthy()
     expect(screen.getByText('it')).toBeTruthy()
     // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
@@ -631,10 +631,10 @@ describe('a task', () => {
     expect(card.textContent).toMatch(/1h 4m in all/)
   })
 
-  it('pushes its branch with the person’s own git, then offers its host’s pull request page, and what connecting would add', async () => {
+  it('names its branch and what of it isn’t pushed, pushes it quietly, and offers connecting its host, which opens its pull request', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const page = 'https://github.com/meridian/api/compare/main...althar/add-a-retry?expand=1'
-    const at = (remote: { pushed: boolean; ahead: number }, phase: ThreadSnapshot['task']['phase'] = 'ready') => {
+    const at = (remote: { pushed: boolean; ahead: number | null }, phase: ThreadSnapshot['task']['phase'] = 'ready') => {
       const base = thread({ session: null })
       return {
         ...base,
@@ -656,38 +656,48 @@ describe('a task', () => {
         },
       }
     }
-    let stands = { pushed: false, ahead: 2 }
-    // Under way, its branch so far can go up already.
+    let stands: { pushed: boolean; ahead: number | null } = { pushed: false, ahead: null }
+    // Before origin says where its branch is, nothing is said of what it has, and nothing offers to push.
+    const unasked = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(stands, 'running')) }).client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const unsaid = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(unsaid.getByText('althar/add-a-retry')).toBeTruthy()
+    expect(unsaid.queryByText(/not pushed/)).toBeNull()
+    expect(unsaid.queryByRole('button', { name: 'Push to origin' })).toBeNull()
+    unasked.unmount()
+
+    stands = { pushed: false, ahead: 2 }
+    // Under way, its branch so far can go up already, quietly; its pull request waits for its lead to be done.
     const early = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(stands, 'running')) }).client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     const sofar = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(sofar.getByText('Its branch so far')).toBeTruthy()
-    expect(sofar.getByRole('button', { name: 'Push the branch to origin' })).toBeTruthy()
+    expect(sofar.getByText('althar/add-a-retry')).toBeTruthy()
+    expect(sofar.getByText('2 commits not pushed')).toBeTruthy()
+    expect(sofar.getByRole('button', { name: 'Push to origin' })).toBeTruthy()
+    expect(sofar.queryByRole('button', { name: 'Connect GitHub' })).toBeNull()
     early.unmount()
 
+    // Ready: connecting GitHub is the button, as what opens its pull request; merging it here is the other way.
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     expect(outputs.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
-    expect(outputs.getByText('Not on origin yet')).toBeTruthy()
-    // Nothing to connect for, before anything is pushed.
-    expect(screen.queryByText(/Connected to GitHub, Althar would/)).toBeNull()
-    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    expect(outputs.getByText('Althar opens its pull request once GitHub is connected.')).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
+    expect(outputs.queryByText(/Not on origin/)).toBeNull()
+    await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
     await waitFor(() => expect(client.pushBranch).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
     view.unmount()
 
-    // Pushed: its pull request is a press away on GitHub, and connecting would let Althar carry it from there.
+    // Pushed: nothing said of it, and its pull request is a press away on GitHub too.
     stands = { pushed: true, ahead: 0 }
     withServices(<Task />, client)
     const pushed = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(pushed.getByText('On origin')).toBeTruthy()
+    expect(pushed.queryByText(/not pushed|origin/)).toBeNull()
     expect(pushed.getByRole('link', { name: /Open a pull request on GitHub/ }).getAttribute('href')).toBe(page)
-    expect(pushed.queryByRole('button', { name: 'Push the branch to origin' })).toBeNull()
-    expect(
-      screen.getByText(/Connected to GitHub, Althar would open the pull request itself, bring its checks and reviews back to the lead/),
-    ).toBeTruthy()
+    expect(pushed.queryByRole('button', { name: 'Push to origin' })).toBeNull()
     // Connecting it opens GitHub's own walk in, beside the outputs.
-    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+    await userEvent.click(pushed.getByRole('button', { name: 'Connect GitHub' }))
     const panel = await screen.findByRole('complementary', { name: 'Connect GitHub' })
     expect(await within(panel).findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     await userEvent.click(within(panel).getByRole('button', { name: /Close/ }))
@@ -722,7 +732,7 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
     expect(await outputs.findByText('origin/althar/add-a-retry refused the push: protected branch.')).toBeTruthy()
   })
 
@@ -756,13 +766,13 @@ describe('a task', () => {
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     // Its remote is behind by what each repository has that it doesn't.
-    expect(outputs.getByText('3 commits not on origin yet')).toBeTruthy()
+    expect(outputs.getByText('3 commits not pushed')).toBeTruthy()
     expect(outputs.getByRole('link', { name: 'Open a pull request on GitLab' })).toBeTruthy()
     expect(outputs.getByRole('link', { name: 'Open a pull request on Codeberg' })).toBeTruthy()
     expect(outputs.getByRole('link', { name: 'Open a pull request' })).toBeTruthy()
     // With no host Althar knows, nothing to connect.
-    expect(screen.queryByText(/Althar would open the pull request itself/)).toBeNull()
-    await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+    expect(screen.queryByRole('button', { name: /^Connect/ })).toBeNull()
+    await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
     await waitFor(() =>
       expect(client.pushBranch).toHaveBeenCalledWith('t1', [
         { repository: 'api', head: 'api-head' },
@@ -798,10 +808,10 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByText('Not on origin yet')).toBeTruthy()
+    expect(outputs.getByText('2 commits not pushed')).toBeTruthy()
     expect(outputs.getByRole('link', { name: 'Open a pull request on GitLab' })).toBeTruthy()
     expect(outputs.queryByRole('link', { name: 'Open a pull request on Codeberg' })).toBeNull()
-    expect(outputs.getByRole('button', { name: 'Push the branch to origin' })).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Push to origin' })).toBeTruthy()
   })
 
   it('opens on its outputs once ready, switches faces by c and o, and goes back on Escape', async () => {
@@ -815,9 +825,9 @@ describe('a task', () => {
     withServices(<Task onBack={onBack} />, client)
     // What it made, on its branch: merged here, as the person says.
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByText('On its branch')).toBeTruthy()
+    expect(outputs.getByText('althar/add-a-retry')).toBeTruthy()
     expect(outputs.getByText('checkout.ts')).toBeTruthy()
-    expect(screen.getByText('Ready for you')).toBeTruthy()
+    expect(screen.getByText('Ready to accept')).toBeTruthy()
     await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
     await waitFor(() => expect(client.mergeHere).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
     // c for the conversation, o for the outputs; not while typing.
@@ -982,7 +992,7 @@ describe('a task', () => {
     expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
     getThread.mockResolvedValue({ ...base, task: { ...base.task, files: [file], phase: 'ready' as const } })
     emit(changed('task', 't1', 'th1'))
-    expect(await screen.findByText('Ready for you')).toBeTruthy()
+    expect(await screen.findByText('Ready to accept')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Thread' })).toBeTruthy()
     expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
   })
@@ -999,6 +1009,20 @@ describe('a task', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
     expect(screen.queryByRole('button', { name: 'Ask for changes' })).toBeNull()
+  })
+
+  it('shows a pull request accepted into its merge queue as there, in its header and on its card, with nothing to accept', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        task: { ...base.task, phase: 'ready' as const, changes: [change({ draft: false, queued: true })], commits: 2 },
+      })),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findAllByText('In the merge queue')).toHaveLength(2)
+    expect(screen.queryByText('Ready for you')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
   })
 
   it('counts what is left to push as soon as a push ends, its button busy until the card read since is shown', async () => {
@@ -1865,15 +1889,57 @@ describe('a task', () => {
     expect(client.startSession).not.toHaveBeenCalled()
   })
 
-  it('opens the pull request of work that ended on its branch', async () => {
+  it('opens the draft pull request of work on its branch whenever no agent is at work on it', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } })),
     })
     const view = withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Open a pull request' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a draft pull request' }))
     await waitFor(() => expect(client.openChange).toHaveBeenCalledWith('t1'))
     view.unmount()
-    // With its host not connected, there is no pull request a press could open.
+    // Stopped, its run waiting to be carried on: what it has goes up as a draft all the same.
+    const stopped = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({ session: null, task: { ...snapshot().task, phase: 'stopped', commits: 2, actions: ['resume', 'abandon'] } }),
+      ),
+    })
+    const halted = withServices(<Task />, stopped.client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open a draft pull request' }))
+    await waitFor(() => expect(stopped.client.openChange).toHaveBeenCalledWith('t1'))
+    halted.unmount()
+    // Its lead's turn cut short with its run still going, its branch on GitHub already: Althar opens it, not GitHub's own page.
+    const pushed = {
+      name: 'origin',
+      branch: 'althar/add-a-retry',
+      pushed: true,
+      ahead: 0,
+      newPullRequest: 'https://github.com/acme/web/pull/new/x',
+    }
+    const interrupted = fakeClient({
+      getThread: vi.fn(async () => {
+        const base = thread({ session: null, task: { ...snapshot().task, phase: 'stopped', commits: 2, actions: ['stop', 'abandon'] } })
+        const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111', remote: pushed }]
+        return { ...base, task: { ...base.task, here } }
+      }),
+    })
+    const cut = withServices(<Task />, interrupted.client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const card = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(card.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Open a draft pull request' }))
+    await waitFor(() => expect(interrupted.client.openChange).toHaveBeenCalledWith('t1'))
+    cut.unmount()
+    // Its lead at work: its run opens it as it ends.
+    const working = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...snapshot().task, phase: 'running', commits: 2, actions: ['stop', 'abandon'] } })),
+    })
+    const busy = withServices(<Task />, working.client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(await screen.findByRole('article', { name: 'Add a retry' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
+    busy.unmount()
+    // With its host not connected, connecting it is what opens one.
     const unconnected = fakeClient({
       getThread: vi.fn(async () => ({
         ...thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2 } }),
@@ -1881,8 +1947,8 @@ describe('a task', () => {
       })),
     })
     withServices(<Task />, unconnected.client)
-    expect(await screen.findByText('Ready for you')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
   })
 
   it('merges work that ended on its branch here, up to the heads it showed', async () => {
@@ -1922,7 +1988,7 @@ describe('a task', () => {
       ]),
     )
     // Its pull request is open already.
-    expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
   })
 
   it('keeps the person’s pinned models in this window, and their default efforts in Althar', async () => {
@@ -2625,7 +2691,7 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     expect(await screen.findByText('No other model is free now.')).toBeTruthy()
-    expect(await screen.findByRole('button', { name: /^Continue with/ }, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Continue with/ })).toBeTruthy()
   })
 
   it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {
@@ -2857,8 +2923,13 @@ describe('a task', () => {
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
-    // Ready, accepting it is the person's; settled, it is done.
-    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready for you' })
+    // Stopped as its card is, its lead's session kept or not: never idle, and what stopped it where something says, as the board does.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'stopped' } })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
+    expect(
+      statusOf({ ...base, task: { ...base.task, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-29T18:00:00.000Z' } } }),
+    ).toEqual({ status: TaskStatus.Stopped, state: 'Stopped', why: 'Stopped when you interrupted it' })
+    // Ready, accepting it is the person's, in its card's words; settled, it is done.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready to accept' })
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled' } })).toEqual({ status: TaskStatus.Done, state: 'Done' })
     // Abandoned, it says so.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned' } })).toEqual({
@@ -2880,7 +2951,7 @@ describe('a task', () => {
     expect(statusOf({ ...base, task: { ...base.task, phase: 'running', step: 'checks' } }).state).toBe('Fixing the checks')
     expect(statusOf({ ...base, task: { ...base.task, phase: 'ready', handedBack: 'The lead couldn’t resolve the conflict.' } })).toEqual({
       status: TaskStatus.Yours,
-      state: 'Needs you',
+      state: 'Merge conflict',
     })
     // On a step, it says what it does there: while its lead works, and while another agent reviews.
     expect(statusOf({ ...running(), task: { ...base.task, step: 'implement' } }).state).toBe('Implementing')

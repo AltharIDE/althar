@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { TaskStatus, TrackStep } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import { HoverCard } from '../../primitives/HoverCard/HoverCard'
+import { HoverCard, Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
@@ -20,11 +20,13 @@ import s from './TaskHeader.module.css'
  * do about it sits inside it, a finished task's Done and Keep for later
  * (SettleWays in the header); while its plan runs, so do its steps' bars.
  *
- * Only then, while a plan of two steps or more is under way, does pointing
- * at or focusing where it stands open a card: who does each step, the one it
- * is on and for how long, and how long it has run in all. That is the one
- * thing the bar doesn't otherwise say: during a review, the reviewer is not
- * the lead the composer names. Anywhere else the chip's words say it all.
+ * While a plan of two steps or more is under way, pointing at or focusing
+ * where it stands opens a card: who does each step, the one it is on and for
+ * how long, and how long it has run in all. That is the one thing the bar
+ * doesn't otherwise say: during a review, the reviewer is not the lead the
+ * composer names. Where its word has a why the chip has no room for, as what
+ * stopped it, pointing or focusing says that. Anywhere else the chip's words
+ * say it all.
  */
 
 export interface TaskHeaderText {
@@ -48,8 +50,10 @@ export interface TaskHeaderProps<F extends string> {
   /** Which task, for a screen reader: the bar shows it beside the way back. */
   title: string
   status: TaskStatus
-  /** Where it stands, in words: Reviewing, Ready for you; or a way into it that says them (a bare WorkStatus). Without it, no chip, as while it is still read. */
+  /** Where it stands, in words: Reviewing, Ready to accept; or a way into it that says them (a bare WorkStatus). Without it, no chip, as while it is still read. */
   state?: ReactNode
+  /** Why it stands so, where its word doesn't say, on pointing at or focusing it: what stopped it. */
+  why?: string
   /** Its plan's steps, each with who does it: bars inside where it stands while it runs, and the card of who does each. */
   steps?: readonly TaskHeaderStep[]
   /** How long the step it is on has run: 4m. */
@@ -72,6 +76,7 @@ export function TaskHeader<F extends string>({
   title,
   status,
   state,
+  why,
   steps,
   took,
   elapsed,
@@ -87,7 +92,7 @@ export function TaskHeader<F extends string>({
   // Its plan under way: the only time there is more to say than the chip's words.
   const plan = status === TaskStatus.Running && steps !== undefined && steps.length > 1 ? steps : null
   const said = (
-    <span className={s.state} {...(plan === null ? {} : { tabIndex: 0 })}>
+    <span className={s.state} {...(plan === null && why === undefined ? {} : { tabIndex: 0 })}>
       <TaskGlyph status={status} />
       <span>{state}</span>
     </span>
@@ -97,7 +102,13 @@ export function TaskHeader<F extends string>({
       {state != null && (
         <span className={cx(s.chip, (plan !== null || beside != null) && s.parted)} data-status={status}>
           {plan === null ? (
-            said
+            why === undefined ? (
+              said
+            ) : (
+              <Tooltip label={why} placement="below">
+                {said}
+              </Tooltip>
+            )
           ) : (
             <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
               {said}
