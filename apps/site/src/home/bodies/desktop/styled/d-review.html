@@ -8,7 +8,6 @@
   --rose: #e0796a;
   --accent: #c3c8ff;
   --accent-dot: #8a93ff;
-  --violet: #c4a8ff;
   --ground:
     radial-gradient(ellipse 60% 50% at 50% 38%, rgba(255, 226, 196, 0.045), transparent 70%),
     radial-gradient(ellipse 100% 85% at 50% 38%, #1a1511 0%, #13100d 50%, #0c0a08 100%);
@@ -120,17 +119,6 @@
 .s-d-review .s-d-review__role--lead { color: var(--accent); }
 .s-d-review .s-d-review__name { position: relative; margin-top: 1.25cqw; font-size: var(--fs-l); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
 .s-d-review .s-d-review__lab { position: relative; margin-top: 0.45cqw; display: flex; align-items: center; gap: 0.5em; font-size: var(--fs-m); line-height: 1.3; color: var(--ink2); white-space: nowrap; }
-/* Open weights: the one tag in the light's violet. */
-.s-d-review .s-d-review__ow {
-  padding: 0.3em 0.5em 0.25em;
-  border-radius: 99px;
-  font: 600 var(--fs-xs)/1 var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--violet);
-  background: rgba(122, 63, 240, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(160, 120, 255, 0.36);
-}
 /* What each agent is doing, one line under a hairline. */
 .s-d-review .s-d-review__st { position: relative; margin-top: 1.05cqw; height: calc(1cqw + 1.45em); font-size: var(--fs-s); }
 .s-d-review .s-d-review__st::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--hair); }
@@ -530,7 +518,7 @@
     <div class="s-d-review__lit"></div>
     <div class="s-d-review__top"><svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="opencode"><path fill-rule="evenodd"/></svg><span class="s-d-review__role">Reviewer</span></div>
     <div class="s-d-review__name">GLM-5.3</div>
-    <div class="s-d-review__lab">Z.ai <span class="s-d-review__ow">Open weights</span></div>
+    <div class="s-d-review__lab">Z.ai</div>
     <div class="s-d-review__st">
       <span data-k="wait" data-on="1"><i class="s-d-review__wait"></i>Waiting</span>
       <span data-k="work"><i class="s-d-review__work"></i>Reviewing</span>
