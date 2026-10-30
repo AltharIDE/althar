@@ -1,5 +1,6 @@
 /* The highlights' pictures: the app drawn in its dark theme, on the log's warm dark, lit from under by the one cobalt light. Everything in em, on the frame's width. */
 
+.frame, .drawn { margin: 0; }
 .frame {
   position: relative;
   isolation: isolate;
@@ -76,7 +77,7 @@
 
 .bar { display: flex; align-items: center; gap: 0.35em; height: 2.7em; padding: 0 0.7em 0 1em; background: var(--bar); border-bottom: 1px solid var(--line); font-size: 0.86em; color: var(--t2); white-space: nowrap; }
 .dots { display: flex; gap: 0.5em; margin-right: 0.9em; }
-.dots i { width: 0.78em; height: 0.78em; border-radius: 50%; background: #3a362f; }
+.dots i { width: 0.78em; height: 0.78em; border-radius: 50%; background: var(--traffic, #3a362f); }
 .tab { display: inline-flex; align-items: center; gap: 0.5em; height: 1.95em; padding: 0 0.8em; border-radius: 0.5em; }
 .tab i { width: 0.75em; height: 0.75em; border-radius: 0.2em; }
 .tab.on { background: var(--paper); color: var(--t1); box-shadow: inset 0 0 0 1px var(--line-2); }
@@ -147,6 +148,8 @@
   .agents li:nth-child(5n + 1) { border-top: 1px solid var(--line); }
   .agents li:first-child { border-top: 0; }
   .agents li { padding: 0.45em 0; }
+  /* On a phone, each agent by its mark and name. */
+  .who span { display: none; }
   .search, .tray > span:first-child { display: none; }
   .bar .tab:not(.on) { display: none; }
 }
@@ -214,7 +217,7 @@
   .dim .art { padding: 1.4em 1em; }
   .behind { display: none; }
   .dialog { width: 100%; padding: 1.2em 1.1em; }
-  .optionWords .sent span { grid-template-columns: 7.5em minmax(0, 1fr); }
+  .optionWords .sent span { grid-template-columns: 8.8em minmax(0, 1fr); }
   .thumb { display: none; }
   .option { grid-template-columns: auto minmax(0, 1fr); }
 }
@@ -306,7 +309,7 @@
 .thread { display: grid; gap: 1.1em; }
 .you { justify-self: end; max-width: 30em; padding: 0.75em 1em; border-radius: 1em 1em 0.3em 1em; background: rgba(255, 240, 215, 0.08); font-size: 0.95em; line-height: 1.45; }
 .coord { display: flex; gap: 0.75em; }
-.coordMark { display: grid; place-items: center; width: 2em; height: 2em; border-radius: 0.55em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.coordMark { flex: none; display: grid; place-items: center; width: 2em; height: 2em; border-radius: 0.55em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
 .coordMark .logo { width: 1.1em; height: 1.1em; }
 .coordWords { display: grid; gap: 0.15em; }
 .coordWords b { font-size: 0.86em; }
@@ -328,7 +331,61 @@
   .roles { grid-column: 2; gap: 0.9em; }
 }
 
-/* ---- on main: the homepage's drawing of automations ---- */
+/* ---- 0.6.0: plan usage, by day and by night ---- */
+
+.planWin { --edge: rgba(255, 240, 215, 0.1); box-shadow: 0 0 0 1px var(--edge), 0 2.4em 4em -1.6em rgba(0, 0, 0, 0.6); }
+.gauge { display: inline-flex; align-items: center; gap: 0.5em; height: 1.95em; padding: 0 0.7em; border-radius: 0.5em; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-2); font-family: var(--mono); font-size: 0.92em; color: var(--t1); }
+.track { position: relative; overflow: hidden; width: 3.2em; height: 0.45em; border-radius: 0.25em; background: var(--line-2); }
+.track i, .planBar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; background: var(--t1); }
+.peek { display: grid; width: 31em; margin: 0.5em 0.7em 0 auto; padding: 1em 1.1em 0.6em; border-radius: 0.75em 0.75em 0 0; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2), 0 1.6em 3em -1em rgba(0, 0, 0, 0.35); }
+.peekHead { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; margin-bottom: 0.6em; }
+.peekHead b { font-size: 0.95em; }
+.peekHead span { font-size: 0.8em; color: var(--t3); }
+.plan { display: grid; grid-template-columns: 2em minmax(0, 1fr) 5em auto; align-items: center; gap: 0.8em; padding: 0.65em 0; border-top: 1px solid var(--line); }
+.plan .mk { width: 2em; height: 2em; border-radius: 0.5em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.plan .mk svg { width: 1.05em; height: 1.05em; }
+.planWho { display: grid; min-width: 0; }
+.planWho b { font-size: 0.88em; font-weight: 550; }
+.planWho span, .planLeft span { font-size: 0.74em; color: var(--t4); white-space: nowrap; }
+.planBar { position: relative; overflow: hidden; height: 0.4em; border-radius: 0.2em; background: var(--line-2); }
+.planLeft { display: grid; justify-items: end; }
+.planLeft b { font-family: var(--mono); font-size: 0.8em; font-weight: 500; }
+/* The first, the one running down: its bar in the warm of a limit coming. */
+.plan:nth-child(2) .planBar i { background: var(--warm); }
+
+/* By day, over the left of it, cut on a slant; the line between them lit. */
+.split .art { position: relative; --warm: #e2a457; }
+.day, .seam { position: absolute; inset: 0; padding: inherit; }
+.seam { background: linear-gradient(rgba(170, 180, 255, 0.95), rgba(120, 132, 255, 0.4)); clip-path: polygon(0 0, 54.2% 0, 40.2% 100%, 0 100%); }
+.day {
+  --win: #f4f2ec;
+  --bar: #ebe8e0;
+  --raised: #fcfbf8;
+  --paper: #ffffff;
+  --line: rgba(20, 20, 28, 0.07);
+  --line-2: rgba(20, 20, 28, 0.11);
+  --line-3: rgba(20, 20, 28, 0.18);
+  --t1: #141417;
+  --t2: #45454c;
+  --t3: #6f6f77;
+  --t4: #8a8990;
+  --live: #2b3bff;
+  --warm: #c9822f;
+  --traffic: #d0cbc0;
+  --edge: rgba(20, 20, 28, 0.12);
+  color: var(--t1);
+  background: radial-gradient(ellipse 90% 80% at 40% 20%, #fbfaf7, #f1eee7 60%, #e9e5dc);
+  clip-path: polygon(0 0, 54% 0, 40% 100%, 0 100%);
+}
+.day .peek { box-shadow: 0 0 0 1px var(--line-2), 0 1.6em 3em -1em rgba(60, 50, 30, 0.2); }
+
+@container (max-width: 560px) {
+  .peek { width: auto; margin: 0.5em 0.5em 0; }
+  .plan { grid-template-columns: 2em minmax(0, 1fr) auto; }
+  .planBar { display: none; }
+}
+
+/* ---- 0.6.0: the homepage's drawing of automations ---- */
 
 .drawn { position: relative; overflow: hidden; border-radius: 18px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.08); }
 .drawnStage { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; container-type: inline-size; }

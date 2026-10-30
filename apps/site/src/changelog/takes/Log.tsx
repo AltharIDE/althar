@@ -23,7 +23,7 @@ import { seeded } from '../../shared/footer/random'
 import { LightUnder } from '../../shared/lightUnder'
 import { OS_NAME, OsMark } from '../../shared/OsMark'
 import s from './Log.module.css'
-import { COMING, type Highlight, HIGHLIGHT, MERGED, PUBLISHED } from './LogData'
+import { COMING, type Highlight, HIGHLIGHTS, MERGED, PUBLISHED } from './LogData'
 import { LogPicture } from './LogPictures'
 
 /*
@@ -186,7 +186,7 @@ function Window() {
     drawGrain(context, 128, seeded(11))
     grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
   }, [])
-  const lead = HIGHLIGHT[LATEST.version]
+  const lead = HIGHLIGHTS[LATEST.version]?.[0]
 
   return (
     <header className={s.window}>
@@ -209,11 +209,13 @@ function Window() {
           <Readout label="Next release" href="#on-main">
             <b>
               {ON_MAIN.length} merged
-              <span className={s.meter} aria-hidden="true">
-                {ON_MAIN.map((m) => (
-                  <span key={m.pr} />
-                ))}
-              </span>
+              {ON_MAIN.length > 0 && (
+                <span className={s.meter} aria-hidden="true">
+                  {ON_MAIN.map((m) => (
+                    <span key={m.pr} />
+                  ))}
+                </span>
+              )}
             </b>
           </Readout>
           <Readout label="Current version" href={`#v${LATEST.version}`} end>
@@ -261,10 +263,17 @@ function Shown({ highlight, note, children }: { highlight: Highlight; note?: Rea
   )
 }
 
-/** What has merged on main since the last release: the log's live tail, what it brings first, then each merge, newest first, its caret blinking. */
+/**
+ * What has merged on main since the last release: the log's live tail, what
+ * it brings first, then each merge, newest first, its caret blinking. With
+ * nothing merged yet, the tail waits for the first, its caret still blinking.
+ */
 function Tail() {
-  const newest = ON_MAIN[0]!
-  const merges = ON_MAIN.filter((m) => m.pr !== COMING.pr)
+  const newest = ON_MAIN[0]
+  // What main brings next, shown while its pull request is among the merges.
+  const next = COMING
+  const coming = next && ON_MAIN.some((m) => m.pr === next.pr) ? next : null
+  const merges = ON_MAIN.filter((m) => m.pr !== coming?.pr)
   const line = (m: Merged, i: number, all: readonly Merged[]) => (
     <li key={m.pr} className={cx(s.merged, m === newest && s.newest)}>
       <span className={cx(s.label, i > 0 && all[i - 1]!.date === m.date && s.again)}>{dated(m.date, false)}</span>
@@ -278,21 +287,38 @@ function Tail() {
   )
   const recent = merges.slice(0, TAIL)
   const older = merges.slice(TAIL)
+  // Main last moved with its newest merge, or, with none since, with the release.
+  const moved = newest
+    ? Date.parse(MERGED[newest.pr] ?? `${newest.date}T12:00:00Z`)
+    : Date.parse(PUBLISHED[LATEST.version] ?? `${LATEST.date}T12:00:00Z`)
   return (
     <li className={cx(s.entry, s.tail)} id="on-main">
       <span className={s.node} aria-hidden="true" />
-      <Stamp at={elapsed(Date.parse(MERGED[newest.pr] ?? `${newest.date}T12:00:00Z`), false)} date={dated(newest.date)} note="On main" />
+      <Stamp at={elapsed(moved, false)} date={dated(newest?.date ?? LATEST.date)} note="On main" />
       <h2 className={s.head}>
         <span className={s.v}>main</span>
-        <span className={s.title}>Since {LATEST.version}, for the next release</span>
+        <span className={s.title}>{newest ? `Since ${LATEST.version}, for the next release` : `Nothing new since ${LATEST.version}`}</span>
       </h2>
-      <Shown highlight={COMING} note="Coming in the next release">
-        {' '}
-        <a className={s.prIn} href={pullUrl(COMING.pr)}>
-          #{COMING.pr}
-        </a>
-      </Shown>
-      <ul className={s.lines}>{recent.map(line)}</ul>
+      {coming && (
+        <Shown highlight={coming} note="Coming in the next release">
+          {' '}
+          <a className={s.prIn} href={pullUrl(coming.pr)}>
+            #{coming.pr}
+          </a>
+        </Shown>
+      )}
+      {newest ? (
+        <ul className={s.lines}>{recent.map(line)}</ul>
+      ) : (
+        <ul className={s.lines}>
+          <li className={cx(s.merged, s.newest, s.waiting)}>
+            <span className={s.label}>Next</span>
+            <span className={s.text}>
+              <span>What merges next lands here, on its way to the next release.</span>
+            </span>
+          </li>
+        </ul>
+      )}
       {older.length > 0 && (
         <Fold count={older.length}>
           <ul className={s.lines}>{older.map(line)}</ul>
@@ -337,9 +363,12 @@ function Run({ kind, lines }: { kind: Kind; lines: readonly string[] }) {
 /** A release: its stamp, its version and title, its highlight, what's new, and what was improved and fixed, folded. */
 function Entry({ release }: { release: Release }) {
   const first = release === FIRST
-  // The newest release's highlight opens the page: here it keeps every line.
-  const highlight = release === LATEST ? undefined : HIGHLIGHT[release.version]
-  const all = runs(release.changes, highlight?.covers)
+  // The newest release's lead opens the page: here it shows the rest, and keeps the lead's lines.
+  const highlights = (HIGHLIGHTS[release.version] ?? []).slice(release === LATEST ? 1 : 0)
+  const all = runs(
+    release.changes,
+    highlights.flatMap((h) => h.covers),
+  )
   const shown = all.filter((run) => run.kind === 'new')
   const folded = all.filter((run) => run.kind !== 'new')
   const more = folded.reduce((n, run) => n + run.lines.length, 0)
@@ -364,7 +393,9 @@ function Entry({ release }: { release: Release }) {
         </a>
         <span className={s.title}>{release.title}</span>
       </h2>
-      {highlight && <Shown highlight={highlight} />}
+      {highlights.map((highlight) => (
+        <Shown key={highlight.title} highlight={highlight} />
+      ))}
       <div className={s.runs}>
         {shown.map((run, i) => (
           <Run key={i} {...run} />
@@ -390,8 +421,8 @@ function Entry({ release }: { release: Release }) {
  */
 const STAGES: readonly Stage[] = ['now', 'next', 'later']
 /** The course's height, in px, and its height at a share `x` of the way across. */
-const COURSE_H = 150
-const courseY = (x: number) => 138 - 126 * x ** 1.5
+const COURSE_H = 120
+const courseY = (x: number) => 108 - 96 * x ** 1.5
 const along = (from: number, to: number) => {
   const points: string[] = []
   for (let i = 0; i <= 24; i++) {

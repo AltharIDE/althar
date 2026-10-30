@@ -274,21 +274,7 @@ export interface Merged {
 }
 
 /** Merged on main since the last release, newest first: what the next one will carry. */
-export const ON_MAIN: readonly Merged[] = [
-  { date: '2026-10-30', text: 'A calm view of a branch with no pull request', pr: 405 },
-  { date: '2026-10-30', text: 'Merge through GitHub’s merge queue, and see a pull request waiting in it', pr: 395 },
-  { date: '2026-10-29', text: 'Pull request reviews start from a plan you can change', pr: 385 },
-  { date: '2026-10-29', text: 'Failing checks go back to the lead, even after you’ve looked', pr: 388 },
-  { date: '2026-10-29', text: 'Every error offers its way out, starting with sign-in', pr: 380 },
-  { date: '2026-10-29', text: 'One motion system across the app', pr: 390 },
-  { date: '2026-10-29', text: 'Settling a task stops everything it left running', pr: 386 },
-  { date: '2026-10-28', text: 'Run any branch or pull request', pr: 358 },
-  { date: '2026-10-28', text: 'Allow everything asks only before what can’t be undone', pr: 378 },
-  { date: '2026-10-28', text: 'Leads can show pictures in the thread at any time', pr: 372 },
-  { date: '2026-10-28', text: 'Home opens instantly, as project tabs do', pr: 371 },
-  { date: '2026-10-27', text: 'Plan usage: every agent’s window, and work steered by it', pr: 324 },
-  { date: '2026-10-27', text: 'Automations: work that starts itself, on a schedule', pr: 339 },
-]
+export const ON_MAIN: readonly Merged[] = []
 
 export type Stage = 'now' | 'next' | 'later'
 

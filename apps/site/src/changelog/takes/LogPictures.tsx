@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Icon, Logo, reportProblemText, runButtonText } from '@althar/ui'
+import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, runButtonText } from '@althar/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
@@ -17,7 +17,7 @@ import p from './LogPictures.module.css'
  * API). Each is laid out in em on a width of `w` em, scaled to the width it
  * is given, so it stays crisp; in a narrow place it lays itself out again on
  * `n` em, larger, so it still reads on a phone. A picture: nothing in it can
- * be pressed, and it reads as its label.
+ * be pressed, and it reads as its label, a figure.
  */
 
 function Frame({
@@ -38,11 +38,11 @@ function Frame({
   children: ReactNode
 }) {
   return (
-    <div className={cx(p.frame, foot && p.foot, className)} role="img" aria-label={label} data-nosnippet>
+    <figure className={cx(p.frame, foot && p.foot, className)} aria-label={label} data-nosnippet>
       <div className={p.art} style={{ '--w': w, '--n': n } as CSSProperties} aria-hidden="true">
         {children}
       </div>
-    </div>
+    </figure>
   )
 }
 
@@ -515,21 +515,95 @@ function Plan() {
   )
 }
 
-/* ---- on main: automations, as the homepage draws them ---- */
+/* ---- 0.6.0: plan usage, in light and in dark ---- */
 
-function Automations() {
+const PLANS = [
+  { agent: Agent.Claude, account: 'Max', window: '5 hours', left: 38, until: '14:00' },
+  { agent: Agent.Codex, account: 'Pro', window: '5 hours', left: 64, until: '15:20' },
+  { agent: Agent.Kimi, account: null, window: 'Week', left: 90, until: 'Mon 09:00' },
+  { agent: Agent.Grok, account: null, window: 'Week', left: 96, until: 'Thu 18:00' },
+] as const
+
+/** The window's bar with the plans' gauge, and the peek it opens: each agent, least room first. */
+function PlanPeek() {
+  const t = planPeekText
+  const tightest = PLANS[0]
   return (
-    <div
-      className={p.drawn}
-      role="img"
-      aria-label="An automation: weekdays at 07:00, review each new pull request, with Opus 5.5 as its lead, on this computer"
-    >
-      <Fragment source={automations} tone="dark" className={p.drawnStage} />
+    <div className={cx(p.win, p.planWin)}>
+      <Bar
+        end={
+          <span className={p.gauge}>
+            <span className={p.track}>
+              <i style={{ width: `${tightest.left}%` }} />
+            </span>
+            {t.share(tightest.left)}
+          </span>
+        }
+      >
+        <Tabs />
+      </Bar>
+      <div className={p.peek}>
+        <div className={p.peekHead}>
+          <b>{t.heading}</b>
+          <span>{t.level.down(NAME[tightest.agent])}</span>
+        </div>
+        {PLANS.map((plan) => (
+          <div key={plan.agent} className={p.plan}>
+            <span className={p.mk}>
+              <AgentMark agent={plan.agent} size={14} />
+            </span>
+            <span className={p.planWho}>
+              <b>{NAME[plan.agent]}</b>
+              <span>{plan.account ? `${plan.account} · ${plan.window}` : plan.window}</span>
+            </span>
+            <span className={p.planBar}>
+              <i style={{ width: `${plan.left}%` }} />
+            </span>
+            <span className={p.planLeft}>
+              <b>{t.left(plan.left)}</b>
+              <span>{t.until(plan.until)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
+/** The same peek by day and by night, the line between them lit. */
+function Plans() {
+  return (
+    <Frame
+      label="Plan usage, in light and in dark: Claude Code has 38% of its five hours left until 14:00, Codex 64%, Kimi Code 90% of its week, Grok Build 96%"
+      w={52}
+      n={30}
+      foot
+      className={p.split}
+    >
+      <PlanPeek />
+      <div className={p.seam} />
+      <div className={p.day}>
+        <PlanPeek />
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.6.0: automations, as the homepage draws them ---- */
+
+function Automations() {
+  return (
+    <figure
+      className={p.drawn}
+      aria-label="An automation: weekdays at 07:00, review each new pull request, with Opus 5.5 as its lead, on this computer"
+    >
+      <Fragment source={automations} tone="dark" className={p.drawnStage} />
+    </figure>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  plans: Plans,
   windows: Windows,
   reviewer: Reviewer,
   report: Report,
