@@ -35,25 +35,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The packages besides the runtime, one after another in one job: each takes under a minute, and a job of its own
+  # mostly waits for a machine and installs, which in the merge queue keeps other pull requests waiting. Every package
+  # runs even when one before it fails, so a run says all that broke.
   verify:
+    name: verify (packages)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          [
-            packages/connectors,
-            packages/contracts,
-            packages/domain,
-            packages/persistence-sqlite,
-            packages/provider-adapters,
-            packages/testing,
-            apps/cli,
-          ]
-    defaults:
-      run:
-        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -63,9 +51,19 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
-        working-directory: .
-      - run: bun run check
-      - run: bun run test
+      - env:
+          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/testing apps/cli
+        run: |
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run check && bun run test) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed:$failed"
+            exit 1
+          fi
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
