@@ -43,6 +43,10 @@ const keyOf = (node: Any): string | undefined => {
   return key?.type === 'Identifier' ? (key.name as string) : key?.type === 'Literal' ? String(key.value) : undefined
 }
 
+/** Whether a time is a size's budget, by name: `budget.medium`. */
+const budgeted = (node: Any | undefined) =>
+  node?.type === 'MemberExpression' && (node.object as Any).type === 'Identifier' && (node.object as Any).name === 'budget'
+
 /** Times a page or a test is given for every wait after. */
 const DEFAULTS = new Set(['setDefaultTimeout', 'setDefaultNavigationTimeout'])
 
@@ -68,8 +72,9 @@ const walk = (file: string, look: (node: Any, at: (what: string) => void, text: 
 /** Where a spec sets a time of its own, or sleeps. */
 const limitsIn = (file: string) =>
   walk(file, (one, at, text) => {
-    // `{ timeout: … }` given to an assertion, an action, a wait or a launch, or `{ actionTimeout: … }` to `test.use`.
-    if (one.type === 'Property' && /timeout$/i.test(keyOf(one) ?? '')) at(`a time of its own: ${text(one)}`)
+    // `{ timeout: … }` given to an assertion, an action, a wait or a launch, or `{ actionTimeout: … }` to `test.use`; a size by
+    // name is the one way, as for the unit tests.
+    if (one.type === 'Property' && /timeout$/i.test(keyOf(one) ?? '') && !budgeted(one.value as Any)) at(`a time of its own: ${text(one)}`)
     if (one.type !== 'CallExpression') {
       // A loop that tries so many times, sleeping between, is a wait with a time of its own.
       if (
@@ -88,7 +93,8 @@ const limitsIn = (file: string) =>
     else if (named === 'setTimeout' || named === 'setInterval')
       at(rootOf(callee) === 'window' ? `a sleep: ${text(one)}` : `a test's time of its own: ${text(one)}`)
     else if (named === 'slow' && rootOf(callee) === 'test') at(`a test's time of its own: ${text(one)}`)
-    else if (named !== undefined && DEFAULTS.has(named)) at(`a time of its own for every wait: ${text(one)}`)
+    else if (named !== undefined && DEFAULTS.has(named) && !budgeted((one.arguments as Array<Any>)[0]))
+      at(`a time of its own for every wait: ${text(one)}`)
     else if (callee.type === 'Identifier' && (callee.name === 'setTimeout' || callee.name === 'setInterval')) at(`a sleep: ${text(one)}`)
   })
 
@@ -96,7 +102,7 @@ const limitsIn = (file: string) =>
 const configLimits = () =>
   walk(CONFIG, (one, at, text) => {
     const key = one.type === 'Property' ? keyOf(one) : undefined
-    if (key !== undefined && /timeout$/i.test(key) && !text(one.value as Any).startsWith('budget.')) at(`not the budget's: ${text(one)}`)
+    if (key !== undefined && /timeout$/i.test(key) && !budgeted(one.value as Any)) at(`not the budget's: ${text(one)}`)
   })
 
 test('finds the end-to-end specs', () => {

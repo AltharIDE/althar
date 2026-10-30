@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 
+import { budget } from '@althar/testing/budget'
 import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
@@ -48,6 +49,7 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
     Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
   )
   const electronApp = await electron.launch({
+    timeout: budget.medium,
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
     args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
     ...(scheme === 'system' ? { colorScheme: null } : {}),
@@ -61,6 +63,9 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
       ...env,
     },
   })
+  // Playwright gives the config's times to the browsers it starts, not to an app it launches, whose actions would each have
+  // 30 s on any machine: a click, or a wait for the window, takes the medium budget, as an assertion does (playwright.config.ts).
+  electronApp.context().setDefaultTimeout(budget.medium)
   return { electronApp, page: await mainWindow(electronApp) }
 }
 
