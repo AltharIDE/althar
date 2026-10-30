@@ -1427,10 +1427,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
       if (again) for (const marker of whole.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
-      // Reminded to report, with the person's words that waited for the turn after the reminder, it does what the words ask.
-      const reminded = REMINDED.test(whole) && whole.includes('\n\n')
+      // Reminded to report, with the person's words that waited for the same turn, it does what the words ask. They come in the
+      // order they were queued: the reminder first, or, where the person wrote as the turn ended, after their words.
+      const paragraphs = whole.split('\n\n')
+      const words = paragraphs.filter((paragraph) => !REMINDED.test(paragraph))
+      const reminded = words.length > 0 && words.length < paragraphs.length
       // The markers in a linked file's words play as a message's do, for what the person sends with no words.
-      const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : reminded ? whole.slice(whole.indexOf('\n\n') + 2) : whole}${cuesIn(params.prompt)}`
+      const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : reminded ? words.join('\n\n') : whole}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(

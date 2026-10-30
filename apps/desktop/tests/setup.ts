@@ -1,9 +1,18 @@
-import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { deadline } from '@althar/testing'
+import { cleanup, configure } from '@testing-library/react'
+import { afterEach, beforeEach } from 'vitest'
 
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
+
+/*
+ * A findBy or waitFor gives up where every other wait does, near the test's own time (@althar/testing), not after
+ * testing-library's one second: what takes a second here can take four on a slower machine.
+ */
+beforeEach(() => {
+  configure({ asyncUtilTimeout: Math.max(0, deadline() - Date.now()) })
+})
 
 /*
  * jsdom lacks what the kit's components lean on in a browser; each stand-in

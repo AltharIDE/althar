@@ -2639,7 +2639,7 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     expect(await screen.findByText('No other model is free now.')).toBeTruthy()
-    expect(await screen.findByRole('button', { name: /^Continue with/ }, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Continue with/ })).toBeTruthy()
   })
 
   it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {

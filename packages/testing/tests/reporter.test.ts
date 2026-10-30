@@ -27,6 +27,12 @@ test('reports a test that failed, then passed on its retry, and no other', async
   const lines = readFileSync(report, 'utf8').trim().split('\n')
   expect(lines.map((line) => JSON.parse(line))).toEqual([
     // Named from the repository's root in CI, where GITHUB_WORKSPACE says where that is.
-    { runner: 'vitest', file: fromRoot(join(import.meta.dirname, 'fixtures/once.fixture.ts')), name: 'passes the second time' },
+    {
+      runner: 'vitest',
+      file: fromRoot(join(import.meta.dirname, 'fixtures/once.fixture.ts')),
+      name: 'passes the second time',
+      // What it failed with first, and where, without Vitest's own frames.
+      error: expect.stringMatching(/^expected 1 to be 2 \/\/ Object\.is equality\n\s+at .*once\.fixture\.ts:7:16$/),
+    },
   ])
 })
