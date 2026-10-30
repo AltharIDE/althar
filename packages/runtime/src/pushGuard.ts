@@ -1,6 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import type { GitRun } from './rules'
 
 /*
  * What can't be undone from a task, stopped where it happens, at git itself
@@ -15,9 +18,12 @@ import { join } from 'node:path'
  *
  * Where the person allows a request that is one of these, Althar writes the
  * session a pass naming the git commands they allowed, for the next two
- * minutes. The guard lets through only a git whose own words (`ps`) are one
- * of those, and only that one run of it: the pass is spent on the git it
- * first lets through, and nothing else gets past on it.
+ * minutes, each with the repository it runs in and, for a push, the URL it
+ * pushes to. The guard lets through only a git whose own words (`ps`),
+ * repository and URL are one of those, and only that one run of it: the
+ * pass is spent on the git it first lets through, and nothing else gets
+ * past on it, the same words in another repository or to a remote that
+ * was pointed elsewhere included.
  *
  * What it stops it names on a line of its own (`STOPPED`), which Althar
  * reads on the failed call to count it as a refusal (`guardStopIn`).
@@ -115,16 +121,19 @@ hook=$1
 shift
 pass=\${ALTHAR_GUARD_PASS:-}
 git=\${ALTHAR_GIT_PID:-}
+url=
+tab=$(printf '\t')
 task=\${ALTHAR_TASK_BRANCH:-}
 defaults=" \${ALTHAR_DEFAULT_BRANCHES:-} "
 how='${HOW.replaceAll("'", "'\\''")}'
-# Whether the person allowed this git: a fresh pass names its words, and no other git has spent it.
+# Whether the person allowed this git: a fresh pass names its repository, its URL and its words, and no other git has spent it.
 passes() {
   [ -n "$pass" ] && [ -n "$git" ] && [ -f "$pass" ] && [ -n "$(find "$pass" -mmin -2 2>/dev/null)" ] || return 1
   spent=$(sed -n 's/^spent //p' "$pass")
   if [ -n "$spent" ]; then [ "$spent" = "$git" ]; return; fi
   words=$(ps -o args= -p "$git" 2>/dev/null | sed -E -e 's#^[^ ]*/git( |$)#git\\1#' -e 's/[[:space:]]+/ /g' -e 's/ $//')
-  [ -n "$words" ] && grep -Fqx -e "$words" "$pass" || return 1
+  top=$(git rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P) || return 1
+  [ -n "$words" ] && grep -Fqx -e "$top$tab$url$tab$words" "$pass" || return 1
   printf 'spent %s\\n' "$git" >> "$pass"
 }
 stop() {
@@ -136,6 +145,7 @@ zero() { case "$1" in *[!0]*) return 1 ;; esac; return 0; }
 case "$hook" in
   pre-push)
     remote=$1
+    url=$2
     while read -r local_ref local_sha remote_ref remote_sha; do
       case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac
       branch=\${remote_ref#refs/heads/}
@@ -222,18 +232,52 @@ export const guardEnv = (input: {
 }
 
 /**
- * Lets past the guard, for the next two minutes, the one run of git whose
- * words are among `commands` (`gitCommandsOf`): the person allowed what it
- * stops. A new pass takes the place of the one before, spent or not.
+ * Lets past the guard, for the next two minutes, the one run of git that is
+ * one of `runs` (`gitRunsOf`), in its repository and to its URL: the person
+ * allowed what it stops. A new pass takes the place of the one before,
+ * spent or not. A git whose repository Althar can't tell gets none.
  */
-export const passGuard = (sessionId: string, commands: ReadonlyArray<string>, at: Guard | undefined = made): void => {
-  if (at === undefined || commands.length === 0) return
+export const passGuard = (sessionId: string, runs: ReadonlyArray<GitRun>, at: Guard | undefined = made): void => {
+  if (at === undefined) return
+  const lines = runs.flatMap((run) => {
+    const where = whereRuns(run)
+    return where === undefined ? [] : [`${where}\t${run.words}\n`]
+  })
+  if (lines.length === 0) return
   try {
     // Its file's own time is what the hook reads, so writing it again starts the two minutes again.
-    writeFileSync(passOf(sessionId, at), commands.map((each) => `${each}\n`).join(''))
+    writeFileSync(passOf(sessionId, at), lines.join(''))
   } catch {
     // A pass that can't be written leaves the guard as it is: the command says what stopped it.
   }
+}
+
+/** Where a git runs, as its hook sees it: the repository's top folder, and for a push the URL it pushes to; none where git can't say. */
+const whereRuns = (run: GitRun): string | undefined => {
+  const { folder, push } = run
+  if (folder === undefined) return undefined
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-C', folder, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim()
+  const or = (read: () => string) => {
+    try {
+      return read()
+    } catch {
+      return ''
+    }
+  }
+  const top = or(() => realpathSync(git('rev-parse', '--show-toplevel')))
+  if (top === '') return undefined
+  if (push === undefined) return `${top}\t`
+  // Where it names no remote, git pushes to the branch's, as its config says, or origin.
+  const branch = or(() => git('symbolic-ref', '--short', 'HEAD'))
+  const remote =
+    push.remote ??
+    ([`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]
+      .map((key) => or(() => git('config', '--get', key)))
+      .find((value) => value !== '') ||
+      'origin')
+  // A remote's URL as its config has it, which is what git hands the hook; a URL or a path named itself.
+  return `${top}\t${or(() => git('remote', 'get-url', '--push', remote)) || remote}`
 }
 
 /** Takes a session's pass away, as when it has ended. */

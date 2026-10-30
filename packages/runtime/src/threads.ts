@@ -308,9 +308,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             })
           : undefined
       // What the boundary refused, git's guard or the sandbox, is counted as a refusal of its kind (tally.ts).
+      // A call that went on after a refusal (`|| true`, a script that carried on) still had it.
       const stopped =
-        event.status === 'failed'
-          ? stoppedIn([output.text, output.error ?? '', ...printedFields(event.rawOutput)].join('\n'), place.sandboxed === true)
+        event.status === 'failed' || event.status === 'completed'
+          ? stoppedIn([output.text, output.error ?? '', ...printedFields(event.rawOutput)].join('\n'), {
+              sandboxed: place.sandboxed === true,
+              failed: event.status === 'failed',
+            })
           : undefined
       return {
         ...extras,

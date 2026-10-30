@@ -937,8 +937,9 @@ deleting a branch that isn't the task's; `reference-transaction` stops
 deleting such a branch here, or moving one so it loses commits. It says
 what it stopped and to run it plainly outside the sandbox, so Althar asks;
 once the person allows a request the rules read as one of these, the
-session has a two-minute pass naming those git commands, which the hooks
-let through once, for the git whose own words (`ps`) match. Each hook then runs
+session has a two-minute pass naming those git commands, with the
+repository each runs in and a push's remote URL, which the hooks let
+through once, for the git whose own words (`ps`), repository and URL match. Each hook then runs
 the repository's own. It holds against a mistake: an agent that changes
 its environment gets past it.
 
@@ -949,7 +950,9 @@ decision (`decisions.kind`) and the card (`counted`). The project's rules
 show how each went over the last 14 days (`tally.ts`): asked and allowed,
 refused, and worked around (the agent's turn went on and a later call
 completed). What the guard or the sandbox refused, which no rule saw, is
-read from the failed call and counted too (`stoppedIn`).
+read from the call and counted too (`stoppedIn`): the guard's mark on any
+call, a script's that went on after it included; the sandbox's refusal on
+a call that failed.
 
 A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:

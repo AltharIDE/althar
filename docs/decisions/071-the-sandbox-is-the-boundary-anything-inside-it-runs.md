@@ -59,7 +59,8 @@
   - **What still holds inside:** the project's own words. A command or a
     kind it never allows, where the line plainly is one, is refused, and a
     command it asks about asks. What it can't read (`$(…)`, a script in
-    another language, a shell given a file) runs, unless Never lists
+    another language, Bun's or Deno's or `tsx`'s, a shell given a file, a
+    program run from a file rather than one installed) runs, unless Never lists
     something nothing at the boundary stops, a deploy or a command the
     project named: then it is refused, with how to write it so Althar can
     read it (`HELD_INSIDE`). A Never that lists only what the sandbox and
@@ -90,10 +91,13 @@
     asks the person. Each hook then runs the repository's own, from its own
     `core.hooksPath` or its git folder. When the person allows a request the
     rules read as one of these, the session gets a pass for two minutes
-    naming the git commands they allowed (`gitCommandsOf`). The guard lets
-    through only a git whose own words (`ps`) are one of those, and only
-    that run of it: the pass is spent on it, and an unrelated push or
-    deletion meanwhile gets nothing. Writes outside the worktree are stopped
+    naming the git commands they allowed, each with the repository it runs
+    in (after the line's `cd`s and `-C`) and, for a push, the URL its remote
+    had then (`gitRunsOf`). The guard lets through only a git whose own
+    words (`ps`), repository and URL are one of those, and only that run of
+    it: the pass is spent on it, and an unrelated push or deletion
+    meanwhile, the same words in another repository of the task, or a
+    remote pointed elsewhere since, gets nothing. Writes outside the worktree are stopped
     by the sandbox itself.
   - **A refusal says why in the refused call itself,** for an agent that
     reads it there (`PermissionMeanings.reasonInBand`). Althar's patch of

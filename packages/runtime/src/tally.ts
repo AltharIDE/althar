@@ -76,13 +76,16 @@ const REFUSED_THERE = /operation not permitted|read-only file system/i
 const KEPT_KEYS = new RegExp(`/(?:${SECRET_PLACES.map((place) => place.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?:/|\\b)`)
 
 /**
- * What the boundary refused a command, from what the failed command printed:
- * the kind git's guard names, or, where a sandbox holds the session and it
- * says the command couldn't, reading where keys are kept or writing outside.
+ * What the boundary refused a command, from what it printed: the kind git's
+ * guard names, whether the command then failed or went on; or, where a
+ * sandbox holds the session and the command failed saying it couldn't,
+ * reading where keys are kept or writing outside. A command that went on
+ * printing that has no mark of the sandbox's to tell it from one that
+ * printed a log or a file saying it, so only the guard's mark counts there.
  */
-export const stoppedIn = (printed: string, sandboxed: boolean): TallyKind | undefined => {
+export const stoppedIn = (printed: string, call: { readonly sandboxed: boolean; readonly failed: boolean }): TallyKind | undefined => {
   const guarded = guardStopIn(printed)
   if (guarded !== undefined) return guarded
-  if (!sandboxed || !REFUSED_THERE.test(printed)) return undefined
+  if (!call.sandboxed || !call.failed || !REFUSED_THERE.test(printed)) return undefined
   return KEPT_KEYS.test(printed) ? 'credentials' : 'outside'
 }

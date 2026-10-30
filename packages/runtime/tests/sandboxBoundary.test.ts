@@ -123,7 +123,8 @@ describe('a command its sandbox holds', () => {
     // What it can't read could be what Never lists where nothing at the boundary would stop it: a deploy, a command the project
     // named. A python script's `npm publish` is refused as the plain one is, saying how to run it so it can be read.
     const publish = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['npm', 'publish'])\nEOF"
-    assert.include((decideInside(command(publish), never) as { reason: string }).reason, 'run its commands written out')
+    for (const line of [publish, "bun -e \"Bun.spawnSync(['npm', 'publish'])\"", 'deno run tools/fix.ts', '/tmp/fix.sh'])
+      assert.include((decideInside(command(line), never) as { reason: string }).reason, 'run its commands written out', line)
     assert.strictEqual(
       decideInside(command(TODAY.loop), context('allow', { commands: [{ pattern: 'rm -rf', decision: 'never' }] })).verdict,
       'deny',
@@ -168,7 +169,15 @@ describe('what crosses a lead’s sandbox', () => {
       pushes,
       'python3 tools/fix.py',
       './tools/fix.sh',
+      '/tmp/fix.sh',
+      'tools/fix.sh --all',
       'bash < fix.sh',
+      'bun tools/fix.ts',
+      'bun run tools/fix.ts',
+      "bun -e \"require('fs').writeFileSync('/work/meridian/main/src/app.ts', 'x')\"",
+      'deno run tools/fix.ts',
+      'bunx tsx tools/fix.ts',
+      'npx ts-node tools/fix.ts',
       'n=$(date +%s); echo $n > /work/meridian/main/stamp',
     ]) {
       const verdict = decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'))
@@ -178,6 +187,9 @@ describe('what crosses a lead’s sandbox', () => {
       assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'allow', line)
       assert.strictEqual(decide(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow', line)
     }
+    // What the project's own scripts and installed tools run, Althar reads as it always has.
+    for (const line of ['bun run build', 'bun test', 'bunx playwright test', './node_modules/.bin/vp build', '/usr/bin/git status'])
+      assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow', line)
     // What the project runs outside from the start goes as it said, and so does what Althar can read.
     assert.strictEqual(decideLeaving(command('node scripts/e2e.ts'), context('allow')).verdict, 'allow')
     assert.strictEqual(decideLeaving(command('bash -c "ls"', { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow')
@@ -230,13 +242,25 @@ describe('what the boundary refuses itself', () => {
   it('is read from what the failed command printed: the kind git’s guard names, or the sandbox’s refusal where one holds it', () => {
     const guarded =
       "Althar stopped this: deleting feature/other on origin can't be undone.\nIf it should happen…\n(stopped by Althar: delete-branch)"
-    assert.strictEqual(stoppedIn(guarded, false), 'delete-branch')
-    assert.strictEqual(stoppedIn("PermissionError: [Errno 1] Operation not permitted: '/work/meridian/main/a.ts'", true), 'outside')
-    assert.strictEqual(stoppedIn('touch: /work/meridian/main/a.ts: Read-only file system', true), 'outside')
-    assert.strictEqual(stoppedIn('head: /Users/someone/.ssh/config: Operation not permitted', true), 'credentials')
+    assert.strictEqual(stoppedIn(guarded, { sandboxed: false, failed: true }), 'delete-branch')
+    assert.strictEqual(
+      stoppedIn("PermissionError: [Errno 1] Operation not permitted: '/work/meridian/main/a.ts'", { sandboxed: true, failed: true }),
+      'outside',
+    )
+    assert.strictEqual(stoppedIn('touch: /work/meridian/main/a.ts: Read-only file system', { sandboxed: true, failed: true }), 'outside')
+    assert.strictEqual(
+      stoppedIn('head: /Users/someone/.ssh/config: Operation not permitted', { sandboxed: true, failed: true }),
+      'credentials',
+    )
     // Where no sandbox holds the session, a refusal like it is the system's, not the boundary's.
-    assert.strictEqual(stoppedIn('kill: 1: Operation not permitted', false), undefined)
-    assert.strictEqual(stoppedIn('AssertionError: expected 1 to be 2', true), undefined)
+    assert.strictEqual(stoppedIn('kill: 1: Operation not permitted', { sandboxed: false, failed: true }), undefined)
+    assert.strictEqual(stoppedIn('AssertionError: expected 1 to be 2', { sandboxed: true, failed: true }), undefined)
+    // A command that went on after it, `|| true` or a script that carried on: the guard's refusal still counts, its mark tells it.
+    assert.strictEqual(stoppedIn(guarded, { sandboxed: true, failed: false }), 'delete-branch')
+    assert.strictEqual(
+      stoppedIn("PermissionError: [Errno 1] Operation not permitted: '/work/a.ts'", { sandboxed: true, failed: false }),
+      undefined,
+    )
   })
 
   it.live('is counted beside what the rules refused, and as worked around where a later call of the turn completed', () =>
@@ -264,6 +288,16 @@ describe('what the boundary refuses itself', () => {
       )
       yield* failed(held, 'python3 - <<EOF', "PermissionError: [Errno 1] Operation not permitted: '/work/meridian/main/a.ts'")
       yield* failed(held, 'head ~/.ssh/config', 'head: /Users/someone/.ssh/config: Operation not permitted')
+      // A script that pushed to main without checking what git said, and finished.
+      yield* held.record({
+        _tag: 'ToolCall',
+        toolCallId: 'python3 push.py',
+        title: 'python3 push.py',
+        kind: 'execute',
+        status: 'completed',
+        rawInput: { command: 'python3 push.py' },
+        rawOutput: { stdout: 'done', stderr: 'Althar stopped this: a push to main…\n(stopped by Althar: default-branch)', exitCode: 0 },
+      })
       // It found another way: a later call of the same turn completed.
       yield* held.record({ _tag: 'ToolCall', toolCallId: 'other-way', title: 'Write it here', kind: 'edit', status: 'completed' })
       // A session no sandbox holds says the same of something else: not counted.
@@ -273,6 +307,7 @@ describe('what the boundary refuses itself', () => {
         [...tally].sort((a, b) => a.kind.localeCompare(b.kind)),
         [
           { kind: 'credentials', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
+          { kind: 'default-branch', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
           { kind: 'delete-branch', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
           { kind: 'outside', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
         ],

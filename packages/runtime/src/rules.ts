@@ -2430,13 +2430,7 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const where = places(context)
   const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
-  const following: Following = {
-    resolve: (from, path) => locate(where, from ?? context.worktree, path),
-    paths: where.system.paths,
-    folder: where.folder,
-    unknown: where.system.paths.parse(where.system.home).root,
-    unsettled: (word) => unsettled(word, where),
-  }
+  const following = followingOf(where, context)
   for (const line of lines)
     walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
@@ -2461,6 +2455,15 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     })
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
+
+/** How to follow a line's `cd`s from the task's worktree. */
+const followingOf = (where: Places, context: RuleContext): Following => ({
+  resolve: (from, path) => locate(where, from ?? context.worktree, path),
+  paths: where.system.paths,
+  folder: where.folder,
+  unknown: where.system.paths.parse(where.system.home).root,
+  unsettled: (word) => unsettled(word, where),
+})
 
 /** Where a `cd` goes, as its words say, past its options (`cd -P x`, cmd's `cd /d D:\\x`); none for home. */
 const cdTarget = (words: ReadonlyArray<string>): string | undefined => {
@@ -3079,26 +3082,53 @@ export const decideInside = (request: PermissionRequest, context?: RuleContext):
   return ALLOW
 }
 
+/** Where a program named by its path is one installed, not a script of the task's: the system's, a package manager's. */
+const INSTALLED =
+  /^\/(usr\/(local\/)?s?bin|s?bin|opt\/homebrew\/s?bin|nix\/store)\/|(^|\/)node_modules\/\.bin\/|\/\.(bun|cargo|deno|local)\/bin\//
+
+/** What runs a package's program, the word after it naming what it runs (`bunx tsx fix.ts`). */
+const PACKAGE_RUNNERS = /^(bunx|npx|pnpx)$/
+
+/** Programs that run a script in another language, beyond the languages themselves. */
+const SCRIPT_RUNNERS = /^(tsx|ts-node|esno|vite-node)$/
+
+/** Bun's and Deno's ways of running code of the line's or a file's, not one of the project's scripts (`bun run test`) or tools. */
+const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
+  const [first = '', second = ''] = after.filter((word) => !/^--?(watch|hot|smol|bun|silent|quiet|allow-\S+|A)$/.test(word))
+  if (/^(-e|--eval|-p|--print)$/.test(first)) return true
+  const file = (word: string) => /\.(m?[jt]sx?|c[jt]s)$/.test(word) || word.includes('/')
+  if (name === 'deno') return ['run', 'eval', 'repl'].includes(first) || file(first)
+  return (first === 'run' && file(second)) || file(first)
+}
+
 /**
  * Why Althar can't read what a line does, where it can't: a part the shell
  * works out as it runs (`$(…)`, backticks, `eval`), a script in another
- * language (`python3 - <<'EOF'`, `node fix.js`), a shell given a file or its
- * input, a program run from a folder of the task's (`./fix.sh`), or what the
- * rules themselves can't tell.
+ * language (`python3 - <<'EOF'`, `node fix.js`, `bun -e '…'`, `bunx tsx
+ * fix.ts`), a shell given a file or its input, a program run from a file
+ * (`./fix.sh`, `/tmp/fix.sh`) rather than one installed, or what the rules
+ * themselves can't tell.
  */
 const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
   const parsed = parseCommandLine(command)
   if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
   for (const words of parsed.commands) {
-    const program = words.find((word) => !assignment.test(word)) ?? ''
+    const start = words.findIndex((word) => !assignment.test(word))
+    const wrapped = PACKAGE_RUNNERS.test((words[start] ?? '').slice((words[start] ?? '').lastIndexOf('/') + 1))
+    const at = wrapped ? words.findIndex((word, index) => index > start && !word.startsWith('-')) : start
+    const program = at < 0 ? '' : (words[at] ?? '')
     const name = program.slice(program.lastIndexOf('/') + 1)
-    const after = words.slice(words.indexOf(program) + 1)
-    if (SCRIPT_LANGUAGES.test(name) && name !== 'bun' && name !== 'deno')
+    const after = words.slice(at + 1)
+    if (
+      (SCRIPT_LANGUAGES.test(name) && name !== 'bun' && name !== 'deno') ||
+      SCRIPT_RUNNERS.test(name) ||
+      (/^(bun|deno)$/.test(name) && runsCode(name, after))
+    )
       return `Althar can't read what this runs: a \`${name}\` script does what its code says, not its words.`
     // A shell given a script to run, from a file or its input, rather than one on the line (`sh -c '…'`, which the rules read).
     if (SHELLS.test(name) && !after.some((word) => /^-\w*c\w*$/.test(word)))
       return `Althar can't read what this runs: \`${name}\` runs a script from a file or its input.`
-    if (program.startsWith('./') || program.startsWith('../'))
+    if (program.includes('/') && !INSTALLED.test(program))
       return `Althar can't read what this runs: \`${program}\` does what its file says.`
   }
   const unclear = kinds.find((each) => each.rule === 'unclear')
@@ -3133,18 +3163,47 @@ export const decideLeaving = (request: PermissionRequest, context: RuleContext):
   }
 }
 
-/**
- * The git commands of a line as git's own words would show them (`ps`): its
- * program by name, its words unquoted, one space between. What a pass from
- * the person lets past git's guard, and no other (pushGuard.ts).
- */
-export const gitCommandsOf = (command: string): ReadonlyArray<string> =>
-  parseCommandLine(command)
-    .commands.map((words) => words.filter((word, at) => !words.slice(0, at + 1).every((each) => assignment.test(each))))
-    .filter((words) => words.length > 0 && words[0]!.slice(words[0]!.lastIndexOf('/') + 1) === 'git')
+/** A git command of a line: what a pass from the person lets past git's guard, and no other (pushGuard.ts). */
+export interface GitRun {
+  /** Git's own words, as `ps` shows them: its program by name, its words unquoted, one space between. */
+  readonly words: string
+  /** The folder it runs in, after the line's `cd`s and its `-C`; none where Althar can't tell. */
+  readonly folder: string | undefined
+  /** For a push, the remote it names (`origin`, a URL), or none where it names none. */
+  readonly push?: { readonly remote: string | undefined }
+}
+
+/** The git commands of a line, from the task's worktree, where the agent's shell starts. */
+export const gitRunsOf = (command: string, context: RuleContext): ReadonlyArray<GitRun> => {
+  const where = places(context)
+  const runs: Array<GitRun> = []
+  walkFolders(parseCommandLine(command), context.worktree, followingOf(where, context), (written, folders) => {
+    const words = written.filter((word, at) => !written.slice(0, at + 1).every((each) => assignment.test(each)))
+    if (words.length === 0 || words[0]!.slice(words[0]!.lastIndexOf('/') + 1) !== 'git') return
     // Its redirects, which the parse puts last, are the shell's, not git's.
-    .map((words) => words.slice(0, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0))
-    .map((words) => ['git', ...words.slice(1)].join(' ').replace(/\s+/g, ' ').trim())
+    const own = ['git', ...words.slice(1, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0)]
+    const known = folders.length === 1 && folders[0]!.blind !== true ? folders[0]!.at : undefined
+    const call = known === undefined ? undefined : gitCall(own, known, where.system.paths)
+    runs.push({
+      words: own.join(' ').replace(/\s+/g, ' ').trim(),
+      folder: call !== undefined && call.elsewhere.length === 0 ? call.cwd : undefined,
+      ...(call?.subcommand === 'push' ? { push: { remote: pushRemoteOf(call.args) } } : {}),
+    })
+  })
+  return runs
+}
+
+/** The remote a push names: `--repo`'s, or its first word that isn't an option. */
+const pushRemoteOf = (args: ReadonlyArray<string>): string | undefined => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    if (arg.startsWith('--repo=')) return arg.slice('--repo='.length)
+    if (arg === '--repo') return args[index + 1]
+    if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
+    else if (!arg.startsWith('-')) return arg
+  }
+  return undefined
+}
 
 // ---- What each ask and refusal is counted as ------------------------------
 

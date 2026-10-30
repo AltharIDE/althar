@@ -38,7 +38,7 @@ import {
   decideLeaving,
   decideReader,
   essentials,
-  gitCommandsOf,
+  gitRunsOf,
   type Hold,
   lasting,
   pathsOf,
@@ -301,7 +301,7 @@ export class Permissions extends Context.Service<
           // A lead's git lets through what the person allowed of what can't be undone, which its guard would stop (pushGuard.ts).
           const rules = input.context.rules
           if (input.decision.decision === 'allow' && rules.role === 'task' && lasting(input.request, rules.context))
-            yield* Effect.sync(() => passGuard(input.context.sessionId, gitCommandsOf(commandOf(input.request))))
+            yield* Effect.sync(() => passGuard(input.context.sessionId, gitRunsOf(commandOf(input.request), rules.context)))
         })
 
       const release = releaseSession
