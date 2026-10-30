@@ -3,6 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-28
 - **Amends:** [ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)
+- **Amended:** 2026-10-29: with everything allowed, what the rules can't
+  read goes ahead; only what they read as one of the kinds below asks
+  ([Amendment](#amendment-what-the-rules-cant-read-goes-ahead)).
 - **Owner:** Repository maintainers
 - **Context:** ADR-043's amendment (DEV-69) kept everything that could lose
   work or a secret asking with everything allowed: the floor. The floor
@@ -22,8 +25,9 @@
     included, or moving or renaming one by force; changing, deleting or
     moving away what's outside the task's worktree, another checkout above
     all, the person's own; git that could throw away work in another
-    checkout; removing a worktree that isn't the task's; and a push, `cd`
-    or command Althar can't read where it could be one of these.
+    checkout; removing a worktree that isn't the task's. (A push, `cd` or
+    command Althar can't read where it could be one of these asked too,
+    until the amendment below.)
   - **Goes ahead with everything allowed:** `git stash` in the task's
     worktree, `clear`, `drop` and `pop` included; pushing tags, every
     branch, or a pattern of branches (which already went ahead);
@@ -58,3 +62,82 @@
   agent's provider.
 - **Revisit when:** people lose a stash entry or a secret to a task with
   everything allowed, or want a kind that can't be undone to go ahead too.
+
+## Amendment: what the rules can't read goes ahead
+
+- **Date:** 2026-10-29
+- **Context:** the person's project allows everything, and their tasks
+  still landed in Needs you, asking "Why do all my tasks keep asking me
+  for permissions". Of the 65 Permission cards in the week to 2026-10-29,
+  54 would still ask under the rules as they stood. Nearly all were what
+  the rules couldn't read, not what they read as irreversible:
+
+  | Why it asked, read again by the rules as they stood | Cards | Still asking after |
+  | --- | --- | --- |
+  | A `python3 - <<'EOF'` script editing files: its body has backticks and the word `push`, read as a command that could push | 19 | 0 |
+  | A shell line with `$(…)` and the word `push` elsewhere (`git stash push`, `grep "push"`, a scratch repository's push) | 6 | 1 |
+  | A variable the line sets itself (`d=$TMPDIR/x && rm -rf $d`) or a loop's (`for f in …; do mv "$f" …`) | 13 | 0 |
+  | A relative path read from the worktree's top while the agent's shell was in a folder in it (`cd ../.. && rm -f sb.log`), or git in a folder that is no checkout | 16 | 0 |
+
+  The other 11 were the stash, which the decision above already lets
+  through. The one left is a push to main in a scratch repository under
+  `$TMPDIR`, which the rules can't tell from the project's main. Every
+  one was the lead's own work: editing the task's files, scratch
+  folders, its own logs.
+- **Decision:** with everything allowed, only what the rules **read** as
+  one of the irreversible kinds above asks: a plain `git push origin
+  main`, `git push --force`, `rm -rf` of the person's checkout, and the
+  like, wherever they stand readably in a compound command or outside a
+  heredoc's body. What the rules can't tell goes ahead, without the
+  coordinator's judge: a judgment adds up to a minute of waiting to every
+  command, a disturbance of its own. In the code, `lastingOf`
+  (`packages/runtime/src/rules.ts`) leaves out:
+  - what the rules can't tell (`Kept`'s `unclear`): a line with `$(…)` or
+    backticks naming `push`, a variable, `xargs`, `eval`, a `cd` to where
+    they can't tell, and what such a `cd` could lead to (`blind`);
+  - the body of a quoted heredoc read by an interpreter of another
+    language (`python3 - <<'EOF'`, `node`, `ruby`, `perl`), which is not
+    the shell's commands; a shell's (`bash <<'EOF'`, `cat <<'EOF' | sh`)
+    is still read.
+
+  In every mode, the rules no longer read as lost what can't be: git in a
+  folder that is there but in no checkout fails, and deleting what isn't
+  there deletes nothing: a file that isn't, in a folder that is; a
+  wildcard nothing in its folder matches, where the rules read it as the
+  shell does (`*`, `?`, `[a-z]`, `[!a]`, a name matching as written or
+  with case ignored; a class such as `[[:digit:]]`, braces or zsh's
+  patterns read as naming what is there); and a relative path, read from
+  where the rules guess the shell is, that names nothing there, not even
+  its folder. An agent's shell keeps the folder it moved to from one
+  command to the next, and no request says where it is, so the rules
+  read a line from the worktree's top: `cd ../.. && rm -f sb.log` from
+  `packages/ui` reads as deleting a log two folders above the worktree.
+  Where that names nothing, either the shell is elsewhere or nothing goes;
+  where it names what is there, it asks, from wherever it could be. Both
+  are still writing outside the worktree. `$TMPDIR`, `$TMP`, `$TEMP` and
+  `$PWD` at a path's start are read as the folders they name, as `~` and
+  `$HOME` were: `$PWD` as where the command runs, and the temp variables
+  as the agent's own temp folder where Althar made it one at launch
+  (`privateTemp`), so `cp $TMPDIR/x ./y` reads as `cp /…/x ./y` and
+  `rm -f $TMPDIR/../../notes.md` as what it reaches. Other agents pick
+  their own temp folder (Claude Code's sandbox sets one), which Althar
+  doesn't know: a path in it is read as in a temp folder, the task's own
+  whichever it is, and one that climbs out of it as worked out only when
+  it runs.
+- **What holds as before:** while Never lists anything, a command the
+  rules can't read is still refused, with how to spell it out. No one
+  reads keys and sign-ins. In every other mode what the rules can't read
+  asks as it did, and the coordinator still never judges it, so ADR-019
+  doesn't change. The lead's brief doesn't change either: different
+  models use different tools, and Althar doesn't tell leads how to write
+  their commands.
+- **Trade-off:** a script or line the rules can't read could, in
+  principle, push to main, force push or delete the person's checkout,
+  and with everything allowed it now runs without asking. The person
+  accepts that on the presumption that today's agents are competent; what
+  a lead does in plain words still asks. The person chose this over
+  having the coordinator judge such a script and over telling leads to
+  avoid scripts and heredocs.
+- **Revisit when:** an agent does something that can't be undone through
+  a command the rules couldn't read, or cards with everything allowed
+  climb again.

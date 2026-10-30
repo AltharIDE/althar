@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, startTask, still, toConversation } from './support'
 
 /*
  * A conflict is never left without a word (ADR-030), in a real window with
@@ -56,10 +56,10 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
     const card = work.getByRole('article').filter({ hasText: 'Add a retry' })
-    await expect(card.getByText('Merge conflict')).toBeVisible({ timeout: 30_000 })
+    await expect(card.getByText('Merge conflict')).toBeVisible()
     await expect(card.getByText(/The lead couldn’t resolve the conflict with main/)).toBeVisible()
     await expect(card.getByRole('button', { name: 'Resolve now' })).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await card.screenshot({ path: 'test-results/conflicts-card.png', animations: 'disabled', scale: 'css' })
 
     // In its task, over the composer, the same, with Resolve now.
@@ -67,14 +67,14 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await toConversation(page)
     const line = page.getByText(/The lead couldn’t resolve the conflict with main/).last()
     await expect(line).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/conflicts-task.png', animations: 'disabled', scale: 'css' })
 
     // Resolve now asks the lead again, though neither main nor the branch moved: it can't, and says so once more.
     const said = page.getByText(/^Couldn.t settle the conflict: both sides change the same lines\.$/)
     const before = await said.count()
     await page.getByRole('button', { name: 'Resolve now' }).click()
-    await expect.poll(() => said.count(), { timeout: 30_000 }).toBeGreaterThan(before)
+    await expect.poll(() => said.count()).toBeGreaterThan(before)
   } finally {
     await electronApp.close()
   }

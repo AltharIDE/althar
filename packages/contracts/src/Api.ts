@@ -888,6 +888,8 @@ export const ChangeSummary = Schema.Struct({
    * the host hasn't worked it out, or doesn't say.
    */
   conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** In its target branch's merge queue, where accepting it put it: its host merges it once the queue's checks pass. */
+  queued: Schema.optional(Schema.Boolean),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */

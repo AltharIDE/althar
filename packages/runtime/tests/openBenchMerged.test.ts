@@ -80,21 +80,15 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
             body,
             disposition: 'after_current',
           })
-          const all = yield* until(
-            cards(project.projectId),
-            (shown) => shown.some((card) => card.phase === 'ready' && card.change?.number === n),
-            Duration.seconds(60),
+          const all = yield* until(cards(project.projectId), (shown) =>
+            shown.some((card) => card.phase === 'ready' && card.change?.number === n),
           )
           const card = all.find((one) => one.phase === 'ready' && one.change?.number === n)
           if (card === undefined) continue
           github.mergeByHand(n)
           yield* (yield* Changes).refresh(card.taskId)
         }
-        yield* until(
-          cards(project.projectId),
-          (shown) => shown.find((card) => card.change?.number === many)?.phase === 'settled',
-          Duration.seconds(60),
-        )
+        yield* until(cards(project.projectId), (shown) => shown.find((card) => card.change?.number === many)?.phase === 'settled')
         // Main moves on, as it does: a hundred commits since the tasks branched.
         const clone = mkdtempSync(join(tmpdir(), 'althar-main-'))
         execFileSync(real(), ['clone', '-q', bare, clone])

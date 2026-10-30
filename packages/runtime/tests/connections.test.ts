@@ -230,7 +230,6 @@ describe('a connection', () => {
   })
 
   it.live('signs in to Linear in the browser, coming back to a loopback address only it knows the code for', () => {
-    const port = 41_000 + Math.floor(Math.random() * 2000)
     const tracker = makeFakeService({ product: 'linear', account: { id: 'u1', login: 'you', name: 'You' } })
     const { fetch, sent } = stub([
       ['POST', 'https://api.linear.app/oauth/token', { json: { access_token: 'lin_oauth', expires_in: 86_400 } }],
@@ -242,20 +241,23 @@ describe('a connection', () => {
       assert.strictEqual(started.kind, 'browser')
       const url = new URL(started.kind === 'browser' ? started.url : '')
       assert.strictEqual(url.origin + url.pathname, 'https://linear.app/oauth/authorize')
-      assert.strictEqual(url.searchParams.get('redirect_uri'), `http://127.0.0.1:${port}/callback`)
+      // Back to this computer alone, on a port the runtime took for it.
+      const back = new URL(url.searchParams.get('redirect_uri') ?? '')
+      assert.strictEqual(`${back.hostname}${back.pathname}`, '127.0.0.1/callback')
+      const port = back.port
       // A browser that comes back without the state this sign-in sent is turned away.
       const wrong = yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/callback?code=x&state=forged`))
       assert.strictEqual(wrong.status, 400)
       assert.strictEqual((yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/other`))).status, 404)
-      const back = yield* Effect.promise(() =>
+      const signedIn = yield* Effect.promise(() =>
         globalThis.fetch(`http://127.0.0.1:${port}/callback?code=the-code&state=${url.searchParams.get('state') ?? ''}`),
       )
-      assert.include(yield* Effect.promise(() => back.text()), 'Signed in to Linear')
+      assert.include(yield* Effect.promise(() => signedIn.text()), 'Signed in to Linear')
       const [done] = yield* until(flowEnded(started.flowId), (states) => states[0]?.state !== 'waiting')
       assert.strictEqual(done?.state, 'done')
       assert.deepInclude(sent[0]?.body, { code: 'the-code', grant_type: 'authorization_code', client_id: 'lin-althar' })
       assert.strictEqual((yield* connections.list)[0]?.auth, 'pkce')
-    }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: port, linear: tracker })))
+    }).pipe(Effect.provide(withGitHub(fetch, { linear: tracker })))
   })
 
   it.live('takes a pasted token, renews the same account’s rather than adding it twice, and is removed with its token', () => {
