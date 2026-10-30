@@ -108,15 +108,24 @@ export const Reviewing: Story = {
 export const Implementing: Story = { args: { state: 'Implementing', steps: planAt(0), took: '52m', elapsed: '52m' } }
 /** Reviewed and settled; accepting it is yours. Nothing runs, so where it stands has nothing more to say: no bars, no card. */
 export const ReadyForYou: Story = {
-  args: { status: TaskStatus.Yours, state: 'Ready for you', steps: planAt(1, true), face: 'out' },
+  args: { status: TaskStatus.Yours, state: 'Ready to accept', steps: planAt(1, true), face: 'out' },
   play: async ({ canvasElement }) => {
-    const said = within(canvasElement).getByText('Ready for you').parentElement
+    const said = within(canvasElement).getByText('Ready to accept').parentElement
     await expect(said).not.toHaveAttribute('tabindex')
-    await userEvent.hover(within(canvasElement).getByText('Ready for you'))
+    await userEvent.hover(within(canvasElement).getByText('Ready to accept'))
     await waitFor(() => expect(within(document.body).queryByRole('tooltip')).toBeNull())
   },
 }
-export const Stopped: Story = { args: { status: TaskStatus.Stopped, state: 'Stopped', steps: planAt(0) } }
+/** Stopped, as the board says it, its lead's session kept or not; what stopped it on pointing at it or focusing it. */
+export const Stopped: Story = {
+  args: { status: TaskStatus.Stopped, state: 'Stopped', why: 'Stopped when you interrupted it', steps: planAt(0) },
+  play: async ({ canvasElement }) => {
+    const said = within(canvasElement).getByText('Stopped').parentElement
+    await expect(said).toHaveAttribute('tabindex', '0')
+    said?.focus()
+    await waitFor(() => expect(within(document.body).getByRole('tooltip')).toHaveTextContent('Stopped when you interrupted it'))
+  },
+}
 /** A question: nothing built, but the switch is still there, so its place never moves. */
 export const NothingBuilt: Story = {
   args: {

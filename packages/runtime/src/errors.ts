@@ -132,7 +132,7 @@ export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('Ou
  */
 export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChangeToOpen', {
   taskId: Schema.String,
-  why: Schema.Literals(['working', 'stopped', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
+  why: Schema.Literals(['working', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
   detail: Schema.optional(Schema.String),
 }) {}
 

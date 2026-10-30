@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -138,21 +138,29 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     const crashReports = page.getByRole('main').getByRole('switch', { name: 'Crash reports' })
     await expect(crashReports).toHaveAttribute('aria-checked', 'true')
     await crashReports.locator('xpath=ancestor::div[2]').screenshot({ path: 'test-results/crash-reports-settings.png', scale: 'css' })
+    // What the app keeps, which it goes by from the moment it is kept: the window's switch moves before then.
+    const kept = () => (JSON.parse(readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')) as { crashReports?: boolean }).crashReports
     await crashReports.click()
     await expect(crashReports).toHaveAttribute('aria-checked', 'false')
+    await expect.poll(kept).toBe(false)
     // Usage data has a switch of its own, and its events on their way may still go: only crash reports must not.
     const before = fake.events.length
-    const thrown = (message: string) =>
-      page.evaluate((said) => {
-        queueMicrotask(() => {
-          throw new Error(said)
-        })
-      }, message)
-    await thrown('After the switch went off')
+    // Of two kinds, so neither is taken for the other: a report goes once a launch for each failure.
+    const thrown = (message: string, kind: 'TypeError' | 'Error') =>
+      page.evaluate(
+        ([said, as]) => {
+          queueMicrotask(() => {
+            throw as === 'TypeError' ? new TypeError(said) : new Error(said)
+          })
+        },
+        [message, kind] as const,
+      )
+    await thrown('After the switch went off', 'TypeError')
     // On again, the next one is sent: what was thrown while it was off would have come before it.
     await crashReports.click()
     await expect(crashReports).toHaveAttribute('aria-checked', 'true')
-    await thrown('After the switch went on again')
+    await expect.poll(kept).toBe(true)
+    await thrown('After the switch went on again', 'Error')
     const values = () =>
       fake.events.slice(before).flatMap((event) => (event.event === '$exception' ? [event.properties.$exception_list?.[0]?.value] : []))
     await expect.poll(values).toContain('After the switch went on again')
