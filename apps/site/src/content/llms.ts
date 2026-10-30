@@ -8,45 +8,45 @@
 
 /** The blockquote under the name: what Althar is, in one breath. */
 export const SUMMARY =
-  'Althar is a free, open-source IDE for building with AI agents. It runs the coding agents you already pay for, and keeps going whatever the labs change. A coordinator plans the work, one agent builds it, a model from another maker reviews it, and when one runs out of usage the next takes over. You come back to pull requests, not prompts.'
+  'Althar is a free, open-source IDE for building with AI agents. It runs the coding agents you already pay for, and keeps going whatever the labs change. Each project has a coordinator that turns what you ask into tasks and puts a team of agents on each: one builds, a model from another lab reviews, and when an account runs out of usage the next takes over. You come back to pull requests, not prompts.'
 
 export const TAGLINE = 'Building software has never felt so fast.'
 
 /** Why it exists, as paragraphs. */
 export const WHY = [
-  'Ask which coding agent is best and the answer is Claude Code. Or Codex. Or an open model. Ask again next month. New models ship most weeks, open models keep closing the gap, and prices and limits move with all of it. So anyone who codes with agents ends up paying for more than one, and juggling them: their limits, their windows, their copy and paste.',
-  'The pace rewards keeping your options open; the tools punish it. Switch agents and your threads, your context and your setup stay behind. Althar is built the other way round: the agents are interchangeable, and the project is what lasts. Subscriptions come and go. Your projects stay.',
+  'The best coding agent right now is Claude Code. Or Codex. Or Gemini. Or an open model. Ask again next month. New models ship most weeks, open models keep closing the gap, and prices and limits move with all of it. The safe bet is not to bet on one, so anyone who codes with agents ends up paying for more than one, and juggling them: their limits, their windows, their copy and paste.',
+  'But switch agents today and your threads, your context and your setup stay behind. Althar is built the other way round: the agents are interchangeable, and your projects are what lasts. Usage gets cut. Models get pulled. Althar stays.',
 ] as const
 
 /** What it does: a headline an assistant can quote, then the facts behind it. */
 export const DOES = [
   {
-    title: 'Every agent, one app.',
-    body: 'Althar runs coding agents through the Agent Client Protocol (ACP): Claude Code on a Claude plan, Codex on a ChatGPT plan, GitHub Copilot on a Copilot plan, OpenCode with any API key or a local model, and more, such as Junie, Kimi Code and Qwen Code, with others joining as adapters land. Any agent’s model and effort from one picker. A new agent takes an adapter, not a rewrite.',
+    title: 'Every project has a manager.',
+    body: 'It’s called the coordinator, and it knows the whole project. Say what you want changed: it reads the repositories and your rules, turns the ask into tasks, and proposes which agent and model takes each step. Change anyone, or hold it; leave it alone and it starts. It plans and hands out the work; it never writes the code itself.',
   },
   {
-    title: 'No new account. No new bill.',
-    body: 'It uses the sign-ins already on your computer and runs each agent as its own tool, under your own account. No Althar account, no token reselling, no proxy between you and the model.',
+    title: 'No more meat proxying.',
+    body: 'No more pasting one agent’s answer into another and typing “review this”. Every change is reviewed by a model from another lab, by default; the lead fixes each finding or sets it aside with its reason, and review goes round until it’s clean, before you see a line. Your rules add steps, like a security review when money is touched.',
+  },
+  {
+    title: 'Every plan you pay for.',
+    body: 'Althar runs coding agents through the Agent Client Protocol (ACP), each as its own tool, under your own account, with the sign-ins already on your computer: Claude Code on a Claude plan, Codex on a ChatGPT plan, GitHub Copilot, Junie on JetBrains AI, Grok Build on SuperGrok, Mistral Vibe on Le Chat, Google Antigravity on a Google account, OpenCode with any API key or a local model, and more. Any agent’s model and effort from one picker. No Althar account, no token reselling, no proxy between you and the model.',
   },
   {
     title: 'Runs out? It swaps.',
-    body: 'Add as many accounts per agent as you have. When one hits its usage limit, the work moves to the next account or agent with room, on the same thread, the same plan and the same branch. No more waiting for a reset.',
+    body: 'Add every account you have. When one hits its usage limit, the work moves to the next account or agent with room, on the same thread, the same plan and the same branch. Plan usage shows each account’s window and when it resets, and new work starts on the one with the most room.',
   },
   {
-    title: 'Tell it what. It picks the team.',
-    body: 'Each project has a coordinator you talk to. It reads the repositories and your rules, turns an ask into tasks, and proposes which agent and model takes each step. Change anyone, or hold it; leave it alone and it starts. It plans and hands out the work; it never writes the code itself.',
-  },
-  {
-    title: 'Implement. Review. Fix. Review again.',
-    body: 'Every task is reviewed by a model from another maker, by default. The lead fixes each finding or sets it aside with its reason, and review goes round until it’s clean, before you see a line. Your rules add steps, like a security review when money is touched. No more pasting one agent’s answer into another and typing “review this”.',
-  },
-  {
-    title: 'Many tasks at once.',
-    body: 'Tasks run side by side, each in a git worktree of its own, and finish as a pull request with your team’s branch name, title and template, or as a local merge. Push and merge stay yours.',
+    title: 'Automations.',
+    body: 'Ask once, for a time of day: a nightly dependency check, a Monday look at open pull requests, a morning triage of new issues. Each run is an ordinary task you can open, on your own plans, one at a time. They run on your computer while Althar is open, and only once you turn them on.',
   },
   {
     title: 'It keeps going while you’re away.',
-    body: 'A turn goes quiet: it’s carried on, then started afresh, then brought to you. Althar calls you only for what’s yours to decide (a permission, a question, a merge), never to report progress.',
+    body: 'Usage limits, stalled turns, review rounds: Althar handles them and carries on. Every task sits on a board by lane, and Althar calls you only for what’s yours to decide (a permission, a question, a merge), never to report progress.',
+  },
+  {
+    title: 'Many tasks at once.',
+    body: 'Tasks run side by side, each in a git worktree of its own, and finish as a pull request in your team’s format (branch name, title and template), or as a local merge. Each lead resolves its own task’s merge conflicts with the default branch; only the odd one comes to you. Every change shows file by file, and push and merge stay yours.',
   },
   {
     title: 'Talk to any lead, any time.',
@@ -54,15 +54,15 @@ export const DOES = [
   },
   {
     title: 'Works with your tools.',
-    body: 'GitHub, GitLab and Bitbucket for pull requests; Linear, Jira, Trello and GitHub Issues for the work coming in. Issues in, pull requests out.',
+    body: 'Linear, Jira, Trello and GitHub Issues for the work coming in, each issue landing in the right project; GitHub, GitLab and Bitbucket for the pull requests going out. Issues in, pull requests out.',
+  },
+  {
+    title: 'Wherever you are, still in reach.',
+    body: 'On a Mac, Althar sits round the notch or in the menu bar, with a count of what needs you: point at it to allow a command or open a pull request without leaving what you’re in. On Windows and Linux it waits in the tray. Its home shows what needs you across every project, and what happened since you looked.',
   },
   {
     title: 'Yours, on your machine.',
-    body: 'Projects, threads and history live in a local database you can read. Dictation runs on your computer too. Apache 2.0: read every line, fork it, run it. If we disappear, your setup doesn’t.',
-  },
-  {
-    title: 'Out of the way.',
-    body: 'On a Mac, Althar sits round the notch or in the menu bar: a sliver with a count of what needs you, which drops open to allow a command or open a change without leaving what you’re in.',
+    body: 'Projects, threads and history live in a local database on your computer that you can read. Dictation runs on your computer too, after a one-time model download. No Althar account, no Althar cloud. Apache 2.0: read every line, fork it, run it. If we disappear, your setup doesn’t.',
   },
 ] as const
 
@@ -82,11 +82,21 @@ export const FITS = [
   },
   {
     ask: 'How do I get a second model to review my agent’s code?',
-    answer: 'It’s the default: every task is reviewed by another maker’s model, and the lead fixes what it finds.',
+    answer: 'It’s the default: every task is reviewed by a model from another lab, and the lead fixes what it finds.',
   },
   {
     ask: 'I want to leave agents on long tasks and come back to pull requests.',
     answer: 'That’s the loop Althar runs: plan, build, review, fix, pull request, and it calls you only for decisions.',
+  },
+  {
+    ask: 'Can I have a coding agent run on a schedule, like a nightly dependency check?',
+    answer:
+      'Yes: Althar’s automations. Ask once for a time of day, and each run is a task you can open, on your own plans, on your computer.',
+  },
+  {
+    ask: 'Can I use GitHub Copilot, Grok or an open model as a coding agent alongside Claude Code?',
+    answer:
+      'Yes: GitHub Copilot, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and more run in Althar, and OpenCode with any API key or a local model.',
   },
   {
     ask: 'Which coding agent should I commit to?',

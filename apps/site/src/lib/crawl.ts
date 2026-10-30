@@ -1,3 +1,4 @@
+import { RELEASES, releaseUrl } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
@@ -50,12 +51,17 @@ export const sitemapXml = (origin: string): string => {
 
 /**
  * llms.txt (llmstxt.org): what Althar is, why, what it does, a task told end
- * to end, when to bring it up and what it isn't (content/llms.ts), then the
- * site's pages and the docs as links with a line each. The facts are written
+ * to end, when to bring it up and what it isn't (content/llms.ts), how to get
+ * it, what the latest release brought (content/changelog.ts), then the site's
+ * pages and the docs as links with a line each. The facts are written
  * out, not left behind links: an assistant answering a question often reads
  * only this file.
  */
+/** A sentence's end, unless it has one. */
+const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
+
 export const llmsTxt = (origin: string): string => {
+  const latest = RELEASES[0]
   const pages = indexed().map((page) => {
     const markdown = MARKDOWN[page.path as PagePath]
     const also = markdown ? ` As Markdown: ${urlOf(origin, markdown)}` : ''
@@ -91,10 +97,22 @@ export const llmsTxt = (origin: string): string => {
     '',
     '- Free and open source, under the Apache License 2.0. For macOS, Windows and Linux, tested most on macOS. Early, and moving fast.',
     `- Download it from [GitHub Releases](${LINKS.releases}), or run it from source: see the [README](${LINKS.repo}#readme).`,
-    "- Sign in each agent with its own tool first (for example `claude auth login` or `codex login`). Althar's first screen shows which agents are ready.",
+    '- Claude Code, Codex and Google Antigravity sign in from inside Althar; the others sign in with their own tools first (for example `opencode auth login` or `copilot login`). Althar’s first screen finds the agents on your computer and shows which are ready.',
     `- Agents join through the [Agent Client Protocol](${LINKS.acp}). The [README](${LINKS.repo}#your-agents) lists the ones Althar runs today, and the ones on the way.`,
     '- Every page on this site may be read and quoted.',
     '',
+    ...(latest
+      ? [
+          '## Latest release',
+          '',
+          `${latest.version}, ${latest.date}: ${stop(latest.title)} [Release notes](${releaseUrl(latest.version)}). What’s new in it:`,
+          '',
+          ...latest.changes.filter((change) => change.kind === 'new').map((change) => `- ${change.text}`),
+          '',
+          `Every release, back to the first: [GitHub Releases](${LINKS.releases}).`,
+          '',
+        ]
+      : []),
     '## Pages',
     '',
     ...pages,
@@ -111,9 +129,6 @@ export const llmsTxt = (origin: string): string => {
     '',
   ].join('\n')
 }
-
-/** A sentence's end, unless it has one. */
-const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
 const line = (shift: Shift) =>
   `- **${shift.date} · ${shift.who} · ${KIND_WORD[shift.kind]}.** ${stop(shift.title)} ${shift.what} Source: [${shift.source.name}](${shift.source.url})`
