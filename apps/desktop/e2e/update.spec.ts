@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
-import { launch } from './support'
+import { launch, still } from './support'
 
 /*
  * An update whose migration can't run on the person's data: a profile made
@@ -51,7 +51,7 @@ test('an update that can’t move the data keeps a copy from before, leaves the 
     copy = join(profile, 'backups', copies[0] ?? '')
     await expect(page.getByRole('region', { name: 'Copy from before the update' })).toContainText(copies[0] ?? '')
     await expect(page.getByRole('region', { name: 'What stopped it' })).toContainText('no such table: no_such_table')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/update-stopped.png' })
 
     // Report this opens Report a problem over the page, about the update, with no runtime to ask: main says what it can itself.

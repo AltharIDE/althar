@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -58,7 +58,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         false,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       moveMainOn(working)
       const refused = yield* Effect.flip(mergeHere(task?.taskId ?? ''))
       assert.deepStrictEqual(cantOf(refused), ['CantMerge', 'conflicts', 'change.txt'])
@@ -75,7 +75,7 @@ describe('a conflict merging here', () => {
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass] [lead:resolve]', true)
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       const reviews = sql<{ n: number }>`
@@ -96,7 +96,7 @@ describe('a conflict merging here', () => {
       assert.strictEqual(git(path, 'merge-base', '--is-ancestor', 'main', 'HEAD'), '')
       // No review round for it, and it waits on the person again.
       assert.strictEqual((yield* reviews)[0]?.n, reviewed?.n)
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       // Asked while it resolves, or merged after, nothing more is asked of it.
       yield* mergeHere(taskId)
       // Both sides hold, as the lead settled them.
@@ -115,7 +115,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       // Looked at while its branch merges cleanly, nothing is asked.
@@ -145,7 +145,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve-wait]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -171,7 +171,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve-fails]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -186,7 +186,7 @@ describe('a conflict merging here', () => {
         [['failed', 2]],
       )
       // Needs you, where the person's own press would leave it: merging again offers to ask the lead, and asks nothing itself.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'conflicts')
       assert.strictEqual((yield* asked(threadId)).length, 2)
       assert.strictEqual((yield* rounds(taskId)).length, 1)
@@ -214,7 +214,7 @@ describe('a conflict merging here', () => {
           'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
           true,
         )
-        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
         const taskId = task?.taskId ?? ''
         const threadId = task?.threadId ?? ''
         // Another task takes the one place: its lead works on until it is stopped.
@@ -440,7 +440,7 @@ describe('a task that says otherwise than its project', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         false,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       // The default branch moves on; nobody merges, so nothing has found it yet.
@@ -458,7 +458,7 @@ describe('a task that says otherwise than its project', () => {
       )
       // Saying it again starts nothing more, and the person merges as ever.
       yield* taskSays(taskId, true)
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       yield* mergeHere(taskId)
       assert.strictEqual(git(working, 'show', 'main:change.txt'), 'change\nrate limits')
       assert.strictEqual((yield* asked(threadId)).length, 1)
@@ -480,7 +480,7 @@ describe('a task that says otherwise than its project', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       yield* taskSays(taskId, false)
       moveMainOn(working)

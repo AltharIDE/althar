@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -103,7 +103,6 @@ describe('a task whose worktree’s starting commit isn’t known', () => {
             SELECT d.prompt FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
             WHERE t.task_id = ${created.taskId} AND t.kind = 'step' ORDER BY d.requested_at LIMIT 1`,
             (rows) => rows.length === 1,
-            Duration.seconds(20),
           )
           if (several) assert.match(briefed?.prompt ?? '', /\n- api: .+, `git diff HEAD~1`/)
           else assert.include(briefed?.prompt, 'See the change with `git diff HEAD~1` there')

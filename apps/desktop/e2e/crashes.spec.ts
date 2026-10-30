@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch } from './support'
+import { launch, still } from './support'
 
 /*
  * Crash reports (ADR-046), from the app as it fails: the window's error, a
@@ -60,7 +60,6 @@ const crashes = (events: ReadonlyArray<Sent>) =>
     .map((event) => `${event.properties.process} ${event.properties.$exception_list?.[0]?.type}`)
 
 test('sends crash reports, masked, while their switch is on, a native crash on the next launch, and nothing once it is off', async () => {
-  test.setTimeout(120_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -75,7 +74,7 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     await expect(page.getByRole('dialog')).toHaveCount(0)
     // Once the launch has played over the screen and the repositories are found.
     await expect(page.getByRole('list', { name: 'Repositories for the project' })).toBeVisible()
-    await page.waitForTimeout(2_500)
+    await still(page)
     await line.locator('xpath=ancestor::section[1]').screenshot({
       path: 'test-results/crash-reports-first-screen.png',
       scale: 'css',
@@ -84,12 +83,12 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
 
     // The window's own error, with a path under the home folder in it, and a rejection nobody handled in main.
     await page.evaluate((where) => {
-      setTimeout(() => {
+      queueMicrotask(() => {
         throw new TypeError(`Couldn’t read ${where}/Projects/meridian/app.ts`)
       })
     }, home)
     await electronApp.evaluate(() => {
-      setTimeout(() => void Promise.reject(new RangeError('Main went out of range')))
+      queueMicrotask(() => void Promise.reject(new RangeError('Main went out of range')))
     })
     await expect.poll(() => crashes(fake.events)).toEqual(expect.arrayContaining(['window TypeError', 'main RangeError']))
 
@@ -99,7 +98,7 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
       const pid = BrowserWindow.getAllWindows()[0]?.webContents.getOSProcessId()
       if (pid !== undefined) process.kill(pid, 'SIGSEGV')
     })
-    await expect.poll(() => crashes(fake.events), { timeout: 20_000 }).toContain('window Process gone')
+    await expect.poll(() => crashes(fake.events)).toContain('window Process gone')
     const sent = JSON.stringify(fake.events)
     expect(sent).not.toContain(home)
     expect(sent).toContain('Couldn’t read ~/…/app.ts')
@@ -113,7 +112,7 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
   // Opened again: the native crash, once, with no minidump in it.
   ;({ electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url }))
   try {
-    await expect.poll(() => crashes(fake.events), { timeout: 20_000 }).toContain('window Native crash')
+    await expect.poll(() => crashes(fake.events)).toContain('window Native crash')
     expect(crashes(fake.events).filter((crash) => crash === 'window Native crash')).toHaveLength(1)
 
     // Once there is a project, its name and its repository's are hidden too.
@@ -124,7 +123,7 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     await page.getByRole('button', { name: /Make the project/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.evaluate(() => {
-      setTimeout(() => {
+      queueMicrotask(() => {
         throw new SyntaxError('meridian’s settings didn’t parse')
       })
     })
@@ -143,13 +142,21 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     await expect(crashReports).toHaveAttribute('aria-checked', 'false')
     // Usage data has a switch of its own, and its events on their way may still go: only crash reports must not.
     const before = fake.events.length
-    await page.evaluate(() => {
-      setTimeout(() => {
-        throw new Error('After the switch went off')
-      })
-    })
-    await page.waitForTimeout(3_000)
-    expect(crashes(fake.events.slice(before))).toEqual([])
+    const thrown = (message: string) =>
+      page.evaluate((said) => {
+        queueMicrotask(() => {
+          throw new Error(said)
+        })
+      }, message)
+    await thrown('After the switch went off')
+    // On again, the next one is sent: what was thrown while it was off would have come before it.
+    await crashReports.click()
+    await expect(crashReports).toHaveAttribute('aria-checked', 'true')
+    await thrown('After the switch went on again')
+    const values = () =>
+      fake.events.slice(before).flatMap((event) => (event.event === '$exception' ? [event.properties.$exception_list?.[0]?.value] : []))
+    await expect.poll(values).toContain('After the switch went on again')
+    expect(values()).toEqual(['After the switch went on again'])
   } finally {
     await electronApp.close()
     await fake.close()
@@ -157,7 +164,6 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
 })
 
 test('keeps an agent it couldn’t check to that agent, shows the others as they are, and reports it as handled', async () => {
-  test.setTimeout(60_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   mkdirSync(join(home, 'Projects'))
   const fake = await posthog()

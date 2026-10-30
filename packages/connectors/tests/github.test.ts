@@ -2,9 +2,9 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 import { TestClock } from 'effect/testing'
 
-import { checkRunState, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
+import { checkRunState, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
 import { fromOutside, type Issue, type Repository } from '../src/model'
-import { type Route, stubFetch, variablesOf } from './stub'
+import { type Route, type Sent, stubFetch, variablesOf } from './stub'
 
 const API = 'https://api.github.com'
 const REPO = `${API}/repos/meridian/api`
@@ -119,6 +119,88 @@ describe('GitHub as a code host', () => {
         merge_method: 'merge',
         sha: open.headSha,
       })
+    }),
+  )
+
+  it.effect('puts a pull request in its branch’s merge queue where GitHub refuses a merge for one, and reads it there when asked', () =>
+    Effect.gen(function* () {
+      const queue = (pull: Record<string, unknown> = {}) => ({
+        json: {
+          data: {
+            repository: { pullRequest: { isMergeQueueEnabled: true, isInMergeQueue: false, timelineItems: { nodes: [] }, ...pull } },
+          },
+        },
+      })
+      const enqueuing = (request: Sent) => JSON.stringify(request.body).includes('enqueuePullRequest')
+      const refusal = { status: 405, json: { message: 'Repository rule violations found\n\nChanges must be made through the merge queue' } }
+      const { host, sent } = github([
+        ['PUT', `${REPO}/pulls/12/merge`, refusal],
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) => (enqueuing(request) ? { json: { data: { enqueuePullRequest: { mergeQueueEntry: { position: 1 } } } } } : queue()),
+        ],
+      ])
+      const open = yield* host.change(repository, 12)
+      // Refused for its queue, it goes in, at the head Althar saw, and is open still: GitHub merges it later.
+      assert.deepInclude(yield* host.merge(repository, open), { state: 'open', queued: true, number: 12, headSha: 'abc' })
+      const [asked, enqueued] = sent.filter((request) => request.method === 'POST')
+      assert.deepStrictEqual(variablesOf(asked), { owner: 'meridian', name: 'api', number: 12 })
+      assert.deepStrictEqual(variablesOf(enqueued), { id: 'PR_1', head: 'abc' })
+      // In it already, as pressing Merge again finds it, it isn't put in twice.
+      const already = github([
+        ['PUT', `${REPO}/pulls/12/merge`, refusal],
+        ['POST', `${API}/graphql`, queue({ isInMergeQueue: true })],
+      ])
+      assert.deepInclude(yield* already.host.merge(repository, open), { state: 'open', queued: true })
+      assert.lengthOf(already.sent.filter(enqueuing), 0)
+      // Refused on a branch with no queue, or where GitHub won't say, it is the refusal it was.
+      for (const answer of [queue({ isMergeQueueEnabled: false }), { status: 502, json: {} }]) {
+        const plain = github([
+          ['PUT', `${REPO}/pulls/12/merge`, { status: 405, json: { message: 'Pull Request is not mergeable' } }],
+          ['POST', `${API}/graphql`, answer],
+        ])
+        assert.deepInclude(yield* Effect.flip(plain.host.merge(repository, open)), {
+          reason: 'rejected',
+          message: 'Pull Request is not mergeable',
+        })
+        assert.lengthOf(plain.sent.filter(enqueuing), 0)
+      }
+      // Read, it says where it stands with the queue only when asked: out of it, and why the queue took it out.
+      const reading = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks' }] } })],
+      ])
+      assert.notProperty(yield* reading.host.change(repository, 12), 'queued')
+      assert.lengthOf(
+        reading.sent.filter((request) => request.method === 'POST'),
+        0,
+      )
+      assert.deepInclude(yield* reading.host.change(repository, 12, { queue: true }), { queued: false, leftQueue: 'checks' })
+      const inIt = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ isInMergeQueue: true })],
+      ])
+      assert.deepInclude(yield* inIt.host.change(repository, 12, { queue: true }), { queued: true, leftQueue: null })
+      // A pull request GraphQL doesn't find, as REST did a moment before, isn't taken for one out of the queue.
+      const unfound = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, { json: { data: { repository: null } } }],
+      ])
+      assert.strictEqual((yield* Effect.flip(unfound.host.change(repository, 12, { queue: true }))).reason, 'not_found')
+      // Merged, there is no queue to ask about.
+      const merged = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-28T12:00:00Z' }) }]])
+      assert.notProperty(yield* merged.host.change(repository, 12, { queue: true }), 'queued')
+      // GitHub's reasons, in Althar's words; one it gives that Althar doesn't know is still a reason.
+      assert.deepStrictEqual(['failed_checks', 'merge_conflict', 'manual', 'merged', 'timed_out', null].map(leftQueueOf), [
+        'checks',
+        'conflict',
+        'removed',
+        'merged',
+        'other',
+        null,
+      ])
     }),
   )
 

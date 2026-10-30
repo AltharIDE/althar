@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { claudeKeychainItems, extractString, readClaudeKeychainField, readTokenField } from '../src/credentialStore'
 import { agents } from '../src/registry'
-import { buildUsageReader, MIN_INTERVAL, type UsagePolicy, usageReader } from '../src/usageRead'
+import { buildUsageReader, MIN_INTERVAL, type UsageAccount, type UsagePolicy, usageReader } from '../src/usageRead'
 import {
   allowedEndpoints,
   chatGptUsageWindows,
@@ -179,8 +179,12 @@ const server = (reply: Reply | (() => Reply)) => {
 }
 
 const codex = (home: string) => ({ agent: 'codex' as const, provider: 'openai', home, named: true })
-const reader = (policy: UsagePolicy = {}, patch: Partial<EndpointSource> = {}) =>
-  buildUsageReader({
+/** A reader of the registry's sources, patched as a test says, asked at the time `now` gives: the system's, unless a test says. */
+const reader = (
+  { now = () => new Date(), ...policy }: UsagePolicy & { readonly now?: () => Date } = {},
+  patch: Partial<EndpointSource> = {},
+) => {
+  const built = buildUsageReader({
     pairs: usagePairs.map((pair) => ({
       ...pair,
       sources: pair.sources.map((source) => (source.kind === 'endpoint' ? { ...source, ...patch } : source)),
@@ -188,6 +192,8 @@ const reader = (policy: UsagePolicy = {}, patch: Partial<EndpointSource> = {}) =
     keychain: async () => null,
     ...policy,
   })
+  return { read: (sourceId: string, account: UsageAccount) => built.read(sourceId, account, now) }
+}
 
 describe('the usage reader', () => {
   it('makes one GET to the allowlisted host and path, carrying the token and the account it is for, and reads the windows', async () => {

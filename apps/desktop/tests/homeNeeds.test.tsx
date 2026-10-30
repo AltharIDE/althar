@@ -171,7 +171,7 @@ describe('the home', () => {
       }),
     })
     withServices(<Home />, client)
-    expect((await screen.findByRole('alert', {}, { timeout: 5000 })).textContent).toBe('The runtime is restarting.')
+    expect((await screen.findByRole('alert')).textContent).toBe('The runtime is restarting.')
     expect(within(document.body).queryByRole('region', { name: /needs? you/ })).toBeNull()
   })
 })
