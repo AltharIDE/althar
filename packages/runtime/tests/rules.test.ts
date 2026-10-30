@@ -34,6 +34,12 @@ const named = (path: string) => resolve(path).replaceAll('\\', '/')
 /** Where a command throws things away: /tmp, or on Windows the temporary folder, as /tmp is a folder of the drive to PowerShell. */
 const scratch = process.platform === 'win32' ? named(tmpdir()) : '/tmp'
 const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'althar/retry', currentBranch: 'althar/retry' }
+/**
+ * A home with the folders the tests throw away in it: deleting what isn't there loses nothing, so a machine without
+ * `~/Documents`, as CI's, would read `rm -rf ~/Documents` as safe. Kept with the tests, not in the temporary folder,
+ * which a path in reads as thrown away.
+ */
+const furnished = join(import.meta.dirname, 'fixtures', 'home')
 
 const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
   sessionId: 's',
@@ -1429,7 +1435,8 @@ describe('what could lose work or a secret (DEV-69)', () => {
 
   it('asks even with everything allowed before what can’t be undone, without holding it, and says why', () => {
     const allow = { mode: 'allow' as const }
-    for (const command of irreversible) assert.deepInclude(run(command, rules(allow)), { verdict: 'ask', held: false }, command)
+    for (const command of irreversible)
+      assert.deepInclude(run(command, { ...rules(allow), home: furnished }), { verdict: 'ask', held: false }, command)
     assert.strictEqual(
       reasonOf(run('git push --force origin althar/retry', rules(allow))),
       'A force push asks even with everything allowed: it can throw away commits on the remote.',
@@ -1440,7 +1447,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
     )
     // Every card that still asks says why, in one line.
     for (const command of irreversible) {
-      const reason = reasonOf(run(command, rules(allow)))
+      const reason = reasonOf(run(command, { ...rules(allow), home: furnished }))
       assert.include(reason, 'even with everything allowed:', command)
       assert.notInclude(reason, '\n', command)
     }
@@ -2347,7 +2354,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
       "bash <<'EOF'\ngit push --force origin althar/retry\nEOF",
       "cat <<'EOF' | sh\ngit push origin main\nEOF",
     ]) {
-      const verdict = decide(runs(command), rules(allow))
+      const verdict = decide(runs(command), { ...rules(allow), home: furnished })
       assert.deepInclude(verdict, { verdict: 'ask', held: false }, command)
       // It says why in one line.
       assert.include('reason' in verdict ? verdict.reason : '', 'even with everything allowed:', command)

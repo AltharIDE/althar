@@ -72,6 +72,8 @@ describe('agents as processes', () => {
 
   it.live('marks a session lost, and its turn failed, when the agent exits mid-turn', () =>
     Effect.gen(function* () {
+      // This run's alone: a run before, or the same test run again, reported its own.
+      lost.length = 0
       const sessions = yield* Sessions
       const { task: created } = yield* task()
       const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'process' })
