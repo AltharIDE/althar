@@ -1745,7 +1745,7 @@ const wildcardPattern = (name: string): ((each: string) => boolean) | undefined 
       const listed = end === -1 ? '' : name.slice(from, end)
       // `[]a]` and `[!]a]` list `]` itself, not read; with `[` or `\` in it, it is a class, an equivalence or an escape.
       if (listed === '' || /[[\\]/.test(listed)) return undefined
-      pattern += `[${negated ? '^' : ''}${listed.replace(/\^/g, '\\^')}]`
+      pattern += `[${negated ? '^' : ''}${listed.replace(/[\\^]/g, '\\$&')}]`
       at = end
     } else pattern += char.replace(/[.+^${}()|\]\\]/g, '\\$&')
   }
