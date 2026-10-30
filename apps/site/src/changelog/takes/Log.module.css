@@ -85,19 +85,16 @@
 /* The page's name, for assistive technology and search: the nav shows it. */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* The newest release's head: its stamp across, then its version and its title, large. */
-.lead { display: grid; justify-items: center; gap: 30px; width: min(1180px, 100%); margin-top: 52px; text-align: center; scroll-margin-top: 88px; }
-.lead .stamp { width: 100%; }
-.release { display: grid; justify-items: center; gap: 14px; }
-.leadV { font: 500 20px/1 var(--mono); letter-spacing: -0.01em; color: var(--lit); text-shadow: 0 0 18px rgba(60, 76, 255, 0.7); }
-.headline { font-family: 'Inter Display', var(--display); font-size: clamp(34px, 4.4vw, 64px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+/* The newest release: its stamp across, its version and title over its lead's name, large in the middle, and why. */
+.lead { display: grid; justify-items: center; gap: 16px; width: min(1180px, 100%); margin-top: 52px; text-align: center; scroll-margin-top: 88px; }
+.lead .stamp { width: 100%; margin-bottom: 20px; }
+.release { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 12px; font: 400 18px/1.3 var(--font); letter-spacing: -0.01em; color: rgba(255, 248, 240, 0.66); }
+.leadV { font: 500 18px/1 var(--mono); letter-spacing: -0.01em; color: var(--lit); text-shadow: 0 0 18px rgba(60, 76, 255, 0.7); }
+.headline { font-family: 'Inter Display', var(--display); font-size: clamp(40px, 5vw, 72px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+.why { max-width: 38em; margin-top: 2px; font-size: 16.5px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
 
-/* Its lead, shown: the feature and why beside its picture, the picture standing on the planet's lit edge. */
-.spot { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 800px); justify-content: center; align-items: center; gap: 56px; width: min(1180px, 100%); margin-top: 46px; padding-bottom: 56px; }
-.spotWords { display: grid; gap: 12px; text-align: left; }
-.spotTitle { font-family: 'Inter Display', var(--display); font-size: 30px; font-weight: 600; line-height: 1.1; letter-spacing: -0.03em; color: #fff; }
-.why { font-size: 16px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
-.heroPic { min-width: 0; }
+/* Its lead, shown under it, standing on the planet's lit edge. */
+.heroPic { width: min(900px, 100%); margin-top: 44px; padding-bottom: 56px; }
 .heroPic > figure { box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12), 0 30px 80px -30px rgba(0, 0, 0, 0.9), 0 0 120px -40px rgba(60, 76, 255, 0.6); }
 
 /* ---- the log ---- */
@@ -113,6 +110,9 @@
 /* The newest release, going on from the window: lit, the rail under it carrying the light down to the one before. */
 .current::before { top: 20px; background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 50%, var(--hair-2)); }
 .current .node { top: 9px; background: var(--lit); box-shadow: 0 0 0 4px rgba(60, 76, 255, 0.2), 0 0 14px var(--glow); }
+/* Its stamp opens it on a phone, where the window leaves it out. */
+.current > .stamp { margin-bottom: 26px; }
+.phoneOnly { display: none; }
 /* The launch: where the log begins. */
 .launch .node { background: radial-gradient(circle, var(--ink) 0 2px, transparent 2.5px); box-shadow: inset 0 0 0 1.5px var(--ink); }
 
@@ -132,7 +132,8 @@
 .met { text-transform: none; letter-spacing: 0.06em; }
 .note { color: var(--ink-2); }
 .rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
-.out { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); text-decoration: none; }
+/* Its hit area runs taller than the line, for a thumb. */
+.out { display: inline-flex; align-items: center; gap: 6px; margin-block: -12px; padding-block: 12px; color: var(--ink-2); text-decoration: none; }
 .out:hover { color: #fff; }
 
 /* The version, as code, and the release's title. */
@@ -304,27 +305,27 @@ a.v:hover { color: var(--lit); }
   .plot { margin-top: 28px; padding-left: 6px; }
 }
 
-@media (max-width: 1100px) {
-  /* The feature and why over the picture, centred. */
-  .spot { grid-template-columns: minmax(0, 820px); gap: 26px; }
-  .spotWords { justify-items: center; max-width: 36em; margin: 0 auto; text-align: center; }
-}
-
 @media (max-width: 640px) {
   .main { --in: 26px; padding-top: 72px; border-radius: 0 0 24px 24px; }
   .window { margin: 0 10px; padding: 18px 16px 0; border-radius: 24px; }
   .limb { top: calc(100% - 110px); left: -90%; right: -90%; }
   .deck { gap: 10px; }
   .readout { gap: 8px; }
-  .readout i { font-size: 9px; letter-spacing: 0.1em; }
-  .readout b { font-size: 13px; }
+  /* The window keeps to the clock and the launch over the release: its version is said just under them, its stamp waits for the log. */
+  .deck { grid-template-columns: minmax(0, 1fr) auto; }
+  .readout.mid { justify-items: end; text-align: right; }
+  .readout.end, .wideOnly { display: none; }
+  .phoneOnly { display: flex; }
+  .current::before { top: 12px; }
+  .current .node { top: 1px; }
+  .readout i { font-size: 10px; letter-spacing: 0.1em; }
+  .readout b { font-size: 14px; }
   .clock { min-width: 0; }
-  .lead { gap: 20px; margin-top: 30px; }
-  .leadV { font-size: 16px; }
-  .headline { font-size: 34px; }
-  .spot { gap: 18px; margin-top: 26px; padding-bottom: 36px; }
-  .spotTitle { font-size: 24px; }
+  .lead { gap: 12px; margin-top: 44px; }
+  .release, .leadV { font-size: 15px; }
+  .headline { font-size: 44px; }
   .why { font-size: 15px; }
+  .heroPic { margin-top: 26px; padding-bottom: 36px; }
   .shown { margin-bottom: 32px; }
   .hl { font-size: 20px; }
   .hlWhy { font-size: 15px; }
@@ -343,4 +344,10 @@ a.v:hover { color: var(--lit); }
   .endRow { flex-direction: column; align-items: stretch; margin-top: 88px; padding-bottom: 96px; }
   .ways { display: grid; gap: 10px; }
   .primary, .secondary { justify-content: center; height: 48px; }
+}
+
+@media (max-width: 380px) {
+  /* Narrower still: the launch's stamp drops its word (the window's readout says it), the plans' link says only where, and a stamp that still runs out wraps its link under it. */
+  .note, .long { display: none; }
+  .stamp { flex-wrap: wrap; row-gap: 12px; }
 }

@@ -341,7 +341,7 @@
 .peekHead { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; margin-bottom: 0.6em; }
 .peekHead b { font-size: 0.95em; }
 .peekHead span { font-size: 0.8em; color: var(--t3); }
-.plan { display: grid; grid-template-columns: 2em minmax(0, 1fr) 5em auto; align-items: center; gap: 0.8em; padding: 0.65em 0; border-top: 1px solid var(--line); }
+.plan { display: grid; grid-template-columns: 2em minmax(0, 1fr) 5em 6.6em; align-items: center; gap: 0.8em; padding: 0.65em 0; border-top: 1px solid var(--line); }
 .plan .mk { width: 2em; height: 2em; border-radius: 0.5em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
 .plan .mk svg { width: 1.05em; height: 1.05em; }
 .planWho { display: grid; min-width: 0; }
@@ -354,7 +354,7 @@
 .plan:nth-child(2) .planBar i { background: var(--warm); }
 
 /* By day, over the left of it, cut on a slant; the line between them lit. */
-.split .art { position: relative; --warm: #e2a457; }
+.dayNight .art { position: relative; --warm: #e2a457; }
 .day, .seam { position: absolute; inset: 0; padding: inherit; }
 .seam { background: linear-gradient(rgba(170, 180, 255, 0.95), rgba(120, 132, 255, 0.4)); clip-path: polygon(0 0, 54.2% 0, 40.2% 100%, 0 100%); }
 .day {
@@ -381,7 +381,7 @@
 
 @container (max-width: 560px) {
   .peek { width: auto; margin: 0.5em 0.5em 0; }
-  .plan { grid-template-columns: 2em minmax(0, 1fr) auto; }
+  .plan { grid-template-columns: 2em minmax(0, 1fr) 6.6em; }
   .planBar { display: none; }
 }
 

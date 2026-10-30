@@ -26,20 +26,20 @@ import { LogPicture } from './LogPictures'
 /*
  * The changelog as the flight log of the capsule the homepage brings in from
  * orbit. It opens on a window as the first screen's is, its instruments
- * along its top: the mission's elapsed time since 0.1.0 went out, counting,
- * and the launch; what main holds for the next release, and the current
- * version. In it, the newest release's highlight, shown; behind it, the
- * night side of the planet, its edge lit cobalt: the page's one light.
+ * along its top: the mission's elapsed time since 0.1.0 went out, counting;
+ * the launch; and the current version. In it, the newest release: when it
+ * went out, its version and title, large, and its lead feature beside its
+ * picture; behind them, the night side of the planet, its edge lit cobalt:
+ * the page's one light.
  *
- * Under it, the log, newest first, down a rail: what has merged on main is
- * its live tail, with what it brings next and its newest line's caret
- * blinking; then each release, stamped with the mission's time when it went
- * out, led by its highlight, shown, and then its lines: what's new in full,
- * what was improved and fixed folded until asked for. Then what's next, as a
- * course plotted into the dark, Now lit, Next dashed, Later fading; and the
- * download.
+ * Under it, the log, newest first, down a rail: the newest release goes on
+ * from the window, lit; then each release, stamped with the mission's time
+ * when it went out, led by its highlights, shown, and then its lines: what's
+ * new in full, what was improved and fixed folded until asked for. Then
+ * what's next, as a course plotted into the dark, Now lit, Next dashed,
+ * Later fading; and the download.
  *
- * With reduced motion the clock reads once and the caret holds still.
+ * With reduced motion the clock reads once.
  */
 
 addDisplay()
@@ -166,9 +166,9 @@ function Clock() {
 }
 
 /** An entry's stamp: the mission's time and the date along a rule, and its link at the end. */
-function Stamp({ at, date, note, link }: { at: string; date: string; note?: string; link?: ReactNode }) {
+function Stamp({ at, date, note, link, className }: { at: string; date: string; note?: string; link?: ReactNode; className?: string }) {
   return (
-    <p className={s.stamp}>
+    <p className={cx(s.stamp, className)}>
       {/* The mission's time keeps its small d: T+7d. */}
       <span className={cx(s.t, at.startsWith('T+') && s.met)}>{at}</span>
       <span>{date}</span>
@@ -176,6 +176,24 @@ function Stamp({ at, date, note, link }: { at: string; date: string; note?: stri
       <span className={s.rule} aria-hidden="true" />
       {link}
     </p>
+  )
+}
+
+/** A release's stamp: when it went out, on the mission's clock and by date, and its release on GitHub. */
+function Released({ release, className }: { release: Release; className?: string }) {
+  return (
+    <Stamp
+      at={wentOut(release)}
+      date={dated(release.date)}
+      note={release === FIRST ? 'Launch' : undefined}
+      className={className}
+      link={
+        <a className={s.out} href={releaseUrl(release.version)}>
+          On GitHub
+          {OUT}
+        </a>
+      }
+    />
   )
 }
 
@@ -211,43 +229,35 @@ function Window() {
           <b>{LATEST.version}</b>
         </Readout>
       </div>
-      {/* The newest release, its head: when it went out, its version and title; then its lead, shown. */}
+      {/* The newest release: when it went out, its version and title over its lead, large in the middle, and the lead shown. */}
       <div className={s.lead} id={`v${LATEST.version}`}>
-        <Stamp
-          at={wentOut(LATEST)}
-          date={dated(LATEST.date)}
-          link={
-            <a className={s.out} href={releaseUrl(LATEST.version)}>
-              On GitHub
-              {OUT}
-            </a>
-          }
-        />
+        {/* On a phone its stamp waits for the log, under the window, so the window keeps to the clock and the release. */}
+        <Released release={LATEST} className={s.wideOnly} />
         <h2 className={s.release}>
           <span className={s.leadV}>{LATEST.version}</span>
-          <span className={s.headline}>{LATEST.title}</span>
+          <span>{LATEST.title}</span>
         </h2>
+        {lead && (
+          <>
+            <h3 className={s.headline}>{lead.title}</h3>
+            <p className={s.why}>{lead.why}</p>
+          </>
+        )}
       </div>
       {lead && (
-        <div className={s.spot}>
-          <div className={s.spotWords}>
-            <h3 className={s.spotTitle}>{lead.title}</h3>
-            <p className={s.why}>{lead.why}</p>
-          </div>
-          <div className={s.heroPic}>
-            <LogPicture picture={lead.picture} />
-          </div>
+        <div className={s.heroPic}>
+          <LogPicture picture={lead.picture} />
         </div>
       )}
     </header>
   )
 }
 
-/** A highlight: what it gives you, why it matters, and the picture that shows it. */
-function Shown({ highlight }: { highlight: Highlight }) {
+/** A highlight: what it gives you, why it matters, and the picture that shows it. Its name goes unsaid where the release's title already says it. */
+function Shown({ highlight, release }: { highlight: Highlight; release: Release }) {
   return (
     <div className={s.shown}>
-      <h3 className={s.hl}>{highlight.title}</h3>
+      {highlight.title !== release.title && <h3 className={s.hl}>{highlight.title}</h3>}
       <p className={s.hlWhy}>{highlight.why}</p>
       <div className={s.hlPic}>
         <LogPicture picture={highlight.picture} />
@@ -304,19 +314,10 @@ function Entry({ release }: { release: Release }) {
   return (
     <li className={cx(s.entry, first && s.launch, current && s.current)} id={current ? 'changes' : `v${release.version}`}>
       <span className={s.node} aria-hidden="true" />
+      {current && <Released release={release} className={s.phoneOnly} />}
       {!current && (
         <>
-          <Stamp
-            at={wentOut(release)}
-            date={dated(release.date)}
-            note={first ? 'Launch' : undefined}
-            link={
-              <a className={s.out} href={releaseUrl(release.version)}>
-                On GitHub
-                {OUT}
-              </a>
-            }
-          />
+          <Released release={release} />
           <h2 className={s.head}>
             {/* The version links to its own entry, to share. */}
             <a className={s.v} href={`#v${release.version}`}>
@@ -327,7 +328,7 @@ function Entry({ release }: { release: Release }) {
         </>
       )}
       {highlights.map((highlight) => (
-        <Shown key={highlight.title} highlight={highlight} />
+        <Shown key={highlight.title} highlight={highlight} release={release} />
       ))}
       <div className={s.runs}>
         {shown.map((run, i) => (
@@ -373,7 +374,9 @@ function Ahead() {
         date="A draft"
         link={
           <a className={s.out} href={`${LINKS.repo}/tree/main/docs/plans`}>
-            Plans on GitHub
+            <span>
+              <span className={s.long}>Plans </span>on GitHub
+            </span>
             {OUT}
           </a>
         }

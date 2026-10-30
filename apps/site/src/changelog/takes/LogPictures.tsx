@@ -578,7 +578,7 @@ function Plans() {
       w={52}
       n={30}
       foot
-      className={p.split}
+      className={p.dayNight}
     >
       <PlanPeek />
       <div className={p.seam} />
