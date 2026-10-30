@@ -1,8 +1,646 @@
 <style>
-.h-pixel { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; text-align: center; background: #0e0b09; font: 500 15px Inter, system-ui, sans-serif; color: rgba(255, 248, 240, 0.7); }
-.h-pixel h1 { font-size: 28px; font-weight: 650; color: #fff; }
+.h-pixel{--bp:3px;position:absolute;inset:0;overflow:hidden;background:#0e0b09;color:#f4ead2;font-family:Inter,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+.h-pixel__cv{position:absolute;left:0;top:0;width:100%;height:100%;image-rendering:crisp-edges;image-rendering:pixelated;pointer-events:none}
+.h-pixel__h1,.h-pixel .is-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.h-pixel__panel{position:absolute;left:0;right:0;bottom:max(18px,4.6cqh);box-sizing:border-box;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:calc(var(--bp)*5)}
+.h-pixel__box{position:relative;box-sizing:border-box;width:min(760px,100%);border:solid calc(var(--bp)*4) transparent;border-image:var(--h-box) 4 fill/calc(var(--bp)*4) stretch;image-rendering:pixelated;padding:calc(var(--bp)*2) calc(var(--bp)*4) calc(var(--bp)*3);filter:drop-shadow(0 calc(var(--bp)*2) 0 rgba(14,11,9,.9));opacity:0;transform-origin:50% 100%}
+.h-pixel.is-box .h-pixel__box{opacity:1;animation:h-pixel-open .21s steps(3,end) both}
+.h-pixel__sub{margin:0;font:500 clamp(14px,1.16cqw,18px)/1.62 "JetBrains Mono",ui-monospace,monospace;color:#f4ead2;letter-spacing:0;text-wrap:pretty}
+.h-pixel__sub span{opacity:0}
+.h-pixel__sub span.on{opacity:1}
+.h-pixel__sub span.cur{opacity:1;color:transparent;background:#ffc94a}
+.h-pixel__more{position:absolute;left:50%;bottom:calc(var(--bp)*-3);width:calc(var(--bp)*5);height:calc(var(--bp)*3);margin-left:calc(var(--bp)*-2.5);background:#ffc94a;clip-path:polygon(0 0,100% 0,100% 33.4%,80% 33.4%,80% 66.7%,60% 66.7%,60% 100%,40% 100%,40% 66.7%,20% 66.7%,20% 33.4%,0 33.4%);opacity:0}
+.h-pixel.is-done .h-pixel__more{opacity:1;animation:h-pixel-blink 1.4s steps(1,end) infinite}
+.h-pixel__btns{display:flex;flex-wrap:wrap;justify-content:center;gap:calc(var(--bp)*4) calc(var(--bp)*5)}
+.h-pixel__btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:calc(var(--bp)*3);box-sizing:border-box;min-height:48px;padding:calc(var(--bp)*2) calc(var(--bp)*5);border:solid calc(var(--bp)*4) transparent;border-image:var(--h-b1) 4 fill/calc(var(--bp)*4) stretch;image-rendering:pixelated;color:#fff;font:700 15px/1 "JetBrains Mono",ui-monospace,monospace;text-decoration:none;filter:drop-shadow(0 calc(var(--bp)*2) 0 #0e0b09);opacity:0;translate:0 calc(var(--bp)*3);cursor:pointer;outline:none}
+.h-pixel__btn--b{border-image-source:var(--h-b2);color:#1a1511}
+.h-pixel__btn--a:hover{border-image-source:var(--h-b1h)}
+.h-pixel__btn--b:hover{border-image-source:var(--h-b2h)}
+.h-pixel.is-b1 .h-pixel__btn--a,.h-pixel.is-b2 .h-pixel__btn--b{opacity:1;translate:none;animation:h-pixel-pop .16s steps(2,end) both}
+.h-pixel .h-pixel__btn:hover{transform:translateY(calc(var(--bp)*-1));filter:drop-shadow(0 calc(var(--bp)*3) 0 #0e0b09)}
+.h-pixel .h-pixel__btn:active{transform:translateY(calc(var(--bp)*2));filter:none}
+.h-pixel__btn:focus-visible{outline:var(--bp) solid #ffc94a;outline-offset:calc(var(--bp)*2)}
+.h-pixel__btn svg{display:block;flex:none;overflow:visible}
+@keyframes h-pixel-open{from{transform:scaleY(.12)}to{transform:scaleY(1)}}
+@keyframes h-pixel-pop{from{translate:0 calc(var(--bp)*3)}to{translate:none}}
+@keyframes h-pixel-blink{0%{opacity:1}50%{opacity:0}}
+@container (min-width:700px){.h-pixel__box{width:min(760px,58cqw)}}
+@media (prefers-reduced-motion:reduce){.h-pixel .h-pixel__box,.h-pixel .h-pixel__btn,.h-pixel .h-pixel__more{animation:none!important}}
 </style>
-<div class="h-pixel"><h1>Building software has never felt so fast.</h1><p>This style is still being drawn.</p></div>
+<div class="h-pixel">
+<canvas class="h-pixel__cv" aria-hidden="true"></canvas>
+<h1 class="h-pixel__h1">Building software has never felt so <span>fast.</span></h1>
+<div class="h-pixel__panel">
+<div class="h-pixel__box"><p class="h-pixel__sub">Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.</p><i class="h-pixel__more" aria-hidden="true"></i></div>
+<div class="h-pixel__btns">
+<a class="h-pixel__btn h-pixel__btn--a" href="https://github.com/AltharIDE/althar/releases"><span class="h-pixel__lbl">Download</span></a>
+<a class="h-pixel__btn h-pixel__btn--b" href="https://github.com/AltharIDE/althar"><span class="h-pixel__lbl">Star on GitHub</span></a>
+</div>
+</div>
+</div>
 <script>
-;(() => {})()
+(() => {
+  const root = document.currentScript.previousElementSibling
+  const cv = root.querySelector('.h-pixel__cv')
+  const ctx = cv.getContext('2d')
+  const panel = root.querySelector('.h-pixel__panel')
+  const sub = root.querySelector('.h-pixel__sub')
+  const RM = matchMedia('(prefers-reduced-motion: reduce)')
+
+  // ---- palette: 32 hand-picked colours -------------------------------------------------
+  const HEX = [
+    '0e0b09', '1a1511', '2a2019', '3d2e22', '574131', '765a40', '9a7a55', 'c4a273', 'e6d2a8', 'f4ead2', // 0-9 cabin
+    '2a0e08', '5c160b', '9c240e', 'd6421a', 'f2701e', 'ff9a2e', 'ffc94a', 'fff1a0', 'ffffff', // 10-18 plasma
+    '0f2a6b', '1c3f99', '2b5fc4', '3d7fe0', '6aa6f0', 'a8d0f7', 'dceefc', // 19-25 sky
+    'e9f2fb', 'bcd3ee', '8aa9d6', // 26-28 cloud
+    '2b3bff', '1a1f8f', '2e8c46', // 29-31 cobalt, deep cobalt, done-green
+  ]
+  const C = new Uint32Array(HEX.map((h) => { const n = parseInt(h, 16); return (0xff000000 | ((n & 255) << 16) | (n & 0xff00) | (n >> 16)) >>> 0 }))
+  const LIGHT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 11, 12, 13, 14, 15, 16, 17, 18, 18, 20, 21, 22, 23, 24, 25, 26, 18, 26, 27, 22, 29, 31]
+  const DARK = [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 10, 11, 12, 13, 14, 15, 16, 17, 0, 19, 20, 21, 22, 23, 24, 25, 28, 21, 30, 1, 1]
+  const BY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16)
+  const bay = (x, y) => BY[((y & 3) << 2) | (x & 3)]
+  const clamp = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v)
+  const sm = (v) => { v = clamp(v); return v * v * (3 - 2 * v) }
+  const hash = (a, b = 0) => {
+    let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263)) | 0
+    h = Math.imul(h ^ (h >>> 13), 1274126177)
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+  }
+  const pick = (list, t, x, y) => list[Math.min(list.length - 1, Math.floor(clamp(t) * (list.length - 1) + bay(x, y)))]
+
+  // ---- bitmap fonts (drawn by hand, one row per |) -------------------------------------
+  const F1 = {
+    a: '....|....|.##.|...#|.###|#..#|.###', b: '#...|#...|###.|#..#|#..#|#..#|###.',
+    d: '...#|...#|.###|#..#|#..#|#..#|.###', e: '....|....|.##.|#..#|####|#...|.###',
+    f: '.##|#..|###|#..|#..|#..|#..', g: '....|....|.###|#..#|#..#|#..#|.###|...#|###.',
+    h: '#...|#...|###.|#..#|#..#|#..#|#..#', i: '#|.|#|#|#|#|#',
+    k: '#...|#...|#..#|#.#.|##..|#.#.|#..#', l: '#.|#.|#.|#.|#.|#.|.#',
+    m: '.....|.....|####.|#.#.#|#.#.#|#.#.#|#.#.#', n: '....|....|###.|#..#|#..#|#..#|#..#',
+    o: '....|....|.##.|#..#|#..#|#..#|.##.', r: '....|....|#.##|##..|#...|#...|#...',
+    s: '....|....|.###|#...|.##.|...#|###.', t: '#..|#..|###|#..|#..|#..|.##',
+    u: '....|....|#..#|#..#|#..#|#..#|.###', v: '.....|.....|#...#|#...#|.#.#.|.#.#.|..#..',
+    w: '.....|.....|#...#|#...#|#.#.#|#.#.#|.#.#.',
+    A: '.##.|#..#|#..#|####|#..#|#..#|#..#', B: '###.|#..#|#..#|###.|#..#|#..#|###.',
+    C: '.###|#...|#...|#...|#...|#...|.###', D: '###.|#..#|#..#|#..#|#..#|#..#|###.',
+    E: '####|#...|#...|###.|#...|#...|####', G: '.###|#...|#...|#.##|#..#|#..#|.###',
+    H: '#..#|#..#|#..#|####|#..#|#..#|#..#', I: '###|.#.|.#.|.#.|.#.|.#.|###',
+    L: '#...|#...|#...|#...|#...|#...|####', O: '.##.|#..#|#..#|#..#|#..#|#..#|.##.',
+    S: '.###|#...|#...|.##.|...#|...#|###.', T: '#####|..#..|..#..|..#..|..#..|..#..|..#..',
+    U: '#..#|#..#|#..#|#..#|#..#|#..#|.##.', V: '#...#|#...#|#...#|.#.#.|.#.#.|..#..|..#..',
+    Y: '#...#|#...#|.#.#.|..#..|..#..|..#..|..#..',
+    0: '.##.|#..#|#.##|##.#|#..#|#..#|.##.', 1: '.#..|##..|.#..|.#..|.#..|.#..|###.',
+    2: '.##.|#..#|...#|..#.|.#..|#...|####', 3: '###.|...#|...#|.##.|...#|...#|###.',
+    4: '#..#|#..#|#..#|####|...#|...#|...#', 5: '####|#...|###.|...#|...#|#..#|.##.',
+    6: '.##.|#...|#...|###.|#..#|#..#|.##.', 7: '####|...#|..#.|..#.|.#..|.#..|.#..',
+    8: '.##.|#..#|#..#|.##.|#..#|#..#|.##.', 9: '.##.|#..#|#..#|.###|...#|...#|.##.',
+    '.': '.|.|.|.|.|.|#', '/': '..#|..#|.#.|.#.|.#.|#..|#..', ' ': '..|..|..|..|..|..|..',
+    v_: '..###..|..###..|#######|.#####.|..###..|...#...|#######', s_: '...#...|..###..|#######|.#####.|..###..|.##.##.|##...##',
+  }
+  // "fast." in a chunky display cut: vertical strokes two cells, horizontals one
+  const F2 = {
+    f: '..####|.##...|.##...|#####.|.##...|.##...|.##...|.##...|.##...|.##...',
+    a: '.......|.......|.......|.#####.|##...##|.....##|.######|##...##|##..###|.###.##',
+    s: '.......|.......|.......|.######|##.....|##.....|.#####.|.....##|.....##|######.',
+    t: '......|.##...|.##...|#####.|.##...|.##...|.##...|.##...|.##...|..####',
+    '.': '..|..|..|..|..|..|..|..|##|##',
+  }
+  const parse = (o) => { const r = {}; for (const k in o) { const rows = o[k].split('|'); r[k] = { w: rows[0].length, rows } } return r }
+  const G1 = parse(F1), G2 = parse(F2)
+  const textW = (str, G = G1) => { let w = 0; for (const ch of str) w += G[ch].w + 1; return w - 1 }
+  // the 2.5 seconds of a cutscene title, as lists of pixels with classes
+  function glyphPts(str, G, sc, ox = 0, oy = 0, ci0 = 0) {
+    const pts = []; let x = ox, i = 0
+    for (const ch of str) {
+      const g = G[ch]
+      g.rows.forEach((row, r) => { for (let c = 0; c < g.w; c++) if (row[c] === '#') for (let a = 0; a < sc; a++) for (let b = 0; b < sc; b++) pts.push(x + c * sc + b, oy + r * sc + a, ci0 + i) })
+      x += (g.w + 1) * sc; i++
+    }
+    return pts
+  }
+  // build a sprite: face(0) outline(1) shadow(2) highlight(3) bevel(4) extrusion(6) halo(8+d)
+  function sprite(pts, w, h, o) {
+    const pad = o.pad, SW = w + pad * 2, SH = h + pad * 2, N = SW * SH
+    const face = new Int16Array(N).fill(-1)
+    for (let i = 0; i < pts.length; i += 3) face[(pts[i + 1] + pad) * SW + pts[i] + pad] = pts[i + 2]
+    for (let it = 0; it < (o.chamfer || 0); it++) {
+      const cut = []
+      for (let y = 1; y < SH - 1; y++) for (let x = 1; x < SW - 1; x++) {
+        const k = y * SW + x; if (face[k] < 0) continue
+        const u = face[k - SW] < 0, d = face[k + SW] < 0, l = face[k - 1] < 0, r = face[k + 1] < 0
+        if ((u && l) || (u && r) || (d && l) || (d && r)) cut.push(k)
+      }
+      cut.forEach((k) => { face[k] = -1 })
+    }
+    const ext = new Int16Array(N).fill(-1)
+    if (o.ext) for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const k = y * SW + x; if (face[k] >= 0) continue
+      for (let d = 1; d <= o.ext && y - d >= 0; d++) if (face[k - d * SW] >= 0) { ext[k] = face[k - d * SW]; break }
+    }
+    const solid = (k) => face[k] >= 0 || ext[k] >= 0
+    const dist = new Int16Array(N).fill(-1), own = new Int16Array(N).fill(-1)
+    for (let k = 0; k < N; k++) if (solid(k)) { dist[k] = 0; own[k] = face[k] >= 0 ? face[k] : ext[k] }
+    const rings = 1 + (o.halo || 0) + (o.shadow ? 1 : 0)
+    for (let d = 1; d <= rings; d++) {
+      for (let y = 1; y < SH - 1; y++) for (let x = 1; x < SW - 1; x++) {
+        const k = y * SW + x; if (dist[k] >= 0) continue
+        for (const n of [k - 1, k + 1, k - SW, k + SW, k - SW - 1, k - SW + 1, k + SW - 1, k + SW + 1]) if (dist[n] === d - 1) { dist[k] = -2 - d; own[k] = own[n]; break }
+      }
+      for (let k = 0; k < N; k++) if (dist[k] === -2 - d) dist[k] = d
+    }
+    const out = []
+    for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const k = y * SW + x, d = dist[k]; if (d < 0) continue
+      let cls
+      if (face[k] >= 0) cls = face[k - SW] < 0 ? 3 : (o.bevel && (face[k + SW] < 0 || (o.bevel > 1 && face[k + 2 * SW] < 0))) ? 4 : 0
+      else if (ext[k] >= 0) cls = ext[k + SW] < 0 && face[k + SW] < 0 ? 7 : 6
+      else if (d === 1) cls = 1
+      else if (o.shadow) { if (d !== 2 || dist[k - SW] !== 1 || y === 0) continue; cls = 2 }
+      else cls = 7 + d
+      out.push(x - pad, y - pad, cls, own[k])
+    }
+    return new Int16Array(out)
+  }
+
+  // ---- layout and the cabin, cached once per size ---------------------------------------
+  const M = 6
+  let W = 0, H = 0, P = 1, CW = 0, kind, lv, lf, img, buf, ib
+  const L = {}
+  function layout() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    const cw = root.clientWidth, ch = root.clientHeight
+    if (!cw || !ch) return false
+    const port = ch > cw * 1.05
+    const bp = Math.max(1, Math.round((cw < 700 ? 2 : 3) * dpr)) / dpr
+    root.style.setProperty('--bp', bp + 'px')
+    const dw = Math.round(cw * dpr), dh = Math.round(ch * dpr)
+    const s = Math.max(1, Math.round(dw / (port ? 260 : 360)))
+    P = s / dpr; W = Math.ceil(dw / s); H = Math.ceil(dh / s)
+    cv.width = W; cv.height = H; cv.style.width = W * P + 'px'; cv.style.height = H * P + 'px'
+    img = ctx.createImageData(W, H); buf = new Uint32Array(img.data.buffer); ib = new Uint8Array(W * H)
+    const rr = root.getBoundingClientRect(), pr = panel.getBoundingClientRect()
+    const pt = Math.floor((pr.top - rr.top) / P)
+    const br = root.querySelector('.h-pixel__box').getBoundingClientRect()
+    L.bl = Math.floor((br.left - rr.left) / P); L.bb = Math.ceil((br.bottom - rr.top) / P)
+    L.port = port; L.ft = port ? 6 : 8; L.rad = port ? 15 : 18
+    L.gx0 = port ? 6 + L.ft : Math.round(W * 0.085); L.gx1 = W - L.gx0
+    L.gy0 = Math.ceil(80 / P); L.gy1 = Math.max(L.gy0 + 60, Math.min(H - 12, pt - (port ? 10 : 9)))
+    const gw = L.gx1 - L.gx0, gh = L.gy1 - L.gy0, cx = (L.gx0 + L.gx1) / 2
+    L.gw = gw; L.gh = gh; L.cx = cx
+    // headline, line one: one line on wide screens, two on narrow
+    const l1 = 'Building software has never felt so'
+    let lines = [l1], sc = 1
+    if (port || textW(l1) + 28 > gw) { lines = ['Building software', 'has never felt so']; sc = textW(lines[1]) * 2 + 18 <= gw ? 2 : 1 }
+    const pts = []; let ci = 0, y = 0
+    lines.forEach((ln) => { const w = textW(ln) * sc; pts.push(...glyphPts(ln, G1, sc, Math.round((gw - w) / 2), y, ci)); ci += ln.length + 1; y += 7 * sc + 4 * sc })
+    L.l1n = ci - 1
+    L.l1 = sprite(pts, gw, y, { pad: 3, shadow: 1 })
+    L.l1x = L.gx0; L.l1y = L.gy0 + (port ? 20 : 12)
+    // "fast.", as big as the window allows
+    let k = 8
+    while (k > 2 && (32 * k > gw - 18 || 10 * k > gh * 0.42)) k--
+    const fp = glyphPts('fast.', G2, k)
+    L.k = k
+    L.fast = sprite(fp, 32 * k, 10 * k, { pad: 6, chamfer: k >= 5 ? 2 : 1, ext: Math.max(2, Math.round(k * 0.55)), halo: 3, bevel: k >= 5 ? 2 : 1 })
+    L.fx = Math.round(cx - 16 * k); L.fy = L.l1y + y + (port ? 10 : 6) - (sc === 1 ? 0 : 2)
+    // readouts on the glass, crew, the little zero-g plush
+    L.hw = 58; L.hh = 25
+    L.hud = [[L.gx0 + 7, L.gy1 - 7 - L.hh], [L.gx1 - 7 - L.hw, L.gy1 - 7 - L.hh]]
+    L.hr = Math.round(Math.min(W * (port ? 0.062 : 0.05), gh * (port ? 0.075 : 0.12)))
+    L.pt = pt
+    const hy = L.gy1 - Math.round(L.hr * (port ? 0.85 : 1.05))
+    L.crew = [[Math.round(cx - L.hr * 2.1), hy], [Math.round(cx + L.hr * 2.1), hy]]
+    L.plush = port ? [L.gx1 - 26, L.gy0 - L.ft, 11] : [L.gx0 + 30, L.gy0 - L.ft, 20]
+    L.fb = L.fy + 10 * k + Math.max(2, Math.round(k * 0.55)) + 1
+    L.hor = Math.min(L.gy1 - 30, Math.max(L.gy0 + Math.round(gh * (port ? 0.5 : 0.64)), L.fb + (port ? 26 : 4)))
+    L.curv = port ? 7 : 9
+    const nl = L.gy1 - L.hor > 90 ? 5 : 3
+    L.ly = []
+    for (let l = 0; l < nl; l++) {
+      const t = l / (nl - 1)
+      L.ly.push({ fr: Math.pow(t, 1.5) * 0.7, wl: (8 + 24 * Math.pow(t, 1.3)) * (port ? 0.9 : 1), amp: 2.2 + 8 * Math.pow(t, 1.2), sp: 1 + 4.5 * t, cd: 5 + 16 * t,
+        cl: t < 0.3 ? [25, 26, 27] : t < 0.75 ? [26, 25, 27, 27, 28] : [18, 26, 26, 27, 27, 28] })
+    }
+    const half = gw / 2
+    for (let x = 0; x < W; x++) { const u = (x - cx) / half; hY[x] = L.hor + Math.round(L.curv * u * u) }
+    sunX = Math.round(L.gx1 - gw * 0.1); sunY = Math.round(port ? L.hor - 13 : L.hor - (L.hor - L.gy0) * 0.3)
+    skyF = new Float32Array(W * H)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const h = hY[x]; if (y >= h - 1) continue
+      let n = 25 - Math.pow(clamp((h - y) / (h - L.gy0 + 4)), 0.8) * 6.4
+      const dx = x - sunX, dy = y - sunY, d2 = dx * dx + dy * dy
+      if (d2 < 13) n = 118; else if (d2 < 27) n = 117; else if (d2 < 120) n += (1 - Math.sqrt(d2) / 11) * 4.5
+      skyF[y * W + x] = n
+    }
+    buildCabin()
+    return true
+  }
+
+  function buildCabin() {
+    CW = W + 2 * M; const CH = H + 2 * M, N = CW * CH
+    kind = new Uint8Array(N); lv = new Uint8Array(N); lf = new Uint8Array(N)
+    const { gx0, gx1, gy0, gy1, ft, rad, cx } = L
+    const cy = (gy0 + gy1) / 2, ha = (gx1 - gx0) / 2, hb = (gy1 - gy0) / 2
+    const yc = gy1 + ft + 3, seamL = gx0 - ft - 7, seamR = gx1 + ft + 6, ceil = gy0 - ft - 5
+    const set = (x, y, kd, v, l) => { const i = (y + M) * CW + x + M; if (i >= 0 && i < N && x >= -M && x < W + M) { kind[i] = kd; lv[i] = v; if (l !== undefined) lf[i] = l } }
+    for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
+      const x = i - M, y = j - M, px = x + 0.5, py = y + 0.5, k = j * CW + i
+      const qx = Math.abs(px - cx) - (ha - rad), qy = Math.abs(py - cy) - (hb - rad)
+      const sd = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rad
+      if (sd <= 0) { kind[k] = 0; continue }
+      let nx = Math.max(qx, 0) * Math.sign(px - cx), ny = Math.max(qy, 0) * Math.sign(py - cy)
+      if (!nx && !ny) { if (qx > qy) nx = Math.sign(px - cx); else ny = Math.sign(py - cy) }
+      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl
+      lf[k] = clamp(1 - sd / (W * 0.3)) * 255
+      let lev
+      if (sd <= 1.3) { kind[k] = 4; lv[k] = 255; continue }
+      if (sd <= 3.2) lev = 3.6 + 1.9 * ny + 0.4 * nx
+      else if (sd <= ft - 2) lev = 5.1 + ((Math.round(sd) === Math.round((ft + 1) / 2)) ? -0.6 : 0)
+      else if (sd <= ft - 0.8) lev = 4.4 - 2 * ny - 0.5 * nx
+      else if (sd <= ft + 0.4) lev = 1.2
+      else {
+        const vg = Math.hypot((px - cx) / (W * 0.75), (py - cy) / (H * 0.9))
+        lev = 3.5 - vg * 1.7
+        if (y < ceil) lev = 2.3 - (ceil - y) * 0.06 + (y === ceil - 1 ? 2.4 : 0)
+        else if (y >= yc) lev = (y === yc ? 6.2 : y === yc + 1 ? 4.9 : 3.3 - (y - yc) * 0.008) - vg * 0.5
+        else if (y === yc - 1) lev = 1.2
+        if (y >= ceil && y < yc - 1) {
+          if (x === seamL || x === seamR) lev -= 1.6
+          else if (x === seamL + 1 || x === seamR + 1) lev += 0.7
+          if ((x === seamL - 3 || x === seamR + 4) && (y - ceil) % 14 === 6) lev = 6.6
+        }
+      }
+      kind[k] = 1; lv[k] = clamp(lev, 0, 9) * 25
+    }
+    // bolts around the frame
+    const bolt = (x, y) => { [[0, 0, 7.6], [1, 0, 6.2], [0, 1, 6.2], [1, 1, 4.2], [-1, 0, 4.4], [0, -1, 4.4], [2, 1, 2.4], [1, 2, 2.4]].forEach(([a, b, v]) => set(x + a, y + b, 1, v * 25)) }
+    const mid = (ft + 3.2) / 2
+    for (let x = gx0 + rad; x <= gx1 - rad; x += 24) { bolt(Math.round(x), Math.round(gy0 - mid - 1)); bolt(Math.round(x), Math.round(gy1 + mid - 1)) }
+    for (let y = gy0 + rad + 4; y <= gy1 - rad; y += 24) { bolt(Math.round(gx0 - mid - 1), y); bolt(Math.round(gx1 + mid - 1), y) }
+    // console lights along the console lip
+    let id = 1
+    for (let x = 6; x < W - 6; x += 5) { set(x, yc + 4, 3, id); set(x + 1, yc + 4, 3, id++); }
+    L.gauges = []
+    // console hardware beside the dialog box: a gauge, toggles, a vent
+    if (!L.port && L.bl > 40) for (const side of [0, 1]) {
+      const mx = (x) => (side ? W - 1 - x : x), gx = Math.round(L.bl * 0.3), gy = yc + 17
+      for (let y = gy - 10; y <= gy + 10; y++) for (let x = gx - 10; x <= gx + 10; x++) {
+        const d = Math.hypot(x - gx, y - gy)
+        if (d > 9.5) continue
+        set(mx(x), y, 1, (d > 7.6 ? (y < gy ? 6.4 : 2.2) : d > 6.6 ? 0.6 : 1.6) * 25, 30)
+      }
+      for (let a = 0; a < 7; a++) { const an = Math.PI * (0.85 + a * 0.22); set(mx(Math.round(gx + Math.cos(an) * 5.4)), Math.round(gy + Math.sin(an) * 5.4), 2, a > 4 ? 14 : 8) }
+      L.gauges.push([mx(gx), gy, side])
+      const tx = Math.round(L.bl * 0.58)
+      for (let i = 0; i < 4 && tx + i * 7 + 4 < L.bl - 4; i++) {
+        const x0 = tx + i * 7, up = (i * 5 + side) % 3 !== 1
+        for (let y = yc + 13; y < yc + 17; y++) for (let x = x0; x < x0 + 5; x++) set(mx(x), y, 1, (y === yc + 13 ? 4.6 : y === yc + 16 ? 1.2 : 2.4) * 25, 30)
+        for (let t = 0; t < 5; t++) set(mx(x0 + 2), up ? yc + 13 - t : yc + 16 + t, 1, (t === 4 ? 8.6 : 6.4) * 25, 60)
+      }
+      for (let r = 0; r < 4; r++) for (let x = 10; x < L.bl - 10; x++) { const y = yc + 32 + r * 4; if (y < H - 4) { set(mx(x), y, 1, 1.1 * 25, 0); set(mx(x), y + 1, 1, 4.4 * 25, 0) } }
+    }
+    // the crew, seen from behind: backlit helmets and shoulders above the dialog box
+    const r = L.hr, yMax = Math.min(L.pt + 3, H + M)
+    for (const [hx, hy] of L.crew) {
+      for (let y = hy - r - 2; y < yMax; y++) for (let x = hx - r * 2; x <= hx + r * 2; x++) {
+        const dx = x + 0.5 - hx, dy = y + 0.5 - hy, ax = Math.abs(dx), d = Math.hypot(dx, dy)
+        if (d <= r && dy < r * 0.7) {
+          if (d > r - 1.4 && dy < r * 0.35) { set(x, y, 4, clamp(1.15 - (dy + r) / (r * 1.7)) * 255); continue }
+          if (ax <= 1.2) { set(x, y, 2, dy < -r * 0.2 ? 29 : 30); continue }
+          const gl = dx < 0 && dy < -r * 0.15 && d < r * 0.78 && d > r * 0.5 ? 1.3 : 0
+          set(x, y, 1, clamp(6.5 - (dy / r) * 1.6 - (ax / r) * 1.5 + gl, 0, 9) * 25, 110); continue
+        }
+        if (ax <= r * 0.7 && dy >= r * 0.55 && dy < r * 0.86) { set(x, y, 1, (dy < r * 0.66 ? 5 : 2.4) * 25, 60); continue }
+        const sy0 = r * 1.5, ex = dx / (r * 1.7), ey = (dy - sy0) / (r * 0.95)
+        if (dy >= r * 0.62 && (ex * ex + ey * ey <= 1 || (dy > sy0 && ax <= r * 1.7))) {
+          if (dy < sy0 && ex * ex + ((dy - 1.4 - sy0) / (r * 0.95)) ** 2 > 1) set(x, y, 4, 150)
+          else set(x, y, 1, (5.4 - Math.max(0, dy - sy0) * 0.12 - (ax / r) * 0.8 - (ax < 1.2 ? 1.4 : 0)) * 25, 90)
+        }
+      }
+    }
+  }
+
+  // ---- the timeline, all from one clock T ------------------------------------------------
+  const plasmaP = (T) => (T < 0.5 ? 0 : T < 3.9 ? Math.pow((T - 0.5) / 3.4, 1.45) : 1)
+  const travel = (T) => { const t = Math.max(0, T - 0.3); return 22 * t + 30 * t * t }
+  const flick = (T) => 0.62 + 0.38 * hash(Math.floor(T * 16), 9)
+  const heat = (T) => clamp(1 - (T - 4.25) / 1.9)
+  const arrive = (i) => 3.9 + i * 0.055
+  const slam = (t) => (t < 0.1 ? Math.round(((0.1 - t) / 0.1) ** 2 * (4 * L.k + 2)) : t < 0.15 ? -2 : t < 0.2 ? 1 : 0)
+  function shakeAt(T) {
+    let a = 0
+    if (T > 0.5 && T < 3.9) a = 0.3 + 2.2 * plasmaP(T)
+    else if (T >= 3.9 && T < 4.5) a = 2.6
+    else if (T >= 4.5 && T < 4.9) a = 3.8
+    else if (T >= 4.9) a = 3.4 * Math.exp(-(T - 4.9) * 5)
+    for (let i = 0; i < 5; i++) { const d = T - arrive(i) - 0.1; if (d >= 0 && d < 0.1) a += 1.4 }
+    const f = Math.floor(T * 30)
+    let dx = Math.round(a * (hash(f, 1) * 2 - 1)), dy = Math.round(a * (hash(f, 2) * 2 - 1))
+    if (T > 5.5) { dx = 0; dy = Math.round(Math.sin((T - 5.5) * 0.8) * 0.9) }
+    return [clamp(dx, 1 - M, M - 1), clamp(dy, 1 - M, M - 1)]
+  }
+  function readouts(T) {
+    if (RM.matches) return [0.24, 38]
+    if (T < 4.6) return [7.8, 122]
+    if (T < 10) { const q = Math.pow(1 - (T - 4.6) / 5.4, 2.2); return [0.24 + 7.56 * q, 38 + 84 * q] }
+    const r = 1 - Math.exp(-(T - 10) / 400)
+    return [0.24 - 0.12 * r, 38 - 8 * r]
+  }
+  const FACE = [9, 9, 17, 16, 16, 17, 18, 18], BEV = [24, 15, 16, 17], EXT = [29, 12, 13, 14, 15, 16], EXB = [30, 11, 12, 13], OUTL = [0, 10, 11], HALO = [16, 15, 13]
+  const COLD = [9, 0, 0, 18, 24, 0, 29, 30]
+  const PLUSH = ['.....K.....', '....KHK....', '....KYK....', 'KKKKYHYKKKK', 'KHHYYYYYYSK', '.KYEYYYEYK.', '..KYYYYYK..', '..KYYSYYK..', '.KYYSKSYYK.', '.KSSK.KSSK.', '.KKK...KKK.']
+  const PLC = { K: 2, H: 17, Y: 16, S: 15, E: 0 }
+
+  let sx = 0, sy = 0
+  const put = (x, y, i) => { if (x >= 0 && y >= 0 && x < W && y < H) ib[y * W + x] = i }
+  const glassAt = (x, y) => x >= 0 && y >= 0 && x < W && y < H && kind[(y - sy + M) * CW + x - sx + M] === 0
+  function drawText(str, x, y, col) {
+    let cx = x
+    for (const ch of str) { const g = G1[ch]; g.rows.forEach((row, r) => { for (let c = 0; c < g.w; c++) if (row[c] === '#') put(cx + c, y + r, col) }); cx += g.w + 1 }
+  }
+  function hud(i, label, val, unit, T) {
+    const x0 = L.hud[i][0] + sx, y0 = L.hud[i][1] + sy, w = L.hw, h = L.hh
+    if (T < 1.25 && hash(Math.floor(T * 20), i + 4) < 0.5) return
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) put(x, y, y === y0 || y === y0 + h - 1 || x === x0 || x === x0 + w - 1 ? 4 : (y - y0) % 2 ? 1 : 0)
+    for (const [x, y, a, b] of [[x0, y0, 1, 1], [x0 + w - 1, y0, -1, 1], [x0, y0 + h - 1, 1, -1], [x0 + w - 1, y0 + h - 1, -1, -1]]) for (let t = 0; t < 4; t++) { put(x + a * t, y, 8); put(x, y + b * t, 8) }
+    drawText(label, x0 + 5, y0 + 4, 8)
+    const uw = textW(unit), vw = textW(val)
+    drawText(val, x0 + w - 5 - uw - 3 - vw, y0 + 14, 16)
+    drawText(unit, x0 + w - 5 - uw, y0 + 14, 15)
+  }
+
+  let glow0 = 0, Pp = 0, D = 0, skyOn = false, tear = 0
+  const hY = new Int16Array(1024), tops = [0, 1, 2, 3, 4].map(() => new Int16Array(1024))
+  let sunX = 0, sunY = 0, skyF, TT = 0
+  const rowA = new Float32Array(2048), rowB = new Float32Array(2048), colA = new Float32Array(1024)
+  const LH = [7, 3, 11].map((b) => Float32Array.from({ length: 1024 }, (_, i) => hash(i - 16, b)))
+  function plasma(lx, ly, x, y, q) {
+    const gy = ly / L.gh
+    let v = glow0 * gy * gy + 0.6 * q * gy * gy * gy + q * 0.1
+    if (q > 0) {
+      const lane = Math.floor((lx + ly * 0.42 + rowA[y]) / 3), li = lane + 16
+      const h1 = LH[0][li], len = 16 + h1 * 44, u = (ly + D * (0.7 + LH[1][li] * 0.8)) / len + h1 * 13
+      const seg = Math.floor(u), e = u - seg
+      if (e < 0.7 && hash(lane, seg) < 0.2 + 0.65 * q) { const r = 1 - e / 0.7; v += q * r * r * (0.7 + 0.5 * LH[2][li]) }
+      v += q * 0.16 * (colA[x] * rowB[y] + 0.7)
+    }
+    const n = Math.floor(v * 9 + bay(x, y))
+    return n <= 0 ? -1 : 9 + Math.min(9, n)
+  }
+  function skyIdx(x, y) {
+    const h = hY[x]
+    if (y < h - 1) {
+      let n = skyF[y * W + x]
+      if (n >= 100) return n - 100
+      const t = (h - y) / (h - L.gy0 + 4)
+      if (y % 5 === 0 && t < 0.6 && t > 0.06) {
+        const X = x + TT * 0.7 + y * 37, seg = Math.floor(X / 64), f = Math.abs(X / 64 - seg - 0.5)
+        if (hash(seg, y) < 0.4 && f < 0.12 + 0.26 * hash(seg, y + 3) && bay(x, y) < 0.95 - f * 2) n += 1.5
+      }
+      const i = Math.floor(n + bay(x, y))
+      return i < 19 ? 19 : i > 25 ? 25 : i
+    }
+    if (y <= h) return 18
+    for (let l = L.ly.length - 1; l >= 0; l--) { const t0 = tops[l][x]; if (y >= t0) return pick(L.ly[l].cl, (y - t0) / L.ly[l].cd, x, y) }
+    return pick([25, 27], (y - h) / 8, x, y)
+  }
+  function outsideIdx(x, y) {
+    const lx = x - L.gx0, ly = y - L.gy0
+    if (!skyOn) {
+      const n = plasma(lx, ly, x, y, Pp)
+      if (n >= 0) return n
+      return hash(lx + 911, ly * 7 + 3) < 0.0045 * (1 - clamp(Pp * 3)) ? (hash(lx, ly) < 0.5 ? 25 : 28) : 0
+    }
+    if (tear < 1) {
+      const by = L.gh * (1 - tear * 1.25) + (hash(lx >> 2, 5) - 0.5) * 12 + Math.sin(lx * 0.11 + 1) * 6
+      if (ly < by - 4) { const n = plasma(lx, ly, x, y, 1); return n >= 0 ? n : 10 }
+      if (ly < by) return pick([16, 17, 18], (ly - by + 4) / 4, x, y)
+      const s = skyIdx(x, y)
+      return bay(x, y) < 0.8 - tear * 0.5 ? LIGHT[LIGHT[s]] : s
+    }
+    return skyIdx(x, y)
+  }
+
+  function render(T) {
+    if (!W && !layout()) return
+    ;[sx, sy] = shakeAt(T)
+    Pp = plasmaP(T); D = travel(T); skyOn = T >= 4.5; tear = clamp((T - 4.5) / 0.3)
+    glow0 = 0.3 * sm(T / 0.9); TT = T
+    const fl = flick(T), day = sm((T - 4.6) / 0.8)
+    const amb = skyOn ? -0.5 + 0.9 * day : -0.5
+    const Lc = (skyOn ? (1 - day) * 2.6 * fl + day * 1.3 : (0.6 * glow0 + 3.3 * Pp) * fl) / 255
+    const rimI = skyOn ? 0.55 + 0.45 * day : clamp(glow0 * 0.9 + Pp * fl * 1.1)
+    const RIM = skyOn && day > 0.5 ? [3, 28, 27, 26, 18] : [2, 11, 13, 15, 16, 17, 18]
+    if (skyOn) {
+      const half = L.gw / 2
+      for (let x = 0; x < W; x++) {
+        const u = (x - L.cx) / half
+        const below = L.gy1 - L.hor
+        for (let l = 0; l < L.ly.length; l++) {
+          const { wl, amp, sp, fr } = L.ly[l]
+          const X = x + T * sp + l * 977
+          const seg = Math.floor(X / wl), f = X / wl - seg
+          const seg2 = Math.floor(X / (wl * 0.5)), f2 = X / (wl * 0.5) - seg2
+          const prof = Math.sqrt(Math.max(0, 1 - (2 * f - 1) ** 2)), prof2 = Math.sqrt(Math.max(0, 1 - (2 * f2 - 1) ** 2))
+          tops[l][x] = hY[x] + Math.round(fr * below + 2 + l * L.curv * u * u * 0.25) - Math.round(amp * (0.4 + 0.6 * hash(seg, l + 1)) * prof + amp * 0.4 * prof2 * hash(seg2, l + 5))
+        }
+      }
+    }
+    if (tear < 1) {
+      for (let y = 0; y < H; y++) { const ly = y - L.gy0; rowA[y] = 2 * Math.sin(ly * 0.05 + D * 0.013); rowB[y] = Math.sin(ly * 0.055 - D * 0.04) }
+      for (let x = 0; x < W; x++) colA[x] = Math.sin((x - L.gx0) * 0.08 + D * 0.021)
+    }
+    const span = L.gw + L.gh, gp = T > 7 ? ((T - 7) % 9) / 0.9 : 9
+    for (let y = 0; y < H; y++) {
+      const row = (y - sy + M) * CW - sx + M, o = y * W
+      for (let x = 0; x < W; x++) {
+        const ci = row + x, kd = kind[ci]
+        let idx
+        if (kd === 1) { const v = lv[ci] * 0.04 + amb + lf[ci] * Lc, f = Math.floor(v); idx = f + (v - f > 0.3 + 0.4 * bay(x, y) ? 1 : 0); idx = idx < 0 ? 0 : idx > 9 ? 9 : idx }
+        else if (kd === 0) {
+          idx = outsideIdx(x, y)
+          const r = (x - sx - L.gx0) + (y - sy - L.gy0)
+          if (r < span * 0.55 && (r % 61 < 2 || r % 61 === 6)) idx = LIGHT[idx]
+          if (gp < 1.2 && Math.abs(r - gp * span) < 2.5) idx = LIGHT[LIGHT[idx]]
+        }
+        else if (kd === 2) idx = lv[ci]
+        else if (kd === 4) idx = pick(RIM, (lv[ci] / 255) * rimI, x, y)
+        else {
+          const id = lv[ci]
+          if (id === 4) idx = skyOn ? 31 : Pp > 0.1 && (T * 4) % 1 < 0.5 ? 13 : 2
+          else { const hc = hash(id, 6); idx = hash(id, Math.floor(T * (0.6 + hash(id, 4) * 1.6) + id)) > 0.55 ? (hc < 0.4 ? 29 : hc < 0.75 ? 15 : 8) : 2 }
+        }
+        ib[o + x] = idx
+      }
+    }
+    // g-meters: the needles climb with the deceleration and settle after
+    for (const [gx, gy, side] of L.gauges) {
+      const g = skyOn ? 0.12 + 0.88 * Math.exp(-(T - 4.5) * 1.6) : 0.04 + 0.96 * Pp
+      const an = Math.PI * (0.85 + 1.25 * g) + (hash(Math.floor(T * 15), side + 30) - 0.5) * 0.25 * Pp * (skyOn ? 0 : 1) + Math.sin(T * 0.9 + side) * 0.02
+      for (let t = 1; t < 6; t++) put(Math.round(gx + sx + Math.cos(an) * t), Math.round(gy + sy + Math.sin(an) * t), 15)
+      put(gx + sx, gy + sy, 9)
+    }
+    // sparks streaming past the glass, and the odd ember after
+    if (T > 0.6 && T < 4.9) for (let i = 0; i < 230; i++) {
+      const b = 0.6 + i * 0.018, life = 0.22 + 0.25 * hash(i, 2), p = (T - b) / life
+      if (p < 0 || p >= 1 || hash(i, 1) > 0.12 + 0.88 * plasmaP(b)) continue
+      const rise = (L.gh + 30) * (0.7 + 0.5 * hash(i, 4))
+      const y = L.gy1 + 4 - p * rise, x = L.gx0 - 24 + hash(i, 3) * (L.gw + 10) + 0.42 * p * rise
+      for (let t = 0; t < 6; t++) { const xx = Math.round(x - 0.6 * t), yy = Math.round(y + 1.4 * t); if (glassAt(xx, yy)) put(xx, yy, [18, 18, 17, 16, 15, 14][t]) }
+    }
+    if (T > 5.6) for (let j = 0; j < 2; j++) {
+      const per = 2.3 + j * 1.1, e = Math.floor((T + j * 0.7) / per), tau = (T + j * 0.7) - e * per
+      if (tau > 2) continue
+      const x = Math.round(L.gx0 + 10 + hash(e, 1 + j) * (L.gw - 20) + Math.sin(tau * 3 + e) * 3), y = Math.round(L.gy1 - (tau / 2) * L.gh * 0.85)
+      if (glassAt(x, y)) put(x, y, tau < 1.1 ? 16 : 15)
+      if (glassAt(x, y + 1)) put(x, y + 1, 14)
+    }
+    // the zero-g plush on its string
+    {
+      const q = plasmaP(T)
+      const th = T < 4.9 ? (0.06 + 0.55 * q) * Math.sin(T * (2 + 4 * q)) + (hash(Math.floor(T * 10), 3) - 0.5) * 0.3 * q : 0.5 * Math.exp(-(T - 4.9) * 1.2) * Math.sin(T * 4.2) + 0.1 * Math.sin(T * 1.1)
+      const blink = (T % 4.7) > 4.55 || (T > 3.9 && T < 4.9), [ax, ay, len] = L.plush, X = ax + sx, Y = ay + sy, s = Math.sin(th), c = Math.cos(th)
+      for (let t = 0; t < len; t++) put(Math.round(X + s * t), Math.round(Y + c * t), 2)
+      const bx = Math.round(X + s * len) - 5, by2 = Math.round(Y + c * len) - 1
+      PLUSH.forEach((row, r) => { for (let k = 0; k < 11; k++) { const ch = row[k]; if (ch !== '.') put(bx + k, by2 + r, ch === 'E' && blink ? 16 : PLC[ch]) } })
+    }
+    if (T > 0.95) { const [v, a] = readouts(T); hud(0, 'VELOCITY', v.toFixed(3), 'km/s', T); hud(1, 'ALTITUDE', a.toFixed(2), 'km', T) }
+    // headline line one, typed in
+    if (T >= 0.45) {
+      const n = Math.floor((T - 0.45) * 62), S = L.l1, x0 = L.l1x, y0 = L.l1y, big = L.l1y && S.length && L.port
+      for (let i = 0; i < S.length; i += 4) {
+        if (S[i + 3] >= n) continue
+        const c = S[i + 2]
+        put(x0 + S[i], y0 + S[i + 1], c === 1 ? 1 : c === 2 ? 0 : c === 3 && big ? 18 : 9)
+      }
+    }
+    // "fast.", forged
+    if (T >= 3.9) {
+      const h = heat(T), F = L.fast, fr = Math.floor(T * 12)
+      const oy = [0, 1, 2, 3, 4].map((li) => { const t = T - arrive(li); return t < 0 ? null : slam(t) })
+      const hotL = [0, 1, 2, 3, 4].map((li) => T - arrive(li) < 0.16)
+      for (let i = 0; i < F.length; i += 4) {
+        const li = F[i + 3]
+        if (oy[li] === null) continue
+        const x = L.fx + F[i], y = L.fy + F[i + 1] + oy[li], c = F[i + 2], hot = hotL[li]
+        let idx
+        if (h <= 0 && c < 8) idx = COLD[c]
+        else if (c === 0) idx = hot ? 18 : pick(FACE, h, x, y)
+        else if (c === 3) idx = 18
+        else if (c === 4) idx = hot ? 18 : pick(BEV, h, x, y)
+        else if (c === 6) idx = hot ? 17 : pick(EXT, h, x, y)
+        else if (c === 7) idx = pick(EXB, h, x, y)
+        else if (c === 1) idx = pick(OUTL, h, x, y)
+        else {
+          const d = c - 8
+          if (h <= 0 || bay(x + (fr & 3), y + (fr >> 2)) >= h * (1.1 - d * 0.3)) continue
+          idx = HALO[d - 1]
+        }
+        if (x >= 0 && y >= 0 && x < W && y < H) ib[y * W + x] = idx
+      }
+      const k = L.k, cx = [3, 10.5, 18.5, 26, 31]
+      for (let li = 0; li < 5; li++) for (let j = 0; j < 10; j++) {
+        const life = 0.45 + 0.4 * hash(j, li + 20), tau = T - arrive(li) - 0.1
+        if (tau < 0 || tau >= life) continue
+        const an = -Math.PI * (0.08 + 0.84 * hash(j, li)), sp = 50 + 80 * hash(j, li + 9)
+        const at = (t) => [Math.round(L.fx + cx[li] * k + Math.cos(an) * sp * t), Math.round(L.fy + 10 * k + Math.sin(an) * sp * t + 110 * t * t)]
+        const [x1, y1] = at(tau), [x2, y2] = at(Math.max(0, tau - 0.025))
+        const col = pick([18, 17, 16, 15, 14], tau / life, x1, y1)
+        put(x2, y2, Math.max(14, col - 1)); put(x1, y1, col)
+      }
+    }
+    // the break's flash, and the fade up from the dark
+    const up = T < 4.74 || T > 5.3 ? 0 : T < 4.8 ? (T - 4.74) / 0.06 * 6 : T < 4.87 ? 6 : 6 * (1 - (T - 4.87) / 0.43)
+    const dn = (1 - clamp(T / 1.0)) * 7
+    for (let y = 0, k = 0; y < H; y++) for (let x = 0; x < W; x++, k++) {
+      let i = ib[k]
+      if (up > 0) for (let n = Math.floor(up + bay(x, y)); n > 0; n--) i = LIGHT[i]
+      if (dn > 0) for (let n = Math.floor(dn + bay(x, y)); n > 0; n--) i = DARK[i]
+      buf[k] = C[i]
+    }
+    ctx.putImageData(img, 0, 0)
+    dom(T)
+  }
+
+  // ---- the DOM layer: dialog box typing, pixel buttons ----------------------------------
+  const spans = []
+  {
+    const t = sub.textContent
+    sub.textContent = ''
+    const sr = document.createElement('span'); sr.className = 'is-sr'; sr.textContent = t
+    const vis = document.createElement('span'); vis.setAttribute('aria-hidden', 'true'); vis.style.opacity = 1
+    for (const ch of t) { const s = document.createElement('span'); s.textContent = ch; vis.appendChild(s); spans.push(s) }
+    sub.append(sr, vis)
+  }
+  const flags = {}
+  const tog = (c, on) => { if (flags[c] !== on) { flags[c] = on; root.classList.toggle(c, on) } }
+  let typed = -1
+  function dom(T) {
+    const all = RM.matches
+    tog('is-box', all || T >= 0.8); tog('is-b1', all || T >= 1.2); tog('is-b2', all || T >= 1.32)
+    const n = all ? spans.length : clamp(Math.floor((T - 1.05) * 52), 0, spans.length)
+    if (n !== typed) {
+      const a = Math.max(0, Math.min(n, typed) - 1), b = Math.min(spans.length, Math.max(n, typed) + 1)
+      for (let i = a; i < b; i++) spans[i].className = i < n ? 'on' : i === n && T >= 0.9 ? 'cur' : ''
+      typed = n
+    }
+    tog('is-done', n >= spans.length)
+  }
+  // nine-slice pixel frames, drawn here and handed to CSS as data: URIs
+  function frame9(c, btn) {
+    const f = document.createElement('canvas'); f.width = f.height = 9
+    const g = f.getContext('2d')
+    for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) {
+      const md = Math.min(x, 8 - x), nd = Math.min(y, 8 - y)
+      if (md + nd <= 1) continue
+      let col
+      if (md === 0 || nd === 0 || (md === 1 && nd === 1)) col = c[0]
+      else if (btn) col = 8 - y <= 2 ? c[3] : 8 - x === 1 ? c[3] : y === 1 || x === 1 ? c[1] : c[2]
+      else col = md === 1 || nd === 1 ? c[1] : md === 2 || nd === 2 ? c[2] : c[3]
+      g.fillStyle = col; g.fillRect(x, y, 1, 1)
+    }
+    return `url(${f.toDataURL()})`
+  }
+  root.style.setProperty('--h-box', frame9(['#0e0b09', '#e6d2a8', '#574131', '#1a1511']))
+  root.style.setProperty('--h-b1', frame9(['#0e0b09', '#7d87ff', '#2b3bff', '#1a1f8f'], 1))
+  root.style.setProperty('--h-b1h', frame9(['#0e0b09', '#a9b0ff', '#4654ff', '#232bb0'], 1))
+  root.style.setProperty('--h-b2', frame9(['#0e0b09', '#ffffff', '#f4ead2', '#c4a273'], 1))
+  root.style.setProperty('--h-b2h', frame9(['#0e0b09', '#ffffff', '#fffaf0', '#e6d2a8'], 1))
+  function pixLabel(a, str, icon, fg, shadow, ic) {
+    const rects = []; let x = 0
+    const add = (g, col, dy) => g.rows.forEach((row, r) => {
+      for (let c = 0; c < g.w;) { if (row[c] === '#') { let e = c; while (e < g.w && row[e] === '#') e++; rects.push(`<rect x="${x + c}" y="${r + dy}" width="${e - c}" height="1" fill="${col}"/>`); c = e } else c++ }
+    })
+    const glyph = (g, col) => { if (shadow) add(g, shadow, 1); add(g, col, 0); x += g.w + 1 }
+    glyph(G1[icon], ic); x += 2
+    for (const ch of str) glyph(G1[ch], fg)
+    const w = x - 1
+    a.insertAdjacentHTML('beforeend', `<svg aria-hidden="true" focusable="false" viewBox="0 0 ${w} 8" shape-rendering="crispEdges" style="width:calc(var(--bp)*${w});height:calc(var(--bp)*8);margin-bottom:calc(var(--bp)*-1)">${rects.join('')}</svg>`)
+    a.querySelector('.h-pixel__lbl').classList.add('is-sr')
+  }
+  pixLabel(root.querySelector('.h-pixel__btn--a'), 'Download', 'v_', '#ffffff', '#1a1f8f', '#fff1a0')
+  pixLabel(root.querySelector('.h-pixel__btn--b'), 'Star on GitHub', 's_', '#1a1511', null, '#c9822f')
+
+  // ---- one clock --------------------------------------------------------------------------
+  let T = 0, last = 0, raf = 0, drawn = 0, onScreen = true
+  const REST = 12
+  function frame(now) {
+    raf = 0
+    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0
+    last = now; T += dt
+    if (T < 10.5 || now - drawn > 62) { drawn = now; render(T) }
+    go()
+  }
+  function go() { if (!raf && onScreen && !document.hidden && !RM.matches) raf = requestAnimationFrame(frame) }
+  function halt() { if (raf) cancelAnimationFrame(raf); raf = 0; last = 0 }
+  root.addEventListener('h-seek', (e) => { T = +e.detail || 0; render(RM.matches ? REST : T) })
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; onScreen ? go() : halt() }).observe(root)
+  document.addEventListener('visibilitychange', () => (document.hidden ? halt() : go()))
+  const relayout = () => { if (layout()) render(RM.matches ? REST : T) }
+  new ResizeObserver(relayout).observe(root)
+  if (document.fonts) document.fonts.ready.then(relayout)
+  RM.addEventListener('change', () => { halt(); relayout(); go() })
+  relayout()
+  go()
+})()
 </script>
