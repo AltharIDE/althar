@@ -112,7 +112,9 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
   const readFile = policy.readFile ?? readTokenField
   const allowed = policy.allowed ?? allowedEndpoints
   const timeout = policy.timeout ?? 10_000
-  const memory = new Map<string, { usage?: AccountUsage; notBefore: number; strikes: number }>()
+  /** `said`: what the last read said where it read no windows, said again while the account isn't asked. */
+  type Memory = { usage?: AccountUsage; notBefore: number; strikes: number; said?: EndpointRead }
+  const memory = new Map<string, Memory>()
   /** A read under way for an account: a second asker gets its answer, not a second call. */
   const inflight = new Map<string, Promise<EndpointRead>>()
 
@@ -128,25 +130,31 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
   const run = async (source: EndpointSource, account: UsageAccount, key: string, now: () => Date): Promise<EndpointRead> => {
     const before = memory.get(key)
     const at = now().getTime()
-    // Within the interval, or waiting as the provider asked: the last windows, not another call.
+    // Within the interval, or waiting as the provider asked: the last windows, or what the last read said, not another call.
     if (before !== undefined && at < before.notBefore)
-      return before.usage === undefined
-        ? fault('unreachable', 'The provider asked Althar to wait before reading again.')
-        : { kind: 'usage', usage: before.usage, stale: true }
+      return before.usage !== undefined
+        ? { kind: 'usage', usage: before.usage, stale: true }
+        : (before.said ?? fault('unreachable', 'The provider asked Althar to wait before reading again.'))
 
     const every = source.every ?? MIN_INTERVAL
     // The interval is taken before anything is awaited, so no second read can start inside it.
-    const remember = (patch: { usage?: AccountUsage; notBefore: number; strikes: number }) => memory.set(key, patch)
+    const remember = (patch: Memory) => memory.set(key, patch)
     remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + every, strikes: before?.strikes ?? 0 })
     const failed = (kind: UsageFault, message: string, strikes = 0, wait = every) => {
-      remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + wait, strikes })
+      // What it said, as it said it: a read failed for another reason isn't shown as a wait the provider asked for.
+      remember({
+        ...(before?.usage === undefined ? {} : { usage: before.usage }),
+        notBefore: at + wait,
+        strikes,
+        said: fault(kind, message),
+      })
       return fault(kind, message, before?.usage)
     }
 
     // The token lives in this call only.
     let token = await stringOf(source.token, account)
     if (token === null) {
-      remember({ notBefore: at + every, strikes: 0 })
+      remember({ notBefore: at + every, strikes: 0, said: { kind: 'none' } })
       return { kind: 'none' }
     }
     const headers: Record<string, string> = { Accept: 'application/json', ...source.headers }

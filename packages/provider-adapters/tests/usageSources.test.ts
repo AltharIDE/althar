@@ -331,6 +331,32 @@ describe('the usage reader', () => {
     expect(endpointSources().find((source) => source.id === 'claude-oauth')?.every).toBe(5 * 60_000)
   })
 
+  it('says again inside the interval what the last read said, where it read no windows: never a wait the provider didn’t ask for', async () => {
+    for (const [reply, said] of [
+      [{ status: 500 }, { kind: 'fault', fault: 'unreachable', message: 'The provider answered with an error.' }],
+      [{ throws: true }, { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' }],
+      [{ status: 401 }, { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }],
+      [{ status: 429 }, { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' }],
+    ] as const) {
+      let time = Date.parse('2026-10-15T12:00:00Z')
+      const { seen, fetch } = server(reply)
+      const r = reader({ fetch, now: () => new Date(time) })
+      const home = fakeHome()
+      expect(await r.read('codex-chatgpt', codex(home))).toMatchObject(said)
+      time += MIN_INTERVAL - 1
+      expect(await r.read('codex-chatgpt', codex(home)), JSON.stringify(reply)).toEqual(said)
+      expect(seen).toHaveLength(1)
+    }
+    // An account with no sign-in to read is one still, not one waiting.
+    const { seen, fetch } = server({})
+    const r = reader({ fetch })
+    const missing = mkdtempSync(join(tmpdir(), 'althar-usage-'))
+    homes.push(missing)
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(seen).toHaveLength(0)
+  })
+
   it('makes one call for readers asking together, and none inside the minute after', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
