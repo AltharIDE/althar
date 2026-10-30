@@ -350,6 +350,7 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           // Its first look, an hour in, comes now: after all of that, never before it.
           yield* TestClock.adjust(Duration.hours(1))
           yield* nothingLeft(task.taskId)
+          // Its mark disappears as it exits, just before Linux has finished reaping the process.
           yield* stopped(outlived)
           yield* until(
             Effect.sync(() => (alive(run) ? [] : [run])),

@@ -54,11 +54,18 @@ const tightest = (account: AccountUsage): UsageWindow | undefined => {
   )
 }
 
+/** A read that failed for a moment (a rate limit, no answer, an error) and will pass on its own: nothing the person can do, so the peek keeps to the last numbers and how old they are. */
+const passing = (account: AccountUsage) => account.fault?.kind === 'unreachable'
+
 const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAccount => ({
   id: account.accountId,
   name: several ? account.accountName : null,
-  age: account.observedAt !== null && now.getTime() - Date.parse(account.observedAt) > OLD ? text.read(ago(account.observedAt, now)) : null,
-  fault: account.fault?.message ?? null,
+  // Old numbers say how old; so do any that a passing fault left unrefreshed, as the fault itself isn't shown.
+  age:
+    account.observedAt !== null && (passing(account) || now.getTime() - Date.parse(account.observedAt) > OLD)
+      ? text.read(ago(account.observedAt, now))
+      : null,
+  fault: passing(account) ? null : (account.fault?.message ?? null),
   windows: account.windows.map((window): PlanWindow => ({
     id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
     label: windowName(window),

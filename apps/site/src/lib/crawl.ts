@@ -1,4 +1,5 @@
-import { LINKS } from '../content/facts'
+import { KIND_WORD as CHANGE_WORD, KINDS, RELEASES, releaseUrl, ROADMAP, STAGE_WORD, STAGES } from '../content/changelog'
+import { INSTALL, LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
 import { KIND_WORD, type Shift, SHIFTS, UPCOMING, type Upcoming } from '../content/shifts'
@@ -16,8 +17,12 @@ import { urlOf } from './meta'
 /** The pages search may list, in the order the site's nav has them. */
 export const indexed = (): PageMeta[] => Object.values(PAGE_META).filter((page) => page.index)
 
-/** The pages also written as Markdown, and where: the thesis as THESIS.md has it, and the shifts as a list. */
-export const MARKDOWN: Partial<Record<PagePath, string>> = { '/shifts': '/shifts.md', '/thesis': '/thesis.md' }
+/** The pages also written as Markdown, and where: the thesis as THESIS.md has it, and the shifts and the releases as lists. */
+export const MARKDOWN: Partial<Record<PagePath, string>> = {
+  '/shifts': '/shifts.md',
+  '/changelog': '/changelog.md',
+  '/thesis': '/thesis.md',
+}
 
 export const robotsTxt = (origin: string): string =>
   [
@@ -37,8 +42,9 @@ export const robotsTxt = (origin: string): string =>
 
 const xml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
-/** The shifts change when a shift is added; the other pages carry no date we can stand behind. */
-const lastModified = (path: string): string | undefined => (path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : undefined)
+/** The shifts change when a shift is added, the changelog with each release; the other pages carry no date we can stand behind. */
+const lastModified = (path: string): string | undefined =>
+  path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : path === '/changelog' ? RELEASES[0]?.date : undefined
 
 export const sitemapXml = (origin: string): string => {
   const urls = indexed().map((page) => {
@@ -48,14 +54,19 @@ export const sitemapXml = (origin: string): string => {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`
 }
 
+/** A sentence's end, unless it has one. */
+const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
+
 /**
  * llms.txt (llmstxt.org): what Althar is, why, what it does, a task told end
- * to end, when to bring it up and what it isn't (content/llms.ts), then the
- * site's pages and the docs as links with a line each. The facts are written
+ * to end, when to bring it up and what it isn't (content/llms.ts), how to get
+ * it, what the latest release brought (content/changelog.ts), then the site's
+ * pages and the docs as links with a line each. The facts are written
  * out, not left behind links: an assistant answering a question often reads
  * only this file.
  */
 export const llmsTxt = (origin: string): string => {
+  const latest = RELEASES[0]
   const pages = indexed().map((page) => {
     const markdown = MARKDOWN[page.path as PagePath]
     const also = markdown ? ` As Markdown: ${urlOf(origin, markdown)}` : ''
@@ -90,11 +101,23 @@ export const llmsTxt = (origin: string): string => {
     '## Get it',
     '',
     '- Free and open source, under the Apache License 2.0. For macOS, Windows and Linux, tested most on macOS. Early, and moving fast.',
-    `- Download it from [GitHub Releases](${LINKS.releases}), or run it from source: see the [README](${LINKS.repo}#readme).`,
-    "- Sign in each agent with its own tool first (for example `claude auth login` or `codex login`). Althar's first screen shows which agents are ready.",
+    `- Download it from [GitHub Releases](${LINKS.releases}); on a Mac, Homebrew installs it from our tap: \`${INSTALL.brew}\`. Or run it from source: see the [README](${LINKS.repo}#readme).`,
+    '- Claude Code, Codex and Google Antigravity sign in from inside Althar; the others sign in with their own tools first (for example `opencode auth login` or `copilot login`). Althar’s first screen finds the agents on your computer and shows which are ready.',
     `- Agents join through the [Agent Client Protocol](${LINKS.acp}). The [README](${LINKS.repo}#your-agents) lists the ones Althar runs today, and the ones on the way.`,
     '- Every page on this site may be read and quoted.',
     '',
+    ...(latest
+      ? [
+          '## Latest release',
+          '',
+          `${latest.version}, ${latest.date}: ${stop(latest.title)} [Release notes](${releaseUrl(latest.version)}). What’s new in it:`,
+          '',
+          ...latest.changes.filter((change) => change.kind === 'new').map((change) => `- ${change.text}`),
+          '',
+          `Every release, back to the first: the [changelog](${urlOf(origin, '/changelog')}), or [GitHub Releases](${LINKS.releases}).`,
+          '',
+        ]
+      : []),
     '## Pages',
     '',
     ...pages,
@@ -111,9 +134,6 @@ export const llmsTxt = (origin: string): string => {
     '',
   ].join('\n')
 }
-
-/** A sentence's end, unless it has one. */
-const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
 const line = (shift: Shift) =>
   `- **${shift.date} · ${shift.who} · ${KIND_WORD[shift.kind]}.** ${stop(shift.title)} ${shift.what} Source: [${shift.source.name}](${shift.source.url})`
@@ -135,6 +155,35 @@ export const shiftsMd = (origin: string, today: string): string => {
     `From ${urlOf(origin, page.path)}: ${SHIFTS.length} shifts, newest first, each with the day it happened and its source. We link the reporting; we don’t host it.`,
     ...months,
     ...(upcoming.length ? ['', `## Announced, not in effect yet (as of ${today})`, '', ...upcoming] : []),
+    '',
+  ].join('\n')
+}
+
+/** The changelog as Markdown: every release, newest first, its lines by kind, then what's next. */
+export const changelogMd = (origin: string): string => {
+  const page = PAGE_META['/changelog']
+  const releases = RELEASES.flatMap((release) => [
+    '',
+    `## ${release.version} · ${release.title}`,
+    '',
+    `Released ${release.date}. [Release notes](${releaseUrl(release.version)})`,
+    ...KINDS.flatMap((kind) => {
+      const lines = release.changes.filter((change) => change.kind === kind)
+      return lines.length ? ['', `### ${CHANGE_WORD[kind]}`, '', ...lines.map((change) => `- ${change.text}`)] : []
+    }),
+  ])
+  const next = STAGES.flatMap((stage) => {
+    const planned = ROADMAP.filter((plan) => plan.stage === stage)
+    return planned.length ? ['', `### ${STAGE_WORD[stage]}`, '', ...planned.map((plan) => `- **${plan.title}.** ${plan.detail}`)] : []
+  })
+  return [
+    '# Changelog',
+    '',
+    `> ${page.description}`,
+    '',
+    `From ${urlOf(origin, page.path)}: ${RELEASES.length} releases, newest first, in the release notes’ own words. Downloads: [GitHub Releases](${LINKS.releases}).`,
+    ...releases,
+    ...(next.length ? ['', '## What’s next', '', `From the plans in the repository: ${LINKS.repo}/tree/main/docs/plans`, ...next] : []),
     '',
   ].join('\n')
 }
