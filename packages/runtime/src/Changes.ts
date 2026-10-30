@@ -1,3 +1,4 @@
+import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
@@ -2440,7 +2441,7 @@ export class Changes extends Context.Service<
             title: several
               ? `Merged here: ${merged.map((one) => `${one.repository} into ${one.branch}`).join(', ')}.`
               : `Merged into ${merged[0]?.branch ?? 'its default branch'} here.`,
-            description: 'On this computer only: nothing was pushed.',
+            description: `On ${thisDevice()} only: nothing was pushed.`,
           })
           // Merged, its task is done, as a merged pull request's is, once any others it has are merged too.
           yield* settleIfDone(taskId, { actorId: instance.personId, here: merged })
@@ -5525,7 +5526,7 @@ export class Changes extends Context.Service<
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined || !existsSync(workspace.path))
             return yield* new ToolRefused({
-              message: "The task's worktree isn't on this computer, so Althar can't see what is on its branch. Tell the person.",
+              message: `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
             })
           // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
           const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), now.source)

@@ -2,7 +2,7 @@ import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot }
 import { doing, type Doing } from './actions'
 import { Failure } from './Failure'
 import type { ErrorMore } from './useTask'
-import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade } from '@althar/ui'
+import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade, modKey } from '@althar/ui'
 import type { ReactNode } from 'react'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
@@ -93,7 +93,7 @@ export const text = {
   pullRequest: (change: ChangeSummary, several: boolean) =>
     several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
   named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**

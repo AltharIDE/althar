@@ -25,6 +25,8 @@ export default defineConfig(({ mode }) => ({
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.stories.tsx', 'src/fixtures/**', 'src/storybook/**', 'src/index.ts'],
       reporter: ['text', 'html'],
+      // Checked when a test fails too, so a run that only quarantined tests fail still gates on it (@althar/testing).
+      reportOnFailure: true,
       thresholds: { lines: 90, branches: 90 },
     },
   },

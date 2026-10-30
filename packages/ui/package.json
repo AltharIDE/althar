@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./screens": "./src/screens/index.ts",
     "./opening": "./src/opening.ts",
+    "./device": "./src/foundations/device.ts",
     "./styles.css": "./src/styles/global.css"
   },
   "scripts": {

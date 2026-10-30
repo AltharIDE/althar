@@ -39,6 +39,8 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: bun run check
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - run: bun run test
       - run: bun run build
       - uses: actions/upload-artifact@v6

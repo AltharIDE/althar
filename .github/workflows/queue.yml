@@ -5,8 +5,8 @@ name: queue
 # lands only if that passes. A pull request that fails there goes back to its branch, and main never has it.
 #
 # The queue runs a pull request's own checks (desktop.yml, harness.yml and the rest), for the paths it changes, as its
-# pull request did. It adds two of its own: for a change to the app or what it builds on, the end-to-end run (e2e.yml),
-# in four parts; and for changed tests, those tests many times over (stress.yml), which the pull request ran too. A
+# pull request did. It adds two of its own, which the pull request ran too: for a change to the app or what it builds
+# on, the end-to-end run (e2e.yml), in four parts; and for changed tests, those tests many times over (stress.yml). A
 # merge waits about as long as the longest of them. Coverage and the packages stay in post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks

@@ -182,7 +182,7 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await page.screenshot({ path: 'test-results/new-project-made.png' })
 
     // Another, left with Escape: nothing is made, and the tab before it has the window.
-    await page.keyboard.press('Meta+n')
+    await page.keyboard.press('ControlOrMeta+n')
     await expect(page.getByRole('textbox', { name: 'Name' })).toBeFocused()
     await page.keyboard.type('Scratch')
     await page.keyboard.press('Escape')
