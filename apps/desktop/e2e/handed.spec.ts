@@ -48,8 +48,8 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     // The screenshot, from the artifact store at its address, drawn large with what the lead said.
     const open = page.getByRole('button', { name: /full size$/ }).last()
     // A picture loads as it nears the screen. The message may still be drawn again as it settles, putting a new button in the old
-    // one's place: the locator finds the new one, and scrolls to it once it stays.
-    await open.scrollIntoViewIfNeeded()
+    // one's place, which a scroll already under way loses: it is tried again, finding the new one, until one stays.
+    await expect(() => open.scrollIntoViewIfNeeded()).toPass()
     const shot = open.getByRole('img')
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     expect(await shot.getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)
