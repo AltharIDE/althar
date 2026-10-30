@@ -1,0 +1,1180 @@
+<style>
+.s-d-auto {
+  --bg: #0e0b09;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 42% 22%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #1b1612 0%, #14100d 48%, #0d0a08 100%);
+  --dot: rgba(255, 238, 220, 0.16);
+  --dots-o: 0.75;
+  --grain-o: 0.07;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(6, 5, 4, 0) 58%, rgba(6, 5, 4, 0.5) 100%);
+  --under: radial-gradient(closest-side, rgba(66, 80, 255, 0.32), rgba(108, 64, 240, 0.13) 52%, rgba(108, 64, 240, 0) 100%);
+  --card: linear-gradient(180deg, #1d1915 0%, #16130f 60%, #14110e 100%);
+  --card-sh: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1.4cqw 2.8cqw -0.8cqw rgba(0, 0, 0, 0.8), 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.35);
+  --edge: linear-gradient(180deg, rgba(255, 244, 232, 0.17), rgba(255, 244, 232, 0.06) 38%, rgba(255, 244, 232, 0.03));
+  --edge-on: linear-gradient(180deg, rgba(160, 168, 255, 0.42), rgba(118, 84, 246, 0.16) 45%, rgba(255, 244, 232, 0.05));
+  --edge-done: 0.18;
+  --lit:
+    radial-gradient(90% 60% at 50% 0%, rgba(86, 98, 255, 0.13), rgba(86, 98, 255, 0) 70%),
+    linear-gradient(180deg, rgba(255, 250, 244, 0.025), rgba(255, 250, 244, 0) 40%);
+  --ink: #efebe4;
+  --ink2: #9d978d;
+  --ink3: #6c665e;
+  --mark: rgba(240, 236, 229, 0.86);
+  --hair: linear-gradient(90deg, rgba(255, 242, 228, 0.1), rgba(255, 242, 228, 0.06));
+  --live: #c3c8ff;
+  --live-b: #dfe2ff;
+  --live-dot: #8a93ff;
+  --live-dot-sh: 0 0 0 0.2em rgba(90, 104, 255, 0.2), 0 0 0.7em rgba(96, 108, 255, 0.9);
+  --hr-on: #c9ceff;
+  --pill: linear-gradient(180deg, #221d18, #17130f);
+  --pill-sh: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0.6cqw 1.4cqw -0.4cqw rgba(0, 0, 0, 0.8);
+  --pill-edge: linear-gradient(180deg, rgba(255, 244, 232, 0.22), rgba(255, 244, 232, 0.05));
+  --pill-edge-on: linear-gradient(180deg, rgba(176, 184, 255, 0.85), rgba(122, 84, 246, 0.45));
+  --pill-on-ink: #e3e6ff;
+  --knob: radial-gradient(circle at 50% 25%, #2c2620 0%, #1a1612 60%, #120f0c 100%);
+  --knob-sh: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 244, 232, 0.1);
+  --knob-sh-on: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(150, 160, 255, 0.4), 0 0 1.2cqw rgba(90, 104, 255, 0.35);
+  --knob-ink: rgba(240, 236, 229, 0.86);
+  --knob-ink-on: #d9dcff;
+  --sw: linear-gradient(180deg, #4250ff, #6343ee);
+  --sw-sh: inset 0 0 0 1px rgba(196, 202, 255, 0.28), 0 0 1cqw rgba(76, 88, 255, 0.35);
+  --sw-knob: linear-gradient(180deg, #ffffff, #e4e2f4);
+  --pip-made: #e6e0d6;
+  --pip-made-sh: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  --pip-none: rgba(255, 242, 228, 0.07);
+  --pip-none-sh: inset 0 0 0 1px rgba(255, 242, 228, 0.24);
+  --pip-fail: #d8933f;
+  --pip-fail-sh: inset 0 0 0 1px rgba(255, 220, 170, 0.25), 0 0 0.6cqw rgba(216, 147, 63, 0.25);
+  --pip-run: #6a74ff;
+  --pip-run-sh: inset 0 0 0 1px rgba(214, 218, 255, 0.5), 0 0 0.9cqw rgba(90, 104, 255, 0.85);
+  --pip-sheen: 0.55;
+  --track: rgba(255, 244, 232, 0.085);
+  --fill: rgba(240, 236, 229, 0.34);
+  --fill-on: linear-gradient(90deg, #3442ff, #6a6dff 60%, #9a7cff);
+  --tip: radial-gradient(circle, rgba(236, 238, 255, 1) 0 14%, rgba(120, 130, 255, 0.5) 34%, rgba(120, 130, 255, 0) 70%);
+  --ok: #72c78b;
+  --warm: #d8933f;
+  --fs-name: max(9.5px, 1.95cqw);
+  --fs-plan: max(8px, 1.5cqw);
+  --fs-st: max(7.5px, 1.38cqw);
+  --fs-mono: max(7px, 1.12cqw);
+  --pip: max(5px, 1.32cqw);
+  --pgap: max(2.5px, 0.56cqw);
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+[data-tone='light'] .s-d-auto {
+  --bg: #f4f2ec;
+  --ground:
+    radial-gradient(ellipse 70% 55% at 42% 22%, rgba(255, 255, 255, 0.75), transparent 70%),
+    radial-gradient(ellipse 95% 80% at 50% 30%, #fcfbf8 0%, #f7f5f0 50%, #efece5 100%);
+  --dot: rgba(20, 20, 28, 0.16);
+  --dots-o: 0.7;
+  --grain-o: 0.022;
+  --vig: radial-gradient(ellipse 80% 78% at 50% 44%, rgba(110, 88, 56, 0) 62%, rgba(110, 88, 56, 0.07) 100%);
+  --under: radial-gradient(closest-side, rgba(43, 59, 255, 0.12), rgba(122, 63, 240, 0.05) 52%, rgba(122, 63, 240, 0) 100%);
+  --card: linear-gradient(180deg, #ffffff 0%, #fefefd 55%, #fcfbf8 100%);
+  --card-sh: 0 0.08cqw 0.16cqw rgba(64, 46, 24, 0.07), 0 0.4cqw 0.8cqw -0.25cqw rgba(64, 46, 24, 0.08), 0 2cqw 4.4cqw -1.4cqw rgba(64, 46, 24, 0.17);
+  --edge: linear-gradient(180deg, rgba(20, 20, 28, 0.055), rgba(20, 20, 28, 0.1) 26%, rgba(20, 20, 28, 0.12));
+  --edge-on: linear-gradient(180deg, rgba(43, 59, 255, 0.55), rgba(122, 63, 240, 0.24) 50%, rgba(20, 20, 28, 0.1));
+  --edge-done: 0.22;
+  --lit: radial-gradient(90% 60% at 50% 0%, rgba(43, 59, 255, 0.055), rgba(43, 59, 255, 0) 70%);
+  --ink: #141417;
+  --ink2: #45454c;
+  --ink3: #6f6f77;
+  --mark: #2a2a30;
+  --hair: linear-gradient(90deg, rgba(20, 20, 28, 0.09), rgba(20, 20, 28, 0.06));
+  --live: #2b3bff;
+  --live-b: #1d2ad8;
+  --live-dot: #2b3bff;
+  --live-dot-sh: 0 0 0 0.2em rgba(43, 59, 255, 0.13), 0 0 0.6em rgba(43, 59, 255, 0.4);
+  --hr-on: #2b3bff;
+  --pill: linear-gradient(180deg, #ffffff, #fbfaf7);
+  --pill-sh: 0 0.08cqw 0.2cqw rgba(64, 46, 24, 0.08), 0 0.8cqw 1.8cqw -0.6cqw rgba(64, 46, 24, 0.2);
+  --pill-edge: linear-gradient(180deg, rgba(20, 20, 28, 0.07), rgba(20, 20, 28, 0.15));
+  --pill-edge-on: linear-gradient(180deg, rgba(43, 59, 255, 0.8), rgba(122, 63, 240, 0.55));
+  --pill-on-ink: #2b3bff;
+  --knob: radial-gradient(circle at 50% 25%, #ffffff 0%, #f5f3ee 100%);
+  --knob-sh: inset 0 0 0 1px rgba(20, 20, 28, 0.11), 0 0.08cqw 0.2cqw rgba(64, 46, 24, 0.08);
+  --knob-sh-on: inset 0 0 0 1px rgba(43, 59, 255, 0.4), 0 0 1cqw rgba(43, 59, 255, 0.16);
+  --knob-ink: #45454c;
+  --knob-ink-on: #2b3bff;
+  --sw: linear-gradient(180deg, #2b3bff, #5a3ff0);
+  --sw-sh: inset 0 0 0 1px rgba(16, 20, 120, 0.18), 0 0.2cqw 0.6cqw rgba(43, 59, 255, 0.28);
+  --sw-knob: linear-gradient(180deg, #ffffff, #f1f0f8);
+  --pip-made: #2b2b31;
+  --pip-made-sh: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  --pip-none: rgba(20, 20, 28, 0.035);
+  --pip-none-sh: inset 0 0 0 1px rgba(20, 20, 28, 0.24);
+  --pip-fail: #c9822f;
+  --pip-fail-sh: inset 0 0 0 1px rgba(120, 70, 10, 0.16);
+  --pip-run: #2b3bff;
+  --pip-run-sh: inset 0 0 0 1px rgba(16, 20, 120, 0.15), 0 0 0.8cqw rgba(43, 59, 255, 0.45);
+  --pip-sheen: 0.22;
+  --track: rgba(20, 20, 28, 0.08);
+  --fill: rgba(20, 20, 28, 0.26);
+  --fill-on: linear-gradient(90deg, #2b3bff, #4a3ff6 60%, #7a3ff0);
+  --tip: radial-gradient(circle, rgba(255, 255, 255, 1) 0 16%, rgba(43, 59, 255, 0.55) 30%, rgba(43, 59, 255, 0) 70%);
+  --ok: #2e8c46;
+  --warm: #c9822f;
+}
+.s-d-auto * { box-sizing: border-box; }
+.s-d-auto .s-d-auto__ground {
+  position: absolute;
+  inset: 0;
+  background: var(--ground);
+}
+.s-d-auto .s-d-auto__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--dot) 0.6px, transparent 1.15px);
+  background-size: 2.5cqw 2.5cqw;
+  background-position: 50% 0.6cqw;
+  -webkit-mask-image: radial-gradient(ellipse 62% 70% at 50% 44%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  mask-image: radial-gradient(ellipse 62% 70% at 50% 44%, #000 15%, rgba(0, 0, 0, 0.45) 55%, transparent 82%);
+  opacity: var(--dots-o);
+}
+.s-d-auto .s-d-auto__under {
+  position: absolute;
+  background: var(--under);
+  opacity: 0;
+  z-index: 1;
+  will-change: opacity;
+}
+.s-d-auto .s-d-auto__under--a { left: 2cqw; top: 41.5cqw; width: 50cqw; height: 21cqw; }
+.s-d-auto .s-d-auto__under--t { left: 58cqw; top: 40cqw; width: 40cqw; height: 19cqw; }
+
+/* Hours along the top: a fine ruler drawn on the canvas, its labels here. */
+.s-d-auto .s-d-auto__hours {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 18.35cqw;
+  height: 2cqw;
+  z-index: 2;
+  -webkit-mask-image: linear-gradient(90deg, transparent 4%, #000 17%, #000 80%, transparent 96%);
+  mask-image: linear-gradient(90deg, transparent 4%, #000 17%, #000 80%, transparent 96%);
+}
+.s-d-auto .s-d-auto__hr {
+  position: absolute;
+  top: 0;
+  margin-left: 0.62cqw;
+  font: 500 var(--fs-mono)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink3);
+  white-space: nowrap;
+  transition: color 0.6s var(--ease);
+}
+.s-d-auto .s-d-auto__hr.is-on { color: var(--hr-on); }
+.s-d-auto .s-d-auto__now {
+  position: absolute;
+  left: 0;
+  top: 10.4cqw;
+  height: max(13px, 2.65cqw);
+  padding: 0 max(5px, 0.8cqw);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  font: 500 max(7.5px, 1.24cqw)/1 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--pill);
+  box-shadow: var(--pill-sh);
+  z-index: 4;
+  will-change: transform, opacity;
+}
+.s-d-auto .s-d-auto__now::before,
+.s-d-auto .s-d-auto__now::after,
+.s-d-auto .s-d-auto__card::before,
+.s-d-auto .s-d-auto__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.s-d-auto .s-d-auto__now::before { background: var(--pill-edge); }
+.s-d-auto .s-d-auto__now::after {
+  background: var(--pill-edge-on);
+  opacity: 0;
+  transition: opacity 0.7s var(--ease);
+}
+.s-d-auto .s-d-auto__now.is-on::after { opacity: 1; }
+.s-d-auto .s-d-auto__now span { position: relative; transition: color 0.5s var(--ease); }
+.s-d-auto .s-d-auto__now.is-on span { color: var(--pill-on-ink); }
+
+/* Glass cards with a hairline gradient border, lit cobalt while at work. */
+.s-d-auto .s-d-auto__card {
+  position: absolute;
+  border-radius: 1.5cqw;
+  background: var(--card);
+  box-shadow: var(--card-sh);
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+  will-change: transform;
+}
+.s-d-auto .s-d-auto__card::before { background: var(--edge); }
+.s-d-auto .s-d-auto__card::after {
+  background: var(--edge-on);
+  opacity: 0;
+  transition: opacity 0.8s var(--ease);
+}
+.s-d-auto .s-d-auto__card[data-st="run"]::after,
+.s-d-auto .s-d-auto__card[data-st="r1"]::after,
+.s-d-auto .s-d-auto__card[data-st="r2"]::after { opacity: 1; }
+.s-d-auto .s-d-auto__card[data-st="done"]::after { opacity: var(--edge-done); }
+.s-d-auto .s-d-auto__lit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--lit);
+  opacity: 0;
+  transition: opacity 0.9s var(--ease);
+  pointer-events: none;
+}
+.s-d-auto .s-d-auto__card[data-st="run"] .s-d-auto__lit,
+.s-d-auto .s-d-auto__card[data-st="r1"] .s-d-auto__lit,
+.s-d-auto .s-d-auto__card[data-st="r2"] .s-d-auto__lit { opacity: 1; }
+
+/* The automation. */
+.s-d-auto .s-d-auto__auto {
+  left: 5cqw;
+  top: 28.6cqw;
+  width: 44cqw;
+  height: 23.4cqw;
+  padding: 1.75cqw 1.9cqw 1.55cqw;
+}
+.s-d-auto .s-d-auto__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: max(12px, 2.6cqw);
+}
+.s-d-auto .s-d-auto__chip {
+  position: relative;
+  flex: none;
+  width: max(12px, 2.6cqw);
+  height: max(12px, 2.6cqw);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--knob);
+  box-shadow: var(--knob-sh);
+  color: var(--knob-ink);
+  transition: color 0.6s var(--ease), box-shadow 0.6s var(--ease);
+}
+.s-d-auto .s-d-auto__auto[data-st="run"] .s-d-auto__chip {
+  color: var(--knob-ink-on);
+  box-shadow: var(--knob-sh-on);
+}
+.s-d-auto .s-d-auto__chip svg { width: 58%; height: 58%; display: block; }
+.s-d-auto .s-d-auto__when {
+  margin-left: max(5px, 0.9cqw);
+  font-size: var(--fs-plan);
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-d-auto .s-d-auto__on {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: max(4px, 0.7cqw);
+  font-size: var(--fs-st);
+  color: var(--ink2);
+}
+.s-d-auto .s-d-auto__sw {
+  position: relative;
+  width: max(16px, 3.3cqw);
+  height: max(9px, 1.86cqw);
+  border-radius: 999px;
+  background: var(--sw);
+  box-shadow: var(--sw-sh);
+}
+.s-d-auto .s-d-auto__sw i {
+  position: absolute;
+  top: 12%;
+  right: 7%;
+  height: 76%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--sw-knob);
+  box-shadow: 0 0.12cqw 0.3cqw rgba(10, 8, 40, 0.45);
+}
+.s-d-auto .s-d-auto__ask {
+  margin-top: 1.95cqw;
+  font-size: max(10px, 2.2cqw);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.016em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.s-d-auto .s-d-auto__lead {
+  margin-top: 0.55cqw;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: var(--fs-plan);
+  line-height: 1.25;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-d-auto .s-d-auto__lead em { font-style: normal; color: var(--ink3); }
+.s-d-auto .s-d-auto__lead svg { width: 1.05em; height: 1.05em; display: block; fill: var(--mark); }
+.s-d-auto .s-d-auto__meta {
+  margin-top: 0.95cqw;
+  font: 400 var(--fs-mono)/1.2 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--ink3);
+}
+.s-d-auto .s-d-auto__foot {
+  position: relative;
+  margin-top: auto;
+  padding-top: 1.3cqw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1cqw;
+}
+.s-d-auto .s-d-auto__foot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--hair);
+}
+.s-d-auto .s-d-auto__status {
+  position: relative;
+  flex: 1;
+  height: max(10px, 1.8cqw);
+  font-size: var(--fs-st);
+  line-height: max(10px, 1.8cqw);
+  letter-spacing: 0.002em;
+}
+.s-d-auto .s-d-auto__st,
+.s-d-auto .s-d-auto__ts {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+  color: var(--ink2);
+  opacity: 0;
+  transform: translateY(0.35em);
+  transition: opacity 0.45s ease, transform 0.7s var(--ease);
+}
+.s-d-auto .s-d-auto__st b { font-weight: 500; color: var(--live-b); }
+.s-d-auto .s-d-auto__st--run,
+.s-d-auto .s-d-auto__ts--r1,
+.s-d-auto .s-d-auto__ts--r2 { color: var(--live); }
+.s-d-auto .s-d-auto__st--run i,
+.s-d-auto .s-d-auto__ts--r1 i,
+.s-d-auto .s-d-auto__ts--r2 i {
+  flex: none;
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: var(--live-dot);
+  box-shadow: var(--live-dot-sh);
+}
+.s-d-auto .s-d-auto__auto[data-st="idle"] .s-d-auto__st--idle,
+.s-d-auto .s-d-auto__auto[data-st="run"] .s-d-auto__st--run,
+.s-d-auto .s-d-auto__auto[data-st="done"] .s-d-auto__st--done { opacity: 1; transform: none; }
+.s-d-auto .s-d-auto__pips {
+  position: relative;
+  flex: none;
+  width: calc(var(--pip) * 7 + var(--pgap) * 6);
+  height: var(--pip);
+}
+.s-d-auto .s-d-auto__pip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--pip);
+  height: var(--pip);
+  border-radius: max(1.5px, 0.3cqw);
+  background-color: var(--pip-made);
+  box-shadow: var(--pip-made-sh);
+  transition: background-color 0.5s var(--ease), box-shadow 0.6s var(--ease);
+  will-change: transform, opacity;
+}
+.s-d-auto .s-d-auto__pip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 62%);
+  opacity: var(--pip-sheen);
+}
+.s-d-auto .s-d-auto__pip[data-k="nothing"] { background-color: var(--pip-none); box-shadow: var(--pip-none-sh); }
+.s-d-auto .s-d-auto__pip[data-k="nothing"]::after { opacity: 0.1; }
+.s-d-auto .s-d-auto__pip[data-k="failed"] { background-color: var(--pip-fail); box-shadow: var(--pip-fail-sh); }
+.s-d-auto .s-d-auto__pip[data-k="run"] { background-color: var(--pip-run); box-shadow: var(--pip-run-sh); }
+
+/* The run it starts. */
+.s-d-auto .s-d-auto__task {
+  left: 61cqw;
+  top: 31.8cqw;
+  width: 34cqw;
+  height: 18cqw;
+  padding: 1.55cqw 1.6cqw 1.5cqw;
+  opacity: 0;
+  transform-origin: 0% 50%;
+  will-change: transform, opacity;
+}
+.s-d-auto .s-d-auto__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: max(10px, 2.1cqw);
+}
+.s-d-auto .s-d-auto__row svg { width: max(10px, 1.95cqw); height: max(10px, 1.95cqw); display: block; fill: var(--mark); }
+.s-d-auto .s-d-auto__idx {
+  font: 500 max(7px, 1.18cqw)/1 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.s-d-auto .s-d-auto__name {
+  position: relative;
+  margin-top: 1.3cqw;
+  font-size: var(--fs-name);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.s-d-auto .s-d-auto__plan {
+  position: relative;
+  margin-top: 0.3cqw;
+  font-size: var(--fs-plan);
+  line-height: 1.25;
+  white-space: nowrap;
+  color: var(--ink2);
+}
+.s-d-auto .s-d-auto__plan em { font-style: normal; color: var(--ink3); }
+.s-d-auto .s-d-auto__meter {
+  position: relative;
+  margin-top: auto;
+  height: max(1px, 0.24cqw);
+  background: var(--track);
+}
+.s-d-auto .s-d-auto__fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  background: var(--fill);
+  will-change: transform;
+}
+.s-d-auto .s-d-auto__fill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--fill-on);
+  transition: opacity 0.8s var(--ease);
+}
+.s-d-auto .s-d-auto__task[data-st="done"] .s-d-auto__fill::before { opacity: 0; }
+.s-d-auto .s-d-auto__tip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  margin: -0.55cqw 0 0 -0.55cqw;
+  border-radius: 50%;
+  background: var(--tip);
+  transition: opacity 0.5s var(--ease);
+  will-change: transform;
+}
+.s-d-auto .s-d-auto__task[data-st="done"] .s-d-auto__tip { opacity: 0; }
+.s-d-auto .s-d-auto__tstat {
+  position: relative;
+  margin-top: 1.05cqw;
+  height: max(10px, 1.8cqw);
+  font-size: var(--fs-st);
+  line-height: max(10px, 1.8cqw);
+}
+.s-d-auto .s-d-auto__ts--done { color: var(--ink); }
+.s-d-auto .s-d-auto__ts--done svg { width: 0.95em; height: 0.95em; display: block; fill: none; stroke: var(--ok); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-d-auto .s-d-auto__task[data-st="r1"] .s-d-auto__ts--r1,
+.s-d-auto .s-d-auto__task[data-st="r2"] .s-d-auto__ts--r2,
+.s-d-auto .s-d-auto__task[data-st="done"] .s-d-auto__ts--done { opacity: 1; transform: none; }
+.s-d-auto .s-d-auto__dur {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font: 500 max(7px, 1.18cqw)/max(10px, 1.8cqw) 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink3);
+}
+
+.s-d-auto .s-d-auto__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+.s-d-auto .s-d-auto__grain {
+  position: absolute;
+  inset: 0;
+  background-size: 64px 64px;
+  opacity: var(--grain-o);
+  mix-blend-mode: overlay;
+  z-index: 5;
+  pointer-events: none;
+}
+.s-d-auto .s-d-auto__vig {
+  position: absolute;
+  inset: 0;
+  background: var(--vig);
+  z-index: 6;
+  pointer-events: none;
+}
+@container (max-width: 520px) {
+  .s-d-auto .s-d-auto__meta,
+  .s-d-auto .s-d-auto__dur { display: none; }
+  .s-d-auto .s-d-auto__auto { padding: 1.6cqw 1.6cqw 1.45cqw; }
+  .s-d-auto .s-d-auto__task { top: 30.6cqw; height: 20.4cqw; padding: 1.5cqw 1.45cqw 1.4cqw; }
+  .s-d-auto .s-d-auto__ask { margin-top: 2.4cqw; }
+  .s-d-auto .s-d-auto__lead { margin-top: 0.9cqw; }
+  .s-d-auto .s-d-auto__name { margin-top: 1.1cqw; }
+  .s-d-auto .s-d-auto__tstat { margin-top: 0.9cqw; }
+}
+</style>
+<div class="s-d-auto" aria-hidden="true">
+  <div class="s-d-auto__ground"></div>
+  <div class="s-d-auto__dots"></div>
+  <div class="s-d-auto__under s-d-auto__under--a"></div>
+  <div class="s-d-auto__under s-d-auto__under--t"></div>
+  <div class="s-d-auto__hours">
+    <span class="s-d-auto__hr" data-h="5">05:00</span>
+    <span class="s-d-auto__hr" data-h="6">06:00</span>
+    <span class="s-d-auto__hr" data-h="7">07:00</span>
+    <span class="s-d-auto__hr" data-h="8">08:00</span>
+    <span class="s-d-auto__hr" data-h="9">09:00</span>
+    <span class="s-d-auto__hr" data-h="10">10:00</span>
+  </div>
+  <div class="s-d-auto__card s-d-auto__auto" data-st="idle">
+    <div class="s-d-auto__lit"></div>
+    <div class="s-d-auto__head">
+      <span class="s-d-auto__chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.1 2"/></svg></span>
+      <span class="s-d-auto__when">Weekdays at 07:00</span>
+      <span class="s-d-auto__on">On<i class="s-d-auto__sw"><i></i></i></span>
+    </div>
+    <div class="s-d-auto__ask">Review each new pull request</div>
+    <div class="s-d-auto__lead"><em>Lead</em><svg class="s-d-auto__mk" viewBox="0 0 24 24"><path/></svg>Opus 5</div>
+    <div class="s-d-auto__meta">tally-api · runs on this computer</div>
+    <div class="s-d-auto__foot">
+      <div class="s-d-auto__status">
+        <span class="s-d-auto__st s-d-auto__st--idle">Next: today at 07:00</span>
+        <span class="s-d-auto__st s-d-auto__st--run"><i></i><span><b>Running</b> · Task 441</span></span>
+        <span class="s-d-auto__st s-d-auto__st--done">Next: tomorrow at 07:00</span>
+      </div>
+      <div class="s-d-auto__pips">
+        <i class="s-d-auto__pip" data-k="made"></i><i class="s-d-auto__pip" data-k="made"></i><i class="s-d-auto__pip" data-k="nothing"></i><i class="s-d-auto__pip" data-k="made"></i><i class="s-d-auto__pip" data-k="failed"></i><i class="s-d-auto__pip" data-k="made"></i><i class="s-d-auto__pip" data-k="made"></i><i class="s-d-auto__pip" data-k="run"></i>
+      </div>
+    </div>
+  </div>
+  <div class="s-d-auto__card s-d-auto__task" data-st="r1">
+    <div class="s-d-auto__lit"></div>
+    <div class="s-d-auto__row"><svg class="s-d-auto__mk" viewBox="0 0 24 24"><path/></svg><span class="s-d-auto__idx">Task 441</span></div>
+    <div class="s-d-auto__name">Reviewing PR #1192</div>
+    <div class="s-d-auto__plan"><em>Lead</em> Opus 5</div>
+    <div class="s-d-auto__meter"><i class="s-d-auto__fill"></i><i class="s-d-auto__tip"></i></div>
+    <div class="s-d-auto__tstat">
+      <span class="s-d-auto__ts s-d-auto__ts--r1"><i></i>Reading the diff</span>
+      <span class="s-d-auto__ts s-d-auto__ts--r2"><i></i>Writing the review</span>
+      <span class="s-d-auto__ts s-d-auto__ts--done"><svg viewBox="0 0 24 24"><path d="M5 12.6l4.4 4.4L19 7.4"/></svg>Made a change</span>
+      <span class="s-d-auto__dur">0:00</span>
+    </div>
+  </div>
+  <div class="s-d-auto__now"><span>06:20</span></div>
+  <canvas class="s-d-auto__fx"></canvas>
+  <div class="s-d-auto__grain"></div>
+  <div class="s-d-auto__vig"></div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('s-d-auto')) return
+  const MARK = 'M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z'
+  root.querySelectorAll('.s-d-auto__mk path').forEach((p) => p.setAttribute('d', MARK))
+
+  // Tone, read once: the light is the same cobalt-to-violet on both, deeper and softer on paper.
+  const toneEl = root.closest('[data-tone]')
+  const LIGHT = !!toneEl && toneEl.dataset.tone === 'light'
+  const K = LIGHT
+    ? { comp: 'source-over', ga: 0.5, wide: 0.07, line: 0.95, dormant: 'rgba(20,20,28,0.13)', port: 'rgba(20,20,28,0.32)', rule: 'rgba(20,20,28,0.17)',
+        route: ['rgb(70,84,255)', 'rgb(43,59,255)', 'rgb(122,63,240)'], hand: '43,59,255',
+        cob: [43, 59, 255], vio: [122, 63, 240], hot: [34, 46, 236], warm: [43, 59, 255], hotCore: 0.34,
+        ramp: [[150, 112, 246], [43, 59, 255], [66, 82, 255]] }
+    : { comp: 'lighter', ga: 1, wide: 0.13, line: 0.92, dormant: 'rgba(255,242,228,0.085)', port: 'rgba(255,242,228,0.3)', rule: 'rgba(255,242,228,0.14)',
+        route: ['rgb(176,184,255)', 'rgb(112,122,255)', 'rgb(128,96,250)'], hand: '200,206,255',
+        cob: [70, 86, 255], vio: [124, 72, 242], hot: [236, 238, 255], warm: [255, 236, 214], hotCore: 0.12,
+        ramp: [[128, 76, 244], [78, 96, 255], [226, 230, 255]] }
+
+  const Q = (s) => root.querySelector(s)
+  const auto = Q('.s-d-auto__auto')
+  const task = Q('.s-d-auto__task')
+  const nowEl = Q('.s-d-auto__now')
+  const nowTx = nowEl.querySelector('span')
+  const hours = Array.from(root.querySelectorAll('.s-d-auto__hr'))
+  const h07 = hours.find((h) => h.dataset.h === '7')
+  const pipsBox = Q('.s-d-auto__pips')
+  const pips = Array.from(root.querySelectorAll('.s-d-auto__pip'))
+  const fill = Q('.s-d-auto__fill')
+  const tip = Q('.s-d-auto__tip')
+  const meter = Q('.s-d-auto__meter')
+  const dur = Q('.s-d-auto__dur')
+  const underA = Q('.s-d-auto__under--a')
+  const underT = Q('.s-d-auto__under--t')
+  const cv = Q('.s-d-auto__fx')
+  const ctx = cv.getContext('2d')
+
+  // Film grain, generated once (no external images).
+  try {
+    const g = document.createElement('canvas')
+    g.width = g.height = 128
+    const gx = g.getContext('2d')
+    const im = gx.createImageData(128, 128)
+    for (let i = 0; i < im.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = v
+      im.data[i + 3] = 255
+    }
+    gx.putImageData(im, 0, 0)
+    Q('.s-d-auto__grain').style.backgroundImage = 'url(' + g.toDataURL() + ')'
+  } catch (e) {}
+
+  // Soft light sprites, rendered once.
+  function sprite(c3, core) {
+    const [r, g, b] = c3
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const x = c.getContext('2d')
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64)
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
+    gr.addColorStop(core, `rgba(${r},${g},${b},0.42)`)
+    gr.addColorStop(0.55, `rgba(${r},${g},${b},0.1)`)
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gr
+    x.fillRect(0, 0, 128, 128)
+    return c
+  }
+  const SP_COB = sprite(K.cob, 0.18)
+  const SP_VIO = sprite(K.vio, 0.16)
+  const SP_HOT = sprite(K.hot, K.hotCore)
+  const SP_WARM = sprite(K.warm, 0.1)
+
+  // Beam colour ramp, tail (violet) to head (pale cobalt on dark, deep cobalt on paper).
+  const NB = 30
+  const BEAM_COL = []
+  const BEAM_A = new Float32Array(NB)
+  for (let i = 0; i < NB; i++) {
+    const t = (i + 0.5) / NB
+    const [a, b2, c] = K.ramp
+    const f = t < 0.62 ? t / 0.62 : (t - 0.62) / 0.38
+    const p = t < 0.62 ? a : b2, q = t < 0.62 ? b2 : c
+    BEAM_COL.push(`rgb(${(p[0] + (q[0] - p[0]) * f) | 0},${(p[1] + (q[1] - p[1]) * f) | 0},${(p[2] + (q[2] - p[2]) * f) | 0})`)
+    BEAM_A[i] = Math.pow(t, 1.7)
+  }
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const io = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+  const iosine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t)
+  const out = (t) => 1 - Math.pow(1 - t, 3)
+  const seg = (t, a, b) => clamp((t - a) / (b - a))
+  const bell = (t, at, w) => Math.exp(-Math.pow((t - at) / w, 2))
+
+  // Timeline, in seconds within one loop.
+  const P = 10.6
+  const SW0 = 0.2             // the clock starts to come round
+  const HIT = 1.85            // 07:00
+  const AON = HIT + 0.42      // the drop of light reaches the automation
+  const PORT = AON + 0.85     // its beam reaches the run marks
+  const SH0 = PORT - 0.18, SH1 = SH0 + 0.7
+  const OUT0 = PORT + 0.04, OUT1 = OUT0 + 0.62
+  const RUN0 = OUT1, RUN1 = 7.25
+  const BACK0 = RUN1 + 0.22, BACK1 = BACK0 + 0.6
+  const RST0 = 9.9
+  const START_MIN = 380       // 06:20
+
+  // Geometry, measured on resize.
+  let W = 0, H = 0, U = 1, dpr = 1
+  let X07 = 0, YR = 0, HOUR = 0
+  const A = { x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 }
+  const T = { x: 0, y: 0, w: 0, h: 0, r: 0, per: 0 }
+  let sPortA = 0, sPortT = 0
+  let pipX0 = 0, pipY = 0, pipPitch = 0, pipW = 0, meterW = 0, nowW = 0, nowB = 0
+  let ruleGrad = null
+  const M = 90
+  const drop = { xs: new Float32Array(M), ys: new Float32Array(M), len: 0, grad: null }
+  const link = { xs: new Float32Array(M), ys: new Float32Array(M), len: 0, grad: null }
+  const tmpX = new Float32Array(65), tmpY = new Float32Array(65), tmpL = new Float32Array(65)
+
+  function bez(rt, x0, y0, x1, y1, x2, y2, x3, y3) {
+    let L = 0
+    for (let i = 0; i <= 64; i++) {
+      const t = i / 64, m = 1 - t
+      const a = m * m * m, b = 3 * m * m * t, c = 3 * m * t * t, d = t * t * t
+      tmpX[i] = a * x0 + b * x1 + c * x2 + d * x3
+      tmpY[i] = a * y0 + b * y1 + c * y2 + d * y3
+      if (i) L += Math.hypot(tmpX[i] - tmpX[i - 1], tmpY[i] - tmpY[i - 1])
+      tmpL[i] = L
+    }
+    rt.len = L
+    let s = 0
+    for (let i = 0; i < M; i++) {
+      const want = (i / (M - 1)) * L
+      while (s < 63 && tmpL[s + 1] < want) s++
+      const span = tmpL[s + 1] - tmpL[s] || 1
+      const f = Math.min(1, Math.max(0, (want - tmpL[s]) / span))
+      rt.xs[i] = tmpX[s] + (tmpX[s + 1] - tmpX[s]) * f
+      rt.ys[i] = tmpY[s] + (tmpY[s + 1] - tmpY[s]) * f
+    }
+    const gr = ctx.createLinearGradient(x0, y0, x3, y3)
+    gr.addColorStop(0, K.route[0])
+    gr.addColorStop(0.5, K.route[1])
+    gr.addColorStop(1, K.route[2])
+    rt.grad = gr
+  }
+
+  function rectOf(el, R) {
+    R.x = el.offsetLeft + 0.5
+    R.y = el.offsetTop + 0.5
+    R.w = el.offsetWidth - 1
+    R.h = el.offsetHeight - 1
+    R.r = Math.max(1, (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 10) - 0.5)
+    R.per = 2 * (R.w - 2 * R.r) + 2 * (R.h - 2 * R.r) + 2 * Math.PI * R.r
+  }
+
+  function measure() {
+    W = root.clientWidth; H = root.clientHeight; U = W / 100
+    if (!W || !H) return false
+    dpr = Math.min(2, window.devicePixelRatio || 1)
+    cv.width = Math.round(W * dpr)
+    cv.height = Math.round(H * dpr)
+    rectOf(auto, A)
+    rectOf(task, T)
+    X07 = A.x + A.w / 2
+    YR = 17.6 * U
+    HOUR = 20 * U
+    hours.forEach((h) => { h.style.left = (X07 + (+h.dataset.h - 7) * HOUR).toFixed(1) + 'px' })
+    // Run marks: the row's place inside the automation, without its lift.
+    const ab = auto.getBoundingClientRect(), pb = pipsBox.getBoundingClientRect()
+    pipW = pips[0].offsetWidth
+    pipPitch = (pipsBox.offsetWidth - pipW) / 6
+    pipX0 = A.x - 0.5 + (pb.left - ab.left)
+    pipY = A.y - 0.5 + (pb.top - ab.top) + pipW / 2
+    meterW = meter.offsetWidth
+    nowW = nowEl.offsetWidth
+    nowB = nowEl.offsetTop + nowEl.offsetHeight
+    // The drop from 07:00 into the automation, and the link from its run marks to the run.
+    bez(drop, X07, YR, X07, YR + 2, X07, A.y - 2, X07, A.y)
+    const x0 = A.x + A.w, y0 = pipY, x3 = T.x, y3 = T.y + T.h / 2
+    const dx = (x3 - x0) * 0.58
+    bez(link, x0, y0, x0 + dx, y0, x3 - dx, y3, x3, y3)
+    sPortA = (A.w / 2 - A.r) + (Math.PI * A.r) / 2 + (pipY - (A.y + A.r))
+    sPortT = (T.w / 2 - T.r) + (Math.PI * T.r) / 2 + (T.h - 2 * T.r) + (Math.PI * T.r) / 2 + (T.w - 2 * T.r) + (Math.PI * T.r) / 2 + (T.h / 2 - T.r)
+    ruleGrad = ctx.createLinearGradient(0, 0, W, 0)
+    const clear = K.rule.replace(/[\d.]+\)$/, '0)')
+    ruleGrad.addColorStop(0.03, clear)
+    ruleGrad.addColorStop(0.17, K.rule)
+    ruleGrad.addColorStop(0.8, K.rule)
+    ruleGrad.addColorStop(0.97, clear)
+    return true
+  }
+
+  const PT = new Float32Array(2)
+  function rrPoint(R, s) {
+    const { x, y, w, h, r } = R
+    s %= R.per
+    if (s < 0) s += R.per
+    const q = (Math.PI * r) / 2
+    let L = w / 2 - r
+    if (s < L) { PT[0] = x + w / 2 + s; PT[1] = y; return }
+    s -= L
+    if (s < q) { const a = -Math.PI / 2 + s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x + w; PT[1] = y + r + s; return }
+    s -= L
+    if (s < q) { const a = s / r; PT[0] = x + w - r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = w - 2 * r
+    if (s < L) { PT[0] = x + w - r - s; PT[1] = y + h; return }
+    s -= L
+    if (s < q) { const a = Math.PI / 2 + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + h - r + Math.sin(a) * r; return }
+    s -= q; L = h - 2 * r
+    if (s < L) { PT[0] = x; PT[1] = y + h - r - s; return }
+    s -= L
+    if (s < q) { const a = Math.PI + s / r; PT[0] = x + r + Math.cos(a) * r; PT[1] = y + r + Math.sin(a) * r; return }
+    s -= q
+    PT[0] = x + r + s; PT[1] = y
+  }
+  // A route's ends may ride with the automation's lift; spread it along the route.
+  let liftA = 0
+  function routePoint(rt, u, dy0, dy1) {
+    const f = clamp(u) * (M - 1)
+    const i = Math.min(M - 2, f | 0)
+    const t = f - i
+    PT[0] = rt.xs[i] + (rt.xs[i + 1] - rt.xs[i]) * t
+    PT[1] = rt.ys[i] + (rt.ys[i + 1] - rt.ys[i]) * t + dy0 + (dy1 - dy0) * clamp(u)
+  }
+  function glow(img, x, y, r, a) {
+    if (a <= 0.003) return
+    ctx.globalAlpha = a > 1 ? 1 : a
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2)
+  }
+  function pathRoute(rt, u0, u1, dy0, dy1) {
+    const i0 = Math.ceil(u0 * (M - 1)), i1 = Math.floor(u1 * (M - 1))
+    ctx.beginPath()
+    routePoint(rt, u0, dy0, dy1)
+    ctx.moveTo(PT[0], PT[1])
+    for (let i = i0; i <= i1; i++) ctx.lineTo(rt.xs[i], rt.ys[i] + dy0 + (dy1 - dy0) * (i / (M - 1)))
+    routePoint(rt, u1, dy0, dy1)
+    ctx.lineTo(PT[0], PT[1])
+  }
+  function dormant(rt, a, dy0, dy1) {
+    if (a <= 0.004) return
+    pathRoute(rt, 0, 1, dy0, dy1)
+    ctx.globalAlpha = a
+    ctx.lineWidth = 1
+    ctx.strokeStyle = K.dormant
+    ctx.stroke()
+  }
+  function litRoute(rt, u0, u1, a, dy0, dy1) {
+    if (a <= 0.004 || u1 - u0 < 0.002) return
+    pathRoute(rt, u0, u1, dy0, dy1)
+    ctx.strokeStyle = rt.grad
+    ctx.globalCompositeOperation = K.comp
+    ctx.globalAlpha = a * K.wide
+    ctx.lineWidth = Math.max(3, U * 0.6)
+    ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = a * K.line
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
+  function packet(x, y, a) {
+    if (a <= 0.004) return
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_VIO, x, y, U * 6, 0.2 * a * K.ga)
+    glow(SP_COB, x, y, U * 3.8, 0.55 * a * K.ga)
+    glow(SP_HOT, x, y, U * 1.05, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  // A comet of light along a card border; head at perimeter distance s.
+  function beam(R, s, len, a, dy) {
+    if (a <= 0.004 || len < 1) return
+    const sg = len / NB
+    ctx.lineWidth = LIGHT ? 1.6 : 1.5
+    ctx.lineCap = 'butt'
+    for (let i = 0; i < NB; i++) {
+      const s0 = s - len + i * sg
+      rrPoint(R, s0)
+      const ax = PT[0], ay = PT[1] + dy
+      rrPoint(R, s0 + sg + 0.35)
+      ctx.globalAlpha = a * BEAM_A[i]
+      ctx.strokeStyle = BEAM_COL[i]
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(PT[0], PT[1] + dy)
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = K.comp
+    for (let i = 0; i < 12; i++) {
+      const t = 0.2 + (i / 11) * 0.8
+      rrPoint(R, s - len * (1 - t))
+      glow(t < 0.6 ? SP_VIO : SP_COB, PT[0], PT[1] + dy, U * 2, a * 0.2 * t * t * K.ga)
+    }
+    rrPoint(R, s)
+    glow(SP_VIO, PT[0], PT[1] + dy, U * 6, a * 0.16 * K.ga)
+    glow(SP_COB, PT[0], PT[1] + dy, U * 3.2, a * 0.42 * K.ga)
+    glow(SP_HOT, PT[0], PT[1] + dy, U * 0.9, a)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  function flash(x, y, f, big) {
+    if (f <= 0.01) return
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_COB, x, y, U * big, f * 0.5 * K.ga)
+    glow(SP_HOT, x, y, U * 1.3, f)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  function port(x, y, a) {
+    ctx.globalAlpha = a
+    ctx.fillStyle = K.port
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, U * 0.22), 0, Math.PI * 2); ctx.fill()
+  }
+
+  // The clock: minutes past midnight at loop time t.
+  function minuteAt(t) {
+    if (t < HIT) return START_MIN + (420 - START_MIN) * (1 - Math.pow(1 - seg(t, SW0, HIT), 2.4))
+    return 420 + (t - HIT) * 0.42
+  }
+  const usage = (t) => {
+    const x = seg(t, RUN0 + 0.12, RUN1 - 0.08)
+    return 0.3 * x + 0.7 * x * x * (3 - 2 * x)
+  }
+  const pad = (n) => (n < 10 ? '0' : '') + n
+
+  const shown = { auto: '', task: '', now: '', nowOn: null, h07: null, nowX: -1, nowA: -1, lift: -1, tA: -1, tS: -1, fill: -1, uA: -1, uT: -1, shift: -1, settled: null, dur: '', dip: -1 }
+
+  function render(t) {
+    if (!W) return
+    // ---------- DOM ----------
+    const reset = seg(t, RST0, P)               // the day turns over
+    const stA = t < AON ? 'idle' : t < BACK1 ? 'run' : t < RST0 + 0.45 ? 'done' : 'idle'
+    if (stA !== shown.auto) { auto.dataset.st = stA; shown.auto = stA }
+    const lift = out(seg(t, AON - 0.1, AON + 0.6)) * (1 - io(seg(t, BACK1 + 0.1, BACK1 + 0.9)))
+    liftA = -lift * U * 0.5
+    if (Math.abs(lift - shown.lift) > 0.002) { auto.style.transform = lift > 0.002 ? `translate3d(0,${liftA.toFixed(2)}px,0)` : ''; shown.lift = lift }
+
+    // The clock comes round, holds at 07:00, and steps aside at the turn of the day.
+    const mins = minuteAt(t)
+    const nx = X07 + ((mins - 420) / 60) * HOUR
+    const nA = seg(t, 0, SW0 + 0.25) * (1 - seg(t, RST0 - 0.1, RST0 + 0.45))
+    if (Math.abs(nx - shown.nowX) > 0.05 || Math.abs(nA - shown.nowA) > 0.004) {
+      nowEl.style.transform = `translate3d(${(nx - nowW / 2).toFixed(2)}px,0,0)`
+      nowEl.style.opacity = nA.toFixed(3)
+      shown.nowX = nx; shown.nowA = nA
+    }
+    const m = Math.floor(mins + 1e-6)
+    const label = pad(Math.floor(m / 60)) + ':' + pad(m % 60)
+    if (label !== shown.now) { nowTx.textContent = label; shown.now = label }
+    const nowOn = t >= HIT && t < BACK1
+    if (nowOn !== shown.nowOn) { nowEl.classList.toggle('is-on', nowOn); shown.nowOn = nowOn }
+    const hOn = t >= HIT - 0.05 && t < BACK1 + 0.4
+    if (hOn !== shown.h07) { h07.classList.toggle('is-on', hOn); shown.h07 = hOn }
+
+    // Run marks: at the run's start the oldest leaves and a running mark joins at the end;
+    // at the run's end it settles to what came of it.
+    const shift = io(seg(t, SH0, SH1)) * (t < RST0 + 0.2 ? 1 : 0)
+    if (Math.abs(shift - shown.shift) > 0.001) {
+      for (let j = 0; j < 8; j++) {
+        const x = (j - shift) * pipPitch
+        let o = 1, sc = 1
+        if (j === 0) { o = 1 - clamp(shift * 1.6); sc = 1 - 0.35 * shift }
+        if (j === 7) { o = clamp(shift * 1.4 - 0.2); sc = 0.55 + 0.45 * out(shift) }
+        pips[j].style.transform = `translate3d(${x.toFixed(2)}px,0,0) scale(${sc.toFixed(3)})`
+        pips[j].style.opacity = o.toFixed(3)
+      }
+      shown.shift = shift
+    }
+    const settled = t >= BACK1 && t < RST0 + 0.2
+    if (settled !== shown.settled) { pips[7].dataset.k = settled ? 'made' : 'run'; shown.settled = settled }
+    // The row dips once as the day turns over, so the reset reads as a new morning.
+    const dip = 1 - 0.8 * bell(t, RST0 + 0.2, 0.2)
+    if (Math.abs(dip - shown.dip) > 0.004) { pipsBox.style.opacity = dip.toFixed(3); shown.dip = dip }
+
+    // The run.
+    const tIn = out(seg(t, OUT1 - 0.22, OUT1 + 0.42))
+    const tOut = io(reset)
+    const tA = tIn * (1 - tOut)
+    const tS = 0.94 + 0.06 * tIn + 0.02 * tOut
+    if (Math.abs(tA - shown.tA) > 0.003 || Math.abs(tS - shown.tS) > 0.0005) {
+      task.style.opacity = tA.toFixed(3)
+      task.style.transform = `scale(${tS.toFixed(4)})`
+      shown.tA = tA; shown.tS = tS
+    }
+    const stT = t < RUN1 ? (usage(t) < 0.46 ? 'r1' : 'r2') : 'done'
+    if (stT !== shown.task) { task.dataset.st = stT; shown.task = stT }
+    const v = t < RUN0 ? 0 : t < RUN1 ? usage(t) : 1
+    if (Math.abs(v - shown.fill) > 0.0004) {
+      fill.style.transform = `scaleX(${v.toFixed(4)})`
+      tip.style.transform = `translate3d(${(v * meterW).toFixed(2)}px,0,0)`
+      shown.fill = v
+    }
+    const secs = Math.round(seg(t, RUN0, RUN1) * 134)
+    const d = Math.floor(secs / 60) + ':' + pad(secs % 60)
+    if (d !== shown.dur) { dur.textContent = d; shown.dur = d }
+    const uA = io(seg(t, AON - 0.1, AON + 0.8)) * (1 - io(seg(t, BACK1, BACK1 + 1.1))) * 0.9
+    const uT = io(seg(t, RUN0 - 0.1, RUN0 + 0.8)) * (1 - io(seg(t, RUN1 + 0.2, RUN1 + 1.4))) * 0.8
+    if (Math.abs(uA - shown.uA) > 0.004) { underA.style.opacity = uA.toFixed(3); shown.uA = uA }
+    if (Math.abs(uT - shown.uT) > 0.004) { underT.style.opacity = uT.toFixed(3); shown.uT = uT }
+
+    // ---------- Light ----------
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.lineCap = 'butt'
+
+    // The ruler: a hairline with ticks every ten minutes, longer at the half hour and the hour.
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1
+    ctx.strokeStyle = ruleGrad
+    ctx.beginPath()
+    ctx.moveTo(0, YR + 0.5)
+    ctx.lineTo(W, YR + 0.5)
+    for (let mm = 270; mm <= 630; mm += 10) {
+      const x = Math.round(X07 + ((mm - 420) / 60) * HOUR) + 0.5
+      const h = mm % 60 === 0 ? U * 1.45 : mm % 30 === 0 ? U * 0.85 : U * 0.5
+      ctx.moveTo(x, YR + 0.5)
+      ctx.lineTo(x, YR + 0.5 + h)
+    }
+    ctx.stroke()
+
+    // The time already come round, lit behind the clock.
+    const x0 = X07 + ((START_MIN - 420) / 60) * HOUR
+    const trailA = nA * (0.75 - 0.45 * seg(t, HIT + 0.3, HIT + 2.2))
+    if (nx > x0 + 1 && trailA > 0.01) {
+      const gr = ctx.createLinearGradient(x0, 0, nx, 0)
+      gr.addColorStop(0, `rgba(${K.vio},0)`)
+      gr.addColorStop(0.6, `rgba(${K.cob},0.75)`)
+      gr.addColorStop(1, `rgba(${K.hand},1)`)
+      ctx.strokeStyle = gr
+      ctx.globalCompositeOperation = K.comp
+      ctx.globalAlpha = trailA * (LIGHT ? 0.08 : 0.18)
+      ctx.lineWidth = Math.max(3, U * 0.55)
+      ctx.beginPath(); ctx.moveTo(x0, YR + 0.5); ctx.lineTo(nx, YR + 0.5); ctx.stroke()
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = trailA
+      ctx.lineWidth = 1.2
+      ctx.stroke()
+    }
+
+    // The clock's hand: from its readout down through the ruler.
+    if (nA > 0.01) {
+      const yEnd = YR + U * 0.7
+      const gr = ctx.createLinearGradient(0, nowB, 0, yEnd)
+      gr.addColorStop(0, `rgba(${K.hand},0.15)`)
+      gr.addColorStop(0.82, `rgba(${K.hand},0.85)`)
+      gr.addColorStop(1, `rgba(${K.hand},0)`)
+      ctx.strokeStyle = gr
+      ctx.globalAlpha = nA
+      ctx.lineWidth = 1.2
+      ctx.beginPath(); ctx.moveTo(nx, nowB); ctx.lineTo(nx, yEnd); ctx.stroke()
+      ctx.globalCompositeOperation = K.comp
+      glow(SP_COB, nx, YR + 0.5, U * 2.2, nA * 0.45 * K.ga)
+      glow(SP_HOT, nx, YR + 0.5, U * 0.65, nA * 0.9)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+
+    // 07:00 itself: a port on the ruler, with a dormant line down to the automation.
+    dormant(drop, 1, 0, liftA)
+    port(X07, YR + 0.5, 1)
+    port(X07, A.y + liftA, 1)
+    port(A.x + A.w, pipY + liftA, 1)
+
+    // At 07:00: a flash on the ruler, and a drop of light runs down into the automation.
+    const hitF = t > HIT - 0.12 ? bell(t, HIT, 0.16) : 0
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_VIO, X07, YR, U * 9, hitF * 0.3 * K.ga)
+    glow(SP_COB, X07, YR, U * 5, hitF * 0.6 * K.ga)
+    glow(SP_HOT, X07, YR, U * 1.4, hitF)
+    ctx.globalCompositeOperation = 'source-over'
+    const dropU = iosine(seg(t, HIT, AON))
+    const dropLit = (t >= HIT ? 1 : 0) * (1 - io(seg(t, AON + 0.5, BACK1 + 0.6)) * 0.55) * (1 - seg(t, RST0 - 0.2, RST0 + 0.4))
+    litRoute(drop, 0, dropU, dropLit, 0, liftA)
+    if (t >= HIT && t < AON) { routePoint(drop, dropU, 0, liftA); packet(PT[0], PT[1], clamp((t - HIT) / 0.08)) }
+    flash(X07, A.y + liftA, t > AON - 0.12 ? bell(t, AON, 0.14) : 0, 5)
+    ctx.globalCompositeOperation = K.comp
+    glow(SP_COB, X07, A.y + liftA, U * 1.6, 0.3 * dropLit * seg(t, AON - 0.05, AON + 0.15) * K.ga)
+    ctx.globalCompositeOperation = 'source-over'
+
+    // The automation's beam: from where the drop landed, round to its run marks, and out.
+    if (t > AON && t < PORT + 0.35) {
+      const lenFull = Math.min(A.per * 0.3, U * 21)
+      const sHead = sPortA * iosine(seg(t, AON, PORT))
+      const drain = seg(t, PORT, PORT + 0.3)
+      const len = Math.min(lenFull, sHead * 0.9) * (1 - drain)
+      beam(A, sHead, len, clamp((t - AON) / 0.15), liftA)
+    }
+
+    // The link to the run: seen while there is a run.
+    dormant(link, tA, liftA, 0)
+    if (tA > 0.01) port(T.x, T.y + T.h / 2, tA)
+    // Out: a packet from the run marks to the new run, lighting the link behind it.
+    const outU = iosine(seg(t, OUT0, OUT1))
+    const linkLit = (1 - 0.45 * seg(t, RUN1 + 0.6, RUN1 + 1.6)) * (1 - io(reset)) * (t >= OUT0 ? 1 : 0)
+    if (t < BACK0) litRoute(link, 0, outU, linkLit, liftA, 0)
+    if (t >= OUT0 && t < OUT1) { routePoint(link, outU, liftA, 0); packet(PT[0], PT[1], 1) }
+    flash(T.x, T.y + T.h / 2, t > OUT1 - 0.12 ? bell(t, OUT1, 0.14) : 0, 5)
+
+    // While it runs, the beam laps the run once, then drains into the link and carries the result back.
+    if (t > RUN0 && t < RUN1 + 0.3) {
+      const lenFull = Math.min(T.per * 0.3, U * 21)
+      const sHead = sPortT + T.per * seg(t, RUN0, RUN1)
+      const drain = seg(t, RUN1, RUN1 + 0.26)
+      const len = Math.min(lenFull, (sHead - sPortT) * 0.9) * (1 - drain)
+      beam(T, sHead, len, clamp((t - RUN0) / 0.15), 0)
+    }
+    if (t >= BACK0) {
+      const bu = 1 - iosine(seg(t, BACK0, BACK1))
+      litRoute(link, bu, 1, linkLit, liftA, 0)
+      if (t < BACK1) { routePoint(link, bu, liftA, 0); packet(PT[0], PT[1], 1) }
+    }
+
+    // The new mark: a soft cobalt glow while it runs, a flash as it settles.
+    const pipLX = pipX0 + 6 * pipPitch + pipW / 2
+    const pipLY = pipY + liftA
+    ctx.globalCompositeOperation = K.comp
+    const running = shift > 0.6 && t < BACK1 ? 1 : 0
+    glow(SP_COB, pipLX, pipLY, U * 2.2, running * (0.28 + 0.12 * Math.sin(t * 5.2)) * K.ga)
+    const sF = t > BACK1 - 0.1 ? bell(t, BACK1, 0.2) : 0
+    glow(SP_COB, pipLX, pipLY, U * 4.5, sF * 0.45 * K.ga)
+    glow(SP_WARM, pipLX, pipLY, U * 1.8, sF * 0.7 * K.ga)
+    glow(SP_HOT, A.x + A.w, pipLY, U * 1.1, t > BACK1 - 0.1 ? bell(t, BACK1, 0.12) : 0)
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = 1
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  const STILL = RUN0 + (RUN1 - RUN0) * 0.42
+  let Tm = 1.0
+  let raf = 0, last = 0, onScreen = false, ready = false
+  function frame(now) {
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0
+    last = now
+    Tm = (Tm + dt) % P
+    render(Tm)
+    raf = requestAnimationFrame(frame)
+  }
+  function invalidate() {
+    shown.nowX = shown.nowA = shown.lift = shown.tA = shown.tS = shown.fill = shown.uA = shown.uT = shown.shift = shown.dip = -1
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) { invalidate(); render(STILL) }
+  }
+  const ro = new ResizeObserver(() => {
+    ready = measure()
+    if (ready) { invalidate(); render(mq.matches ? STILL : Tm) }
+    sync()
+  })
+  ro.observe(root)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+})()
+</script>

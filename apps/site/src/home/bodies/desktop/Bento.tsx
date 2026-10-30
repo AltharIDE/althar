@@ -7,9 +7,10 @@ import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
 import s from './Bento.module.css'
-import { Automations, Conflicts } from './Drawn'
 import { Fragment } from './Fragment'
 import accounts from './styled/d-accounts.html?raw'
+import automations from './styled/d-automations.html?raw'
+import conflicts from './styled/d-conflicts.html?raw'
 import workspaces from './styled/d-workspaces.html?raw'
 import worktrees from './styled/d-worktrees.html?raw'
 
@@ -135,25 +136,27 @@ const TILES: Tile[] = [
     id: 'automations',
     span: 3,
     drawn: true,
+    tone: 'light',
     title: (
       <>
         Work that <b>starts itself.</b>
       </>
     ),
     lead: 'Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.',
-    piece: () => <Automations skin="ink" />,
+    piece: (tone) => <Fragment key={tone} source={automations} tone={tone} className={s.stage} />,
   },
   {
     id: 'conflicts',
     span: 3,
     drawn: true,
+    tone: 'dark',
     title: (
       <>
         Conflicts, <b>settled.</b>
       </>
     ),
     lead: 'When a task’s change and the default branch disagree, Althar asks its lead to settle it. Only one it can’t settle comes to you.',
-    piece: () => <Conflicts skin="ink" />,
+    piece: (tone) => <Fragment key={tone} source={conflicts} tone={tone} className={s.stage} />,
   },
   {
     id: 'home',
