@@ -201,13 +201,9 @@ describe('a turn Althar’s word waited for when it stopped', () => {
       yield* Effect.gen(function* () {
         const tasks = yield* Tasks
         const { first, second, turns } = before
-        yield* until(attempts(second.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+        yield* until(attempts(second.taskId), (rows) => rows.at(-1)?.state === 'running')
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
-        const told = yield* until(
-          turnsOn(first.threadId),
-          (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed',
-          Duration.seconds(15),
-        )
+        const told = yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed')
         assert.include(told.at(-1)?.prompt, 'Look again.')
         assert.isNull(yield* waitsOn(first.threadId))
       }).pipe(Effect.provide(oneAtOnce({}, file)))
@@ -379,14 +375,10 @@ describe('a review that waits for a place of its own', () => {
         { key: 'review', agentId: 'codex' },
       ])
       // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
       yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
       // At the reset there is none: the review waits for a place of its own.
-      yield* until(
-        attempts(task.taskId),
-        (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy',
-        Duration.seconds(15),
-      )
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy')
       const reviewers = sql`SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       const before = (yield* reviewers).length
       yield* runs.skipReview({ envelope: yield* Runtime.envelope('run.skip_review', {}), taskId: task.taskId })

@@ -5,10 +5,15 @@ on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
   pull_request:
-    paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/ui.yml']
+    paths: ['packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/ui.yml']
 
 permissions:
   contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
   group: ui-${{ github.ref }}
@@ -39,3 +44,6 @@ jobs:
           name: storybook
           path: packages/ui/dist/storybook
           retention-days: 7
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky

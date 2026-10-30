@@ -1,3 +1,4 @@
+import { budget } from '@althar/testing'
 import { spawn } from 'node:child_process'
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -284,7 +285,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         yield* Effect.sleep('200 millis')
         assert.isFalse(isAlive(serverPid))
       }),
-    120_000,
+    budget.large,
   )
 
   it.live(
@@ -300,7 +301,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         assert.strictEqual(visible, 'False')
         assert.deepStrictEqual(yield* stopProcessGroup(root, '200 millis'), { signal: 'SIGKILL', survivors: false })
       }),
-    120_000,
+    budget.large,
   )
 
   it.live(
@@ -316,6 +317,6 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         assert.isFalse(isAlive(root))
         assert.isFalse(isAlive(serverPid))
       }),
-    120_000,
+    budget.large,
   )
 })

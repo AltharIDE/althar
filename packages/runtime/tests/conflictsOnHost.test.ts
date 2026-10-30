@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -64,7 +64,7 @@ describe('a conflict its pull request’s host reports', () => {
         ['resolved', 1, git(bare, 'rev-parse', 'althar/add-a-retry')],
       )
       // Nothing left to push, and it waits on the person to merge it.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0, Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0)
       // Asked once, though the host said so on every look until the merge was pushed.
       assert.strictEqual((yield* asked(threadId)).length, 1)
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -87,7 +87,6 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(
         Effect.sync(() => [heard]),
         ([times]) => (times ?? 0) >= 3,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])
@@ -173,7 +172,6 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(
         Effect.sync(() => [heard]),
         ([times]) => (times ?? 0) >= 3,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])
@@ -187,7 +185,7 @@ describe('a conflict its pull request’s host reports', () => {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve-wait]')
       const url = (yield* cards(projectId))[0]?.change?.url ?? ''
       moveHostMainOn(working, bare)
-      yield* until(asked(threadId), (all) => all.length === 1, Duration.seconds(20))
+      yield* until(asked(threadId), (all) => all.length === 1)
       yield* (yield* Changes).stopListening(taskId, url)
       yield* titled(threadId, 'Althar no longer follows the conflict on PR #1.')
       const [round] = yield* rounds(taskId)
@@ -213,7 +211,6 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(
         Effect.sync(() => [heard]),
         ([times]) => (times ?? 0) >= 2,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(yield* rounds(taskId), [])
       yield* (yield* Policies).set(projectId, { resolveConflicts: true }, (yield* Instance).personId)
@@ -237,12 +234,11 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(
         Effect.sync(() => [polled]),
         ([times]) => (times ?? 0) >= 2,
-        Duration.seconds(20),
       )
       assert.strictEqual((yield* rounds(taskId))[0]?.state, 'checking')
       const url = (yield* cards(projectId))[0]?.change?.url ?? ''
       yield* (yield* Changes).merge(taskId, git(bare, 'rev-parse', 'althar/add-a-retry'), url)
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -259,7 +255,7 @@ describe('a conflict its pull request’s host reports', () => {
       git(working, 'commit', '-q', '--allow-empty', '-m', 'From elsewhere')
       git(working, 'push', '-q', bare, 'HEAD:althar/add-a-retry')
       git(working, 'checkout', '-q', 'main')
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -274,9 +270,9 @@ describe('a conflict its pull request’s host reports', () => {
       // More is committed on the branch here, then the checks fail.
       git((yield* worktreeOf(taskId)).path, 'commit', '-q', '--allow-empty', '-m', 'More')
       merged = FAILED
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved')
       // The lead hears them as it always does, not as the round's to fix.
-      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed')), Duration.seconds(20))
+      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed')))
       assert.isFalse((yield* given(threadId)).some((body) => body.includes('commit the fix as one commit on top of the merge')))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -291,7 +287,7 @@ describe('a conflict its pull request’s host reports', () => {
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
       yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId }), taskId })
       merged = FAILED
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved')
       assert.isFalse((yield* given(threadId)).some((body) => body.includes('commit the fix as one commit on top of the merge')))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

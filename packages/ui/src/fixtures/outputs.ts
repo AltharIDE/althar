@@ -101,6 +101,8 @@ export const CHANGE_FAILED: Data = {
 }
 
 export const CHANGE_MERGED: Data = { ...CHANGE_READY, state: ChangeState.Merged }
+/** Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass. */
+export const CHANGE_QUEUED: Data = { ...CHANGE_READY, state: ChangeState.Queued }
 
 export const CHANGE_ONE_REPO: Data = {
   host: GITHUB,

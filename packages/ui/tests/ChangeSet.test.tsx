@@ -51,6 +51,11 @@ describe('where a change stands', () => {
     expect(screen.getByText('Uncommitted changes in 1 file')).toBeInTheDocument()
   })
 
+  it('says a pull request accepted into its merge queue is there, beside it', () => {
+    render(<ChangeSet state={ChangeState.Queued} host={GITHUB} prs={one()} />)
+    expect(screen.getByText('In the merge queue')).toBeInTheDocument()
+  })
+
   it('says how big a change of one file is', () => {
     render(<ChangeSet state={ChangeState.Ready} host={GITHUB} prs={one()} />)
     expect(screen.getByText('1 file')).toBeInTheDocument()

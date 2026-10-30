@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Duration, Effect, Exit, Layer } from 'effect'
+import { Cause, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -82,7 +82,7 @@ describe('a task from an issue in its own repository', () => {
       const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
-      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready')
       assert.strictEqual(ready?.branch, 'althar/issue-12-fix-the-limit')
       assert.strictEqual(github.changes[0]?.title, 'Fix the limit')
       assert.include(github.changes[0]?.body, 'Issue: #12')
@@ -305,7 +305,7 @@ const onItsBranch = (path: string, before: Effect.Effect<unknown, unknown, Conne
     const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
       snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
     )
-    yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+    yield* until(cards, (all) => all[0]?.phase === 'ready')
     return {
       task,
       projectId: project.projectId,

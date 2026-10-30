@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -87,7 +87,6 @@ describe('a lead outside a step whose agent runs out of usage', () => {
       const [taken] = yield* until(
         Effect.map(turns(created.threadId), (rows) => rows.filter((row) => row.prompt?.includes('aider was working on this') === true)),
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       assert.include(taken?.prompt, 'aider was working on this when it reached its usage limit, and may have done some of it already.')
       const running = Option.getOrUndefined(yield* sessions.running(created.threadId))

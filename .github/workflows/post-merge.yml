@@ -19,6 +19,11 @@ on:
 
 permissions:
   contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
   group: post-merge-${{ github.ref }}
@@ -26,24 +31,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The packages besides the runtime, with their coverage gates, one after another in one job: a job each mostly waited
+  # for a machine. Every package runs even when one before it fails, so a run says all that broke.
   harness:
+    name: harness (packages)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          [
-            packages/connectors,
-            packages/contracts,
-            packages/domain,
-            packages/persistence-sqlite,
-            packages/provider-adapters,
-            apps/cli,
-          ]
-    defaults:
-      run:
-        working-directory: ${{ matrix.package }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -53,9 +46,22 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
-        working-directory: .
-      - run: bun run check
-      - run: bun run test:coverage
+      - env:
+          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters apps/cli
+        run: |
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run check && bun run test:coverage) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed:$failed"
+            exit 1
+          fi
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   # The runtime's tests with coverage, in parts by file, as on a pull request: as one they took most of twenty minutes.
   # Each part keeps what it found as a blob report; harness (packages/runtime) merges them and gates the whole coverage.
@@ -83,7 +89,7 @@ jobs:
         working-directory: .
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
       - run: >-
-          bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob
+          bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter
           --outputFile.blob=.vitest/blob/part-${{ strategy.job-index }}.json
           --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
       # Kept when tests fail too, so the merged report says all that broke.
@@ -95,6 +101,9 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   harness-runtime:
     name: harness (packages/runtime)
@@ -122,7 +131,8 @@ jobs:
           path: packages/runtime/.vitest/blob
           merge-multiple: true
       # The parts' results and coverage as one run's: the thresholds hold for the whole suite, as before it was split.
-      - run: bun run test:coverage --merge-reports=.vitest/blob
+      # The parts reported their flaky tests; the merge names its reporters so it doesn't again.
+      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions
       # A part that stopped before writing its report leaves out its tests, and the merge alone wouldn't say so.
       - env:
           PARTS: ${{ needs.runtime.result }}
@@ -151,6 +161,9 @@ jobs:
       - run: bun run check
       - run: bun run test:coverage
       - run: bun run build
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   desktop:
     runs-on: ubuntu-24.04
@@ -172,38 +185,15 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test:coverage
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
-  # The desktop app's end-to-end run, a job of its own: a check or a coverage gate that fails doesn't keep it from running,
-  # so what it finds shows on the merge that broke it.
+  # The desktop app's end-to-end run, in parts of its own (e2e.yml): a check or a coverage gate that fails doesn't keep it
+  # from running, so what it finds shows on the merge that broke it. The merge queue ran it already; this is the run a
+  # release is cut from.
   desktop-e2e:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    defaults:
-      run:
-        working-directory: apps/desktop
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
-      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
-      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
-      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
-      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
-      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
-      - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
-      - uses: actions/upload-artifact@v6
-        if: failure()
-        with:
-          name: desktop-e2e
-          path: apps/desktop/test-results
-          retention-days: 7
+    uses: ./.github/workflows/e2e.yml
 
   # The Linux packages as a build test.
   package:

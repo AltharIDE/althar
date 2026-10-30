@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -194,7 +194,6 @@ describe('a quick task', () => {
           Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
         ),
         (left) => left.length === 1,
-        Duration.seconds(20),
       )
       yield* until(
         turns(task?.threadId ?? ''),
@@ -216,7 +215,6 @@ describe('a quick task', () => {
       const said = yield* until(
         Effect.map(notices(task?.threadId ?? ''), (all) => all.filter((one) => one.title?.startsWith('Couldn’t stop'))),
         (lines) => lines.length > 0,
-        Duration.seconds(20),
       )
       assert.lengthOf(said, 1)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { refusesStop: () => true }))))),

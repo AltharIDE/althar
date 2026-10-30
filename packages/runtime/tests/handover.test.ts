@@ -620,7 +620,6 @@ describe("a handover brief's open tasks", () => {
           JOIN threads t ON t.task_id = k.id AND t.kind = 'task' JOIN runs r ON r.task_id = k.id
           WHERE r.state = 'succeeded' ORDER BY k.created_at`,
         (rows) => rows.length === 3,
-        Duration.seconds(20),
       )
       if (ready === undefined || stopped === undefined || again === undefined) return yield* Effect.die(new Error('Not done'))
       yield* sql`UPDATE runs SET state = 'failed' WHERE id = ${stopped.runId}`
