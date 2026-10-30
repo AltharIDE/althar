@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Clock, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -18,7 +18,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { items, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * The coordinator out of usage, where limits.test.ts and accounts.test.ts
@@ -78,11 +78,11 @@ describe('the coordinator out of usage', () => {
       const { projectId, threadId, say } = yield* asked('Is the checkout slow?')
       yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
       yield* say
-      const [reply] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(15))
+      const [reply] = yield* until(replies(threadId), (all) => all.length > 0)
       assert.deepStrictEqual(reply, { agentId: 'claude-code', accountId: work.id })
       assert.include(
         yield* said(threadId),
-        `Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code (work) takes over, on Small.`,
+        `Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code (work) takes over, on Small.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code@usual': { outOfUsage: { until: back } } })))
   })
@@ -97,7 +97,7 @@ describe('the coordinator out of usage', () => {
         const instance = yield* Instance
         const { projectId, threadId, say } = yield* asked('Is the checkout slow?')
         yield* say
-        const lines = yield* until(said(threadId), (all) => all.some((line) => line.includes('ran out of usage')), Duration.seconds(15))
+        const lines = yield* until(said(threadId), (all) => all.some((line) => line.includes('ran out of usage')))
         assert.include(lines, 'Fake claude-code ran out of usage. Your message waits until Fake claude-code is back.')
         assert.lengthOf(yield* replies(threadId), 0)
 
@@ -123,7 +123,6 @@ describe('the coordinator out of usage', () => {
             payload: string
           }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
           (rows) => rows.length === 1,
-          Duration.seconds(15),
         )
         assert.deepInclude(JSON.parse(call?.payload ?? '{}'), { step: 'implement', why: 'usage_limit', agentId: 'claude-code' })
         const ran = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${task.threadId}`
@@ -133,8 +132,8 @@ describe('the coordinator out of usage', () => {
 })
 
 describe('a usage-limit call made without the account that ran out, as an earlier Althar made one', () => {
-  it.live('holds the step until the reset when the person waits, and carries it on then on the agent’s own account', () => {
-    const back = Date.now() + 4000
+  it.effect('holds the step until the reset when the person waits, and carries it on then on the agent’s own account', () => {
+    const back = later()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const plans = yield* Plans
@@ -164,7 +163,6 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       const [call] = yield* until(
         sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       yield* sql`UPDATE attention_requests SET payload = json_set(payload, '$.limit.accountId', NULL) WHERE id = ${call?.id ?? ''}`
       yield* runs.answerStuck({
@@ -176,14 +174,11 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       assert.deepInclude(JSON.parse(held?.output ?? '{}'), { heldFor: 'claude-code', account: null, why: 'asked' })
       assert.include(
         yield* said(task.threadId),
-        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}, when Fake claude-code is back, as you said.`,
+        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), yield* Clock.currentTimeMillis)}, when Fake claude-code is back, as you said.`,
       )
       // At the reset, its lead carries on, on the agent's first account, and finishes.
-      yield* until(
-        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`,
-        (rows) => rows[0]?.state === 'succeeded',
-        Duration.seconds(15),
-      )
+      yield* atReset(back)
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, (rows) => rows[0]?.state === 'succeeded')
       const [usual] = yield* accounts.of('claude-code')
       const ran = yield* sql<{ accountId: string }>`
         SELECT account_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at, rowid`
@@ -191,6 +186,6 @@ describe('a usage-limit call made without the account that ran out, as an earlie
         ran.map((row) => row.accountId),
         [usual?.id],
       )
-    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
   })
 })

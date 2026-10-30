@@ -101,8 +101,10 @@ import {
   commentForLead,
   commentLine,
   fromAlthar,
+  leftQueueNote,
   nameOf,
   outsidersLine,
+  queuedNote,
   reviewForLead,
   reviewLine,
   signed,
@@ -189,6 +191,14 @@ const Snapshot = Schema.Struct({
    * opens another.
    */
   attached: Schema.optional(Schema.Boolean),
+  /**
+   * In its target branch's merge queue, as Althar put it there and its host
+   * says since: the host merges it once the queue's checks pass. Asked about
+   * on each listening turn while it is; absent once it isn't, or never was.
+   */
+  queued: Schema.optional(Schema.Boolean),
+  /** How many times the merge queue took it out unmerged: a merge after each is another, at the same head too. */
+  leftQueue: Schema.optional(Schema.Number),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -439,6 +449,7 @@ const snapshotOf = (
   target: change.target,
   conflicts: change.conflicts ?? null,
   source: change.source,
+  ...(change.queued === true ? { queued: true } : {}),
 })
 
 type Store =
@@ -2172,8 +2183,8 @@ export class Changes extends Context.Service<
               subject: { type: 'external_link', id: link.id },
               target: `${host.product}:${snapshot.repository.join('/')}`,
               operation: 'merge',
-              // A merge at another head is another merge.
-              key: `merge:${link.id}:${head}`,
+              // A merge at another head is another merge, as is one after the merge queue took it out.
+              key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}`,
               request: { number: snapshot.number, head },
               retryable: false,
               perform: host.merge(repository, { ...read, headSha: head }).pipe(
@@ -2198,8 +2209,14 @@ export class Changes extends Context.Service<
                 )
               return
             }
+            // In its target branch's merge queue, it merges once the queue's checks pass, which takes as long as they do: kept so,
+            // said in its thread, and asked about the queue on each listening turn until it lands or the queue takes it out.
+            if (merged.queued === true) {
+              yield* seenNow(link, snapshot, merged)
+              if (snapshot.queued !== true) yield* sayOn(link, queuedNote(nameOf(snapshot), snapshot.target))
+            }
             // Taken but not landed yet (Bitbucket answers 202 to one that takes long): asked about again soon, until it has.
-            if (merged.state === 'open') yield* Effect.forkIn(landing(taskId, link.id), scope)
+            else if (merged.state === 'open') yield* Effect.forkIn(landing(taskId, link.id), scope)
           }
           const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
           if (now !== undefined) yield* poll(now)
@@ -2236,6 +2253,7 @@ export class Changes extends Context.Service<
             draft: read.draft,
             title: read.title,
             headSha: read.headSha ?? before.headSha,
+            ...(read.queued === true ? { queued: true } : {}),
           }
           const settled = after.state !== 'open'
           yield* saveSnapshot(link, after, settled ? { listening: 0 } : {})
@@ -3134,7 +3152,8 @@ export class Changes extends Context.Service<
           const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
-          const answer = yield* host.change(repository, before.number)
+          // In its merge queue, it is asked about the queue too: whether it is in it still, and why the queue took it out.
+          const answer = yield* host.change(repository, before.number, before.queued === true ? { queue: true } : undefined)
           // Merged, it stays so: for a moment after a merge, a host can still answer it as it was.
           const read: ChangeRequest = before.state === 'merged' ? { ...answer, state: 'merged' } : answer
           const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
@@ -3293,10 +3312,22 @@ export class Changes extends Context.Service<
             if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
+          // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
+          // otherwise, open, the queue took it out unmerged: it is the person's to merge again.
+          const lands = before.queued === true && now.state === 'open' && now.queued === false && now.leftQueue === 'merged'
+          const leftQueue = before.queued === true && now.state === 'open' && now.queued !== true && !lands
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
             ...(before.attached === true ? { attached: true } : {}),
+            ...(lands ? { queued: true } : {}),
+            ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
+          }
+          // While it is in the queue, it is worth asking about often: it lands, or comes back, as soon as the queue's checks end.
+          if (after.queued === true) happened = true
+          if (leftQueue) {
+            happened = true
+            yield* sayOn(link, leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
             happened = true
@@ -3810,8 +3841,15 @@ export class Changes extends Context.Service<
       ): Effect.Effect<Askable, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; state: string; resolveConflicts: number | null; run: string | null }>`
+          const [task] = yield* sql<{
+            projectId: ProjectId
+            threadId: string | null
+            state: string
+            resolveConflicts: number | null
+            run: string | null
+          }>`
             SELECT k.project_id, k.state, k.resolve_conflicts,
+              (SELECT id FROM threads WHERE task_id = k.id AND kind = 'task' LIMIT 1) AS thread_id,
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
             FROM tasks k WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'open') return 'off'
@@ -3833,7 +3871,14 @@ export class Changes extends Context.Service<
             return { why: 'Its run is still going, so Althar asks its lead once it ends.', shown: false }
           if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
           if (force) return 'yes'
-          if (task.run === 'suspended') return { why: 'You stopped it, so Althar doesn’t start its lead for a conflict.', shown: true }
+          if (task.run === 'suspended') {
+            // Told to go on without its run carried on, its lead is at work all the same: nothing for the person to resolve now.
+            const lead = task.threadId === null ? Option.none() : yield* sessions.running(task.threadId)
+            if (Option.exists(lead, (session) => session.turnRunning))
+              return { why: 'Its lead is at work, so Althar doesn’t ask it about a conflict now.', shown: false }
+            // Whoever stopped it, the person, a command they declined, or Althar: its card says which.
+            return { why: 'It’s stopped, so Althar doesn’t start its lead for a conflict.', shown: true }
+          }
           // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
           if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
             const left = yield* decodeEnded(latest.ended)

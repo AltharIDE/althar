@@ -56,8 +56,8 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
     await expect(page.getByRole('alert')).toContainText('Once it closes, Althar can open again.')
     await page.screenshot({ path: 'test-results/profile-in-use.png' })
 
-    // Main waits out the restarts it would have made; the runtime started once and never exited.
-    await page.waitForTimeout(3_000)
+    // Main makes none of the restarts it would have: the runtime started once, found the profile held, and hasn't exited.
+    await expect.poll(() => runtimeLines(home).held).toBe(earlier.held + 1)
     expect(runtimeLines(home)).toEqual({ started: earlier.started + 1, exited: earlier.exited, held: earlier.held + 1 })
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
@@ -68,6 +68,8 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
     await expect.poll(() => runtimeLines(home).started).toBe(earlier.started + 2)
     // The new runtime has found it held, so letting go of it now can't let that one open it before Try again.
     await expect.poll(() => runtimeLines(home).held).toBe(earlier.held + 2)
+    // Nothing else started or stopped meanwhile: the first runtime waited for Try again, and nothing restarted it.
+    expect(runtimeLines(home)).toEqual({ started: earlier.started + 2, exited: earlier.exited + 1, held: earlier.held + 2 })
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
     // Closed, it opens.

@@ -4,7 +4,7 @@ import type { Priority } from '@althar/connectors'
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -994,7 +994,8 @@ export class Coordinator extends Context.Service<
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
-      const listModels = (access: ToolAccess) => Effect.map(usableModels(access.projectId), describeModels)
+      const listModels = (access: ToolAccess) =>
+        Effect.zipWith(usableModels(access.projectId), Clock.currentTimeMillis, (usable, now) => describeModels(usable, now))
 
       /**
        * A step's effort, where the plan names one: one of the levels its model
@@ -1040,7 +1041,7 @@ export class Coordinator extends Context.Service<
             if (route !== null) return yield* on(route, pick.model)
             if (pick.agent === undefined)
               return yield* new ToolRefused({
-                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId), use)}`,
+                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
               })
           }
           if (pick.agent === undefined)
@@ -1060,7 +1061,7 @@ export class Coordinator extends Context.Service<
                 : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
             if (elsewhere !== null) return yield* on(elsewhere, pick.model)
             return yield* new ToolRefused({
-              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId), use)}`,
+              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
             })
           }
           // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.

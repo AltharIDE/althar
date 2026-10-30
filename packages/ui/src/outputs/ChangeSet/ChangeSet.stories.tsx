@@ -8,6 +8,7 @@ import {
   CHANGE_HELD,
   CHANGE_MERGED,
   CHANGE_ONE_REPO,
+  CHANGE_QUEUED,
   CHANGE_READY,
   PR_416,
 } from '../../fixtures/outputs'
@@ -72,6 +73,14 @@ export const Failed: Story = {
   },
 }
 export const Merged: Story = { args: { ...CHANGE_MERGED, actions: undefined } }
+/** Accepted on a branch that merges through a merge queue: in it, with nothing to press, until its host merges it. */
+export const Queued: Story = {
+  args: { ...CHANGE_QUEUED, actions: undefined },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('In the merge queue')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByRole('button', { name: /Accept/ })).not.toBeInTheDocument()
+  },
+}
 /** One pull request: its number is the one link to its host. */
 export const OneRepository: Story = {
   args: CHANGE_ONE_REPO,
@@ -249,6 +258,7 @@ export const AllStates: Story = {
         { state: 'held', node: <ChangeSet {...args} {...Held.args} /> },
         { state: 'a check failed', node: <ChangeSet {...args} {...Failed.args} /> },
         { state: 'merged', node: <ChangeSet {...args} {...Merged.args} /> },
+        { state: 'in the merge queue', node: <ChangeSet {...args} {...Queued.args} /> },
         { state: 'one repository', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
         { state: 'on its branch, not pushed', node: <ChangeSet {...args} {...BranchNotPushed.args} /> },

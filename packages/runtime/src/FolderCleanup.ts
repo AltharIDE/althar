@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
 
@@ -421,7 +421,8 @@ export class FolderCleanup extends Context.Service<
         })
 
       /** Opened from Althar within the day. */
-      const openedLately = (candidate: Candidate) => candidate.opened !== null && Date.now() - candidate.opened < OPENED
+      const openedLately = (candidate: Candidate) =>
+        Effect.map(Clock.currentTimeMillis, (now) => candidate.opened !== null && now - candidate.opened < OPENED)
 
       /**
        * What of what is in a task's folders would be lost with them, the
@@ -486,7 +487,7 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const bytes = yield* sizeOfAll(candidate)
           const lost = yield* lostWith(candidate)
-          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: Date.now() }
+          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: yield* Clock.currentTimeMillis }
           facts.set(candidate.taskId, measured)
           return measured
         })
@@ -494,7 +495,8 @@ export class FolderCleanup extends Context.Service<
       /** Measures, in the background, the folders whose facts are missing or old; one round at a time. */
       const measureLater = (all: ReadonlyArray<Candidate>) =>
         Effect.gen(function* () {
-          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < Date.now() - KEPT_FOR)
+          const now = yield* Clock.currentTimeMillis
+          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < now - KEPT_FOR)
           if (stale.length === 0 || measuring) return
           measuring = true
           yield* Effect.forkIn(
@@ -524,7 +526,7 @@ export class FolderCleanup extends Context.Service<
             kind: candidate.kind,
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
-            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, openedLately(candidate)),
+            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, yield* openedLately(candidate)),
           })
         }
         return {
@@ -538,7 +540,7 @@ export class FolderCleanup extends Context.Service<
       const staysBy = (candidate: Candidate) =>
         Effect.gen(function* () {
           if (yield* runningFrom(candidate)) return true
-          if (holdOf(false, yield* lostWith(candidate), openedLately(candidate)) !== null) return true
+          if (holdOf(false, yield* lostWith(candidate), yield* openedLately(candidate)) !== null) return true
           return yield* unshippedOf(candidate)
         })
 
@@ -622,7 +624,7 @@ export class FolderCleanup extends Context.Service<
                 if (yield* runningFrom(now)) return new TaskRefused({ taskId: now.taskId, why: 'folder_in_use' })
                 if (lost !== null && (lost.why !== seen?.why || lost.count !== seen.count))
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
-              } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
+              } else if ((yield* runningFrom(now)) || holdOf(false, lost, yield* openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
               // What still runs from them, from before it settled, stops first.
               yield* launches.stopAll(now.projectId, now.taskId)
@@ -684,7 +686,7 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const chosen = yield* wait
           if (chosen === 'never') return
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const oldest = (yield* candidates).toSorted((a, b) => a.clock - b.clock)
           const up = oldest.filter((candidate) => candidate.clock + waitDays(chosen, candidate.kind) * DAY <= now)
           yield* removeAll(yield* free(up, 'wait', chosen), instance.systemId)

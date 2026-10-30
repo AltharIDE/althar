@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -23,9 +23,6 @@ import { callTool, items, notices, repository, runtime, task, until } from './su
  * lead handed over in a task of several repositories, and an agent that says
  * nothing of itself as it starts.
  */
-
-/** How long a wait for a fake agent's turn may take: a handover starts a fresh session, slow on a loaded runner. */
-const ROOM = Duration.seconds(40)
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', ...args], { cwd })
@@ -45,12 +42,10 @@ const answered = (threadId: string, count: number) =>
     yield* until(
       prompts(threadId),
       (rows) => rows.length === count && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
-      ROOM,
     )
     yield* until(
       Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) && !running.value.turnRunning ? [true] : [])),
       (rows) => rows.length === 1,
-      ROOM,
     )
   })
 
@@ -78,7 +73,7 @@ describe('a coordinator handed to a fresh session', () => {
       yield* answered(threadId, 1)
       yield* callTool(access, 'draft_task', { title: 'Tidy the README' })
       yield* say('Where are we? [context:85]')
-      yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active', ROOM)
+      yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active')
       assert.deepInclude(yield* notices(threadId), {
         source: 'runtime',
         severity: 'info',
@@ -89,56 +84,53 @@ describe('a coordinator handed to a fresh session', () => {
 })
 
 describe('a lead handed to a fresh session', () => {
-  it.live(
-    'in a task of several repositories, says it carries on in the same worktrees',
-    () =>
-      Effect.gen(function* () {
-        const projects = yield* Projects
-        const plans = yield* Plans
-        const sessions = yield* Sessions
-        const instance = yield* Instance
-        const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
-        for (const name of ['api', 'web']) {
-          const path = join(folder, name)
-          mkdirSync(path)
-          git(path, 'init', '-q', '-b', 'main')
-          writeFileSync(join(path, 'README.md'), `# ${name}\n`)
-          git(path, 'add', '.')
-          git(path, 'commit', '-q', '-m', 'Start')
-        }
-        const opened = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
-        const created = yield* projects.createTask({
-          envelope: yield* Runtime.envelope('task.create', {}),
-          projectId: opened.projectId,
-          title: 'Share the retry',
-          description: 'Do it. [lead:finish]',
-          draft: true,
-          repositories: ['api', 'web'],
-        })
-        const planId = yield* plans.propose({
-          projectId: opened.projectId as ProjectId,
-          taskId: created.taskId,
-          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-          reason: null,
-          actorId: instance.personId,
-          end: null,
-          held: true,
-        })
-        yield* plans.start(planId, instance.personId)
-        yield* answered(created.threadId, 1)
-        const say = (body: string) =>
-          Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) =>
-            sessions.send({ envelope, threadId: created.threadId, body, disposition: 'after_current' }),
-          )
-        // Past its mark: its next turn starts in a fresh session, briefed from the task.
-        yield* say('Look again. [context:25/1000000]')
-        yield* answered(created.threadId, 2)
-        yield* say('And now?')
-        const [, , first] = yield* until(prompts(created.threadId), (all) => all.length === 3 && all[2]?.state === 'completed', ROOM)
-        assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktrees:/)
-        assert.lengthOf(yield* sessionsOn(created.threadId), 2)
-      }).pipe(Effect.provide(runtime())),
-    60_000,
+  it.live('in a task of several repositories, says it carries on in the same worktrees', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const sessions = yield* Sessions
+      const instance = yield* Instance
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+        git(path, 'add', '.')
+        git(path, 'commit', '-q', '-m', 'Start')
+      }
+      const opened = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: opened.projectId,
+        title: 'Share the retry',
+        description: 'Do it. [lead:finish]',
+        draft: true,
+        repositories: ['api', 'web'],
+      })
+      const planId = yield* plans.propose({
+        projectId: opened.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        end: null,
+        held: true,
+      })
+      yield* plans.start(planId, instance.personId)
+      yield* answered(created.threadId, 1)
+      const say = (body: string) =>
+        Effect.flatMap(Runtime.envelope('thread.send', { body }), (envelope) =>
+          sessions.send({ envelope, threadId: created.threadId, body, disposition: 'after_current' }),
+        )
+      // Past its mark: its next turn starts in a fresh session, briefed from the task.
+      yield* say('Look again. [context:25/1000000]')
+      yield* answered(created.threadId, 2)
+      yield* say('And now?')
+      const [, , first] = yield* until(prompts(created.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
+      assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktrees:/)
+      assert.lengthOf(yield* sessionsOn(created.threadId), 2)
+    }).pipe(Effect.provide(runtime())),
   )
 })
 

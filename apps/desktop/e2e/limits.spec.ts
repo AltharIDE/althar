@@ -77,7 +77,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
   const { electronApp, page } = await startWhileOut('claude-code:3600')
   try {
     // Codex took the step over and finished it.
-    await expect(shown(page, 'Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Ready', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved-card.png', animations: 'disabled' })
     await openTask(page)
     await expect(
@@ -95,7 +95,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
   try {
     // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
     const held = /Codex is out of usage until /
-    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
@@ -131,7 +131,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
 test('asks the person when the reset isn’t known and no other agent is free', async () => {
   const { electronApp, page } = await startWhileOut('claude-code,codex')
   try {
-    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     await openTask(page)
     await expect(
       shown(page, /^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
@@ -158,7 +158,7 @@ test('asks the person when the reset isn’t known and no other agent is free', 
 test('asks the person where the project says to, on the home too, and moves the step to the model they pick', async () => {
   const { electronApp, page } = await startWhileOut('claude-code:3600', { asks: true })
   try {
-    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     // The home lists it, for a person who is elsewhere.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const call = page.getByRole('article', { name: 'Add a retry to the checkout call' })
@@ -181,8 +181,8 @@ test('asks the person where the project says to, on the home too, and moves the 
     await page.screenshot({ path: 'test-results/limit-ask.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: /^Continue with/ }).click()
-    await expect(shown(page, 'Switched from Claude Code to Codex.')).toBeVisible({ timeout: 15_000 })
-    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Switched from Claude Code to Codex.')).toBeVisible()
+    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
   } finally {
     await electronApp.close()
   }
@@ -193,7 +193,7 @@ test('lets the person hand a step held for the reset to another model, from the 
   try {
     // The project waits for resets: the step is held, and its card says what ran out, on which step, and until when.
     const held = /Claude Code is out of usage until /
-    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page
       .getByRole('article', { name: /Add a retry to the checkout call/ })
       .first()
@@ -229,7 +229,7 @@ test('lets the person hand a step held for the reset to another model, from the 
     await page.getByRole('button', { name: 'Pick another model' }).click()
     await page.getByRole('button', { name: /^Continue with/ }).click()
     // Handed to Codex, it carries on there now, and the reset brings nothing back.
-    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
     await expect(shown(page, held)).toHaveCount(0)
   } finally {
     await electronApp.close()

@@ -16,12 +16,25 @@ export default defineConfig({
       '**/storybook-static/**',
     ],
     plugins: ['typescript', 'unicorn', 'oxc', 'react', 'jsx-a11y', 'import'],
+    jsPlugins: ['./lint/clock.js'],
     options: { typeAware: true, typeCheck: true },
     rules: {
       'no-console': ['error', { allow: ['warn', 'error'] }],
       'react/rules-of-hooks': 'error',
       'react/exhaustive-deps': 'error',
     },
+    overrides: [
+      /* The runtime and the packages it uses read the time and wait only through Effect's Clock (lint/clock.js). */
+      {
+        files: ['packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors}/src/**'],
+        rules: { 'althar/one-clock': 'error' },
+      },
+      /* But the fake agent, which runs outside any effect, as a process of its own too, and times what a test asks of it. */
+      {
+        files: ['packages/provider-adapters/src/testing/**'],
+        rules: { 'althar/one-clock': 'off' },
+      },
+    ],
   },
   fmt: {
     ignorePatterns: ['**/dist/**', '**/.ssr/**', '**/coverage/**', '**/*.html', 'apps/**/*.css', '**/*.md', 'bun.lock'],

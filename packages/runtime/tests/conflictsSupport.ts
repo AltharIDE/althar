@@ -130,7 +130,7 @@ export const PUSHED_FOR_IT =
 export const briefOf = (threadId: string) => Effect.map(turns(threadId), (all) => all[0]?.prompt ?? '')
 
 export const titled = (threadId: string, start: string) =>
-  until(notices(threadId), (all) => all.some((notice) => notice.title?.startsWith(start) === true), Duration.seconds(20))
+  until(notices(threadId), (all) => all.some((notice) => notice.title?.startsWith(start) === true))
 
 /** The task's own say on its lead resolving conflicts, as its menu sets it. */
 export const taskSays = (taskId: string, resolveConflicts: boolean | null) =>
@@ -215,7 +215,7 @@ export const opened = (working: string, markers: string, resolveConflicts = true
       `Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] ${markers}`,
       resolveConflicts,
     )
-    const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change !== null, Duration.seconds(20))
+    const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change !== null)
     return { projectId, taskId: task?.taskId ?? '', threadId: task?.threadId ?? '' }
   })
 
@@ -236,7 +236,6 @@ export const mergedHere = (taskId: string) =>
     yield* until(
       Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length]),
       ([parts]) => parts === 3,
-      Duration.seconds(20),
     )
   })
 
@@ -247,6 +246,5 @@ export const fixedHere = (taskId: string) =>
     yield* until(
       Effect.sync(() => [holdsFix(path, 'HEAD')]),
       ([fixed]) => fixed === true,
-      Duration.seconds(20),
     )
   })

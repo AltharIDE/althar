@@ -1,3 +1,4 @@
+import { budget } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,6 +8,7 @@ import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { makeFakeService } from '@althar/connectors/testing'
 
@@ -23,7 +25,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, onTestClock, repository, runtime, until } from './support'
 
 /*
  * What a task leaves running once it settles, checked against the processes
@@ -104,7 +106,6 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
     yield* until(
       Effect.map(Effect.orDie((yield* Queries).card(task.taskId)), (card) => (card?.phase === 'ready' ? [card] : [])),
       (ready) => ready.length === 1,
-      Duration.seconds(30),
     )
     const running = yield* (yield* Sessions).running(task.threadId)
     assert.isTrue(Option.isSome(running) && running.value.background.some((left) => left.ended === null))
@@ -115,7 +116,7 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
       yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
     }
     // Its lead, the server it left and its run, each found by its mark.
-    const marked = yield* until(markedFor(task.taskId), (pids) => pids.length >= (more.run === false ? 2 : 3), Duration.seconds(10))
+    const marked = yield* until(markedFor(task.taskId), (pids) => pids.length >= (more.run === false ? 2 : 3))
     return { project, task, marked }
   })
 
@@ -127,14 +128,13 @@ const stopped = (pids: ReadonlyArray<number>) =>
   until(
     Effect.sync(() => pids.filter(alive)),
     (left) => left.length === 0,
-    Duration.seconds(5),
   )
 
 /** Waits until nothing on this computer carries the task's mark, and says how long that took. */
-const nothingLeft = (taskId: string, within = Duration.seconds(15)) =>
+const nothingLeft = (taskId: string) =>
   Effect.gen(function* () {
     const from = Date.now()
-    yield* until(markedFor(taskId), (pids) => pids.length === 0, within)
+    yield* until(markedFor(taskId), (pids) => pids.length === 0)
     return Date.now() - from
   })
 
@@ -190,156 +190,136 @@ describe('what to stop by its mark', () => {
 })
 
 describe.skipIf(windows)('a command an agent left running', () => {
-  it.live(
-    'stopped by the person, leaves nothing it started running, though its server is in its shell’s group, not its tree',
-    () =>
-      Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
-        const running = yield* sessions.running(task.threadId)
-        assert.isTrue(Option.isSome(running))
-        if (Option.isNone(running)) return
-        const lead = running.value.pid
-        const server = (yield* markedFor(task.taskId)).filter((pid) => pid !== lead)
-        assert.isNotEmpty(server)
-        const left = running.value.background.find((one) => one.ended === null)
-        assert.isDefined(left)
-        yield* sessions.stopBackground(task.threadId, left?.id ?? '')
-        // Its lead runs on, and only its lead.
-        yield* until(markedFor(task.taskId), (pids) => pids.length === 1 && pids[0] === lead, Duration.seconds(5))
-        yield* stopped(server)
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    60_000,
+  it.live('stopped by the person, leaves nothing it started running, though its server is in its shell’s group, not its tree', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+      const running = yield* sessions.running(task.threadId)
+      assert.isTrue(Option.isSome(running))
+      if (Option.isNone(running)) return
+      const lead = running.value.pid
+      const server = (yield* markedFor(task.taskId)).filter((pid) => pid !== lead)
+      assert.isNotEmpty(server)
+      const left = running.value.background.find((one) => one.ended === null)
+      assert.isDefined(left)
+      yield* sessions.stopBackground(task.threadId, left?.id ?? '')
+      // Its lead runs on, and only its lead.
+      yield* until(markedFor(task.taskId), (pids) => pids.length === 1 && pids[0] === lead)
+      yield* stopped(server)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  it.live(
-    'goes with everything it started when its agent stops',
-    () =>
-      Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
-        yield* sessions.stop(task.threadId)
-        yield* nothingLeft(task.taskId, Duration.seconds(5))
-        yield* stopped(marked)
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    60_000,
+  it.live('goes with everything it started when its agent stops', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+      yield* sessions.stop(task.threadId)
+      yield* nothingLeft(task.taskId)
+      yield* stopped(marked)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
 
 describe.skipIf(windows)('a task that settles', () => {
-  it.live(
-    'merged on its host, leaves no agent, server or run of it running, and keeps no place',
-    () => {
-      const { working, bare } = hosted()
-      const github = makeFakeService({ pushUrl: () => bare })
-      github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
-      return Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const instance = yield* Instance
-        yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-        const { task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
-        // The server it left keeps a place for it, before.
-        assert.isNotEmpty(yield* holdersOf(task.taskId))
-        github.mergeByHand(1)
-        yield* (yield* Changes).refresh(task.taskId)
-        yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`, (rows) => rows[0]?.state === 'done')
-        const took = yield* nothingLeft(task.taskId)
-        assert.isBelow(took, 10_000)
-        yield* stopped(marked)
-        assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-        assert.deepStrictEqual(
-          yield* (yield* Launches).ofProject(
-            (yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${task.taskId}`)[0]?.projectId ?? '',
-          ),
-          [],
-        )
-        // Keeping a place no longer lists it.
-        assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
-      }).pipe(
-        Effect.provide(
-          Queries.layer.pipe(
-            Layer.provideMerge(runtime(undefined, {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
-          ),
+  it.live('merged on its host, leaves no agent, server or run of it running, and keeps no place', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const { task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
+      // The server it left keeps a place for it, before.
+      assert.isNotEmpty(yield* holdersOf(task.taskId))
+      github.mergeByHand(1)
+      yield* (yield* Changes).refresh(task.taskId)
+      yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`, (rows) => rows[0]?.state === 'done')
+      const took = yield* nothingLeft(task.taskId)
+      assert.isBelow(took, 10_000)
+      yield* stopped(marked)
+      assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
+      assert.deepStrictEqual(
+        yield* (yield* Launches).ofProject(
+          (yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${task.taskId}`)[0]?.projectId ?? '',
         ),
+        [],
       )
-    },
-    60_000,
+      // Keeping a place no longer lists it.
+      assert.deepStrictEqual(yield* holdersOf(task.taskId), [])
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(undefined, {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+        ),
+      ),
+    )
+  })
+
+  it.live('marked done, leaves none of it running', () =>
+    Effect.gen(function* () {
+      const { task, marked } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
+      assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
+      yield* nothingLeft(task.taskId)
+      yield* stopped(marked)
+      assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  it.live(
-    'marked done, leaves none of it running',
-    () =>
-      Effect.gen(function* () {
-        const { task, marked } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
-        assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
-        yield* nothingLeft(task.taskId)
-        yield* stopped(marked)
-        assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task.threadId)))
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    60_000,
-  )
-
-  it.live(
-    'abandoned, leaves none of it running, though its server outlived its lead',
-    () =>
-      Effect.gen(function* () {
-        const { task, marked } = yield* started('Try the cache [lead:serve-apart] [lead:finish]', { quick: true })
-        yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
-        yield* nothingLeft(task.taskId)
-        yield* stopped(marked)
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    60_000,
+  it.live('abandoned, leaves none of it running, though its server outlived its lead', () =>
+    Effect.gen(function* () {
+      const { task, marked } = yield* started('Try the cache [lead:serve-apart] [lead:finish]', { quick: true })
+      yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
+      yield* nothingLeft(task.taskId)
+      yield* stopped(marked)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
 
 describe.skipIf(windows)('a task opened again before settling has stopped it', () => {
-  it.live(
-    'keeps its lead and the run started since',
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* Sessions
-        const launches = yield* Launches
-        const { project, task } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
-        // Asked something that takes it a while: its turn runs as the task settles, so settling waits for it.
-        const body = 'And the footer? [lead:slowly]'
-        yield* sessions.send({
-          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
-          threadId: task.threadId,
-          body,
-        })
-        const turn = (running: boolean) =>
-          until(
-            Effect.map(sessions.running(task.threadId), (one) => (Option.exists(one, (on) => on.turnRunning === running) ? [one] : [])),
-            (seen) => seen.length === 1,
-            Duration.seconds(10),
-          )
-        yield* turn(true)
-        assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
-        yield* Effect.sleep(Duration.seconds(1))
-        // Opened again once settling waits on that turn, as by a round the person's words open, and run again.
-        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${task.taskId}`
-        const again = yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
-        // Its turn ended, and settling had its go: its lead and its new run go on.
-        yield* turn(false)
-        yield* Effect.sleep(Duration.seconds(5))
-        assert.isTrue(Option.isSome(yield* sessions.running(task.threadId)))
-        const runs = yield* launches.ofProject(project.projectId)
-        assert.deepStrictEqual(
-          runs.map((run) => [run.id, run.ended]),
-          [[again.id, null]],
+  it.live('keeps its lead and the run started since', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const launches = yield* Launches
+      const { project, task } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
+      // Asked something that takes it a while: its turn runs as the task settles, so settling waits for it.
+      const body = 'And the footer? [lead:slowly]'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+        threadId: task.threadId,
+        body,
+      })
+      const turn = (running: boolean) =>
+        until(
+          Effect.map(sessions.running(task.threadId), (one) => (Option.exists(one, (on) => on.turnRunning === running) ? [one] : [])),
+          (seen) => seen.length === 1,
         )
-        yield* sessions.stop(task.threadId)
-        yield* launches.stopAll(project.projectId)
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-    60_000,
+      yield* turn(true)
+      assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
+      yield* Effect.sleep(Duration.seconds(1))
+      // Opened again once settling waits on that turn, as by a round the person's words open, and run again.
+      yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${task.taskId}`
+      const again = yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
+      // Its turn ended, and settling had its go: its lead and its new run go on.
+      yield* turn(false)
+      yield* Effect.sleep(Duration.seconds(5))
+      assert.isTrue(Option.isSome(yield* sessions.running(task.threadId)))
+      const runs = yield* launches.ofProject(project.projectId)
+      assert.deepStrictEqual(
+        runs.map((run) => [run.id, run.ended]),
+        [[again.id, null]],
+      )
+      yield* sessions.stop(task.threadId)
+      yield* launches.stopAll(project.projectId)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
 
 describe.skipIf(windows)('what settled tasks left running that Althar lost track of', () => {
-  it.live(
+  it.effect(
     'goes once Althar looks after it starts again, and nothing else does',
     () => {
       const database = join(mkdtempSync(join(tmpdir(), 'althar-left-')), 'althar.sqlite')
@@ -352,8 +332,8 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           const two = yield* started('Serve that [lead:serve-apart] [lead:finish]', { quick: true })
           return { task: one.task, other: two.task }
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(database)))))
-        yield* nothingLeft(task.taskId, Duration.seconds(5))
-        yield* nothingLeft(other.taskId, Duration.seconds(5))
+        yield* nothingLeft(task.taskId)
+        yield* nothingLeft(other.taskId)
         // What an Althar that was killed, or one from before, left of each, outside every tree.
         const outlived = [loner(`task:${task.taskId}`)]
         const stillOpen = [loner(`task:${other.taskId}`)]
@@ -367,20 +347,22 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           yield* sql`UPDATE projects SET archived_at = ${new Date().toISOString()} WHERE id = ${removed.projectId}`
           const run = loner(`run:${removed.projectId}`)
           open.push(run)
-          yield* nothingLeft(task.taskId, Duration.seconds(20))
+          // Its first look, an hour in, comes now: after all of that, never before it.
+          yield* TestClock.adjust(Duration.hours(1))
+          yield* nothingLeft(task.taskId)
           // Its mark disappears as it exits, just before Linux has finished reaping the process.
           yield* stopped(outlived)
           yield* until(
             Effect.sync(() => (alive(run) ? [] : [run])),
             (gone) => gone.length === 1,
-            Duration.seconds(10),
           )
           // An open task's, another Althar's and one no Althar started run on.
           assert.isTrue(stillOpen.every(alive))
           assert.isTrue(alive(others.unknown))
           assert.isTrue(alive(others.unmarked))
-        }).pipe(Effect.provide(runtime(database, {}, { leftFirst: Duration.millis(500), leftEvery: Duration.seconds(1) })))
+        }).pipe(Effect.provide(runtime(database)))
       }).pipe(
+        onTestClock,
         Effect.ensuring(
           Effect.sync(() => {
             for (const pid of [others.unknown, others.unmarked, ...open]) if (alive(pid)) process.kill(pid, 'SIGKILL')
@@ -388,6 +370,6 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
         ),
       )
     },
-    90_000,
+    budget.large,
   )
 })

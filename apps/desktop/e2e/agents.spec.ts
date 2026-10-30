@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 
 import { deviceWords } from '../src/renderer/shared/device'
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, still } from './support'
 
 /*
  * Every agent Althar runs, as the window shows them all: Claude Code and
@@ -32,8 +32,7 @@ test('shows every agent: those on this computer first, the rest to download or i
     await expect(away.getByRole('listitem').first()).toContainText('OpenCode')
     await expect(away.getByRole('button', { name: /^Download GitHub Copilot, / })).toBeVisible()
     await expect(away.getByRole('button', { name: 'How to install Junie' })).toBeVisible()
-    // Once the launch has played over it, as the app's spec waits.
-    await page.waitForTimeout(3000)
+    await still(page)
     await page.screenshot({ path: 'test-results/agents-start.png', animations: 'disabled' })
 
     // Settings, once there is a project: a tab for each, those on this computer first.
