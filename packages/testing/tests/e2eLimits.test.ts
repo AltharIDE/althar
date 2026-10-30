@@ -14,11 +14,11 @@ import { expect, test } from 'vite-plus/test'
 const root = join(import.meta.dirname, '../../..')
 
 /*
- * The specs that drive real agents and real models (`real*.spec.ts`) keep their own times: they run only by hand, with
- * the person's own sign-in, and a real agent's turn takes as long as it and its service do, which no budget for the
- * machine bounds.
+ * The specs that drive real agents keep their own times: they run only by hand, with the person's own sign-in, and a
+ * real agent's turn takes as long as it and its service do, which no budget for the machine bounds. The real speech
+ * model runs on the machine, so its spec takes the budget as every other does.
  */
-const apart = (file: string) => /\/real[^/]*\.spec\.ts$/.test(file)
+const apart = (file: string) => file.endsWith('/e2e/real.spec.ts') || file.endsWith('/e2e/real-tools.spec.ts')
 
 const specs = globSync('apps/desktop/e2e/**/*.ts', { cwd: root })
   .map((file) => file.replaceAll('\\', '/'))
@@ -68,8 +68,8 @@ const walk = (file: string, look: (node: Any, at: (what: string) => void, text: 
 /** Where a spec sets a time of its own, or sleeps. */
 const limitsIn = (file: string) =>
   walk(file, (one, at, text) => {
-    // `{ timeout: … }` given to an assertion, an action, a wait or a launch.
-    if (one.type === 'Property' && keyOf(one) === 'timeout') at(`a time of its own: ${text(one)}`)
+    // `{ timeout: … }` given to an assertion, an action, a wait or a launch, or `{ actionTimeout: … }` to `test.use`.
+    if (one.type === 'Property' && /timeout$/i.test(keyOf(one) ?? '')) at(`a time of its own: ${text(one)}`)
     if (one.type !== 'CallExpression') {
       // A loop that tries so many times, sleeping between, is a wait with a time of its own.
       if (
@@ -84,7 +84,9 @@ const limitsIn = (file: string) =>
     const callee = one.callee as Any
     const named = callee.type === 'MemberExpression' ? keyOf({ key: callee.property } as Any) : undefined
     if (named === 'waitForTimeout') at(`a sleep: ${text(one)}`)
-    else if (named === 'setTimeout' && rootOf(callee) === 'test') at(`a test's time of its own: ${text(one)}`)
+    // `test.setTimeout(…)`, `test.info().setTimeout(…)` or a fixture's `testInfo.setTimeout(…)`; in a page, `window.setTimeout(…)`.
+    else if (named === 'setTimeout' || named === 'setInterval')
+      at(rootOf(callee) === 'window' ? `a sleep: ${text(one)}` : `a test's time of its own: ${text(one)}`)
     else if (named === 'slow' && rootOf(callee) === 'test') at(`a test's time of its own: ${text(one)}`)
     else if (named !== undefined && DEFAULTS.has(named)) at(`a time of its own for every wait: ${text(one)}`)
     else if (callee.type === 'Identifier' && (callee.name === 'setTimeout' || callee.name === 'setInterval')) at(`a sleep: ${text(one)}`)
