@@ -2,8 +2,7 @@ import { RELEASES } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
 import { Nav } from '../shared/Nav'
-import { Night, night as n, Readout, Window } from '../shared/night/Night'
-import { Out } from '../shared/Out'
+import { Night, night as n, Panes, Readout, Window } from '../shared/night/Night'
 import s from './Docs.module.css'
 
 /*
@@ -14,10 +13,10 @@ import s from './Docs.module.css'
  */
 
 const WAYS = [
-  { href: LINKS.repo, name: 'The README', note: 'Installing, and signing in your agents', out: true },
-  { href: '/thesis', name: 'The thesis', note: 'What Althar is for, and why', out: false },
-  { href: LINKS.issues, name: 'Issues', note: 'Ask, or tell us what’s missing', out: true },
-] as const
+  { href: LINKS.repo, name: 'The README', note: 'Installing, and signing in your agents' },
+  { href: '/thesis', name: 'The thesis', note: 'What Althar is for, and why' },
+  { href: LINKS.issues, name: 'Issues', note: 'Ask, or tell us what’s missing' },
+]
 
 export function Docs() {
   const latest = RELEASES[0]
@@ -47,19 +46,7 @@ export function Docs() {
             <h1 className={n.headline}>The docs are being written.</h1>
             <p className={n.why}>How to install Althar, sign in your agents and run a project, step by step. Until they’re here:</p>
           </div>
-          <ul className={s.ways}>
-            {WAYS.map((way) => (
-              <li key={way.href}>
-                <a href={way.href}>
-                  <b>
-                    {way.name}
-                    {way.out && <Out size={10} />}
-                  </b>
-                  <span>{way.note}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
+          <Panes ways={WAYS} />
         </Window>
       </Night>
       <Footer />

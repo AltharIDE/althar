@@ -89,6 +89,40 @@
 .picture { width: min(900px, 100%); margin-top: 44px; padding-bottom: 56px; }
 .picture > figure { box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12), 0 30px 80px -30px rgba(0, 0, 0, 0.9), 0 0 120px -40px rgba(60, 76, 255, 0.6); }
 
+/* Only the page's head, over a page of its own below. */
+.headOnly { padding-bottom: 16px; }
+
+/* ---- ways on: panes of smoked glass on the planet's lit edge ---- */
+.panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: min(960px, 100%); margin: 56px 0 0; padding: 0 0 176px; list-style: none; }
+.panes a {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: 100%;
+  padding: 22px 24px 24px;
+  border-radius: 18px;
+  background: rgba(24, 20, 17, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 244, 232, 0.1),
+    inset 0 1px 0 rgba(255, 244, 232, 0.08),
+    0 30px 60px -30px rgba(0, 0, 0, 0.9),
+    0 0 80px -40px rgba(60, 76, 255, 0.6);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  color: inherit;
+  text-decoration: none;
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+.panes a:hover { background: rgba(34, 29, 25, 0.8); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.2), inset 0 1px 0 rgba(255, 244, 232, 0.1), 0 30px 60px -30px rgba(0, 0, 0, 0.9), 0 0 80px -30px rgba(60, 76, 255, 0.8); }
+.panes b { display: flex; align-items: center; gap: 8px; font: 550 22px/1.2 'Inter Display', var(--display); letter-spacing: -0.025em; color: #fff; }
+.panes b svg { color: var(--ink-3); }
+.panes span { font-size: 15px; line-height: 1.45; color: var(--ink-2); }
+
+@media (max-width: 760px) {
+  .panes { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 40px; padding-bottom: 150px; }
+  .panes a { padding: 18px 20px; }
+}
+
 /* A heading for assistive technology and search, where the nav or the window already shows it. */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 

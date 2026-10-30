@@ -4,6 +4,7 @@ import { addDisplay } from '../../home/display'
 import { cx } from '../../lib/cx'
 import { useGrain } from '../grain'
 import { LightUnder } from '../lightUnder'
+import { Out } from '../Out'
 import s from './Night.module.css'
 
 /*
@@ -22,13 +23,33 @@ addDisplay()
 
 export { s as night }
 
-/** The page's main, dark all the way down: the nav turns to smoked glass over it. */
-export function Night({ className, children }: { className?: string; children: ReactNode }) {
+/** The page's main, dark all the way down: the nav turns to smoked glass over it. `head` makes it only the page's head, inside a main of the page's own (the thesis, whose sheet is paper). */
+export function Night({ className, head, children }: { className?: string; head?: boolean; children: ReactNode }) {
+  const Tag = head ? 'div' : 'main'
   return (
-    <main id="main" tabIndex={-1} className={cx(s.night, className)}>
+    <Tag id={head ? undefined : 'main'} tabIndex={head ? undefined : -1} className={cx(s.night, head && s.headOnly, className)}>
       <LightUnder tone="ink" className={s.under} />
       {children}
-    </main>
+    </Tag>
+  )
+}
+
+/** Ways on from a page that has little of its own (the docs' place, a page that isn't there): panes of smoked glass on the planet's lit edge. */
+export function Panes({ ways }: { ways: readonly { href: string; name: string; note: string }[] }) {
+  return (
+    <ul className={s.panes}>
+      {ways.map((way) => (
+        <li key={way.href}>
+          <a href={way.href}>
+            <b>
+              {way.name}
+              {/^https?:/.test(way.href) && <Out size={10} />}
+            </b>
+            <span>{way.note}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
   )
 }
 
