@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 
+import { device } from '../../foundations/device'
 import { MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../../fixtures/setup'
 import { States } from '../../storybook/States'
 import { ProjectRepositories } from './ProjectRepositories'
@@ -43,7 +44,7 @@ export const Default: Story = {
     const page = within(canvasElement)
     await expect(page.getByRole('heading', { level: 2, name: 'Repositories' })).toBeVisible()
     // The map says what it is: no line under the title, its columns named in plain words.
-    await expect(page.getByRole('heading', { level: 3, name: 'On this computer' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 3, name: `On ${device.this}` })).toBeVisible()
   },
 }
 

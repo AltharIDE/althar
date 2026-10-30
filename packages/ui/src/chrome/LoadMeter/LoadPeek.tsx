@@ -1,5 +1,6 @@
 import { useId } from 'react'
 
+import { device } from '../../foundations/device'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -39,7 +40,7 @@ export interface LoadPeekText {
 }
 
 export const loadPeekText: LoadPeekText = {
-  machine: 'This Mac',
+  machine: device.This,
   cpu: 'CPU',
   memory: 'Memory',
   percent: (p) => `${p}%`,

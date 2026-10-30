@@ -271,7 +271,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
 
     // What it changed, file by file, read from its worktree: ⌘D opens it.
-    await page.keyboard.press('Meta+d')
+    await page.keyboard.press('ControlOrMeta+d')
     const changes = page.getByRole('dialog', { name: 'Changes' })
     await expect(changes.getByText(/althar\/add-a-retry-to-the-checkout-call into main/)).toBeVisible()
     await expect(changes.getByRole('group', { name: 'change.txt' })).toContainText('change')
