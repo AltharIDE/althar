@@ -283,6 +283,12 @@ export interface FakeAgentOptions {
    */
   readonly now?: () => number
   /**
+   * What a test holds it at (`holds`): a turn that takes a while, as `[review:slowly]` and `[lead:slowly]` do, goes on
+   * once the test opens its marker's hold, or the turn is stopped, and never by itself. Without, as when it runs as a
+   * process of its own, each takes its time.
+   */
+  readonly holds?: Holds
+  /**
    * Its connection, asked as each prompt starts: while it is down, every
    * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
    * or given a server error, as Claude Code ends its turn, having used
@@ -323,6 +329,19 @@ export interface FakeAgentOptions {
   readonly leavesForGood?: boolean
 }
 
+/** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
+export interface Holds {
+  /** Lets what waits on the marker go on, now and from now on. */
+  readonly open: (marker: string) => void
+  readonly opened: (marker: string) => boolean
+}
+
+/** Holds none of which is open yet. */
+export const holds = (): Holds => {
+  const open = new Set<string>()
+  return { open: (marker) => void open.add(marker), opened: (marker) => open.has(marker) }
+}
+
 interface SessionState {
   mode: string
   model: string
@@ -336,6 +355,8 @@ interface SessionState {
   meta: Readonly<Record<string, unknown>> | undefined
   /** Where the session works, for a step that writes. */
   cwd: string
+  /** What the test holds it at, if it does. */
+  holds: Holds | undefined
   /** Althar's tools, when the session was given them over HTTP. */
   tools: { readonly url: string; readonly headers: Record<string, string> } | undefined
   /** The role markers the session has been given, in any turn. */
@@ -578,7 +599,8 @@ const playStall = async (
  * second round;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
- * seconds over what it was asked before it plays its part.
+ * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
+ * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
@@ -767,6 +789,16 @@ const leaveTests = async (
   else setTimeout(() => void report(), plan.reportsAfter).unref()
 }
 
+/**
+ * A turn that takes a while: `milliseconds`, or until the test opens the marker's hold where it holds the agent
+ * (`FakeAgentOptions.holds`); either way only until the turn is stopped.
+ */
+const takesAWhile = async (session: SessionState, marker: string, milliseconds: number) => {
+  const held = session.holds
+  if (held === undefined) for (let waited = 0; !session.cancelled && waited < milliseconds; waited += 10) await pause(10)
+  else while (!session.cancelled && !held.opened(marker)) await pause(10)
+}
+
 const playRole = async (
   session: SessionState,
   text: string,
@@ -801,7 +833,7 @@ const playRole = async (
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         return 'Stopped reviewing.'
       }
-      if (session.markers.has('[review:slowly]')) for (let waited = 0; !session.cancelled && waited < 3_000; waited += 10) await pause(10)
+      if (session.markers.has('[review:slowly]')) await takesAWhile(session, '[review:slowly]', 3_000)
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -855,7 +887,7 @@ const playRole = async (
     }
     if (available.has('finish_step')) {
       // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
-      if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
+      if (text.includes('[lead:slowly]')) await takesAWhile(session, '[lead:slowly]', 6_000)
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
@@ -1316,6 +1348,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         mcpServers: params.mcpServers.length,
         meta: params._meta ?? undefined,
         cwd: params.cwd,
+        holds: options.holds,
         tools: (() => {
           const server = params.mcpServers.find((candidate) => 'type' in candidate && candidate.type === 'http')
           return server === undefined || !('url' in server)
