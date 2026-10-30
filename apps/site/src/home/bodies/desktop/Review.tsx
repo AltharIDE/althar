@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 import { Fragment } from './Fragment'
 import s from './Review.module.css'
 import proxy from './styled/r-proxy.html?raw'
+import task from './styled/rp-task.html?raw'
 
 /*
  * The work reviewing itself, as a before and after. Today you carry each
@@ -13,7 +14,10 @@ import proxy from './styled/r-proxy.html?raw'
  * the takes under it.
  */
 
-const TAKES = [{ id: 'windows', name: 'Windows', source: proxy }] as const
+const TAKES = [
+  { id: 'windows', name: 'Windows', source: proxy },
+  { id: 'task', name: 'Task', source: task },
+] as const
 
 const unchanging = () => () => {}
 const askedFor = () => new URLSearchParams(window.location.search).get('review')
