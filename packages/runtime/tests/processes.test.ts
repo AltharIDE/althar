@@ -4,12 +4,16 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Stream } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from '../src/device'
 import { SessionFailed } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
+import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { notices, runtime, task, turns, until } from './support'
@@ -69,6 +73,8 @@ describe('agents as processes', () => {
 
   it.live('marks a session lost, and its turn failed, when the agent exits mid-turn', () =>
     Effect.gen(function* () {
+      // This run's alone: a run before, or the same test run again, reported its own.
+      lost.length = 0
       const sessions = yield* Sessions
       const { task: created } = yield* task()
       const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'process' })
@@ -117,6 +123,52 @@ describe('agents as processes', () => {
         { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
       ])
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('reads `$TMPDIR` in its commands as the temp folder its launch made it, where it made one', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const { project } = yield* task()
+      yield* policies.set(project.projectId, { permissions: 'rules' }, instance.personId)
+      // Its own temp folder is in the system's, so `$TMPDIR/..` is the system's temp folder, anything's to write to.
+      const command = `rm -f $TMPDIR/../althar-temp-probe-${crypto.randomUUID()}.log`
+      const asks = (agentId: string) =>
+        Effect.gen(function* () {
+          const other = yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', { title: agentId }),
+            projectId: project.projectId,
+            title: agentId,
+          })
+          yield* sessions.start({ threadId: other.threadId, agentId })
+          yield* until(
+            turns(other.threadId),
+            (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+          )
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: other.threadId, body: `${scenarios.run}${command}` }),
+            threadId: other.threadId,
+            body: `${scenarios.run}${command}`,
+            disposition: 'after_current',
+          })
+          const [seen] = yield* until(
+            queries.thread(other.threadId).pipe(Effect.map((thread) => [thread])),
+            ([thread]) =>
+              thread !== undefined &&
+              (thread.attention.length > 0 ||
+                thread.items.some((item) => item.kind === 'agent_message' && item.content.text.startsWith('chosen='))),
+          )
+          yield* sessions.stop(other.threadId)
+          return (seen?.attention ?? []).map((call) => call.command)
+        })
+      // Launched with one of its own, the rules know where it climbs to, and it goes ahead.
+      assert.deepStrictEqual(yield* asks('process-temp'), [])
+      // Launched without, they don't, and it asks.
+      assert.deepStrictEqual(yield* asks('process'), [command])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
   it.live('stops and records every session when the runtime closes', () =>

@@ -42,7 +42,7 @@ const GATHER = 25
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
-  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  /** Its repositories as this Mac has them, each with its remote: what its header says it is made of. */
   readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null

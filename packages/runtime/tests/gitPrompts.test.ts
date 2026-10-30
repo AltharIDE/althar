@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect } from 'vitest'
 
 import { freshCopy } from '../src/coordinatorFolder'
 import { fetchBranch, gitWithin, sshEnvironment } from '../src/git'
+import { onTestClock } from './support'
 
 /*
  * Althar's own git never waits on a question nobody can answer. Started from
@@ -145,7 +146,7 @@ describe.runIf(linux)('git over SSH with nobody to answer', () => {
       const failed = yield* Effect.flip(gitWithin(1_000, at.repository, 'fetch', 'origin'))
       expect(Date.now() - started).toBeLessThan(5_000)
       assert.strictEqual(failed.args[0], 'fetch')
-    }),
+    }).pipe(onTestClock),
   )
 
   it.effect("makes the coordinator's copy from the last fetch when the remote doesn't answer in time", () =>
@@ -157,7 +158,7 @@ describe.runIf(linux)('git over SSH with nobody to answer', () => {
       yield* freshCopy(at.repository, copy, 'main', at.repository, 1_000)
       expect(Date.now() - started).toBeLessThan(5_000)
       assert.strictEqual(run(copy, 'log', '-1', '--format=%s'), 'Start')
-    }),
+    }).pipe(onTestClock),
   )
 })
 

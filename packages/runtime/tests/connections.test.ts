@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -56,24 +55,10 @@ const stub = (routes: ReadonlyArray<Route>) => {
   return { fetch, sent }
 }
 
-const freeLoopbackPort = () =>
-  Effect.promise(async () => {
-    const server = createServer()
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', resolve)
-    })
-    const address = server.address()
-    if (address === null || typeof address === 'string') throw new Error('Could not get a loopback port')
-    await new Promise<void>((resolve, reject) => server.close((error) => (error === undefined ? resolve() : reject(error))))
-    return address.port
-  })
-
 /** The runtime with GitHub's real adapter over `fetch`, and Linear answered by a fake. */
 const withGitHub = (
   fetch: Fetch,
   more: {
-    readonly callbackPort?: number
     readonly linear?: ReturnType<typeof makeFakeService>
     readonly secrets?: Layer.Layer<Secrets>
     /** Real adapters for other products, offered with GitHub's. */
@@ -99,7 +84,7 @@ const withGitHub = (
         ],
         fetch,
         clientIds: { github: 'Iv1.althar', linear: 'lin-althar' },
-        callbackPort: more.callbackPort ?? 0,
+        callbackPort: 0,
         cliToken: more.cliToken ?? (() => Effect.succeed(null)),
       }),
     ),
@@ -248,29 +233,30 @@ describe('a connection', () => {
     const { fetch, sent } = stub([
       ['POST', 'https://api.linear.app/oauth/token', { json: { access_token: 'lin_oauth', expires_in: 86_400 } }],
     ])
-    return Effect.flatMap(freeLoopbackPort(), (port) =>
-      Effect.gen(function* () {
-        const connections = yield* Connections
-        const instance = yield* Instance
-        const started = yield* connections.startSignIn({ product: 'linear', actorId: instance.personId })
-        assert.strictEqual(started.kind, 'browser')
-        const url = new URL(started.kind === 'browser' ? started.url : '')
-        assert.strictEqual(url.origin + url.pathname, 'https://linear.app/oauth/authorize')
-        assert.strictEqual(url.searchParams.get('redirect_uri'), `http://127.0.0.1:${port}/callback`)
-        // A browser that comes back without the state this sign-in sent is turned away.
-        const wrong = yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/callback?code=x&state=forged`))
-        assert.strictEqual(wrong.status, 400)
-        assert.strictEqual((yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/other`))).status, 404)
-        const back = yield* Effect.promise(() =>
-          globalThis.fetch(`http://127.0.0.1:${port}/callback?code=the-code&state=${url.searchParams.get('state') ?? ''}`),
-        )
-        assert.include(yield* Effect.promise(() => back.text()), 'Signed in to Linear')
-        const [done] = yield* until(flowEnded(started.flowId), (states) => states[0]?.state !== 'waiting')
-        assert.strictEqual(done?.state, 'done')
-        assert.deepInclude(sent[0]?.body, { code: 'the-code', grant_type: 'authorization_code', client_id: 'lin-althar' })
-        assert.strictEqual((yield* connections.list)[0]?.auth, 'pkce')
-      }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: port, linear: tracker }))),
-    )
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const started = yield* connections.startSignIn({ product: 'linear', actorId: instance.personId })
+      assert.strictEqual(started.kind, 'browser')
+      const url = new URL(started.kind === 'browser' ? started.url : '')
+      assert.strictEqual(url.origin + url.pathname, 'https://linear.app/oauth/authorize')
+      // Back to this computer alone, on a port the runtime took for it.
+      const back = new URL(url.searchParams.get('redirect_uri') ?? '')
+      assert.strictEqual(`${back.hostname}${back.pathname}`, '127.0.0.1/callback')
+      const port = back.port
+      // A browser that comes back without the state this sign-in sent is turned away.
+      const wrong = yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/callback?code=x&state=forged`))
+      assert.strictEqual(wrong.status, 400)
+      assert.strictEqual((yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${port}/other`))).status, 404)
+      const signedIn = yield* Effect.promise(() =>
+        globalThis.fetch(`http://127.0.0.1:${port}/callback?code=the-code&state=${url.searchParams.get('state') ?? ''}`),
+      )
+      assert.include(yield* Effect.promise(() => signedIn.text()), 'Signed in to Linear')
+      const [done] = yield* until(flowEnded(started.flowId), (states) => states[0]?.state !== 'waiting')
+      assert.strictEqual(done?.state, 'done')
+      assert.deepInclude(sent[0]?.body, { code: 'the-code', grant_type: 'authorization_code', client_id: 'lin-althar' })
+      assert.strictEqual((yield* connections.list)[0]?.auth, 'pkce')
+    }).pipe(Effect.provide(withGitHub(fetch, { linear: tracker })))
   })
 
   it.live('takes a pasted token, renews the same account’s rather than adding it twice, and is removed with its token', () => {

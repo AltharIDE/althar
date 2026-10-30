@@ -67,8 +67,8 @@ export const windowWords = (room: Pick<Room, 'kind' | 'label'>): string => {
 }
 
 /** How much an account has left, as a thread says it: "3% of its five-hour limit left, until 14:00", or without the reset. */
-export const roomWords = (room: Room, reset = true): string =>
-  `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt)}`}`
+export const roomWords = (room: Room, now: number, reset = true): string =>
+  `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt, now)}`}`
 
 /**
  * What a thread says when a new step steers clear of an agent that is nearly
@@ -78,17 +78,19 @@ export const roomWords = (room: Room, reset = true): string =>
 export const lowWords = (input: {
   readonly from: string
   readonly room: Room
+  /** The time it is said at, which says whether the reset is today. */
+  readonly now: number
   readonly step?: keyof typeof outStep
   readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
 }): string => {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const work = step?.work ?? 'the step'
   if (input.to !== undefined)
-    return `${input.from} has ${roomWords(input.room)}, so ${input.to.agent} takes ${work} instead${
+    return `${input.from} has ${roomWords(input.room, input.now)}, so ${input.to.agent} takes ${work} instead${
       input.to.model === null ? '' : `, on ${input.to.model}`
     }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
-  const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt)}`
-  return `${input.from} has ${roomWords(input.room, false)}, so ${work} ${step?.waits ?? 'waits'} ${back}. To carry on now, pick another model on the task.`
+  const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
+  return `${input.from} has ${roomWords(input.room, input.now, false)}, so ${work} ${step?.waits ?? 'waits'} ${back}. To carry on now, pick another model on the task.`
 }
 
 /** An account that is out: until its reset, if it said, and when it is tried again either way. */
@@ -99,14 +101,14 @@ export interface Out {
   readonly until: string
 }
 
-/** When an agent is back, in the words a thread says it: the time, and the day where it isn't today. */
-export const whenWords = (iso: string, now: Date = new Date()): string => {
+/** When an agent is back, in the words a thread says it at `now`: the time, and the day where it isn't today. */
+export const whenWords = (iso: string, now: number): string => {
   const at = new Date(iso)
   const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(at)
-  if (at.toDateString() === now.toDateString()) return time
+  if (at.toDateString() === new Date(now).toDateString()) return time
   const day = new Intl.DateTimeFormat(
     undefined,
-    Duration.toMillis(Duration.days(6)) > at.getTime() - now.getTime() ? { weekday: 'long' } : { day: 'numeric', month: 'long' },
+    Duration.toMillis(Duration.days(6)) > at.getTime() - now ? { weekday: 'long' } : { day: 'numeric', month: 'long' },
   ).format(at)
   return `${day}, ${time}`
 }
@@ -126,6 +128,8 @@ export const outStep = {
 export const outWords = (input: {
   readonly from: string
   readonly resetsAt: string | null
+  /** The time it is said at, which says whether the reset is today. */
+  readonly now: number
   /** The step it was on; none outside one. */
   readonly step?: keyof typeof outStep
   /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
@@ -136,7 +140,7 @@ export const outWords = (input: {
 }): string => {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
-  const back = input.resetsAt === null ? null : whenWords(input.resetsAt)
+  const back = input.resetsAt === null ? null : whenWords(input.resetsAt, input.now)
   if (input.to !== undefined)
     return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
       input.to.model === null ? '' : `, on ${input.to.model}`

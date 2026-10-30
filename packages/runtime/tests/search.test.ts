@@ -293,7 +293,7 @@ describe('finding tasks', () => {
       const cards = Effect.map(Effect.orDie(queries.coordinator(projectId)), (snapshot) =>
         snapshot.items.flatMap((item) => (item.kind === 'task' && item.content.change !== null ? [item.content] : [])),
       )
-      const [card] = yield* until(cards, (all) => all.length === 1, Duration.seconds(30))
+      const [card] = yield* until(cards, (all) => all.length === 1)
       assert.deepStrictEqual(yield* found('#1', projectId), ['Add a retry'])
       assert.deepStrictEqual(yield* found(BUILT.split(/\s+/).slice(0, 3).join(' '), projectId), ['Add a retry'])
       const [hit] = yield* findTasks({ text: '1', projectId }, new Set([card?.taskId ?? '']))

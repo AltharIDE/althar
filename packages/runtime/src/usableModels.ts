@@ -156,6 +156,8 @@ const effortWords = (route: Route | undefined): string => {
  */
 export const describeModels = (
   usable: ReadonlyArray<UsableModel>,
+  /** The time they are read at, which says whether a reset is today. */
+  now: number,
   use = "propose_plan's lead and review and start_task's lead",
 ): string => {
   if (usable.length === 0)
@@ -180,7 +182,7 @@ export const describeModels = (
       best?.plan === true
         ? best.room === null
           ? 'on a plan'
-          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room)}`
+          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room, now)}`
         : fact?.price == null
           ? 'per use'
           : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`

@@ -1,6 +1,6 @@
 import { now, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Scope } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -133,10 +133,10 @@ export class LeftBehind extends Context.Service<
       /** Waits for the agent on the thread to end its turn, up to `TURN_ENDS`. */
       const turnEnds = (threadId: string) =>
         Effect.gen(function* () {
-          const until = Date.now() + Duration.toMillis(TURN_ENDS)
+          const until = (yield* Clock.currentTimeMillis) + Duration.toMillis(TURN_ENDS)
           for (;;) {
             const running = yield* sessions.running(threadId)
-            if (Option.isNone(running) || !running.value.turnRunning || Date.now() >= until) return
+            if (Option.isNone(running) || !running.value.turnRunning || (yield* Clock.currentTimeMillis) >= until) return
             yield* Effect.sleep(Duration.millis(200))
           }
         })
@@ -243,7 +243,7 @@ export class LeftBehind extends Context.Service<
       const sweep = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         // An agent left idle on a settled task, by a settling it outlived or an Althar from before this one.
-        const idleBefore = Date.now() - Duration.toMillis(IDLE_FOR)
+        const idleBefore = (yield* Clock.currentTimeMillis) - Duration.toMillis(IDLE_FOR)
         for (const session of yield* sessions.onTasks) {
           if (session.turnRunning) continue
           const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${session.taskId} AND state IN ('done', 'abandoned')`

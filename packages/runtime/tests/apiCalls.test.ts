@@ -10,6 +10,7 @@ import { scenarios, SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
@@ -53,16 +54,6 @@ const connected = Effect.gen(function* () {
   const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry checkout' })
   return { client, project, task }
 })
-
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
-  })
 
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
 
@@ -119,7 +110,7 @@ describe('what a project runs, from the window', () => {
         // With none named, the first runs: this one ends by itself, and stays until it is cleared.
         const first = yield* client.RunProject({ commandId: commandId(), projectId, taskId: null, threadId: null })
         assert.strictEqual(first.runnableId, once.id)
-        const [ended] = (yield* eventually(client.GetCoordinator({ projectId }), (snapshot) =>
+        const [ended] = (yield* until(client.GetCoordinator({ projectId }), (snapshot) =>
           snapshot.launches.some((launch) => launch.ended !== null),
         )).launches
         assert.deepInclude(ended?.ended, { code: 0 })
@@ -143,14 +134,14 @@ describe('what a lead left running, from the window', () => {
         const { client, task } = yield* connected
         const { threadId } = task
         yield* client.StartSession({ commandId: commandId(), threadId, agentId: 'claude-code' })
-        yield* eventually(client.GetThread({ threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId }), (thread) => idle(thread) && thread.items.length > 0)
         const heard = yield* Effect.forkChild(
           Stream.runHead(Stream.filter(client.Watch({}), (event) => event._tag === 'Background' && event.background.length > 0)),
         )
         yield* Effect.sleep('50 millis')
         yield* client.Send({ commandId: commandId(), threadId, body: scenarios.background, disposition: 'after_current' })
         yield* Fiber.join(heard)
-        const serving = yield* eventually(client.GetThread({ threadId }), (thread) => thread.session?.background[0]?.url != null)
+        const serving = yield* until(client.GetThread({ threadId }), (thread) => thread.session?.background[0]?.url != null)
         const left = serving.session?.background[0]
         assert.deepInclude(left, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
         // What it printed is read while it runs: its address, as it said it.
@@ -164,7 +155,7 @@ describe('what a lead left running, from the window', () => {
         assert.deepStrictEqual((yield* client.GetThread({ threadId })).session?.background, [])
 
         yield* client.Send({ commandId: commandId(), threadId, body: '[lead:serve-exits]', disposition: 'after_current' })
-        const exited = yield* eventually(client.GetThread({ threadId }), (thread) => thread.session?.background[0]?.ended != null)
+        const exited = yield* until(client.GetThread({ threadId }), (thread) => thread.session?.background[0]?.ended != null)
         const gone = exited.session?.background[0]
         assert.strictEqual(gone?.ended?.code, 1)
         yield* client.ClearBackground({ commandId: commandId(), threadId, id: gone?.id ?? '' })
@@ -189,10 +180,10 @@ describe('finding tasks, from the window', () => {
 
         // Its lead mid-turn, it is found as at work.
         yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         const before = (yield* client.SearchTasks({ text: 'checkout' })).tasks[0]?.phase
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.slow, disposition: 'after_current' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session?.turnRunning === true)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.session?.turnRunning === true)
         assert.strictEqual((yield* client.SearchTasks({ text: 'checkout' })).tasks[0]?.phase, 'running')
         assert.notStrictEqual(before, 'running')
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
@@ -208,17 +199,15 @@ describe('a lead’s question, from the window', () => {
         const { client, task } = yield* connected
         const { threadId } = task
         yield* client.StartSession({ commandId: commandId(), threadId, agentId: 'codex' })
-        yield* eventually(client.GetThread({ threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId }), (thread) => idle(thread) && thread.items.length > 0)
         yield* client.Send({ commandId: commandId(), threadId, body: scenarios.questions, disposition: 'after_current' })
-        const asking = yield* eventually(client.GetThread({ threadId }), (thread) =>
-          thread.attention.some((call) => call.kind === 'question'),
-        )
+        const asking = yield* until(client.GetThread({ threadId }), (thread) => thread.attention.some((call) => call.kind === 'question'))
         const call = asking.attention.find((each) => each.kind === 'question')
         const answers = Object.fromEntries(
           (call?.question?.fields ?? []).map((field) => [field.id, { values: [field.options[0]?.value ?? ''] }]),
         )
         yield* client.AnswerQuestion({ commandId: commandId(), attentionId: call?.id ?? '', answers })
-        const answered = yield* eventually(client.GetThread({ threadId }), (thread) => idle(thread) && thread.attention.length === 0)
+        const answered = yield* until(client.GetThread({ threadId }), (thread) => idle(thread) && thread.attention.length === 0)
         const question = answered.items.find((item) => item.kind === 'question')
         assert.strictEqual(question?.kind === 'question' ? question.content.state : undefined, 'answered')
       }),
@@ -241,7 +230,7 @@ describe('handing a thread over, from the window', () => {
           images: [{ data: SCREENSHOT_PNG, name: 'shot.png' }],
           dictated: true,
         })
-        const thread = yield* eventually(
+        const thread = yield* until(
           client.GetThread({ threadId }),
           (value) => idle(value) && value.items.some((item) => item.kind === 'user_message'),
         )

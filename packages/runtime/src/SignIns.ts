@@ -1,5 +1,5 @@
 import { adapterNode, planPairOf, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
-import { Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -68,14 +68,15 @@ export class SignIns extends Context.Service<
       const account = (of: Account, recheck = false) =>
         Effect.gen(function* () {
           const last = known.get(of.id)
-          if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return yield* paid(of, last.check)
+          if (!recheck && last !== undefined && (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(TTL))
+            return yield* paid(of, last.check)
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
           yield* accounts.prepare(of)
           const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
-          known.set(of.id, { check: checked, at: Date.now() })
+          known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
           if (checked.status === 'signed_in') {
             const how: SignedIn['how'] | null = before === 'signed_out' ? 'signed_in' : found.has(of.agentId) ? null : 'found'
             found.add(of.agentId)

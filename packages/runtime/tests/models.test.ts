@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent, fakeAgentMain, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Fiber, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
@@ -267,7 +267,6 @@ describe('the models each agent offers', () => {
           SELECT COUNT(*) AS count, SUM(CASE WHEN state IN ('launching', 'running') THEN 1 ELSE 0 END) AS active
           FROM processes WHERE purpose = 'probe'`,
         (rows) => (rows[0]?.count ?? 0) > 0 && rows[0]?.active === 0,
-        Duration.seconds(20),
       )
       const [rows] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM processes WHERE purpose = 'probe'`
       assert.strictEqual(rows?.count, 1)
@@ -327,7 +326,6 @@ describe('the models each agent offers', () => {
           SELECT COUNT(*) AS count, SUM(CASE WHEN state IN ('launching', 'running') THEN 1 ELSE 0 END) AS active
           FROM processes WHERE purpose = 'probe'`,
         (rows) => (rows[0]?.count ?? 0) > 0 && rows[0]?.active === 0,
-        Duration.seconds(20),
       )
       const [rows] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM processes WHERE purpose = 'probe'`
       assert.strictEqual(checks, 2)
@@ -342,8 +340,9 @@ describe('the models each agent offers', () => {
     Effect.gen(function* () {
       const models = yield* Models
       const sql = yield* SqlClient.SqlClient
-      yield* models.catalog
-      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing), Duration.seconds(20))
+      // Read twice at once, as the coordinator and the model picker can: each agent is asked once all the same.
+      yield* Effect.all([models.catalog, models.catalog], { concurrency: 'unbounded' })
+      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       assert.strictEqual(asked?.models.length, 2)
       const processes = yield* sql<{
         purpose: string

@@ -72,6 +72,11 @@ const write = (kept: Kept) => {
   listeners.forEach((listener) => listener())
 }
 
+/** Forgets the lanes this window kept, as each test starts. */
+export const forgetFolds = () => {
+  last = { raw: null, kept: NONE }
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)

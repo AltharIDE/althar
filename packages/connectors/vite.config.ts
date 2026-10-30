@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 /* The default suite: the fakes, and the adapters against recorded answers, so it runs in CI. Real accounts run with `bun run test:real`. */
 export default defineConfig({
   test: {
+    ...testing('medium'),
     include: ['tests/*.test.ts'],
     environment: 'node',
     coverage: {

@@ -14,7 +14,7 @@ import {
   transition,
 } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -2230,9 +2230,10 @@ export class Runs extends Context.Service<
           const model = yield* limits.modelFor({ agentId: next, projectId: run.projectId, planned })
           const [from, to] = [yield* limits.named(planned.agentId, null), yield* limits.named(next, model)]
           const instead = { ...to, ownWork: next === other }
+          const now = yield* Clock.currentTimeMillis
           const said = Option.isSome(low)
-            ? lowWords({ from: from.agent, room: low.value, step, to: instead })
-            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, step, to: instead })
+            ? lowWords({ from: from.agent, room: low.value, now, step, to: instead })
+            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, now, step, to: instead })
           if (!quiet) yield* sayOut(run.threadId, run.projectId, said)
           return { agentId: next, model, said }
         })
@@ -2294,7 +2295,13 @@ export class Runs extends Context.Service<
           const [from, to] = [yield* limits.named(agentId, null, accountId), yield* limits.named(agentId, null, next.id)]
           return Option.some({
             accountId: next.id,
-            said: lowWords({ from: from.agent, room: room.value, step, to: { agent: to.agent, model: null } }),
+            said: lowWords({
+              from: from.agent,
+              room: room.value,
+              now: yield* Clock.currentTimeMillis,
+              step,
+              to: { agent: to.agent, model: null },
+            }),
           })
         })
 
@@ -2441,6 +2448,7 @@ export class Runs extends Context.Service<
               const said = outWords({
                 from: (yield* limits.named(agentId, null, accountId)).agent,
                 resetsAt: out?.resetsAt ?? null,
+                now: yield* Clock.currentTimeMillis,
                 ...(step === undefined ? {} : { step }),
                 to: { ...(yield* limits.named(next, model, to)), ownWork: next === other },
               })
@@ -2492,8 +2500,15 @@ export class Runs extends Context.Service<
             on.run.threadId,
             on.run.projectId,
             low === undefined
-              ? outWords({ from, resetsAt, ...(step === undefined ? {} : { step }), waits: 'step', nothingFree })
-              : lowWords({ from, room: low, ...(step === undefined ? {} : { step }) }),
+              ? outWords({
+                  from,
+                  resetsAt,
+                  now: yield* Clock.currentTimeMillis,
+                  ...(step === undefined ? {} : { step }),
+                  waits: 'step',
+                  nothingFree,
+                })
+              : lowWords({ from, room: low, now: yield* Clock.currentTimeMillis, ...(step === undefined ? {} : { step }) }),
           )
           yield* touchCard(on.run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -2538,13 +2553,13 @@ export class Runs extends Context.Service<
                 threadId,
                 agentId: next,
                 ...(model === null ? {} : { model }),
-                said: outWords({ from, resetsAt, to: yield* limits.named(next, model, to) }),
+                said: outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, to: yield* limits.named(next, model, to) }),
                 about: 'limit',
               })
               return
             }
           }
-          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, waits: 'message' }))
+          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, waits: 'message' }))
           // Back at its reset, it takes what waits: the same loop as a held step's, so after a restart too.
           yield* Queue.offer(holdsChanged, undefined)
         })
@@ -3530,7 +3545,7 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until)}, when ${from} is back, as you said.`,
+            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until, yield* Clock.currentTimeMillis)}, when ${from} is back, as you said.`,
           })
           yield* touchCard(current.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -4373,7 +4388,7 @@ export class Runs extends Context.Service<
             yield* Queue.take(holdsChanged)
             continue
           }
-          const wait = next.at - Date.now()
+          const wait = next.at - (yield* Clock.currentTimeMillis)
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(holdsChanged), Effect.sleep(Duration.millis(wait)))
             continue

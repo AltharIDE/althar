@@ -1,0 +1,123 @@
+name: queue
+
+# The merge queue. A pull request's checks run on it as it was branched; two that each pass can still break main once
+# both are in. Queued, a pull request is checked again on main as it will be, with the pull requests ahead of it, and
+# lands only if that passes. A pull request that fails there goes back to its branch, and main never has it.
+#
+# The queue runs a pull request's own checks (desktop.yml, harness.yml and the rest), for the paths it changes, as its
+# pull request did. It adds two of its own: for a change to the app or what it builds on, the end-to-end run (e2e.yml),
+# in four parts; and for changed tests, those tests many times over (stress.yml), which the pull request ran too. A
+# merge waits about as long as the longest of them. Coverage and the packages stay in post-merge.yml.
+#
+# Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks
+# being the ones that say how it stands; in the queue, it passes once every check that ran there did.
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  # The workflows it calls file flaky tests as issues (.github/actions/flaky).
+  issues: write
+
+jobs:
+  # Which workflows the queued pull request's changes call for, by each workflow's own `paths`.
+  changes:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      desktop: ${{ steps.paths.outputs.desktop }}
+      harness: ${{ steps.paths.outputs.harness }}
+      ui: ${{ steps.paths.outputs.ui }}
+      site: ${{ steps.paths.outputs.site }}
+      brand: ${{ steps.paths.outputs.brand }}
+      report: ${{ steps.paths.outputs.report }}
+      windows-installer: ${{ steps.paths.outputs.windows-installer }}
+      stress: ${{ steps.paths.outputs.stress }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # What this entry adds to the one ahead of it, or to main.
+      - env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git diff --name-only "$BASE" HEAD > "$RUNNER_TEMP/changed"
+      - id: paths
+        run: |
+          bun -e '
+            const changed = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
+            for (const name of ["desktop", "harness", "ui", "site", "brand", "report", "windows-installer", "stress"]) {
+              const workflow = Bun.YAML.parse(await Bun.file(`.github/workflows/${name}.yml`).text())
+              const globs = workflow.on.pull_request.paths.map((path) => new Bun.Glob(path))
+              console.log(`${name}=${changed.some((file) => globs.some((glob) => glob.match(file)))}`)
+            }
+          ' | tee -a "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop.yml
+
+  harness:
+    needs: changes
+    if: needs.changes.outputs.harness == 'true'
+    uses: ./.github/workflows/harness.yml
+
+  ui:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    uses: ./.github/workflows/ui.yml
+
+  site:
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    uses: ./.github/workflows/site.yml
+
+  brand:
+    needs: changes
+    if: needs.changes.outputs.brand == 'true'
+    uses: ./.github/workflows/brand.yml
+
+  report:
+    needs: changes
+    if: needs.changes.outputs.report == 'true'
+    uses: ./.github/workflows/report.yml
+
+  windows-installer:
+    needs: changes
+    if: needs.changes.outputs.windows-installer == 'true'
+    uses: ./.github/workflows/windows-installer.yml
+
+  # The app's end-to-end run, for the changes desktop.yml runs for: they all reach the app.
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/e2e.yml
+
+  stress:
+    needs: changes
+    if: needs.changes.outputs.stress == 'true'
+    uses: ./.github/workflows/stress.yml
+
+  # The one check main's rules require: passes when nothing that ran failed. On a pull request, nothing above runs.
+  merge-queue:
+    name: merge queue
+    needs: [changes, desktop, harness, ui, site, brand, report, windows-installer, e2e, stress]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          case " $RESULTS " in
+            *' failure '* | *' cancelled '*)
+              echo "::error::A check in the merge queue didn't pass: this pull request goes back to its branch."
+              exit 1
+              ;;
+          esac

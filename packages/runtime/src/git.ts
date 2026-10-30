@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 
 import { GitFailed } from './errors'
 
@@ -88,14 +88,22 @@ const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): Node
  * session's group ends, ssh with git: a child git left behind would hold its
  * output open, and the call would wait on it.
  */
+type GitProcessResult = {
+  readonly error: (Error & { readonly code?: unknown }) | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
 const spawnGit = (
-  timeout: number,
   cwd: string,
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   input: string | undefined,
-  done: (error: (Error & { readonly code?: unknown }) | null, stdout: string, stderr: string) => void,
-) => {
+): {
+  readonly result: Effect.Effect<GitProcessResult>
+  readonly timeout: (milliseconds: number) => void
+  readonly stop: () => void
+} => {
   const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
   // Windows has no sessions to leave, and a detached child there gets a console of its own.
   // `spawn`, not `execFile`, which doesn't pass `detached` on.
@@ -118,6 +126,8 @@ const spawnGit = (
   const out: Array<Buffer> = []
   const err: Array<Buffer> = []
   let size = 0
+  let resolveResult: (result: GitProcessResult) => void = () => undefined
+  const result = new Promise<GitProcessResult>((resolve) => (resolveResult = resolve))
   const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
     size += chunk.length
     if (size > MAX_OUTPUT) {
@@ -128,18 +138,13 @@ const spawnGit = (
   }
   child.stdout.on('data', collect(out))
   child.stderr.on('data', collect(err))
-  const timer = setTimeout(() => {
-    why ??= `No answer within ${timeout / 1000} s, so Althar stopped waiting.`
-    stop()
-  }, timeout)
   let ended = false
   const end = (error: (Error & { readonly code?: unknown }) | null) => {
     if (ended) return
     ended = true
-    clearTimeout(timer)
     const stderr = Buffer.concat(err).toString()
     // What it said before it was stopped, then why it was.
-    done(error, Buffer.concat(out).toString(), why === null ? stderr : `${stderr.trim()}\n${why}`.trim())
+    resolveResult({ error, stdout: Buffer.concat(out).toString(), stderr: why === null ? stderr : `${stderr.trim()}\n${why}`.trim() })
   }
   child.on('error', end)
   child.on('close', (code, signal) =>
@@ -152,6 +157,17 @@ const spawnGit = (
   // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
   child.stdin.on('error', () => undefined)
   child.stdin.end(input)
+  return {
+    result: Effect.promise(() => result),
+    timeout: (milliseconds) => {
+      if (ended) return
+      why ??= `No answer within ${milliseconds / 1000} s, so Althar stopped waiting.`
+      stop()
+    },
+    stop: () => {
+      if (!ended) stop()
+    },
+  }
 }
 
 /** As much output as Althar reads from one git command. */
@@ -168,10 +184,11 @@ export const gitOutcome = (
   cwd: string,
   ...args: ReadonlyArray<string>
 ): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
-  Effect.callback<{ readonly code: number; readonly stdout: string }>((resume) =>
-    spawnGit(60_000, cwd, args, {}, undefined, (error, stdout) =>
-      resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
-    ),
+  runProcess(60_000, cwd, args, {}, undefined).pipe(
+    Effect.map(({ error, stdout }) => ({
+      code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128,
+      stdout: stdout.trim(),
+    })),
   )
 
 /** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
@@ -187,14 +204,33 @@ const run = (
   /** What the command reads, for one such as `cat-file --batch-check`. */
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
-  Effect.callback<string, GitFailed>((resume) =>
-    spawnGit(timeout, cwd, args, env, input, (error, stdout, stderr) =>
-      resume(
-        error === null
-          ? Effect.succeed(trim ? stdout.trim() : stdout)
-          : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
-      ),
+  runProcess(timeout, cwd, args, env, input).pipe(
+    Effect.flatMap(({ error, stdout, stderr }) =>
+      error === null
+        ? Effect.succeed(trim ? stdout.trim() : stdout)
+        : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
     ),
+  )
+
+/** Runs a git process with a clock-controlled timeout and stops it when its caller leaves. */
+const runProcess = (
+  timeout: number,
+  cwd: string,
+  args: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>>,
+  input: string | undefined,
+): Effect.Effect<GitProcessResult> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => spawnGit(cwd, args, env, input)),
+    (running) =>
+      Effect.race(
+        running.result,
+        Effect.sleep(Duration.millis(timeout)).pipe(
+          Effect.tap(() => Effect.sync(() => running.timeout(timeout))),
+          Effect.andThen(running.result),
+        ),
+      ),
+    (running) => Effect.sync(running.stop),
   )
 
 /**

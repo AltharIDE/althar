@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, toConversation } from './support'
+import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -33,7 +33,7 @@ const openReady = async (page: Page, title: string) => {
 const shots = process.env.ALTHAR_SHOTS
 
 const shoot = async (page: Page, name: string) => {
-  await page.waitForTimeout(400)
+  await still(page)
   if (shots) await page.screenshot({ path: join(shots, name) })
 }
 

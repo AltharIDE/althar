@@ -8,6 +8,7 @@ import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '@althar/testing'
 
 import { connect, messageOf, newCommandId, receivePort } from '../src/renderer/data/client'
 import { fakeAgents } from '../src/runtime/fakeAgents'
@@ -54,15 +55,6 @@ const connected = async () => {
   return { client, grant }
 }
 
-const eventually = async <A>(read: () => Promise<A>, check: (value: A) => boolean): Promise<A> => {
-  for (let tries = 0; tries < 250; tries += 1) {
-    const value = await read()
-    if (check(value)) return value
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error('Timed out')
-}
-
 describe('the client', () => {
   it('opens a project by its grant, starts a task, talks to its lead, and hears what changes', async () => {
     const { client, grant } = await connected()
@@ -83,19 +75,19 @@ describe('the client', () => {
     expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
     expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
-    await eventually(
+    await waitFor(
       () => client.getThread(task.threadId),
       (thread) => thread.session?.turnRunning === false && thread.items.length > 0,
     )
     await client.send({ threadId: task.threadId, body: 'hello', disposition: 'after_current' })
-    const thread = await eventually(
+    const thread = await waitFor(
       () => client.getThread(task.threadId),
       (snapshot) => snapshot.items.some((item) => 'text' in item.content && item.content.text === 'Hello'),
     )
     expect(thread.session?.agentName).toBe('Claude Code')
     const reply = thread.items.at(-1)
     expect(await client.getThreadItem(task.threadId, reply?.id ?? '')).toEqual(reply)
-    await eventually(
+    await waitFor(
       async () => events,
       (seen) => seen.some((event) => event._tag === 'Changed' && event.threadId === task.threadId),
     )
@@ -145,7 +137,7 @@ describe('the client', () => {
     const coordinator = await client.getCoordinator(project.id)
     expect(coordinator.suggested?.agentId).toBe('claude-code')
     await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
-    const planned = await eventually(
+    const planned = await waitFor(
       () => client.getCoordinator(project.id, { limit: 50 }),
       (snapshot) => snapshot.items.some((item) => item.kind === 'task'),
     )
@@ -156,7 +148,7 @@ describe('the client', () => {
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
     expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
     await client.startPlan(planId)
-    await eventually(
+    await waitFor(
       () => client.getThreadItem(coordinator.threadId, card?.id ?? ''),
       (item) => item.kind === 'task' && item.content.phase === 'running',
     )
@@ -417,7 +409,7 @@ describe('the client', () => {
         listening += 1
       },
     )
-    await eventually(
+    await waitFor(
       async () => [watches.length, listening],
       ([seen, said]) => (seen ?? 0) >= 2 && (said ?? 0) >= 2,
     )

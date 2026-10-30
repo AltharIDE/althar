@@ -155,16 +155,16 @@ describe('asking Codex’s app-server', () => {
   })
 
   it('says why when the agent refuses', async () => {
-    expect(await readAgentUsage(codex('refuse'))).toEqual({ kind: 'failed', message: 'Not signed in with ChatGPT.' })
+    expect(await readAgentUsage(codex('refuse'), { now: () => NOW })).toEqual({ kind: 'failed', message: 'Not signed in with ChatGPT.' })
   })
 
   it('says so when the agent stops before it answers', async () => {
-    const read = await readAgentUsage(codex('exit'))
+    const read = await readAgentUsage(codex('exit'), { now: () => NOW })
     expect(read.kind).toBe('failed')
   })
 
   it('gives up on an agent that never answers', async () => {
-    const read = await readAgentUsage(codex('silent'), { timeout: 300 })
+    const read = await readAgentUsage(codex('silent'), { timeout: 300, now: () => NOW })
     expect(read).toEqual({ kind: 'failed', message: 'Codex didn’t answer in time.' })
   })
 
@@ -181,7 +181,10 @@ describe('asking Codex’s app-server', () => {
         }),
       },
     }
-    expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({ kind: 'failed', message: '/accounts/work' })
+    expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' }, now: () => NOW })).toEqual({
+      kind: 'failed',
+      message: '/accounts/work',
+    })
   })
 
   it('says a fault, not "no limits", when the answer is not the documented shape', async () => {
@@ -197,7 +200,7 @@ describe('asking Codex’s app-server', () => {
         }),
       },
     }
-    expect((await readAgentUsage(odd)).kind).toBe('failed')
+    expect((await readAgentUsage(odd, { now: () => NOW })).kind).toBe('failed')
   })
 
   it('starts the agent with the allowed environment and the account’s home, not the whole one', async () => {
@@ -216,7 +219,7 @@ describe('asking Codex’s app-server', () => {
           }),
         },
       }
-      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({
+      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' }, now: () => NOW })).toEqual({
         kind: 'failed',
         message: '||/accounts/work|string',
       })
@@ -241,7 +244,7 @@ describe('asking Codex’s app-server', () => {
           }),
         },
       }
-      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({
+      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' }, now: () => NOW })).toEqual({
         kind: 'failed',
         message: 'unix:path=/run/user/1000/bus|/accounts/work',
       })
@@ -251,7 +254,7 @@ describe('asking Codex’s app-server', () => {
   })
 
   it('is not asked of an agent with no usage channel', async () => {
-    const read = await readAgentUsage(agents.opencode)
+    const read = await readAgentUsage(agents.opencode, { now: () => NOW })
     expect(read).toEqual({ kind: 'failed', message: 'OpenCode has no usage channel.' })
   })
 })

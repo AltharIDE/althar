@@ -1,0 +1,38 @@
+{
+  "name": "@althar/testing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "How Althar's tests run: a time budget by the size of a test, scaled for the machine, one way to wait, and in CI a retry that reports the tests that needed it.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./budget": "./src/budget.ts",
+    "./vitest": "./src/vitest.ts",
+    "./setup": "./src/setup.ts",
+    "./effect": "./src/effect.ts",
+    "./reporter": "./src/reporter.ts",
+    "./playwright": "./src/playwright.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "verify": "bun run check && bun run test"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.118"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "oxc-parser": "0.127.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

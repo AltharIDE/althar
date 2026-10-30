@@ -103,7 +103,6 @@ const stuckCall = (taskId: string) =>
       sql<{ id: string; payload: string }>`
         SELECT id, payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
       (rows) => rows.length === 1,
-      Duration.seconds(20),
     )
     return { id: call?.id ?? '', ...(JSON.parse(call?.payload ?? '{}') as { step: string; why: string; detail: string | null }) }
   })
@@ -164,7 +163,6 @@ describe('opening a task’s pull request', () => {
         sql<{ id: string }>`
           SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'publish' AND a.state = 'running'`,
         (rows) => rows.length === 1,
-        Duration.seconds(20),
       )
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: task.taskId })
       yield* Deferred.succeed(gate, undefined)
@@ -177,7 +175,7 @@ describe('opening a task’s pull request', () => {
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck'`, 0)
       assert.deepStrictEqual(yield* runsOf(task.taskId), [{ state: 'suspended' }])
       yield* tasks.resume({ envelope: yield* Runtime.envelope('task.resume', {}), taskId: task.taskId })
-      yield* until(published(task.threadId), (said) => said.length === 1, Duration.seconds(20))
+      yield* until(published(task.threadId), (said) => said.length === 1)
       assert.deepStrictEqual(yield* published(task.threadId), ['Opened draft pull request #1.'])
       assert.deepStrictEqual(yield* runsOf(task.taskId), [{ state: 'succeeded' }])
     }).pipe(Effect.provide(runtimeWith(refusing, { stopGrace: Duration.millis(300) })))
@@ -189,7 +187,7 @@ describe('opening a task’s pull request', () => {
       const sessions = yield* Sessions
       const changes = yield* Changes
       const task = yield* publishing(working)
-      yield* until(published(task.threadId), (said) => said.length === 1, Duration.seconds(20))
+      yield* until(published(task.threadId), (said) => said.length === 1)
       github.close(1)
       yield* changes.refresh(task.taskId)
       yield* until(
@@ -202,7 +200,7 @@ describe('opening a task’s pull request', () => {
         threadId: task.threadId,
         body: 'Retry twice. [lead:finish] [lead:edit]',
       })
-      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded', Duration.seconds(20))
+      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         "PR #1 was closed, so what the follow-up committed isn't in a pull request yet.",
@@ -265,7 +263,7 @@ describe('opening a task’s pull request', () => {
         held: true,
       })
       yield* plans.start(planId, instance.personId)
-      const [said] = yield* until(published(draft.threadId), (all) => all.length === 1, Duration.seconds(20))
+      const [said] = yield* until(published(draft.threadId), (all) => all.length === 1)
       assert.strictEqual(said, 'Pushed to pull request #1, which the task follows.')
       assert.lengthOf(github.changes, 1)
       assert.strictEqual(tip(), git(draft.worktree, 'rev-parse', 'HEAD'))

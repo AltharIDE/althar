@@ -82,6 +82,7 @@ export interface RequestContext {
         readonly offline?: boolean
         readonly cwd?: string
         readonly trusted?: boolean
+        readonly contained?: boolean
         readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
       }
 }
@@ -538,11 +539,12 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const { offline, cwd, trusted, reads } = requestContext.rules
+              const { offline, cwd, trusted, contained, reads } = requestContext.rules
               const read = decideReader(request, {
                 offline: offline === true,
                 ...(cwd === undefined ? {} : { cwd }),
                 ...(trusted === true ? { trusted } : {}),
+                ...(contained === true ? { contained } : {}),
                 ...(reads === undefined ? {} : { reads }),
               })
               const decision: PermissionDecision =

@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { ToolServer } from '../src/ToolServer'
-import { runtime } from './support'
+import { runtime, until } from './support'
 
 /*
  * Quitting the runtime while an agent is still on a call to its tools. Node's
@@ -16,7 +16,9 @@ import { runtime } from './support'
 describe('quitting', () => {
   it.live('quits at once while an agent is still on a call to its tools', () =>
     Effect.gen(function* () {
-      const closing = yield* Effect.gen(function* () {
+      // What the call heard back, and whether its connection is gone.
+      const call = { answered: '', cut: false }
+      yield* Effect.gen(function* () {
         const granted = yield* (yield* ToolServer).grant({
           role: 'coordinator',
           projectId: 'p',
@@ -32,12 +34,18 @@ describe('quitting', () => {
             socket.write('POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n')
             setTimeout(() => resume(Effect.void), 100)
           })
+          socket.on('data', (data) => void (call.answered += data.toString()))
+          socket.on('close', () => void (call.cut = true))
           socket.on('error', () => undefined)
         })
-        return Date.now()
       }).pipe(Effect.provide(runtime()))
-      // Waited for, it would hold quitting up until the request timed out: a minute.
-      assert.isBelow(Date.now() - closing, 2_000)
+      // Cut as it quit, and never answered: waited for, it would have held quitting up until the request timed out, a
+      // minute, and been answered then.
+      yield* until(
+        Effect.sync(() => call.cut),
+        Boolean,
+      )
+      assert.strictEqual(call.answered, '')
     }),
   )
 })
