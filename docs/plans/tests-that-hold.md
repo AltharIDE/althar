@@ -286,6 +286,17 @@ fixed where it is.
   - **The fake host's 3 s merge,** better as a gate.
   - **`process.env` writes in eleven runtime test files.** Vitest runs each file in a worker of its own, so they can't reach another file, and each test puts back what it changed.
 
+## Open problems
+
+A running list: each goes when it is fixed, and a new one is added as it is found.
+
+- **#430, `sessionEdges` › "in a task of several repositories, says it carries on in the same worktrees".** It flaked once in the queue: the person's first follow-up was never delivered. It passes 20 runs on a Mac. Its report didn't say which wait timed out; since #433 a wait's report keeps a long prompt's state, so the next one will.
+- **#431, `models` › "record the process asking starts" on Windows.** The process agent is asked for its models twice, now and then. Two catalog reads at once (#418) are ruled out, and so are a failed probe, `forget`, and a second `Models`. Likely next: the forked probe interrupted after it claimed the agent but before it recorded the answer.
+- **An agent's last words after its turn read as more work (`Sessions.ts`).** An update the agent sends as its turn ends can reach the runtime after the turn's own stream has closed. It then counts as the agent at work outside a turn, busy for `QUIET_FOR` (30 s), and a lead handover due at that break waits for the next one. #429 made `leadHandover`'s test wait for the lead to be done; the cause needs the agent connection to finish handing over a turn's updates before it ends the turn.
+- **`e2e/agents.spec.ts` counts the agents this computer has.** It expects eight agents not on this computer, and on a Mac with agents installed it finds fewer, on main too. It should give the app a PATH and home without the person's agents, as the other specs do with their profile.
+- **What only post-merge checks.** The merge queue doesn't run the coverage gates or build the Linux packages, so a pull request can pass the queue and still turn main red on either. Running coverage in the queue for changes to the gated packages would close it.
+- **Phase 4's rest, and the timed fakes** (Where it stands, above): git, processes and ports as services with fakes, the fake agent's `[lead:wait]` cap, the 45 tests on short real-time timer options, and the fake host's 3 s merge.
+
 ## Phases
 
 Each is one pull request, through the queue.
