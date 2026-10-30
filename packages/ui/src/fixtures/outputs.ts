@@ -123,6 +123,29 @@ export const CHANGE_BRANCH: Data = {
   review: { state: CheckState.Passed, by: [SONNET] },
 }
 
+/** A fix for signed-in redirects, ended on its branch: two commits not pushed, and paths too long for the card beside what it made. */
+export const CHANGE_REDIRECTS: Data = {
+  prs: [
+    {
+      repo: 'frontend',
+      files: [
+        { path: 'middleware.ts', add: 2, del: 6 },
+        { path: 'app/hooks/useAuthPageRedirect.ts', add: 26, del: 0 },
+        { path: 'app/login/page.tsx', add: 4, del: 0 },
+        { path: 'app/signup/page.tsx', add: 4, del: 0 },
+        { path: 'lib/auth-page-destination.ts', add: 7, del: 0 },
+        { path: 'e2e/07-auth-page-redirects.spec.ts', add: 51, del: 0 },
+        { path: 'tests/unit/auth-page-destination.test.js', add: 9, del: 0 },
+        { path: 'tests/unit/middleware.test.js', add: 19, del: 0 },
+      ],
+    },
+  ],
+  state: ChangeState.Branch,
+  branch: 'althar/fnt-225-fix-signed-in-redirects-on-auth-pages',
+  remote: { name: 'origin', pushed: true, ahead: 2 },
+  review: { state: CheckState.Passed, by: [SONNET] },
+}
+
 /** A nightly dependency check's files: the lockfile, and a manifest in nearly every folder. */
 export const NIGHTLY_FILES = [
   { path: 'bun.lock', add: 214, del: 263 },
