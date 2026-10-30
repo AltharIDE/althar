@@ -4,6 +4,7 @@ import { Fragment } from './Fragment'
 import s from './Review.module.css'
 import proxy from './styled/r-proxy.html?raw'
 import card from './styled/rp-card.html?raw'
+import loop from './styled/rp-loop.html?raw'
 import task from './styled/rp-task.html?raw'
 
 /*
@@ -19,6 +20,7 @@ const TAKES = [
   { id: 'windows', name: 'Windows', source: proxy },
   { id: 'task', name: 'Task', source: task },
   { id: 'card', name: 'One card', source: card },
+  { id: 'loop', name: 'Loop', source: loop },
 ] as const
 
 const unchanging = () => () => {}
