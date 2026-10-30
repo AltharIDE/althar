@@ -4,6 +4,8 @@ name: desktop
 # test, since nothing else runs the app there. The coverage gate, the end-to-end run and the packages run after merge,
 # in post-merge.yml.
 on:
+  # From queue.yml, for a pull request in the merge queue.
+  workflow_call:
   pull_request:
     paths:
       [
@@ -18,11 +20,18 @@ on:
         'package.json',
         'bun.lock',
         'vite.config.ts',
+        'packages/testing/**',
+        '.github/actions/flaky/**',
         '.github/workflows/desktop.yml',
       ]
 
 permissions:
   contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
   group: desktop-${{ github.ref }}
@@ -49,6 +58,9 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   # Windows, where no one here works day to day: the checks and unit tests of the desktop app and everything it builds
   # on, in parts that take about as long as each other, so what breaks there shows on the pull request. The runtime's
@@ -124,6 +136,9 @@ jobs:
             echo "::error::Failed on Windows:$failed"
             exit 1
           fi
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   # The app itself on Windows: built unpackaged, started, and a project made of a repository (e2e/smoke.spec.ts).
   windows-e2e:
@@ -157,3 +172,6 @@ jobs:
           name: windows-e2e
           path: apps/desktop/test-results
           retention-days: 7
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky

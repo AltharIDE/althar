@@ -300,10 +300,16 @@ export class Models extends Context.Service<
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
-          if (!probing.has(definition.id) && isInstalled(installs, definition) && (yield* signIns.of(definition.id)) !== 'signed_out') {
+          // Claimed before its sign-in is read, which waits: the catalog is read from several places at once, and each
+          // would start the agent otherwise.
+          if (!probing.has(definition.id) && isInstalled(installs, definition)) {
             probing.add(definition.id)
-            yield* Effect.forkIn(probe(entry), scope)
-            return { ...seen, ...now, defaults, blocked, probing: true }
+            const signIn = yield* signIns.of(definition.id).pipe(Effect.onError(() => Effect.sync(() => probing.delete(definition.id))))
+            if (signIn !== 'signed_out') {
+              yield* Effect.forkIn(probe(entry), scope)
+              return { ...seen, ...now, defaults, blocked, probing: true }
+            }
+            probing.delete(definition.id)
           }
           return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })

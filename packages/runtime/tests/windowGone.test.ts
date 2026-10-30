@@ -9,6 +9,7 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
@@ -51,16 +52,6 @@ const connected = Effect.gen(function* () {
   return { client, grant }
 })
 
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
-  })
-
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) => thread.session !== null && !thread.session.turnRunning
 
 /** What a call that can't be done says, as the window shows it. */
@@ -99,22 +90,22 @@ describe('a question the coordinator asked before the person stopped it', () => 
         const coordinator = client.GetCoordinator({ projectId: project.id })
         const { threadId } = yield* coordinator
         yield* client.Send({ commandId: commandId(), threadId, body: 'Hello.', disposition: 'after_current' })
-        yield* eventually(coordinator, idle)
+        yield* until(coordinator, idle)
         yield* client.Send({ commandId: commandId(), threadId, body: scenarios.questions, disposition: 'after_current' })
-        const asking = yield* eventually(coordinator, (snapshot) =>
+        const asking = yield* until(coordinator, (snapshot) =>
           snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'open'),
         )
         const question = asking.items.find((item) => item.kind === 'question')
         const fields = question?.kind === 'question' ? question.content.fields : []
         // The person stops the coordinator while its question waits; the question stays for them.
         yield* client.StopSession({ commandId: commandId(), threadId })
-        yield* eventually(coordinator, (snapshot) => snapshot.session === null)
+        yield* until(coordinator, (snapshot) => snapshot.session === null)
         yield* client.AnswerQuestion({
           commandId: commandId(),
           attentionId: question?.kind === 'question' ? question.content.attentionId : '',
           answers: Object.fromEntries(fields.map((field) => [field.id, { values: [field.options[0]?.value ?? ''] }])),
         })
-        const answered = yield* eventually(
+        const answered = yield* until(
           coordinator,
           (snapshot) => idle(snapshot) && snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'answered'),
         )

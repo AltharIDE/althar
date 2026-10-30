@@ -6,7 +6,8 @@ import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
 import { States } from '../../storybook/States'
 import { laneDecorator } from '../../storybook/lane'
 import { BoardCard } from './BoardCard'
-import { BranchChip, CommandChip, Fact, FactLine, FileChips, Findings, NextStep, PullChip, Thumbs } from './Chips'
+import { NextStep } from '../../primitives/NextStep/NextStep'
+import { BranchChip, CommandChip, Fact, FactLine, FileChips, Findings, PullChip, Thumbs } from './Chips'
 
 /* The chips a board card holds, each at a card's width, and narrow, where what gives way first shows. */
 
@@ -101,7 +102,7 @@ export const Facts: Story = {
     </div>
   ),
 }
-/** What stands between a ready change and merging, as one line, the most pressing first; then the one next thing, at the foot's end. */
+/** What stands between a ready change and merging, as one line, the most pressing first. */
 export const FactsInALine: Story = {
   render: () => (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 11.5 }}>
@@ -113,9 +114,6 @@ export const FactsInALine: Story = {
           harness / verify failed
         </Fact>
       </FactLine>
-      <NextStep onPress={() => {}} label="Push 2 commits to #1187" signal>
-        Push 2 commits
-      </NextStep>
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -124,7 +122,6 @@ export const FactsInALine: Story = {
     await expect(line.getByText('harness / verify failed')).toBeInTheDocument()
     // One middot between two facts, and none before the first.
     await expect(line.getAllByText('·')).toHaveLength(1)
-    await expect(line.getByRole('button', { name: 'Push 2 commits to #1187' })).toBeInTheDocument()
   },
 }
 /** A step the person does from the card is a button of its own; pressing it does the step and does not open the card. */
@@ -135,7 +132,7 @@ export const NextStepButton: Story = {
       word="Ready to accept"
       title="Add a retry to the sync"
       onOpen={opened}
-      foot={
+      next={
         <NextStep signal onPress={fn()} label="Push 13 commits to #189">
           Push 13 commits
         </NextStep>
@@ -151,7 +148,7 @@ export const NextStepButton: Story = {
     await expect(opened).toHaveBeenCalledOnce()
   },
 }
-/** A push that failed says why in the foot's line, and the button offers to try again. */
+/** A push that failed says why in the foot's line, and the strip offers to try again. */
 export const NextStepFailed: Story = {
   render: () => (
     <BoardCard
@@ -159,19 +156,19 @@ export const NextStepFailed: Story = {
       title="Add a retry to the sync"
       onOpen={opened}
       foot={
-        <>
-          <FactLine>
-            <Fact key="failed" icon="close" tone="danger" role="alert">
-              Push failed: the branch is protected
-            </Fact>
-            <Fact key="unpushed" tone="warm">
-              13 commits not on the PR
-            </Fact>
-          </FactLine>
-          <NextStep signal onPress={fn()} label="Try pushing 13 commits to #189 again">
-            Try again
-          </NextStep>
-        </>
+        <FactLine>
+          <Fact key="failed" icon="close" tone="danger" role="alert">
+            Push failed: the branch is protected
+          </Fact>
+          <Fact key="unpushed" tone="warm">
+            13 commits not on the PR
+          </Fact>
+        </FactLine>
+      }
+      next={
+        <NextStep signal onPress={fn()} label="Try pushing 13 commits to #189 again">
+          Try again
+        </NextStep>
       }
     />
   ),
@@ -179,31 +176,6 @@ export const NextStepFailed: Story = {
     const card = within(canvasElement)
     await expect(card.getByRole('alert')).toHaveTextContent('Push failed: the branch is protected')
     await expect(card.getByRole('button', { name: 'Try pushing 13 commits to #189 again' })).toBeInTheDocument()
-  },
-}
-/** Under way it says so, stays focusable and ignores presses. */
-export const NextStepBusy: Story = {
-  render: () => {
-    const press = fn()
-    return (
-      <NextStep signal busy onPress={press} label="Push 13 commits to #189" doing="Pushing 13 commits">
-        Push 13 commits
-      </NextStep>
-    )
-  },
-  play: async ({ canvasElement }) => {
-    const button = within(canvasElement).getByRole('button', { name: 'Push 13 commits to #189' })
-    await expect(button).toHaveAttribute('aria-busy', 'true')
-    await expect(button).toHaveTextContent('Pushing 13 commits')
-  },
-}
-/** What needs the lead is words with an arrow, a link into the task: the card around it opens the task. */
-export const NextStepLink: Story = {
-  render: () => <NextStep>Ask the lead to fix it</NextStep>,
-  play: async ({ canvasElement }) => {
-    const step = within(canvasElement)
-    await expect(step.getByText('Ask the lead to fix it')).toBeInTheDocument()
-    await expect(step.queryByRole('button')).toBeNull()
   },
 }
 /** A live fact has its cobalt dot, not a glyph, even given one. */

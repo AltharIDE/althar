@@ -22,7 +22,7 @@ describe('a conflict merging here, its lead spoken to as its turn ends', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -49,7 +49,7 @@ describe('a conflict merging here, its lead spoken to as its turn ends', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -58,10 +58,8 @@ describe('a conflict merging here, its lead spoken to as its turn ends', () => {
       yield* until(turns(threadId), (all) => all.every((turn) => turn.state !== 'delivered'))
       // Stopped while Althar waits to look: the round is looked at as the session ends, and the merge it committed stands.
       yield* (yield* Sessions).stop(threadId)
-      const said = yield* until(
-        notices(threadId),
-        (all) => all.some((notice) => notice.title?.startsWith('The lead') === true && notice.title.includes('the conflict with main')),
-        Duration.seconds(20),
+      const said = yield* until(notices(threadId), (all) =>
+        all.some((notice) => notice.title?.startsWith('The lead') === true && notice.title.includes('the conflict with main')),
       )
       assert.strictEqual(
         said.find((notice) => notice.title?.includes('the conflict with main') === true)?.title,

@@ -7,7 +7,7 @@ import {
   type SignInStatus,
   unsupportedAt,
 } from '@althar/provider-adapters'
-import { Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -73,12 +73,13 @@ export class SignIns extends Context.Service<
       /* Each agent's last reading of its version, from when it began: those that start while it runs share it. */
       const versions = new Map<string, { readonly at: number; readonly read: Promise<string | null> }>()
       const versionOf = (entry: AgentEntry, within: Duration.Duration) =>
-        Effect.suspend(() => {
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
           const last = versions.get(entry.definition.id)
-          if (last !== undefined && Date.now() - last.at < Duration.toMillis(within)) return Effect.promise(() => last.read)
+          if (last !== undefined && now - last.at < Duration.toMillis(within)) return yield* Effect.promise(() => last.read)
           const read = Effect.runPromise(agentVersion(entry.definition, adapterNode()))
-          versions.set(entry.definition.id, { at: Date.now(), read })
-          return Effect.promise(() => read)
+          versions.set(entry.definition.id, { at: now, read })
+          return yield* Effect.promise(() => read)
         })
       /** Paid by a plan where its status can't say, its plan is told by its sign-in, and a usage read found it and read the plan. */
       const paid = (of: Account, check: SignInCheck) =>
@@ -93,21 +94,22 @@ export class SignIns extends Context.Service<
       const account = (of: Account, recheck = false) =>
         Effect.gen(function* () {
           const last = known.get(of.id)
-          if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return yield* paid(of, last.check)
+          if (!recheck && last !== undefined && (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(TTL))
+            return yield* paid(of, last.check)
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
           // An agent at a version no session starts on isn't asked either: OpenCode 2's status goes through a service the
           // whole user shares, which answers for whichever account started it and keeps running after.
           // Asked now, as the person may have changed it, but once for the accounts checked together.
           if (entry.definition.supported !== undefined && unsupportedAt(entry.definition, yield* versionOf(entry, ROUND)) !== null) {
-            known.set(of.id, { check: UNKNOWN, at: Date.now() })
+            known.set(of.id, { check: UNKNOWN, at: yield* Clock.currentTimeMillis })
             return UNKNOWN
           }
           yield* accounts.prepare(of)
           const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
-          known.set(of.id, { check: checked, at: Date.now() })
+          known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
           if (checked.status === 'signed_in') {
             const how: SignedIn['how'] | null = before === 'signed_out' ? 'signed_in' : found.has(of.agentId) ? null : 'found'
             found.add(of.agentId)

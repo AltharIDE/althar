@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
@@ -85,7 +85,6 @@ const ranOnCodex = (projectId?: string) =>
         all.flatMap((item) => (item.kind === 'notice' || item.kind === 'step_result' ? [JSON.stringify(item.content)] : [])),
       ),
       (lines) => lines.some((line) => line.includes('Did the task.')),
-      Duration.seconds(20),
     )
     return { projectId: project, taskId: task.taskId, threadId: task.threadId, said: said.join('\n') }
   })

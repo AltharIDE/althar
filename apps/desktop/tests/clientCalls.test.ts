@@ -3,6 +3,7 @@ import { Api, ApiError, type DomMessagePort, emitterPort, type PlanStep, serverP
 import { Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '@althar/testing'
 
 import { type Client, connect, newProjectId } from '../src/renderer/data/client'
 
@@ -148,7 +149,7 @@ describe('what the client sends', () => {
     const { client, heard } = await standIn()
     const events: Array<WatchEvent> = []
     const unwatch = client.watch((event) => events.push(event))
-    for (let tries = 0; tries < 250 && events.length === 0; tries += 1) await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitFor(() => events.length)
     unwatch()
     expect(heard.find((one) => one.tag === 'Watch')?.payload).toEqual({})
     expect(events[0]).toMatchObject({ _tag: 'Changed', cursor: 7 })

@@ -143,7 +143,7 @@ describe('a file’s lines', () => {
       return <div data-testid="lines">{lines?.[0] ?? 'plain'}</div>
     }
     render(<Coloured />)
-    await waitFor(() => expect(screen.getByText('const')).toHaveStyle({ color: 'var(--syn-keyword)' }), { timeout: 10_000 })
+    await waitFor(() => expect(screen.getByText('const')).toHaveStyle({ color: 'var(--syn-keyword)' }))
     expect(screen.getByText('20')).toHaveStyle({ color: 'var(--syn-string)' })
     expect(screen.getByText(/a minute/)).toHaveStyle({ fontStyle: 'italic' })
   })

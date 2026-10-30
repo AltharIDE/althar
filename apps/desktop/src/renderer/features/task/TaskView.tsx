@@ -53,6 +53,7 @@ import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { stepText, trackFor } from '../../shared/steps'
+import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
@@ -211,6 +212,9 @@ export const statusOf = (
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
   if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
     return { status: TaskStatus.Yours, state: text.finished }
+  // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
+  if (phase === 'ready' && inMergeQueue(snapshot.task.changes))
+    return { status: TaskStatus.Running, state: stepText.now[MERGE_QUEUE_STEP] ?? text.ready }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Kept for later: out of Needs you as it is, until the person writes to it or settles it.

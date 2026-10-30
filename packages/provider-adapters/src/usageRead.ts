@@ -65,7 +65,6 @@ export interface UsagePolicy {
   readonly fetch?: Fetch
   readonly readFile?: (home: string, location: TokenLocation) => Promise<string | null>
   readonly keychain?: KeychainRead
-  readonly now?: () => Date
   /** In ms. */
   readonly timeout?: number
 }
@@ -93,9 +92,10 @@ const retryAfter = (value: string | null | undefined, now: number): number | und
 export interface UsageReader {
   /**
    * One account's windows from the registry's source `sourceId`, which must
-   * be one of the sources of the account's own (agent, provider) plan pair.
+   * be one of the sources of the account's own (agent, provider) plan pair,
+   * at the time `now` gives: the caller's clock (Effect's, in the runtime).
    */
-  readonly read: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
+  readonly read: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
 }
 
 /** A reader with its own memory of when each account was last asked and what it said (windows only, never a token). */
@@ -103,7 +103,6 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
   const pairs = policy.pairs ?? usagePairs
   const fetcher: Fetch = policy.fetch ?? ((url, init) => fetch(url, init))
   const readFile = policy.readFile ?? readTokenField
-  const now = policy.now ?? (() => new Date())
   const allowed = policy.allowed ?? allowedEndpoints
   const timeout = policy.timeout ?? 10_000
   const memory = new Map<string, { usage?: AccountUsage; notBefore: number; strikes: number }>()
@@ -119,7 +118,7 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
           (found) => found ?? readFile(account.home, { file: '.credentials.json', path: path ?? token.path }),
         )
 
-  const run = async (source: EndpointSource, account: UsageAccount, key: string): Promise<EndpointRead> => {
+  const run = async (source: EndpointSource, account: UsageAccount, key: string, now: () => Date): Promise<EndpointRead> => {
     const before = memory.get(key)
     const at = now().getTime()
     // Within the interval, or waiting as the provider asked: the last windows, not another call.
@@ -189,7 +188,7 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
     }
   }
 
-  const read: UsageReader['read'] = async (sourceId, account) => {
+  const read: UsageReader['read'] = async (sourceId, account, now) => {
     // The source is the registry's, for this account's own pair: a caller names it, and cannot supply one.
     const source = pairs
       .filter((pair) => pair.agent === account.agent && pair.provider === account.provider && pair.pays === 'plan')
@@ -201,7 +200,7 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
     const key = `${source.id}\n${join(account.home)}`
     const going = inflight.get(key)
     if (going !== undefined) return going
-    const started = run(source, account, key).finally(() => inflight.delete(key))
+    const started = run(source, account, key, now).finally(() => inflight.delete(key))
     inflight.set(key, started)
     return started
   }

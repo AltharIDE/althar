@@ -518,6 +518,8 @@ export enum ChangeState {
   /** Every check passed; waiting for you to accept it. */
   Ready = 'ready',
   Merged = 'merged',
+  /** Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass. */
+  Queued = 'queued',
   /** Ended on its branch, with no pull request: it merges on this Mac when you accept it. */
   Branch = 'branch',
 }
