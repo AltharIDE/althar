@@ -22,10 +22,10 @@ const failed = (stderr: string, ended: Partial<Pick<GitFailed, 'code' | 'signal'
 
 /** What the person reads for a push that failed so: its reason, its sentence, and the Details under it. */
 const pushed = (git: GitFailed) => {
-  const known = pushFailureOf(git)
-  const error =
-    known === null ? git : new PushRefused({ taskId: 'task', remote: 'origin/fix-it', host: 'GitLab', detail: pushDetailOf(git), ...known })
-  return { why: known?.why ?? null, ...words(error, String) }
+  // As Changes' refusal makes it: one none of the patterns names is `failed`, its sentence safe and all git said under Details.
+  const known = pushFailureOf(git) ?? { why: 'failed' as const }
+  const error = new PushRefused({ taskId: 'task', remote: 'origin/fix-it', host: 'GitLab', detail: pushDetailOf(git), ...known })
+  return { why: known.why, ...words(error, String) }
 }
 
 describe('a push that failed', () => {
@@ -38,7 +38,7 @@ describe('a push that failed', () => {
     assert.strictEqual(why, 'denied')
     assert.strictEqual(
       message,
-      'GitLab didn’t accept your sign-in, so nothing was pushed. Connect GitLab to push with Althar’s, or sign git in to GitLab from a terminal, then try again.',
+      'GitLab didn’t accept your sign-in, so nothing was pushed. Sign git in to GitLab from a terminal, then try again.',
     )
     assert.include(detail, 'Authentication failed for')
     assert.include(detail, 'Exit code 128.')
@@ -122,11 +122,18 @@ describe('a push that failed', () => {
     assert.notInclude(message, '8ac5a185')
   })
 
-  it('says how git ended where it said nothing else, never the command line', () => {
-    assert.deepInclude(pushed(failed('', { code: 1 })), { why: null, message: 'git push failed with code 1, without saying why.' })
-    assert.deepInclude(pushed(failed('', { signal: 'SIGKILL' })), {
-      why: null,
-      message: 'git push was stopped (SIGKILL) before it was done. Try again.',
+  it('says one it can’t name in a sentence of its own, with all git said and how it ended under Details, never the command line', () => {
+    const unknown = 'Althar couldn’t push to GitLab. What git said is under Details.'
+    assert.deepInclude(pushed(failed('', { code: 1 })), { why: 'failed', message: unknown, detail: 'Exit code 1.' })
+    assert.deepInclude(pushed(failed('', { signal: 'SIGKILL' })), { why: 'failed', message: unknown, detail: 'Stopped by SIGKILL.' })
+    // One line of git's own, kept whole under Details rather than in the sentence.
+    const certificate =
+      "fatal: unable to access 'https://gitlab.example.com/acme/engine.git/': SSL certificate problem: self-signed certificate"
+    assert.deepInclude(pushed(failed(certificate)), { why: 'failed', message: unknown, detail: `${certificate}\nExit code 128.` })
+    // Several lines, stopped by a signal: the signal is kept too.
+    assert.deepInclude(pushed(failed('Enumerating objects: 5, done.\nerror: unexpected disconnect', { signal: 'SIGKILL' })), {
+      why: 'failed',
+      detail: 'Enumerating objects: 5, done.\nerror: unexpected disconnect\nStopped by SIGKILL.',
     })
     assert.deepInclude(pushed(failed('', { timedOut: true, timeout: 10_000 })), { why: 'unanswered' })
   })
@@ -145,6 +152,9 @@ describe('a git command that fails', () => {
       assert.deepInclude(quiet, { stderr: '', code: 3 })
       assert.notProperty(quiet, 'timedOut')
       assert.strictEqual(words(quiet, String).message, 'git quiet failed with code 3, without saying why.')
+      // What it said, if only a line, stays whole under Details with how it ended.
+      const loud = yield* Effect.flip(gitWithin(10_000, repository(), '-c', 'alias.loud=!echo no way >&2; exit 2', 'loud'))
+      assert.deepInclude(words(loud, String), { message: "git loud didn't work: no way.", detail: 'no way\nExit code 2.' })
     }),
   )
 

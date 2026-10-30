@@ -284,11 +284,13 @@ describe('merging a task here', () => {
       // Merged, but following nothing: nowhere to push it, and nothing said of a push.
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
       assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join(' '), 'Pushed')
-      // Following a remote that isn't there any more: git's own failure, not a guess at why.
+      // Following a remote that isn't there any more: git's own words under Details, not a guess at why.
       git(root, 'remote', 'add', 'origin', join(tmpdir(), `althar-gone-${Date.now()}`))
       git(root, 'config', 'branch.main.remote', 'origin')
       git(root, 'config', 'branch.main.merge', 'refs/heads/main')
-      assert.strictEqual(((yield* Effect.flip(changes.pushHere(task.taskId))) as { _tag?: string })._tag, 'GitFailed')
+      const gone = yield* Effect.flip(changes.pushHere(task.taskId))
+      assert.deepInclude(gone, { _tag: 'PushRefused', why: 'failed' })
+      assert.include(words(gone, String).detail ?? '', 'does not appear to be a git repository')
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -727,15 +727,15 @@ describe('a task', () => {
   })
 
   describe('a push of its branch that failed', () => {
-    const failing = (why: string, message: string, detail: string) => {
+    const failing = (why: string, message: string, detail: string, { phase = 'ready' as const, connected = false } = {}) => {
       const base = thread({ session: null })
       return fakeClient({
         getThread: vi.fn(async () => ({
           ...base,
-          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected: false },
+          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected },
           task: {
             ...base.task,
-            phase: 'ready' as const,
+            phase: phase as 'ready' | 'running',
             commits: 1,
             here: [
               {
@@ -771,8 +771,62 @@ describe('a task', () => {
       expect(alert.textContent).toContain("fatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'")
       await userEvent.click(within(alert).getByRole('button', { name: 'Hide details' }))
       expect(alert.textContent).not.toContain('Authentication failed')
+      expect(alert.textContent).toContain('Or open a pull request with Althar’s sign-in:')
       await userEvent.click(within(alert).getByRole('button', { name: 'Connect GitLab' }))
       expect(await screen.findByRole('complementary', { name: 'Connect GitLab' })).toBeTruthy()
+    })
+
+    it('once GitLab is connected, opens a pull request with Althar’s sign-in in place of the push that failed', async () => {
+      withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', '', { connected: true }))
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      expect(await outputs.findByRole('button', { name: 'Open a pull request' })).toBeTruthy()
+      expect(outputs.queryByRole('button', { name: 'Push the branch to origin' })).toBeNull()
+    })
+
+    it('says how to sign git in, with no Connect, where connecting wouldn’t change the push: a branch still being worked on', async () => {
+      const message = 'GitLab didn’t accept your sign-in, so nothing was pushed. Sign git in to GitLab from a terminal, then try again.'
+      withServices(<Task />, failing('denied', message, 'fatal: Authentication failed', { phase: 'running' as 'ready' }))
+      // Under way, Outputs is a tab away.
+      await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+      const alert = await (await pushIn()).findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain(message))
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+    })
+
+    it('says how to sign git in, with no Connect, for a push of what merged here', async () => {
+      const message = 'GitLab didn’t accept your sign-in, so nothing was pushed. Sign git in to GitLab from a terminal, then try again.'
+      const base = thread({ session: null })
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => ({
+          ...base,
+          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected: false },
+          task: {
+            ...base.task,
+            phase: 'settled' as const,
+            merged: [{ repository: 'engine', name: 'engine', branch: 'main', remote: 'origin/main', ahead: 1 }],
+          },
+        })),
+        pushHere: vi.fn(async () =>
+          Promise.reject(new ApiError({ reason: 'PushRefused', message, why: 'denied', detail: 'fatal: Authentication failed' })),
+        ),
+      })
+      withServices(<Task />, client)
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      await userEvent.click(outputs.getByRole('button', { name: 'Push main to origin' }))
+      const alert = await outputs.findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain(message))
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      expect(within(alert).getByRole('button', { name: 'Details' })).toBeTruthy()
+    })
+
+    it('says one it can’t name in a sentence of its own, with git’s words only under Details', async () => {
+      const said = "fatal: unable to access 'https://gitlab.example.com/acme/engine.git/': SSL certificate problem\nExit code 128."
+      withServices(<Task />, failing('failed', 'Althar couldn’t push to GitLab. What git said is under Details.', said))
+      const alert = await (await pushIn()).findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain('Althar couldn’t push to GitLab. What git said is under Details.'))
+      expect(alert.textContent).not.toContain('SSL certificate')
+      await userEvent.click(within(alert).getByRole('button', { name: 'Details' }))
+      expect(alert.textContent).toContain('SSL certificate problem')
     })
 
     it('offers trying again where GitLab couldn’t be reached', async () => {

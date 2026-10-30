@@ -6,7 +6,7 @@ import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
-import { secondsOf } from './pushFailure'
+import { pushDetailOf, secondsOf } from './pushFailure'
 import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
@@ -245,8 +245,10 @@ export const words = (
           return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
         if (why === 'unanswered')
           return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+        if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
+        // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
         if (host !== '')
-          return `${host} didn’t accept your sign-in, so nothing was pushed. Connect ${host} to push with Althar’s, or sign git in to ${host} from a terminal, then try again.`
+          return `${host} didn’t accept your sign-in, so nothing was pushed. Sign git in to ${host} from a terminal, then try again.`
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }
       case 'CantMerge': {
@@ -313,10 +315,21 @@ export const words = (
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
   if (reason === 'PushRefused')
     return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
-  // A git failure that said more than its last line keeps it all, for a quiet Details under that line.
+  // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
   if (reason === 'GitFailed') {
-    const said = text(error, 'stderr').trim()
-    return { reason, message, ...(said.split('\n').filter((line) => line.trim() !== '').length > 1 ? { detail: said } : {}) }
+    const code = fieldOf(error, 'code')
+    const timeout = fieldOf(error, 'timeout')
+    const detail =
+      text(error, 'stderr').trim() === ''
+        ? ''
+        : pushDetailOf({
+            stderr: text(error, 'stderr'),
+            ...(typeof code === 'number' ? { code } : {}),
+            ...(text(error, 'signal') === '' ? {} : { signal: text(error, 'signal') }),
+            ...(fieldOf(error, 'timedOut') === true ? { timedOut: true } : {}),
+            ...(typeof timeout === 'number' ? { timeout } : {}),
+          })
+    return { reason, message, ...(detail === '' ? {} : { detail }) }
   }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }

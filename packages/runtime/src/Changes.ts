@@ -2422,11 +2422,11 @@ export class Changes extends Context.Service<
 
       /**
        * Why a push failed, in its words where git's output says (pushFailure.ts), with all it said kept
-       * for Details: else git's own failure. `host` names the code host the remote is on, where known.
+       * for Details. `host` names the code host the remote is on, where known.
        */
-      const refusal = (taskId: string, remote: string, failed: GitFailed, host?: string): Effect.Effect<never, GitFailed | PushRefused> => {
-        const known = pushFailureOf(failed)
-        if (known === null) return Effect.fail(failed)
+      const refusal = (taskId: string, remote: string, failed: GitFailed, host?: string): Effect.Effect<never, PushRefused> => {
+        // One none of these names still says it in a sentence of its own, and keeps all git said, and how it ended, for Details.
+        const known = pushFailureOf(failed) ?? { why: 'failed' as const }
         return Effect.fail(
           new PushRefused({
             taskId,
@@ -2639,11 +2639,10 @@ export class Changes extends Context.Service<
                           ? `${remote} didn't take the person's sign-in, so ${tag} wasn't pushed. Tell the person.`
                           : refused.why === 'refused'
                             ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
-                            : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
+                            : refused.why === 'failed'
+                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
-                    ),
-                    Effect.catchTag('GitFailed', (other) =>
-                      Effect.succeed(`Pushing ${tag} failed: ${other.stderr.trim().split('\n').at(-1) ?? ''}`),
                     ),
                   ),
             ),

@@ -177,14 +177,15 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  * there (`forbidden`), the branch is protected (`protected`), the host
  * couldn't be reached (`unreachable`), it got no answer in time, as while
  * git waits for a sign-in no one can give (`unanswered`), or the remote
- * itself said no, as a hook does (`refused`, with what it said). Replacing a
+ * itself said no, as a hook does (`refused`, with what it said), or git
+ * failed in a way none of these says (`failed`, all it said in `detail`). Replacing a
  * pull request's commits also stops where the pull request moved on from
  * the head the person saw (`moved`), and where the project's rules never
  * allow a force push (`never`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'moved', 'never']),
+  why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'failed', 'moved', 'never']),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
   /** What the remote said, for one it refused: its one line. */

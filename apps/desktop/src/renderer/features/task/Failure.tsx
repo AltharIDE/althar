@@ -13,6 +13,7 @@ import s from './Task.module.css'
  */
 
 export const failureText = {
+  instead: 'Or open a pull request with Althar’s sign-in:',
   connect: (host: string) => `Connect ${host}`,
   retry: 'Try again',
   details: 'Details',
@@ -28,15 +29,19 @@ export function Failure({
 }: {
   message: string
   more: ErrorMore | null
-  /** The project's code host, and whether Althar is connected to it: connecting is the way out of a sign-in git's own push couldn't give. */
+  /** The project's code host, and whether Althar is connected to it. */
   host: { readonly name: string; readonly connected: boolean } | null
-  onConnect: () => void
+  /**
+   * Connects the host, where that is a way out of a sign-in git's own push couldn't give: only where connecting has Althar
+   * open a pull request with its own sign-in in place of that push. Without, the sentence says how to sign git in.
+   */
+  onConnect?: (() => void) | undefined
   /** Does again what failed, where trying again may be all it takes: a host that couldn't be reached, or didn't answer. */
   onRetry?: (() => void) | undefined
 }) {
   const [open, setOpen] = useState(false)
   const why = more?.why ?? null
-  const connect = (why === 'denied' || why === 'unanswered') && host !== null && !host.connected
+  const connect = (why === 'denied' || why === 'unanswered') && host !== null && !host.connected && onConnect !== undefined
   const retry = (why === 'unreachable' || why === 'unanswered') && onRetry !== undefined
   const detail = more?.detail ?? null
   return (
@@ -45,6 +50,7 @@ export function Failure({
       {connect && (
         <>
           {' '}
+          {failureText.instead}{' '}
           <Button size="small" onClick={onConnect}>
             {failureText.connect(host.name)}
           </Button>
