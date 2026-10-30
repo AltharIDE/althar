@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent, fakeAgentMain, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
@@ -259,7 +259,7 @@ describe('the models each agent offers', () => {
       const models = yield* Models
       const sql = yield* SqlClient.SqlClient
       yield* models.catalog
-      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing), Duration.seconds(20))
+      const [asked] = yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       assert.strictEqual(asked?.models.length, 2)
       const processes = yield* sql<{
         purpose: string

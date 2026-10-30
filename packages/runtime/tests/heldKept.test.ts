@@ -1,6 +1,6 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -83,7 +83,7 @@ const attempts = (taskId: string) =>
 /** The task's latest step, once it is held for this reason. */
 const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
   Effect.map(
-    until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === reason, Duration.seconds(15)),
+    until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === reason),
     (rows) => rows.at(-1) ?? { id: '', step: '', state: '', holdReason: null, output: null },
   )
 
@@ -93,9 +93,9 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
  */
 const reviewBehind = (projectId: ProjectId, taskId: string) =>
   Effect.gen(function* () {
-    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
     const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
-    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
     return { other, review: yield* heldFor(taskId, 'machine_busy') }
   })
 
@@ -107,7 +107,6 @@ const readyIs = (projectId: string, taskId: string) =>
       return board.tasks.filter((task) => task.taskId === taskId && task.phase === 'ready')
     }),
     (rows) => rows.length === 1,
-    Duration.seconds(30),
   )
 
 const ranOn = (threadId: string) =>

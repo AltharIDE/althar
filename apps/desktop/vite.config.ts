@@ -2,6 +2,7 @@ import { join } from 'node:path'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 const pages = join(import.meta.dirname, 'src/renderer')
 
@@ -27,10 +28,12 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: { input: { index: join(pages, 'index.html'), edge: join(pages, 'edge.html') } },
   },
   test: {
+    ...testing('medium'),
     root: '.',
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
-    setupFiles: ['tests/setup.ts'],
+    // The shared setup (@althar/testing), then this package's own.
+    setupFiles: ['@althar/testing/setup', 'tests/setup.ts'],
     coverage: {
       include: ['src/renderer/**/*.{ts,tsx}'],
       // The entry and the routes wire the app together; what they use is tested on its own, and the whole in the end-to-end tests.

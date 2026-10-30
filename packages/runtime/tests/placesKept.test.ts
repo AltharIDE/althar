@@ -1,6 +1,6 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -84,7 +84,7 @@ const attempts = (taskId: string) =>
 /** The task's latest step, once it waits for a place. */
 const waitingStep = (taskId: string) =>
   Effect.map(
-    until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === 'machine_busy', Duration.seconds(15)),
+    until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === 'machine_busy'),
     (rows) => rows.at(-1) ?? { id: '', step: '', state: '', holdReason: null, output: null },
   )
 
@@ -94,9 +94,9 @@ const waitingStep = (taskId: string) =>
  */
 const reviewBehind = (projectId: ProjectId, taskId: string) =>
   Effect.gen(function* () {
-    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
     const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
-    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
     return { other, review: yield* waitingStep(taskId) }
   })
 
@@ -119,7 +119,6 @@ const readyIs = (projectId: string, taskId: string) =>
   until(
     Effect.map(phaseOf(projectId, taskId), (phase) => (phase === 'ready' ? [phase] : [])),
     (rows) => rows.length === 1,
-    Duration.seconds(30),
   )
 
 describe('a step an earlier Althar kept waiting for a place as the person resumed it', () => {
@@ -191,10 +190,10 @@ describe('a step whose usage limit resets while every place is taken', () => {
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
       const task = yield* started(projectId, 'Out', 'Do it. [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
       // Held for its reset, it takes no place: another task's lead takes the one there is.
       const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
-      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
       // At its reset, there is no place: it waits for one.
       yield* waitingStep(task.taskId)
       // The place frees: it carries on, on Claude Code.
@@ -209,53 +208,48 @@ describe('a step whose usage limit resets while every place is taken', () => {
 })
 
 describe('a review that waited for a place while its reviewer fell nearly out', () => {
-  it.live(
-    'goes by the project’s rule, as a review starting at once would: held until the reset, where it waits',
-    () => {
-      const back = outUntilSoon()
-      return Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* Sessions
-        const policies = yield* Policies
-        const instance = yield* Instance
-        const projectId = yield* opened
-        yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-        const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
-          { key: 'implement', agentId: 'claude-code' },
-          { key: 'review', agentId: 'codex' },
-        ])
-        // Its review waits for a place behind another task, kept as an earlier Althar kept a review after its lead's.
-        const { other, review } = yield* reviewBehind(projectId, task.taskId)
-        assert.strictEqual(review.step, 'review')
-        yield* keptAs(review.id, review.output, { how: 'next', reviewer: { key: 'review', agentId: 'codex', model: null, skipped: false } })
-        // Meanwhile Codex falls to 3%.
-        const [codex] = yield* (yield* Accounts).of('codex')
-        const resetsAt = new Date(Math.ceil((Date.now() + 3_600_000) / 1000) * 1000).toISOString()
-        yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
-          accountId: codex?.id ?? '',
-          agentId: 'codex',
-          source: 'agent',
-          plan: null,
-          windows: JSON.stringify([{ kind: 'five_hour', usedPercent: 97, resetsAt }]),
-          observedAt: new Date().toISOString(),
-        })}`
-        // The other task finishes: the place frees, and the review is held for Codex's reset, as the project waits.
-        yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
-        const held = (yield* until(
-          attempts(task.taskId),
-          (rows) =>
-            rows.at(-1)?.holdReason === 'usage_limit' && (JSON.parse(rows.at(-1)?.output ?? '{}') as { until?: string }).until === resetsAt,
-          Duration.seconds(15),
-        )).at(-1)
-        assert.strictEqual(held?.step, 'review')
-        const notices = yield* sql<{ title: string }>`
+  it.live('goes by the project’s rule, as a review starting at once would: held until the reset, where it waits', () => {
+    const back = outUntilSoon()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const projectId = yield* opened
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex' },
+      ])
+      // Its review waits for a place behind another task, kept as an earlier Althar kept a review after its lead's.
+      const { other, review } = yield* reviewBehind(projectId, task.taskId)
+      assert.strictEqual(review.step, 'review')
+      yield* keptAs(review.id, review.output, { how: 'next', reviewer: { key: 'review', agentId: 'codex', model: null, skipped: false } })
+      // Meanwhile Codex falls to 3%.
+      const [codex] = yield* (yield* Accounts).of('codex')
+      const resetsAt = new Date(Math.ceil((Date.now() + 3_600_000) / 1000) * 1000).toISOString()
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: codex?.id ?? '',
+        agentId: 'codex',
+        source: 'agent',
+        plan: null,
+        windows: JSON.stringify([{ kind: 'five_hour', usedPercent: 97, resetsAt }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      // The other task finishes: the place frees, and the review is held for Codex's reset, as the project waits.
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
+      const held = (yield* until(
+        attempts(task.taskId),
+        (rows) =>
+          rows.at(-1)?.holdReason === 'usage_limit' && (JSON.parse(rows.at(-1)?.output ?? '{}') as { until?: string }).until === resetsAt,
+      )).at(-1)
+      assert.strictEqual(held?.step, 'review')
+      const notices = yield* sql<{ title: string }>`
         SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
-        assert.include(
-          notices.map((row) => row.title),
-          `Fake codex has 3% of its five-hour limit left, so the review waits until ${whenWords(resetsAt)}. To carry on now, pick another model on the task.`,
-        )
-      }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
-    },
-    40_000,
-  )
+      assert.include(
+        notices.map((row) => row.title),
+        `Fake codex has 3% of its five-hour limit left, so the review waits until ${whenWords(resetsAt)}. To carry on now, pick another model on the task.`,
+      )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
+  })
 })

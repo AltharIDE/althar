@@ -121,7 +121,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(inTurn(threadId), (turn) => [turn]),
         ([turn]) => turn === false,
-        Duration.seconds(20),
       )
       yield* Effect.sleep(Duration.millis(1200))
       const [during] = yield* rounds(taskId)
@@ -234,7 +233,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
         ([seen]) => seen?.phase === 'running' && seen.step === 'conflict' && !seen.turn,
-        Duration.seconds(20),
       )
       // Pushed, it waits for the checks on what Althar pushed: ready for the person to accept once they pass.
       yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
@@ -252,7 +250,6 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* until(
         Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
         ([seen]) => seen?.phase === 'running' && seen.step === 'checks' && !seen.turn,
-        Duration.seconds(20),
       )
       yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
       assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })

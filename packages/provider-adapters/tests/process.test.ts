@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { assert, beforeAll, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
+import { until } from '@althar/testing/effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
@@ -34,18 +35,22 @@ const isAlive = (pid: number) => {
 }
 
 /** Whether a process is gone within a second: one Althar did not start is reaped by the OS, in its own time. */
+/** Waits until the process is gone (@althar/testing), and says it is. */
 const goneSoon = (pid: number) =>
-  Effect.gen(function* () {
-    for (let waited = 0; isAlive(pid) && waited < 1_000; waited += 25) yield* Effect.sleep('25 millis')
-    return !isAlive(pid)
-  })
+  Effect.map(
+    until(
+      Effect.sync(() => isAlive(pid)),
+      (alive) => !alive,
+    ),
+    (alive) => !alive,
+  )
 
 describe('the process transport', () => {
   // On Windows the first process spawned builds the keeper it runs under with the .NET compiler, once for the machine,
   // which takes seconds; built first, so each test times only its own work.
   beforeAll(async () => {
     if (windows) await Effect.runPromise(keeper())
-  }, 60_000)
+  })
 
   it.live('runs a turn with the agent as a process it owns, and records what it started', () =>
     Effect.scoped(
@@ -136,21 +141,17 @@ describe('the process transport', () => {
     }),
   )
 
-  it.live(
-    'keeps what a process printed though it exited before it was read, every time',
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          for (let n = 0; n < 20; n += 1) {
-            const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
-            assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
-            const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
-            assert.strictEqual(printed, 'done\n')
-          }
-        }),
-      ),
-    // Twenty Nodes started one after another: a quarter of a second each on Windows' runner fills the usual five.
-    20_000,
+  it.live('keeps what a process printed though it exited before it was read, every time', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (let n = 0; n < 20; n += 1) {
+          const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
+          assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
+          const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+          assert.strictEqual(printed, 'done\n')
+        }
+      }),
+    ),
   )
 
   it.live.skipIf(windows)('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>
@@ -164,7 +165,10 @@ describe('the process transport', () => {
       )
       const temp = owned.temp ?? ''
       assert.match(temp, /althar-agent-/)
-      for (let waited = 0; !existsSync(join(temp, 'unpacked')) && waited < 2_000; waited += 25) yield* Effect.sleep('25 millis')
+      yield* until(
+        Effect.sync(() => existsSync(join(temp, 'unpacked'))),
+        Boolean,
+      )
       assert.strictEqual(owned.stderrTail().trim(), `${temp} ${temp} ${temp}`)
       yield* Scope.close(scope, Exit.void)
       assert.isFalse(existsSync(temp))
@@ -263,7 +267,10 @@ describe('the process transport', () => {
       const reader = owned.stdout.getReader()
       const said = new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value)
       reader.releaseLock()
-      for (let waited = 0; owned.stderrTail() === '' && waited < 2_000; waited += 25) yield* Effect.sleep('25 millis')
+      yield* until(
+        Effect.sync(() => owned.stderrTail()),
+        (tail) => tail !== '',
+      )
       const started = Number(owned.stderrTail().trim())
       assert.strictEqual(said, 'none')
       assert.isTrue(isAlive(started))

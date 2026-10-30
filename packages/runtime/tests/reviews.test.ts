@@ -375,7 +375,6 @@ describe('reviewing someone else’s pull request', () => {
         yield* until(
           Effect.map(sessions.running(threadId), (running) => [running]),
           ([running]) => running !== undefined && Option.isSome(running),
-          Duration.seconds(20),
         )
         const told: Array<string> = []
         yield* Effect.forkChild(
@@ -451,7 +450,6 @@ describe('reviewing someone else’s pull request', () => {
         const [onBoard] = yield* until(
           Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.filter((one) => one.taskId === task?.id)),
           (cards) => cards[0]?.phase === 'ready',
-          Duration.seconds(20),
         )
         assert.deepInclude(onBoard, { kind: 'review' })
         // The person is told it waits for them, outside the window too.
@@ -525,7 +523,6 @@ describe('reviewing someone else’s pull request', () => {
         yield* until(
           Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
           (gone) => gone.length === 1,
-          Duration.seconds(10),
         )
         assert.deepInclude(yield* reviewBriefOf(task?.id ?? ''), {
           verdict: 'changes',
@@ -569,7 +566,6 @@ describe('reviewing someone else’s pull request', () => {
       const turnOver = until(
         Effect.map(sessions.running(threadId), (running) => [running]),
         ([running]) => running !== undefined && !Option.exists(running, (session) => session.turnRunning),
-        Duration.seconds(20),
       )
       // What the window does as the person writes to it; then its lead's answer, and its turn over.
       const write = (body: string) =>
@@ -577,7 +573,7 @@ describe('reviewing someone else’s pull request', () => {
           const before = (yield* said(threadId)).length
           yield* tasks.bringBack(taskId)
           yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
-          yield* until(said(threadId), (all) => all.length > before, Duration.seconds(20))
+          yield* until(said(threadId), (all) => all.length > before)
           yield* turnOver
         })
       const posted = () =>
@@ -589,7 +585,7 @@ describe('reviewing someone else’s pull request', () => {
         })
 
       // Its lead reads the pull request first, once its plan starts, then drafts.
-      yield* until(said(threadId), (all) => all.length > 0, Duration.seconds(20))
+      yield* until(said(threadId), (all) => all.length > 0)
       yield* turnOver
       yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'Looks fine.' })
       yield* posted()
@@ -903,11 +899,10 @@ describe('reviewing someone else’s pull request', () => {
       const task = yield* until(
         Effect.map(reviewTask(projectId), ({ task }) => (task === undefined ? [] : [task])),
         (all) => all.length > 0,
-        Duration.seconds(20),
       )
       // Its thread opens with what the person said; its lead drafts from the change it reads.
       assert.strictEqual(task[0]?.request, body)
-      const [card] = yield* until(cardsIn(task[0]?.threadId ?? ''), (all) => all.length > 0, Duration.seconds(20))
+      const [card] = yield* until(cardsIn(task[0]?.threadId ?? ''), (all) => all.length > 0)
       assert.deepInclude(card, { suggested: 'changes', verdict: 'changes', drafter: 'Fake claude-code' })
       assert.deepStrictEqual(
         card?.comments.map((comment) => [comment.path, comment.line, comment.severity]),
@@ -923,7 +918,6 @@ describe('reviewing someone else’s pull request', () => {
           Option.exists(running, (session) => !session.turnRunning) ? [true] : [],
         ),
         (done) => done.length > 0,
-        Duration.seconds(20),
       )
       // What Althar does as a turn ends, done.
       yield* Effect.sleep('1 second')
@@ -1706,7 +1700,6 @@ describe('a review’s plan', () => {
       yield* until(
         Effect.map(sessions.running(threadId), (running) => [running]),
         ([running]) => running !== undefined && Option.isSome(running),
-        Duration.seconds(20),
       )
       assert.strictEqual(Option.getOrNull(Option.map(yield* sessions.running(threadId), (running) => running.agentId)), 'opencode')
       assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).phase, 'running')

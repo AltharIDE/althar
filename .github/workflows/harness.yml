@@ -17,11 +17,18 @@ on:
         'package.json',
         'bun.lock',
         'vite.config.ts',
+        'packages/testing/**',
+        '.github/actions/flaky/**',
         '.github/workflows/harness.yml',
       ]
 
 permissions:
   contents: read
+  issues: write
+
+# Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
   group: harness-${{ github.ref }}
@@ -41,6 +48,7 @@ jobs:
             packages/domain,
             packages/persistence-sqlite,
             packages/provider-adapters,
+            packages/testing,
             apps/cli,
           ]
     defaults:
@@ -58,6 +66,9 @@ jobs:
         working-directory: .
       - run: bun run check
       - run: bun run test
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   # The runtime's tests in four parts by file (vitest's --shard), each its own job: as one they took most of a quarter
   # of an hour, and often more.
@@ -85,6 +96,9 @@ jobs:
         working-directory: .
       - run: bun run check
       - run: bun run test --shard=${{ matrix.shard }}
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
 
   # The runtime's parts as the one check they were before, under its name: passes only when every part did.
   runtime-verified:

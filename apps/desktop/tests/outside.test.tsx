@@ -433,7 +433,7 @@ describe('connections', () => {
     // Asked again, a little apart, until it is let in.
     expect(await screen.findByRole('heading', { name: 'Connected as you' }, { timeout: 6000 })).toBeTruthy()
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('says how a browser sign-in ended, starts it again once, and cancels one left for another way', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
@@ -456,7 +456,7 @@ describe('connections', () => {
     expect(await screen.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     expect(client.cancelSignIn).toHaveBeenCalledWith('flow1')
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('drops what answers late for a way, a token or a sign-in left behind, and goes on once a server answers', async () => {
     /** A call answered when the test says, in the order it was made. */
@@ -553,7 +553,7 @@ describe('connections', () => {
     expect(await within(panel).findByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
     expect(closed).not.toHaveBeenCalled()
     open.mockRestore()
-  }, 20_000)
+  })
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({

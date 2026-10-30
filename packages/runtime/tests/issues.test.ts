@@ -129,7 +129,7 @@ describe('an issue', () => {
       const cards = Effect.map(queries.coordinator(projectId), (snapshot) =>
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
-      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready')
       // With the connection it is read through, which its project's settings say Althar's standing on.
       assert.deepInclude(ready?.issue, { product: 'linear', key: 'MER-231', connectionId: linearConnection.id })
       assert.strictEqual(ready?.branch, 'althar/mer-231-rate-limit-refunds')
@@ -181,7 +181,7 @@ describe('an issue', () => {
       assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'In Review')
       // Merged on the host, the task settles, and the card to close its issue as done is in the coordinator's thread.
       github.mergeByHand(1)
-      const [done] = yield* until(changesIn(threadId), (all) => all.length > 0, Duration.seconds(20))
+      const [done] = yield* until(changesIn(threadId), (all) => all.length > 0)
       assert.match(done?.note ?? '', /: PR #1 merged\.$/)
       assert.deepStrictEqual(done?.issues[0]?.changes, [{ field: 'close', to: null }])
       yield* (yield* IssueChanges).apply(done?.changesId ?? '', instance.personId)
@@ -217,7 +217,7 @@ describe('an issue', () => {
       const cards = Effect.map((yield* Queries).coordinator(projectId), (snapshot) =>
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
-      yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change != null, Duration.seconds(20))
+      yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change != null)
       assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
       assert.deepStrictEqual(fake.linksOn('MER-231'), [])
       assert.notInclude(fake.calls, 'link')
@@ -238,7 +238,7 @@ describe('an issue', () => {
       yield* Effect.sleep(Duration.millis(200))
       assert.notInclude(tracker.calls, 'start')
       yield* start
-      yield* until(outcomes(taskId), (rows) => rows.length > 0, Duration.seconds(20))
+      yield* until(outcomes(taskId), (rows) => rows.length > 0)
       assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'started')
       assert.deepStrictEqual(yield* notices(threadId), ['Moved MER-231 to In Progress'])
       // Started again, as by a later plan, it is left to the person.
@@ -260,7 +260,7 @@ describe('an issue', () => {
       yield* connect('linear')
       const { projectId, taskId, threadId, slug, start } = yield* fromIssue(working)
       yield* start
-      const [failed] = yield* until(outcomes(taskId), (rows) => rows.length > 0, Duration.seconds(20))
+      const [failed] = yield* until(outcomes(taskId), (rows) => rows.length > 0)
       assert.strictEqual(failed?.type, 'external_link.issue_start_failed')
       assert.deepStrictEqual(yield* notices(threadId), ['Couldn’t move MER-231 to In Progress: The fake start failed (forbidden)'])
       const access: ToolAccess = { role: 'coordinator', projectId, threadId: '', sessionId: 'none', taskId: null }
@@ -271,7 +271,7 @@ describe('an issue', () => {
       assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'todo')
       // Its step finishes as it would have: nothing waits on the issue.
       const results = Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'step_result'))
-      yield* until(results, (rows) => rows.length > 0, Duration.seconds(20))
+      yield* until(results, (rows) => rows.length > 0)
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 
