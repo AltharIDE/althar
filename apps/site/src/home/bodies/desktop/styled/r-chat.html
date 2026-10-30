@@ -1,7 +1,692 @@
 <style>
-.r-chat { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; background: #0e0b09; font: 500 15px Inter, system-ui, sans-serif; color: rgba(255, 248, 240, 0.6); }
+.r-chat {
+  --ink: #efebe4;
+  --ink2: #a39d93;
+  --ink3: #6f695f;
+  --cob: #2b3bff;
+  --cob-l: #8a95ff;
+  --cob-xl: #c3c8ff;
+  --warm: #e39c4a;
+  --green: #62c47e;
+  --rose: #e0796a;
+  --hair: rgba(255, 240, 215, 0.075);
+  --hair2: rgba(255, 240, 215, 0.12);
+  --chip: rgba(255, 240, 215, 0.055);
+  --mk: rgba(240, 236, 229, 0.9);
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --fs-body: max(11px, 1.42cqw);
+  --fs-meta: max(10px, 1.12cqw);
+  --fs-mono: max(10px, 1.1cqw);
+  --av: max(18px, 2.45cqw);
+  --pad: max(12px, 1.9cqw);
+  --gap: max(9px, 1.45cqw);
+  --r: max(10px, 1.45cqw);
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  background: #0e0b09;
+}
+.r-chat * { box-sizing: border-box; }
+.r-chat svg { display: block; }
+
+/* The ground: warm near-black, a little warm light, and cobalt behind the thread. */
+.r-chat .r-chat__ground {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 60% at 50% 46%, rgba(255, 226, 196, 0.04), transparent 70%),
+    radial-gradient(ellipse 95% 90% at 50% 45%, #18130f 0%, #110d0b 55%, #0e0b09 100%);
+}
+.r-chat .r-chat__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 238, 220, 0.14) 0.6px, transparent 1.15px);
+  background-size: 2.4cqw 2.4cqw;
+  background-position: 50% 0.5cqw;
+  -webkit-mask-image: radial-gradient(ellipse 58% 70% at 50% 50%, #000 20%, rgba(0, 0, 0, 0.4) 60%, transparent 85%);
+  mask-image: radial-gradient(ellipse 58% 70% at 50% 50%, #000 20%, rgba(0, 0, 0, 0.4) 60%, transparent 85%);
+  opacity: 0.55;
+}
+.r-chat .r-chat__bloom {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 92cqw;
+  height: 62cqw;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(52, 70, 255, 0.3), rgba(98, 70, 245, 0.1) 55%, transparent);
+  pointer-events: none;
+}
+.r-chat .r-chat__bloom--you {
+  top: 84%;
+  width: 76cqw;
+  height: 30cqw;
+  background: radial-gradient(closest-side, rgba(52, 70, 255, 0.34), rgba(52, 70, 255, 0.07) 60%, transparent);
+  opacity: 0;
+  transition: opacity 0.9s cubic-bezier(0.22, 0.61, 0.24, 1);
+}
+.r-chat[data-you='1'] .r-chat__bloom--you { opacity: 1; }
+
+/* The thread. */
+.r-chat .r-chat__panel {
+  position: absolute;
+  left: 50%;
+  top: 4.4cqw;
+  bottom: 4.4cqw;
+  width: max(58cqw, 400px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r);
+  background: linear-gradient(180deg, #1e1a17 0%, #181512 55%, #151210 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 2.4cqw 5cqw -1.2cqw rgba(0, 0, 0, 0.85), 0 0.3cqw 0.6cqw rgba(0, 0, 0, 0.35);
+}
+.r-chat .r-chat__panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(196, 202, 255, 0.3), rgba(255, 244, 232, 0.07) 30%, rgba(255, 244, 232, 0.035) 70%, rgba(150, 160, 255, 0.12));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+
+/* Who is in it: two agents, and you. */
+.r-chat .r-chat__head {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: max(6px, 0.7cqw);
+  padding: max(9px, 1.2cqw) var(--pad);
+  border-bottom: 1px solid var(--hair);
+}
+.r-chat .r-chat__p {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: max(6px, 0.6cqw);
+  padding: max(3px, 0.3cqw) max(9px, 0.95cqw) max(3px, 0.3cqw) max(3px, 0.3cqw);
+  border-radius: 99px;
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink2);
+  white-space: nowrap;
+  transition: box-shadow 0.3s cubic-bezier(0.22, 0.61, 0.24, 1), color 0.3s, background 0.3s;
+}
+.r-chat .r-chat__pav {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: max(16px, 1.9cqw);
+  height: max(16px, 1.9cqw);
+  border-radius: 50%;
+  background: #2b2723;
+}
+.r-chat .r-chat__pav svg { width: 58%; height: 58%; fill: var(--mk); fill-rule: evenodd; }
+.r-chat .r-chat__p--you .r-chat__pav { background: linear-gradient(160deg, #4a443c, #2c2823); }
+.r-chat .r-chat__p--you .r-chat__pav svg { width: 66%; height: 66%; fill: none; stroke: var(--ink); stroke-width: 1.9; stroke-linecap: round; opacity: 0.85; }
+/* presence: a small dot on the avatar, cobalt while that one is writing */
+.r-chat .r-chat__pav::after {
+  content: '';
+  position: absolute;
+  right: -8%;
+  bottom: -8%;
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background: #4a453e;
+  box-shadow: 0 0 0 max(1.5px, 0.16cqw) #1b1815;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.r-chat .r-chat__p[data-on='1'] {
+  color: var(--ink);
+  background: rgba(70, 86, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(138, 149, 255, 0.42), 0 0 1.6cqw rgba(43, 59, 255, 0.28);
+}
+.r-chat .r-chat__p[data-on='1'] .r-chat__pav::after { background: var(--cob-l); box-shadow: 0 0 0 max(1.5px, 0.16cqw) #1b1815, 0 0 0.6cqw rgba(138, 149, 255, 0.9); }
+
+/* The conversation: newest at the bottom, older ones scroll up under a fade. */
+.r-chat .r-chat__view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(transparent, #000 max(14px, 2.2cqw));
+  mask-image: linear-gradient(transparent, #000 max(14px, 2.2cqw));
+}
+.r-chat .r-chat__item {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  top: 0;
+  padding-top: var(--gap);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.r-chat .r-chat__round {
+  display: flex;
+  align-items: center;
+  gap: max(8px, 1cqw);
+  padding-top: calc(var(--gap) * 1.25);
+  padding-bottom: max(2px, 0.25cqw);
+  font: 500 var(--fs-mono)/1 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--ink3);
+}
+.r-chat .r-chat__round::before,
+.r-chat .r-chat__round::after { content: ''; flex: 1; height: 1px; background: var(--hair); }
+
+.r-chat .r-chat__msg {
+  display: grid;
+  grid-template-columns: var(--av) 1fr;
+  column-gap: max(8px, 1.05cqw);
+}
+.r-chat .r-chat__av {
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  width: var(--av);
+  height: var(--av);
+  border-radius: 28%;
+  background: linear-gradient(180deg, #2e2a25, #25221e);
+  box-shadow: inset 0 0 0 1px var(--hair2);
+  transition: box-shadow 0.3s;
+}
+.r-chat .r-chat__av svg { width: 58%; height: 58%; fill: var(--mk); fill-rule: evenodd; }
+.r-chat .r-chat__msg[data-typing='1'] .r-chat__av { box-shadow: inset 0 0 0 1px rgba(138, 149, 255, 0.55), 0 0 1.4cqw rgba(43, 59, 255, 0.35); }
+.r-chat .r-chat__who {
+  display: flex;
+  align-items: center;
+  gap: max(6px, 0.6cqw);
+  height: var(--av);
+  white-space: nowrap;
+}
+.r-chat .r-chat__who b { font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.01em; }
+.r-chat .r-chat__who span { font-size: var(--fs-meta); color: var(--ink3); }
+.r-chat .r-chat__slot { position: relative; }
+.r-chat .r-chat__typing {
+  position: absolute;
+  left: 0;
+  top: max(3px, 0.35cqw);
+  display: inline-flex;
+  gap: max(3px, 0.32cqw);
+  padding: max(7px, 0.75cqw) max(9px, 0.95cqw);
+  border-radius: 99px;
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  opacity: 0;
+}
+.r-chat .r-chat__typing i {
+  display: block;
+  width: max(4px, 0.46cqw);
+  height: max(4px, 0.46cqw);
+  border-radius: 50%;
+  background: var(--cob-xl);
+}
+.r-chat .r-chat__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: max(5px, 0.5cqw) max(5px, 0.55cqw);
+  padding-top: max(2px, 0.2cqw);
+  font-size: var(--fs-body);
+  line-height: 1.45;
+  color: var(--ink);
+  opacity: 0;
+}
+.r-chat .r-chat__body > span { margin-right: max(2px, 0.2cqw); }
+
+.r-chat .r-chat__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: max(3px, 0.32cqw) max(7px, 0.7cqw);
+  border-radius: max(6px, 0.6cqw);
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.r-chat .r-chat__chip--file { font-family: var(--mono); font-size: var(--fs-mono); }
+.r-chat .r-chat__chip--file svg { width: 1.15em; height: 1.15em; fill: none; stroke: var(--ink2); stroke-width: 1.6; stroke-linejoin: round; }
+.r-chat .r-chat__add { color: var(--green); }
+.r-chat .r-chat__del { color: var(--rose); margin-left: -0.15em; }
+.r-chat .r-chat__find { position: relative; padding-left: calc(max(7px, 0.7cqw) + 1.1em); transition: color 0.35s; }
+.r-chat .r-chat__find::before {
+  content: '';
+  position: absolute;
+  left: max(7px, 0.7cqw);
+  top: 50%;
+  width: 0.5em;
+  height: 0.5em;
+  margin: -0.25em 0 0 0.15em;
+  border-radius: 50%;
+  background: var(--warm);
+  box-shadow: 0 0 0.5em rgba(227, 156, 74, 0.45);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.r-chat .r-chat__find svg {
+  position: absolute;
+  left: max(6px, 0.6cqw);
+  top: 50%;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.5em;
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.3s, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.r-chat .r-chat__msg[data-fixed='1'] .r-chat__find { color: var(--ink2); }
+.r-chat .r-chat__msg[data-fixed='1'] .r-chat__find::before { opacity: 0; transform: scale(0.4); }
+.r-chat .r-chat__msg[data-fixed='1'] .r-chat__find svg { opacity: 1; transform: none; }
+.r-chat .r-chat__msg[data-fixed='1'] .r-chat__find:nth-of-type(2) svg { transition-delay: 0.12s; }
+
+/* What reaches you. */
+.r-chat .r-chat__pr {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  row-gap: max(5px, 0.55cqw);
+  column-gap: max(10px, 1.2cqw);
+  padding: max(10px, 1.2cqw) max(12px, 1.35cqw);
+  border-radius: max(9px, 1.05cqw);
+  background:
+    radial-gradient(90% 90% at 50% 0%, rgba(70, 86, 255, 0.16), rgba(70, 86, 255, 0) 70%),
+    linear-gradient(180deg, #221e1b, #1b1815);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 1.2cqw 2.4cqw -0.8cqw rgba(0, 0, 0, 0.8);
+}
+.r-chat .r-chat__pr::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(170, 178, 255, 0.7), rgba(118, 84, 246, 0.25) 50%, rgba(255, 244, 232, 0.07));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.r-chat .r-chat__prt {
+  display: flex;
+  align-items: center;
+  gap: max(6px, 0.6cqw);
+  min-width: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.r-chat .r-chat__prt svg { flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: var(--cob-xl); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.r-chat .r-chat__prt em { font: 500 var(--fs-mono)/1 var(--mono); font-style: normal; color: var(--ink3); letter-spacing: 0; }
+.r-chat .r-chat__ok {
+  display: flex;
+  align-items: center;
+  gap: max(6px, 0.55cqw);
+  font-size: var(--fs-meta);
+  color: var(--ink2);
+  white-space: nowrap;
+}
+.r-chat .r-chat__ok svg { width: 1.15em; height: 1.15em; fill: none; stroke: var(--green); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.r-chat .r-chat__ok b { font-weight: 500; color: var(--ink2); }
+.r-chat .r-chat__for {
+  justify-self: end;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--cob-xl);
+  white-space: nowrap;
+}
+.r-chat .r-chat__act { position: relative; justify-self: end; display: flex; }
+.r-chat .r-chat__accept {
+  position: relative;
+  padding: max(5px, 0.55cqw) max(12px, 1.3cqw);
+  border-radius: max(6px, 0.65cqw);
+  background: linear-gradient(180deg, #4150ff, var(--cob));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 1px rgba(20, 30, 200, 0.6);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
+  white-space: nowrap;
+}
+.r-chat .r-chat__glow {
+  position: absolute;
+  inset: -70% -35%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(52, 70, 255, 0.5), transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Your part: your own row under theirs, and nothing in it. */
+.r-chat .r-chat__comp {
+  position: relative;
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--av) 1fr;
+  align-items: center;
+  column-gap: max(8px, 1.05cqw);
+  margin: max(6px, 0.6cqw) var(--pad) var(--pad);
+}
+.r-chat .r-chat__me {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--av);
+  height: var(--av);
+  border-radius: 50%;
+  background: linear-gradient(160deg, #4a443c, #2c2823);
+  box-shadow: inset 0 0 0 1px var(--hair2);
+  transition: box-shadow 0.4s cubic-bezier(0.22, 0.61, 0.24, 1);
+}
+.r-chat .r-chat__me svg { width: 64%; height: 64%; fill: none; stroke: var(--ink); stroke-width: 1.9; stroke-linecap: round; opacity: 0.85; }
+.r-chat[data-you='1'] .r-chat__me { box-shadow: inset 0 0 0 1px rgba(170, 178, 255, 0.7), 0 0 0 max(2px, 0.25cqw) rgba(43, 59, 255, 0.35), 0 0 1.6cqw rgba(43, 59, 255, 0.5); }
+.r-chat .r-chat__box {
+  display: flex;
+  align-items: center;
+  gap: max(8px, 0.9cqw);
+  padding: max(8px, 0.9cqw) max(7px, 0.7cqw) max(8px, 0.9cqw) max(11px, 1.2cqw);
+  border-radius: max(10px, 1.1cqw);
+  background: #26221e;
+  box-shadow: inset 0 0 0 1px var(--hair2), 0 0.4cqw 1cqw rgba(0, 0, 0, 0.3);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+}
+.r-chat .r-chat__at {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--cob-xl);
+  padding: 0.05em 0.28em;
+  margin-left: -0.05em;
+  border-radius: 0.3em;
+  background: rgba(70, 86, 255, 0.13);
+  white-space: nowrap;
+}
+.r-chat .r-chat__nw { margin: 0; white-space: nowrap; }
+.r-chat .r-chat__field { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; color: var(--ink3); white-space: nowrap; }
+.r-chat .r-chat__caret {
+  flex: none;
+  width: max(1.5px, 0.14cqw);
+  height: 1.25em;
+  margin-right: 1px;
+  background: var(--ink);
+  border-radius: 1px;
+}
+.r-chat .r-chat__send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: max(22px, 2.5cqw);
+  height: max(22px, 2.5cqw);
+  border-radius: 50%;
+  background: rgba(255, 240, 215, 0.06);
+}
+.r-chat .r-chat__send svg { width: 52%; height: 52%; fill: none; stroke: var(--ink3); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Upright, on a phone: the thread fills the stage. */
+@container (max-width: 559px) {
+  .r-chat {
+    --fs-body: max(11px, 3.45cqw);
+    --fs-meta: max(10px, 2.95cqw);
+    --fs-mono: max(10px, 2.9cqw);
+    --av: max(20px, 6.6cqw);
+    --pad: max(12px, 4cqw);
+    --gap: max(9px, 3.3cqw);
+    --r: max(12px, 3.8cqw);
+  }
+  .r-chat .r-chat__panel { left: 5.5cqw; right: 5.5cqw; width: auto; transform: none; top: 8.5cqw; bottom: 8.5cqw; }
+  .r-chat .r-chat__head { gap: max(5px, 1.6cqw); padding: max(9px, 3cqw) var(--pad); }
+  .r-chat .r-chat__p { gap: max(5px, 1.5cqw); padding: max(3px, 0.8cqw) max(8px, 2.4cqw) max(3px, 0.8cqw) max(3px, 0.8cqw); }
+  .r-chat .r-chat__pav { width: max(16px, 5cqw); height: max(16px, 5cqw); }
+  .r-chat .r-chat__bloom { width: 150cqw; height: 150cqw; }
+  .r-chat .r-chat__bloom--you { top: 82%; width: 130cqw; height: 70cqw; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .r-chat *, .r-chat { transition: none !important; }
+}
 </style>
-<div class="r-chat" aria-hidden="true">This take is still being drawn.</div>
+<div class="r-chat" aria-hidden="true">
+  <div class="r-chat__ground"></div>
+  <div class="r-chat__dots"></div>
+  <div class="r-chat__bloom"></div>
+  <div class="r-chat__bloom r-chat__bloom--you"></div>
+  <div class="r-chat__panel">
+    <div class="r-chat__head">
+      <span class="r-chat__p" data-p="opus"><span class="r-chat__pav"><svg viewBox="0 0 24 24" data-mk="claude"><path /></svg></span>Opus 5.5</span>
+      <span class="r-chat__p" data-p="glm"><span class="r-chat__pav"><svg viewBox="0 0 24 24" data-mk="opencode"><path /></svg></span>GLM-5.3</span>
+      <span class="r-chat__p r-chat__p--you" data-p="you"><span class="r-chat__pav"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.6" /><path d="M5.2 20c1.1-3.5 3.7-5.4 6.8-5.4s5.7 1.9 6.8 5.4" /></svg></span>You</span>
+    </div>
+    <div class="r-chat__view">
+      <div class="r-chat__item r-chat__round" data-k="r1">Round 1</div>
+      <div class="r-chat__item r-chat__msg" data-k="m1" data-a="opus">
+        <span class="r-chat__av"><svg viewBox="0 0 24 24" data-mk="claude"><path /></svg></span>
+        <div class="r-chat__who"><b>Opus 5.5</b><span>Claude Code</span></div>
+        <div class="r-chat__slot">
+          <div class="r-chat__typing"><i></i><i></i><i></i></div>
+          <div class="r-chat__body"><span><em class="r-chat__at">@GLM-5.3</em> done, retries now honour <span class="r-chat__nw">Retry-After.</span></span><span class="r-chat__chip r-chat__chip--file"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></svg>retry.ts <span class="r-chat__add">+2</span><span class="r-chat__del">−1</span></span></div>
+        </div>
+      </div>
+      <div class="r-chat__item r-chat__msg" data-k="m2" data-a="glm">
+        <span class="r-chat__av"><svg viewBox="0 0 24 24" data-mk="opencode"><path /></svg></span>
+        <div class="r-chat__who"><b>GLM-5.3</b><span>OpenCode</span></div>
+        <div class="r-chat__slot">
+          <div class="r-chat__typing"><i></i><i></i><i></i></div>
+          <div class="r-chat__body"><span><em class="r-chat__at">@Opus 5.5</em> two things:</span><span class="r-chat__chip r-chat__find"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Retry-After may be a date</span><span class="r-chat__chip r-chat__find"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>No cap on the wait</span></div>
+        </div>
+      </div>
+      <div class="r-chat__item r-chat__round" data-k="r2">Round 2</div>
+      <div class="r-chat__item r-chat__msg" data-k="m3" data-a="opus">
+        <span class="r-chat__av"><svg viewBox="0 0 24 24" data-mk="claude"><path /></svg></span>
+        <div class="r-chat__who"><b>Opus 5.5</b><span>Claude Code</span></div>
+        <div class="r-chat__slot">
+          <div class="r-chat__typing"><i></i><i></i><i></i></div>
+          <div class="r-chat__body"><span><em class="r-chat__at">@GLM-5.3</em> good catches, fixed both.</span><span class="r-chat__chip r-chat__chip--file"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></svg>retry.ts <span class="r-chat__add">+3</span><span class="r-chat__del">−2</span></span></div>
+        </div>
+      </div>
+      <div class="r-chat__item r-chat__msg" data-k="m4" data-a="glm">
+        <span class="r-chat__av"><svg viewBox="0 0 24 24" data-mk="opencode"><path /></svg></span>
+        <div class="r-chat__who"><b>GLM-5.3</b><span>OpenCode</span></div>
+        <div class="r-chat__slot">
+          <div class="r-chat__typing"><i></i><i></i><i></i></div>
+          <div class="r-chat__body"><span><em class="r-chat__at">@Opus 5.5</em> clean. Nothing more from me.</span></div>
+        </div>
+      </div>
+      <div class="r-chat__item r-chat__card" data-k="pr">
+        <div class="r-chat__pr">
+          <span class="r-chat__prt"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2" /><circle cx="6" cy="18" r="2.2" /><circle cx="18" cy="18" r="2.2" /><path d="M6 8.2v7.6" /><path d="M18 15.8V10a3 3 0 0 0-3-3h-4" /><path d="M13 4.6L10.6 7 13 9.4" /></svg>Honour Retry-After <em>#1191</em></span>
+          <span class="r-chat__for">Ready for you</span>
+          <span class="r-chat__ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><b>Checks passed</b></span>
+          <span class="r-chat__act"><span class="r-chat__glow"></span><span class="r-chat__accept">Accept</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="r-chat__comp">
+      <span class="r-chat__me"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.6" /><path d="M5.2 20c1.1-3.5 3.7-5.4 6.8-5.4s5.7 1.9 6.8 5.4" /></svg></span>
+      <div class="r-chat__box">
+        <div class="r-chat__field"><span class="r-chat__caret"></span>Tell Opus 5.5 something</div>
+        <span class="r-chat__send"><svg viewBox="0 0 24 24"><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></svg></span>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
-;(() => {})()
+;(() => {
+  const root = document.currentScript.previousElementSibling
+  if (!root || !root.classList.contains('r-chat')) return
+  const MARKS = {
+    claude: 'M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z',
+    opencode: 'M16 6H8v12h8V6zm4 16H4V2h16v20z',
+  }
+  root.querySelectorAll('svg[data-mk]').forEach((s) => s.firstElementChild.setAttribute('d', MARKS[s.dataset.mk]))
+
+  // The script of the loop, in seconds: when each one starts writing, and when it says it.
+  const LOOP = 16
+  const BEATS = {
+    r1: { at: 0.3 },
+    m1: { type: 0.55, at: 1.4 },
+    m2: { type: 2.85, at: 3.75 },
+    r2: { at: 5.85 },
+    m3: { type: 6.05, at: 6.9 },
+    m4: { type: 8.35, at: 9.1 },
+    pr: { at: 10.3 },
+  }
+  const FIXED = 7.4 // the two findings tick over once the fix lands
+  const OUT = 15.2 // the thread clears for the next loop
+  const STILL = 13 // the whole story: both rounds, the pull request with you, your composer empty
+
+  const view = root.querySelector('.r-chat__view')
+  const items = Array.from(root.querySelectorAll('.r-chat__item')).map((el) => {
+    const k = el.dataset.k
+    const typing = el.querySelector('.r-chat__typing')
+    return {
+      el,
+      k,
+      b: BEATS[k],
+      a: el.dataset.a,
+      typing,
+      dots: typing ? Array.from(typing.children) : [],
+      body: el.querySelector('.r-chat__body'),
+      slot: el.querySelector('.r-chat__slot'),
+      full: 0,
+      typ: 0,
+    }
+  })
+  const m2 = items.find((it) => it.k === 'm2')
+  const chips = { opus: root.querySelector('[data-p="opus"]'), glm: root.querySelector('[data-p="glm"]'), you: root.querySelector('[data-p="you"]') }
+  const caret = root.querySelector('.r-chat__caret')
+  const glow = root.querySelector('.r-chat__glow')
+
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+  const out3 = (p) => 1 - Math.pow(1 - p, 3)
+  const ramp = (T, t0, dur) => out3(clamp((T - t0) / dur))
+  const put = (el, k, v) => { if (el.dataset[k] !== v) el.dataset[k] = v }
+
+  let U = 1
+  let viewH = 0
+  let ready = false
+  function measure() {
+    const w = root.clientWidth
+    if (!w) return false
+    U = w / 100
+    viewH = view.clientHeight
+    for (const it of items) {
+      it.full = it.el.offsetHeight
+      it.typ = it.typing ? it.slot.offsetTop + it.typing.offsetTop + it.typing.offsetHeight : 0
+    }
+    return true
+  }
+
+  function render(T) {
+    if (!ready) return
+    const clear = T >= OUT ? 1 - ramp(T, OUT, 0.6) : 1
+    // Heights first: each one grows into place, a typing line first, then what it says.
+    const hs = items.map((it) => {
+      const b = it.b
+      if (b.type !== undefined) {
+        if (T < b.type) return 0
+        if (T < b.at) return it.typ * ramp(T, b.type, 0.4)
+        return it.typ + (it.full - it.typ) * ramp(T, b.at, 0.45)
+      }
+      return T < b.at ? 0 : it.full * ramp(T, b.at, 0.45)
+    })
+    // Newest at the bottom, right above your own row; older ones climb away under the fade.
+    const total = hs.reduce((s, h) => s + h, 0)
+    let y = viewH - U * 0.5 - total
+    items.forEach((it, i) => {
+      const b = it.b
+      const t0 = b.type !== undefined ? b.type : b.at
+      const p = T < t0 ? 0 : ramp(T, t0, 0.4)
+      const rise = (1 - p) * U * 1.4
+      const sc = it.k === 'pr' ? 0.97 + 0.03 * p : 1
+      it.el.style.transform = `translate3d(0,${(y + rise).toFixed(2)}px,0)` + (sc < 1 ? ` scale(${sc.toFixed(4)})` : '')
+      it.el.style.opacity = (p * clear).toFixed(3)
+      y += hs[i]
+      if (it.typing) {
+        const writing = T >= b.type && T < b.at + 0.2
+        const tp = writing ? ramp(T, b.type, 0.25) * (1 - clamp((T - b.at) / 0.12)) : 0
+        it.typing.style.opacity = tp.toFixed(3)
+        if (tp > 0) {
+          it.dots.forEach((d, k) => {
+            const w = 0.5 + 0.5 * Math.sin(Math.PI * 2 * (T * 1.5 - k * 0.17))
+            d.style.opacity = (0.3 + 0.7 * w).toFixed(3)
+            d.style.transform = `translateY(${(-w * 32).toFixed(1)}%)`
+          })
+        }
+        const bp = T < b.at + 0.08 ? 0 : ramp(T, b.at + 0.08, 0.4)
+        it.body.style.opacity = bp.toFixed(3)
+        it.body.style.transform = `translateY(${((1 - bp) * U * 0.5).toFixed(2)}px)`
+        put(it.el, 'typing', T >= b.type && T < b.at ? '1' : '0')
+      }
+    })
+    put(m2.el, 'fixed', T >= FIXED && T < OUT + 0.3 ? '1' : '0')
+    // Who is writing lights up; you light up only when it reaches you.
+    for (const who of ['opus', 'glm']) {
+      const on = items.some((it) => it.a === who && T >= it.b.type && T < it.b.at)
+      put(chips[who], 'on', on ? '1' : '0')
+    }
+    const you = T >= BEATS.pr.at + 0.15 && T < OUT
+    put(chips.you, 'on', you ? '1' : '0')
+    put(root, 'you', you ? '1' : '0')
+    const breathe = mq.matches ? 1 : 0.5 + 0.5 * Math.sin((T - BEATS.pr.at) * 2.2)
+    glow.style.opacity = you ? ((0.5 + 0.4 * breathe) * clamp((T - BEATS.pr.at) / 0.6)).toFixed(3) : '0'
+    // Your caret, waiting the whole time.
+    caret.style.opacity = mq.matches || T % 1.1 < 0.6 ? '1' : '0'
+  }
+
+  // Loop control: only while on screen and the tab is visible.
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  let T = 0
+  let raf = 0
+  let last = 0
+  let onScreen = false
+  function frame(now) {
+    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0
+    last = now
+    T = (T + dt) % LOOP
+    render(T)
+    raf = requestAnimationFrame(frame)
+  }
+  function sync() {
+    const run = ready && onScreen && !document.hidden && !mq.matches
+    if (run && !raf) { last = 0; raf = requestAnimationFrame(frame) }
+    else if (!run && raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (ready && mq.matches) render(STILL)
+  }
+  function remeasure() {
+    ready = measure()
+    if (ready) render(mq.matches ? STILL : T)
+    sync()
+  }
+  new ResizeObserver(remeasure).observe(root)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(remeasure)
+  new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; sync() }).observe(root)
+  document.addEventListener('visibilitychange', sync)
+  if (mq.addEventListener) mq.addEventListener('change', sync)
+  root.addEventListener('rv-seek', (e) => { T = e.detail; render(T) })
+})()
 </script>
