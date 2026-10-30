@@ -51,12 +51,13 @@ test('going back to the home shows the home it kept, without the outline', async
     await expect(page.getByText('Ready', { exact: true }).first()).toBeVisible()
     await watchOutline(page)
 
-    // The home, the first time, with the runtime held: what it waits on was read ahead.
+    // The home, the first time, with the runtime held: read ahead, it shows at once, as it was read, and catches up with what
+    // waits once the runtime answers.
     let release = await holdRuntime(page)
     await toHome()
     await expect(projects).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Tidy the receipts', level: 4 })).toBeVisible()
     await release()
+    await expect(page.getByRole('heading', { name: 'Tidy the receipts', level: 4 })).toBeVisible()
     const kept = await projects.elementHandle()
 
     // A task, opened from the home: its address, to go back to it.

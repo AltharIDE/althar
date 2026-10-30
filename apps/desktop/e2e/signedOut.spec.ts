@@ -78,7 +78,8 @@ test('a step whose lead is signed out asks at once, with Sign in again first', a
   const { electronApp, page } = await opened()
   try {
     await startTask(page, 'Fix the heading', '[lead:signed-out]')
-    await page.getByRole('button', { name: /Open task/ }).click()
+    // Its card asks at once, Open task becoming Answer: pressed once it has, rather than whichever it is when looked at.
+    await page.getByRole('button', { name: /^Answer/ }).click()
     await toConversation(page)
     const thread = page.getByRole('region', { name: 'Thread' })
     const call = thread.getByRole('button', { name: 'Sign in again' })
