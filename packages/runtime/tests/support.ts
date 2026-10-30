@@ -87,6 +87,9 @@ export const launches: Array<{
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
+/** Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts. */
+export const fakeSandbox = { contains: false }
+
 export const definition = (
   id: string,
   signedOut: ReadonlyArray<string> = [],
@@ -138,6 +141,7 @@ export const definition = (
           sessionMetas.push({ role, options })
           return { fake: { asks: true } }
         },
+        contains: () => fakeSandbox.contains,
         upFront: true as const,
       }
     : {}),

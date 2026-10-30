@@ -2024,7 +2024,14 @@ export class Sessions extends Context.Service<
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-058): never a review's lead.
-                    ...(thread.role === 'coordinator' ? { trusted: true, reads: thread.folder.reads } : {}),
+                    ...(thread.role === 'coordinator'
+                      ? {
+                          trusted: true,
+                          reads: thread.folder.reads,
+                          // Held by a sandbox it never leaves (sessionMeta's `contained` below), what it writes stays in its copies.
+                          ...(definition.sessionMeta !== undefined && definition.contains?.() === true ? { contained: true } : {}),
+                        }
+                      : {}),
                   },
           }
           // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
@@ -2069,6 +2076,8 @@ export class Sessions extends Context.Service<
                 modeOptionId: definition.options.mode,
                 // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
                 ...heldFor(definition, reads),
+                // The coordinator's every turn is a reply the person reads: a refusal never starts one of its own (ADR-019).
+                ...(thread.role === 'coordinator' ? { refusals: 'withNext' as const } : {}),
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
@@ -2885,7 +2894,7 @@ export class Sessions extends Context.Service<
                 )
                 .join(
                   '\n',
-                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, what stays inside it runs too, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); write such a command plainly, without \`$?\` or \`eval\`, since one your agent can't read asks, and then only what only looks is allowed. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
+                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, what stays inside it runs too, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); write such a command plainly, without \`$?\` or \`eval\`, since one your agent can't read asks, and then only what only looks is allowed: a loop, an \`if\` or a variable you set runs then where every command in it only looks, or fetches a copy's \`origin\` where your sandbox holds it. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
           [
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
