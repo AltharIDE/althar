@@ -3,7 +3,6 @@ import { Home } from '@althar/ui/screens'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { TwoLabReview } from '../kit/app'
 import { Shot } from '../kit/Shot'
 import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
 import s from './Bento.module.css'
@@ -15,9 +14,9 @@ import workspaces from './styled/d-workspaces.html?raw'
 import worktrees from './styled/d-worktrees.html?raw'
 
 /*
- * What keeps you in flow: eight tiles on a six-column grid, each drawing at
- * least half its row. Three hold a piece of the app in its light (what
- * happened while you were away, home, a review); five hold a feature drawn
+ * What keeps you in flow: seven tiles on a six-column grid, each drawing at
+ * least half its row. Two hold a piece of the app in its light (what
+ * happened while you were away, and home across a whole row); five hold a feature drawn
  * as an interface lit by one light, dark or light (Althar fed by each of
  * your accounts in turn, automations, conflicts settled, tasks side by side
  * in worktrees of their own, workspaces bound to their projects).
@@ -83,7 +82,7 @@ interface Tile {
   title: ReactNode
   lead: string
   /** How many of the six columns it takes. */
-  span: 2 | 3 | 4
+  span: 2 | 3 | 4 | 6
   piece: (tone: Tone) => ReactNode
   /** Drawn, not a piece of the app: it stands whole in the middle of its tile. */
   drawn?: boolean
@@ -160,7 +159,7 @@ const TILES: Tile[] = [
   },
   {
     id: 'home',
-    span: 3,
+    span: 6,
     title: (
       <>
         One home <b>for everything.</b>
@@ -193,28 +192,6 @@ const TILES: Tile[] = [
     ),
   },
   {
-    id: 'change',
-    span: 3,
-    title: (
-      <>
-        Nothing reaches you <b>half done.</b>
-      </>
-    ),
-    lead: 'By the time you see it, it’s planned, built, reviewed by another lab, fixed, reviewed again, and open as a pull request with its checks run.',
-    piece: () => (
-      <Shot
-        w={740}
-        maxScale={1}
-        label="A review by Sonnet 5 and Gemini 3 Pro: three findings, two fixed by the lead, one waiting for your call"
-        frame={s.card}
-      >
-        <div className={s.pad}>
-          <TwoLabReview />
-        </div>
-      </Shot>
-    ),
-  },
-  {
     id: 'worktrees',
     span: 3,
     drawn: true,
@@ -242,7 +219,7 @@ const TILES: Tile[] = [
   },
 ]
 
-const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4 } as const
+const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4, 6: s.span6 } as const
 
 /** A drawing's tone: dark or light. Each tile has its own; ?tone=dark or ?tone=light shows every one in that tone, while the mix is chosen. */
 type Tone = 'dark' | 'light'

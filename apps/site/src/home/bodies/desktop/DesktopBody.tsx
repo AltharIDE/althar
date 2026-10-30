@@ -9,6 +9,7 @@ import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
 import { Bento } from './Bento'
 import s from './DesktopBody.module.css'
+import { Review } from './Review'
 
 /*
  * Desktop: the product, shown, after the first screen's "fast": first that
@@ -16,8 +17,8 @@ import s from './DesktopBody.module.css'
  * end the craft and the freedom of open source, by the download. One claim
  * a screen, in the first screen's type, each over a large picture of the
  * app drawn by its own components: the board at work on a panel as dark and
- * warm as the first screen's cabin, then the coordinator, a bento of what
- * keeps you in flow, and the notch. Pictures of the app framed as pictures,
+ * warm as the first screen's cabin, then the coordinator, the work reviewing
+ * itself, a bento of what keeps you in flow, and the notch. Pictures of the app framed as pictures,
  * so nothing looks like it is part of this page.
  */
 
@@ -32,11 +33,15 @@ function Scene({
   title: ReactNode
   lead: ReactNode
   children: ReactNode
-  /** A dark panel: ink, or warm as the first screen's cabin. */
-  tone?: 'ink' | 'cabin'
+  /** A dark panel: ink, warm as the first screen's cabin, or the warm near-black a lit drawing stands on. */
+  tone?: 'ink' | 'cabin' | 'lit'
 }) {
   return (
-    <section id={id} className={cx(s.scene, tone && s.ink, tone === 'cabin' && s.cabin)} aria-labelledby={`${id}-h`}>
+    <section
+      id={id}
+      className={cx(s.scene, tone && s.ink, tone === 'cabin' && s.cabin, tone === 'lit' && s.lit)}
+      aria-labelledby={`${id}-h`}
+    >
       {/* Dark under the nav: it turns to smoked glass with white words over it. */}
       {tone && <LightUnder tone="ink" className={s.under} />}
       <div className={s.head}>
@@ -82,6 +87,19 @@ export function DesktopBody() {
         lead="It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask."
       >
         <AskOnce />
+      </Scene>
+
+      <Scene
+        id="review"
+        tone="lit"
+        title={
+          <>
+            No more <b>meat proxying.</b>
+          </>
+        }
+        lead="Every change is reviewed by a model from another lab, fixed by its lead, and reviewed again until it’s clean. Better work, and you never paste one agent’s answer into another again."
+      >
+        <Review />
       </Scene>
 
       <Scene

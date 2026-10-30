@@ -20,6 +20,8 @@
 .ink > .under { top: 0; bottom: 0; }
 .ink .head h2 { color: #fff; }
 .ink .head p { color: rgba(255, 255, 255, 0.7); }
+/* Lit: the warm near-black a drawing lit by one light stands on, so the drawing has no edge. */
+.lit { background: #0e0b09; }
 /* The cabin: warm as the first screen, the sky's blue faint at its head and the fire's glow at its foot. */
 .cabin {
   overflow: hidden;
