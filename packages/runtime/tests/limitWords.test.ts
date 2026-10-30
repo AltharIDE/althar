@@ -20,10 +20,11 @@ const named = [{ definition: { id: 'codex', name: 'Codex' } }]
 
 describe('the words for an agent out of usage', () => {
   it('say when it is back, and that a step waits for it, without naming the step where none is given', () => {
-    const later = new Date(Date.now() + 3 * 60 * 60_000).toISOString()
-    assert.strictEqual(outWords({ from: 'Codex', resetsAt: later }), `Codex ran out of usage, until ${whenWords(later)}.`)
+    const now = Date.parse('2026-10-03T12:00:00')
+    const later = new Date(now + 3 * 60 * 60_000).toISOString()
+    assert.strictEqual(outWords({ from: 'Codex', resetsAt: later, now }), `Codex ran out of usage, until ${whenWords(later, now)}.`)
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, waits: 'step' }),
+      outWords({ from: 'Codex', resetsAt: null, now, waits: 'step' }),
       'Codex ran out of usage. The step waits until Codex is back. To carry on now, pick another model on the task.',
     )
   })

@@ -82,7 +82,7 @@ describe('the coordinator out of usage', () => {
       assert.deepStrictEqual(reply, { agentId: 'claude-code', accountId: work.id })
       assert.include(
         yield* said(threadId),
-        `Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code (work) takes over, on Small.`,
+        `Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code (work) takes over, on Small.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code@usual': { outOfUsage: { until: back } } })))
   })
@@ -174,7 +174,7 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       assert.deepInclude(JSON.parse(held?.output ?? '{}'), { heldFor: 'claude-code', account: null, why: 'asked' })
       assert.include(
         yield* said(task.threadId),
-        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}, when Fake claude-code is back, as you said.`,
+        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}, when Fake claude-code is back, as you said.`,
       )
       // At the reset, its lead carries on, on the agent's first account, and finishes.
       yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, (rows) => rows[0]?.state === 'succeeded')

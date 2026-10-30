@@ -1,6 +1,6 @@
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -231,7 +231,7 @@ export class Plans extends Context.Service<
             yield* Queue.take(wake)
             continue
           }
-          const wait = next.at - Date.now()
+          const wait = next.at - (yield* Clock.currentTimeMillis)
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(wait)))
             continue

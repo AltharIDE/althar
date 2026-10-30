@@ -148,7 +148,7 @@ describe('an agent out of usage', () => {
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'))
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(yield* said(task.threadId), [
-        `Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes the work over, on Large.`,
+        `Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes the work over, on Large.`,
         'implement: Did the task.',
         'The task ends on its branch.',
       ])
@@ -323,7 +323,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake opencode takes the review over.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
@@ -335,7 +335,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
@@ -382,7 +382,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes over.`,
+        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
@@ -487,7 +487,7 @@ describe('an agent out of usage, where the project asks', () => {
       assert.deepStrictEqual([held?.phase, held?.waits?.agentId, held?.waits?.until], ['running', 'claude-code', reset(back)])
       assert.include(
         yield* said(task.threadId),
-        `The work waits until ${whenWords(reset(back))}, when Fake claude-code is back, as you said.`,
+        `The work waits until ${whenWords(reset(back), Date.now())}, when Fake claude-code is back, as you said.`,
       )
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
@@ -885,36 +885,36 @@ describe('limits', () => {
   )
 
   it('say when an agent is back, and what its work does meanwhile', () => {
-    const now = new Date('2026-10-03T12:00:00')
+    const now = Date.parse('2026-10-03T12:00:00')
     const later = new Date('2026-10-03T15:40:00')
     const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(later)
     assert.strictEqual(whenWords(later.toISOString(), now), time)
     assert.match(whenWords(new Date('2026-10-05T09:00:00').toISOString(), now), /, /)
     assert.match(whenWords(new Date('2026-11-20T09:00:00').toISOString(), now), /20/)
-    assert.strictEqual(outWords({ from: 'Codex', resetsAt: null }), 'Codex ran out of usage.')
+    assert.strictEqual(outWords({ from: 'Codex', resetsAt: null, now }), 'Codex ran out of usage.')
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, step: 'review', waits: 'step' }),
+      outWords({ from: 'Codex', resetsAt: null, now, step: 'review', waits: 'step' }),
       'Codex ran out of usage during the review. The review waits until Codex is back. To carry on now, pick another model on the task.',
     )
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: later.toISOString(), step: 'implement', waits: 'step', nothingFree: true }),
-      `Codex ran out of usage while working on the task. No other model was free, so the work waits until ${whenWords(later.toISOString())}, when Codex is back. Pick one on the task to carry on now.`,
+      outWords({ from: 'Codex', resetsAt: later.toISOString(), now, step: 'implement', waits: 'step', nothingFree: true }),
+      `Codex ran out of usage while working on the task. No other model was free, so the work waits until ${whenWords(later.toISOString(), now)}, when Codex is back. Pick one on the task to carry on now.`,
     )
     // The fixes are many, so they wait.
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, step: 'settle', waits: 'step' }),
+      outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', waits: 'step' }),
       'Codex ran out of usage while fixing what the review found. The fixes wait until Codex is back. To carry on now, pick another model on the task.',
     )
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, step: 'settle', waits: 'step', nothingFree: true }),
+      outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', waits: 'step', nothingFree: true }),
       'Codex ran out of usage while fixing what the review found. No other model was free, so the fixes wait until Codex is back. Pick one on the task to carry on now.',
     )
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, step: 'settle', to: { agent: 'Claude Code', model: null } }),
+      outWords({ from: 'Codex', resetsAt: null, now, step: 'settle', to: { agent: 'Claude Code', model: null } }),
       'Codex ran out of usage while fixing what the review found. Claude Code takes the fixes over.',
     )
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, to: { agent: 'Claude Code', model: null } }),
+      outWords({ from: 'Codex', resetsAt: null, now, to: { agent: 'Claude Code', model: null } }),
       'Codex ran out of usage. Claude Code takes over.',
     )
   })

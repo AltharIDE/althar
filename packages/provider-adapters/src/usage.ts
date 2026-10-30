@@ -186,7 +186,8 @@ export interface ReadUsageOptions {
   readonly home?: Readonly<Record<string, string>>
   /** How long it waits, in ms. */
   readonly timeout?: number
-  readonly now?: () => Date
+  /** The time it is, which the windows' resets are read from: the caller's clock (Effect's, in the runtime). */
+  readonly now: () => Date
 }
 
 const FIFTEEN_SECONDS = 15_000
@@ -197,7 +198,7 @@ const FIFTEEN_SECONDS = 15_000
  * It reads no credential: the agent answers about its own sign-in. Codex's
  * app-server speaks JSON-RPC lines on stdio.
  */
-export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions = {}): Promise<UsageRead> =>
+export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions): Promise<UsageRead> =>
   new Promise((resolve) => {
     const usage = agent.usage
     if (usage === undefined) return resolve({ kind: 'failed', message: `${agent.name} has no usage channel.` })
@@ -218,6 +219,7 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
       if (child.exitCode === null) child.kill()
       resolve(read)
     }
+    // Node's own timer, outside any effect: the child's time to answer, which only the process it runs in can keep.
     const timer = setTimeout(
       () => end({ kind: 'failed', message: `${agent.name} didn’t answer in time.` }),
       options.timeout ?? FIFTEEN_SECONDS,
@@ -261,7 +263,7 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
       write({ jsonrpc: '2.0', method: 'initialized', params: {} })
       send('account/rateLimits/read', undefined, (result, failed) => {
         if (failed !== null) return end({ kind: 'failed', message: failed })
-        end(codexUsage(result, (options.now ?? (() => new Date()))()))
+        end(codexUsage(result, options.now()))
       })
     })
   })

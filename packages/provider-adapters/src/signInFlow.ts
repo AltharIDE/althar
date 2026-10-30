@@ -141,6 +141,7 @@ export const startSignInFlow = (
     if (event !== undefined) say(event)
     if (child.exitCode !== null) return
     if (grace === 0) child.kill()
+    // Node's own timers, outside any effect: the child's time to finish, which only the process it runs in can keep.
     else setTimeout(() => child.exitCode === null && child.kill(), grace).unref()
   }
   const timer = setTimeout(

@@ -7,7 +7,7 @@ import type { AutomationCard, AutomationDefinition } from '@althar/contracts'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -38,17 +38,41 @@ import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } fr
 
 const LONDON = 'Europe/London'
 
-/** A clock the test moves, and the automations read by it, looked at often, with no wait after waking and no stagger. */
+/**
+ * A clock the test moves, which the runtime reads (`on`): real time, put forward to where the test sets it, so what the
+ * runtime waits for meanwhile still comes. The automations read by it are looked at often, with no wait after waking and
+ * no stagger.
+ */
 const clockAt = (iso: string) => {
-  const now = { at: Date.parse(iso) }
+  let ahead = Date.parse(iso) - Date.now()
+  const now = () => Date.now() + ahead
+  const layer = Layer.effect(
+    Clock.Clock,
+    Clock.clockWith((live) =>
+      Effect.succeed<Clock.Clock>({
+        currentTimeMillisUnsafe: now,
+        currentTimeMillis: Effect.sync(now),
+        currentTimeNanosUnsafe: () => BigInt(now()) * 1_000_000n,
+        currentTimeNanos: Effect.sync(() => BigInt(now()) * 1_000_000n),
+        monotonicTimeNanosUnsafe: () => live.monotonicTimeNanosUnsafe(),
+        monotonicTimeNanos: live.monotonicTimeNanos,
+        sleep: (duration) => live.sleep(duration),
+      }),
+    ),
+  )
   const options: AutomationOptions = {
-    now: () => now.at,
     zone: () => LONDON,
     tick: Duration.millis(100),
     settle: Duration.zero,
     stagger: false,
   }
-  return { now, options, set: (to: string) => void (now.at = Date.parse(to)) }
+  return {
+    now,
+    options,
+    set: (to: string) => void (ahead = Date.parse(to) - Date.now()),
+    /** The runtime, and the test, on this clock. */
+    on: <A, E, R>(runtime: Layer.Layer<A, E, R>) => runtime.pipe(Layer.provideMerge(layer)),
+  }
 }
 
 /** Release notes every weekday at 9:00: a report, nothing outside this computer. */
@@ -181,7 +205,7 @@ describe('automations', () => {
       const queries = yield* Queries
       const card = (yield* queries.board(projectId)).tasks.find((one) => one.taskId === ran?.taskId)
       assert.deepStrictEqual(card?.automation, { id: automationId, name: 'Release notes' })
-    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options })))))
+    }).pipe(Effect.provide(clock.on(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options }))))))
   })
 
   it.live('run a slot the computer slept through once on waking, within its window, and miss one past it; never every slot', () => {
@@ -212,7 +236,7 @@ describe('automations', () => {
       clock.set('2026-10-23T09:30:00Z')
       const later = yield* until(occurrencesOf(automationId), (all) => all.length === 3)
       assert.deepInclude(later[2], { slot: '2026-10-23T09:00', state: 'missed' })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live('count no slot from before they were turned on, and run none while they are off', () => {
@@ -232,7 +256,7 @@ describe('automations', () => {
       assert.deepStrictEqual(yield* occurrencesOf(proposed), [])
       // Not on yet, it says when it would first run.
       assert.strictEqual((yield* automations.read(proposed)).nextAt, '2026-10-23T08:00:00.000Z')
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live('skip a slot while their last run still goes, or while every automation is paused; Run now still runs, once at a time', () => {
@@ -257,7 +281,7 @@ describe('automations', () => {
       assert.strictEqual((refused as AutomationRefused).message, 'Its last run was still going.')
 
       // Done with it, and every automation paused: Friday's is skipped, saying so; Run now runs it.
-      yield* sql`UPDATE automation_occurrences SET state = 'failed', ended_at = ${new Date().toISOString()}, reason = 'Stopped.' WHERE automation_id = ${automationId} AND state = 'running'`
+      yield* sql`UPDATE automation_occurrences SET state = 'failed', ended_at = ${new Date(clock.now()).toISOString()}, reason = 'Stopped.' WHERE automation_id = ${automationId} AND state = 'running'`
       yield* automations.setAllPaused(true)
       assert.isTrue(yield* automations.allPaused)
       assert.isNull((yield* automations.read(automationId)).nextAt)
@@ -270,7 +294,7 @@ describe('automations', () => {
       assert.match(now[3]?.slot ?? '', /^now:occ_/)
       yield* automations.setAllPaused(false)
       assert.isFalse(yield* automations.allPaused)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live('pause themselves after three failures in a row, saying why, and run again once turned back on', () => {
@@ -314,7 +338,7 @@ describe('automations', () => {
       assert.deepInclude(yield* automationRow(automationId), { state: 'on', pausedBy: null, pauseReason: null })
       clock.set('2026-10-23T08:00:05Z')
       yield* until(occurrencesOf(automationId), (rows) => rows.length === 4 && rows[3]?.state === 'made')
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live(
@@ -422,7 +446,7 @@ describe('automations', () => {
         yield* automations.remove(automationId, instance.personId)
         assert.strictEqual((yield* automations.list(projectId)).length, 0)
         assert.deepInclude((yield* cards)[0], { state: 'deleted' })
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options })))))
+      }).pipe(Effect.provide(clock.on(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options }))))))
     },
   )
 
@@ -438,7 +462,7 @@ describe('automations', () => {
       clock.set('2026-10-21T08:00:05Z')
       const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
       assert.deepInclude(skipped, { state: 'skipped', reason: 'Its agent pays per use, and automations run on a plan only for now.' })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] }))))
   })
 
   it.live('stop a run that has worked its minutes, which failed saying so', () => {
@@ -461,7 +485,7 @@ describe('automations', () => {
       )
       // Its turns, as if they had gone on for ten minutes.
       yield* sql`
-        UPDATE turn_deliveries SET delivered_at = ${new Date(Date.now() - 10 * 60_000).toISOString()}
+        UPDATE turn_deliveries SET delivered_at = ${new Date(clock.now() - 10 * 60_000).toISOString()}
         WHERE thread_id IN (SELECT id FROM threads WHERE task_id = ${running?.taskId ?? ''})`
       const [stopped] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'failed')
       assert.strictEqual(stopped?.reason, 'Stopped after 5 minutes of work.')
@@ -469,7 +493,7 @@ describe('automations', () => {
         sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${running?.taskId ?? ''}`,
         (rows) => rows[0]?.state === 'suspended',
       )
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live('start a run Althar stopped before its task was made, once it is back, and fail one whose automation is off by then', () => {
@@ -501,12 +525,12 @@ describe('automations', () => {
         yield* left(on, '2026-10-21T09:00')
         yield* left(off, 'now:occ_0')
         return { on, off }
-      }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
+      }).pipe(Effect.provide(clock.on(runtime(database, {}, { automations: clock.options }))))
       yield* Effect.gen(function* () {
         yield* until(occurrencesOf(made.on), (rows) => rows[0]?.state === 'made')
         const [failed] = yield* until(occurrencesOf(made.off), (rows) => rows[0]?.state === 'failed')
         assert.strictEqual(failed?.reason, 'Althar stopped before its task started.')
-      }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
+      }).pipe(Effect.provide(clock.on(runtime(database, {}, { automations: clock.options }))))
     })
   })
 
@@ -555,7 +579,7 @@ describe('automations', () => {
             ['made', '#1 Send back'],
           ],
         )
-      }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
+      }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) }))))
     },
   )
 
@@ -572,7 +596,7 @@ describe('automations', () => {
       clock.set('2026-10-21T08:00:05Z')
       const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
       assert.deepInclude(skipped, { state: 'skipped', reason: unsure })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, unsure: ['codex'] })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, unsure: ['codex'] }))))
   })
 
   it.live('keep a run on a plan when its account runs out: another agent on a plan takes it over, never the account paid per use', () => {
@@ -613,7 +637,9 @@ describe('automations', () => {
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, key.id)
     }).pipe(
       Effect.provide(
-        runtime(':memory:', {}, { automations: clock.options, each: { 'codex@usual': { outOfUsage: { until: back } } }, perUse: [work] }),
+        clock.on(
+          runtime(':memory:', {}, { automations: clock.options, each: { 'codex@usual': { outOfUsage: { until: back } } }, perUse: [work] }),
+        ),
       ),
     )
   })
@@ -636,7 +662,7 @@ describe('automations', () => {
       const rows = yield* occurrencesOf(automationId)
       assert.strictEqual(rows.length, 1)
       assert.strictEqual(rows[0]?.cause, 'now')
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options }))))
   })
 
   it.live('start a run’s plan Althar kept, held, but stopped before starting, once it is back: once', () => {
@@ -685,7 +711,7 @@ describe('automations', () => {
           here: true,
         })
         return created.taskId
-      }).pipe(Effect.provide(runtime(database, {}, { automations: { ...clock.options, tick: Duration.hours(1) } })))
+      }).pipe(Effect.provide(clock.on(runtime(database, {}, { automations: { ...clock.options, tick: Duration.hours(1) } }))))
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const [made] = yield* until(
@@ -698,7 +724,7 @@ describe('automations', () => {
           kept.map((plan) => plan.state),
           ['accepted'],
         )
-      }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
+      }).pipe(Effect.provide(clock.on(runtime(database, {}, { automations: clock.options }))))
     })
   })
 
@@ -722,7 +748,7 @@ describe('automations', () => {
       yield* automations.runNow(automationId, instance.personId)
       const now = yield* until(occurrencesOf(automationId), (all) => all.length === 3 && all[2]?.state !== 'starting')
       assert.deepInclude(now[2], { cause: 'now', state: 'nothing', reason: 'No new pull requests to review.' })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) }))))
   })
 
   it.live('end a review whose lead the person stopped from the composer, once nothing has come of it for as long as it may work', () => {
@@ -752,14 +778,14 @@ describe('automations', () => {
       assert.strictEqual((yield* occurrencesOf(automationId))[1]?.state, 'running')
       // Nothing said since, as if for ten minutes: its run is over, and failed.
       yield* sql`
-        UPDATE turn_deliveries SET ended_at = ${new Date(Date.now() - 10 * 60_000).toISOString()} WHERE thread_id = ${threadId}`
+        UPDATE turn_deliveries SET ended_at = ${new Date(clock.now() - 10 * 60_000).toISOString()} WHERE thread_id = ${threadId}`
       const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed')
       assert.strictEqual(stopped[1]?.reason, 'Its review was stopped before its lead drafted one.')
       // Run now isn't refused as if it still went.
       yield* automations.runNow(automationId, instance.personId)
       const now = yield* until(occurrencesOf(automationId), (all) => all.length === 3 && all[2]?.state !== 'starting')
       assert.deepInclude(now[2], { cause: 'now', state: 'nothing', reason: 'No new pull requests to review.' })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) }))))
   })
 
   it.live('read on past a listing that had more, to find the oldest a teammate opened; and say when it couldn’t read to the end', () => {
@@ -812,7 +838,9 @@ describe('automations', () => {
       )
       assert.match(view.runs[1]?.reason ?? '', short)
     }).pipe(
-      Effect.provide(runtime(':memory:', {}, { automations: { ...clock.options, listed: 2 }, connectors: fakeConnectors({ github }) })),
+      Effect.provide(
+        clock.on(runtime(':memory:', {}, { automations: { ...clock.options, listed: 2 }, connectors: fakeConnectors({ github }) })),
+      ),
     )
   })
 })
