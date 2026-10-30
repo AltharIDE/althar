@@ -1,4 +1,4 @@
-import { RELEASES, releaseUrl } from '../content/changelog'
+import { KIND_WORD as CHANGE_WORD, type Kind, RELEASES, releaseUrl, ROADMAP, type Stage, STAGE_WORD } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
@@ -17,8 +17,12 @@ import { urlOf } from './meta'
 /** The pages search may list, in the order the site's nav has them. */
 export const indexed = (): PageMeta[] => Object.values(PAGE_META).filter((page) => page.index)
 
-/** The pages also written as Markdown, and where: the thesis as THESIS.md has it, and the shifts as a list. */
-export const MARKDOWN: Partial<Record<PagePath, string>> = { '/shifts': '/shifts.md', '/thesis': '/thesis.md' }
+/** The pages also written as Markdown, and where: the thesis as THESIS.md has it, and the shifts and the releases as lists. */
+export const MARKDOWN: Partial<Record<PagePath, string>> = {
+  '/shifts': '/shifts.md',
+  '/changelog': '/changelog.md',
+  '/thesis': '/thesis.md',
+}
 
 export const robotsTxt = (origin: string): string =>
   [
@@ -38,8 +42,9 @@ export const robotsTxt = (origin: string): string =>
 
 const xml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
-/** The shifts change when a shift is added; the other pages carry no date we can stand behind. */
-const lastModified = (path: string): string | undefined => (path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : undefined)
+/** The shifts change when a shift is added, the changelog with each release; the other pages carry no date we can stand behind. */
+const lastModified = (path: string): string | undefined =>
+  path === '/shifts' ? newestFirst(SHIFTS)[0]?.date : path === '/changelog' ? RELEASES[0]?.date : undefined
 
 export const sitemapXml = (origin: string): string => {
   const urls = indexed().map((page) => {
@@ -109,7 +114,7 @@ export const llmsTxt = (origin: string): string => {
           '',
           ...latest.changes.filter((change) => change.kind === 'new').map((change) => `- ${change.text}`),
           '',
-          `Every release, back to the first: [GitHub Releases](${LINKS.releases}).`,
+          `Every release, back to the first: the [changelog](${urlOf(origin, '/changelog')}), or [GitHub Releases](${LINKS.releases}).`,
           '',
         ]
       : []),
@@ -150,6 +155,38 @@ export const shiftsMd = (origin: string, today: string): string => {
     `From ${urlOf(origin, page.path)}: ${SHIFTS.length} shifts, newest first, each with the day it happened and its source. We link the reporting; we don’t host it.`,
     ...months,
     ...(upcoming.length ? ['', `## Announced, not in effect yet (as of ${today})`, '', ...upcoming] : []),
+    '',
+  ].join('\n')
+}
+
+const KINDS: readonly Kind[] = ['new', 'improved', 'fixed']
+const STAGES: readonly Stage[] = ['now', 'next', 'later']
+
+/** The changelog as Markdown: every release, newest first, its lines by kind, then what's next. */
+export const changelogMd = (origin: string): string => {
+  const page = PAGE_META['/changelog']
+  const releases = RELEASES.flatMap((release) => [
+    '',
+    `## ${release.version} · ${release.title}`,
+    '',
+    `Released ${release.date}. [Release notes](${releaseUrl(release.version)})`,
+    ...KINDS.flatMap((kind) => {
+      const lines = release.changes.filter((change) => change.kind === kind)
+      return lines.length ? ['', `### ${CHANGE_WORD[kind]}`, '', ...lines.map((change) => `- ${change.text}`)] : []
+    }),
+  ])
+  const next = STAGES.flatMap((stage) => {
+    const planned = ROADMAP.filter((plan) => plan.stage === stage)
+    return planned.length ? ['', `### ${STAGE_WORD[stage]}`, '', ...planned.map((plan) => `- **${plan.title}.** ${plan.detail}`)] : []
+  })
+  return [
+    '# Changelog',
+    '',
+    `> ${page.description}`,
+    '',
+    `From ${urlOf(origin, page.path)}: ${RELEASES.length} releases, newest first, in the release notes’ own words. Downloads: [GitHub Releases](${LINKS.releases}).`,
+    ...releases,
+    ...(next.length ? ['', '## What’s next', '', `From the plans in the repository: ${LINKS.repo}/tree/main/docs/plans`, ...next] : []),
     '',
   ].join('\n')
 }

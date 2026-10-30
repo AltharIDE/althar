@@ -38,6 +38,14 @@ export const PAGE_META = {
     image: '/og/shifts.png',
     index: true,
   },
+  '/changelog': {
+    path: '/changelog',
+    name: 'Changelog',
+    title: 'Changelog · Althar',
+    description: 'What changed in Althar, release by release since the first, and what’s next.',
+    image: '/og/changelog.png',
+    index: true,
+  },
   '/thesis': {
     path: '/thesis',
     name: 'The Fourth Age of Software Engineering',
@@ -60,15 +68,6 @@ export const PAGE_META = {
     name: 'Docs',
     title: 'Docs · Althar',
     description: 'Althar’s documentation is being written. Until it’s published: the README, the thesis and the issues on GitHub.',
-    image: '/og/home.png',
-    index: false,
-  },
-  /** What changed, release by release, and what's next: kept out of search while its direction is chosen. */
-  '/changelog': {
-    path: '/changelog',
-    name: 'Changelog',
-    title: 'Changelog · Althar',
-    description: 'What changed in Althar, release by release, what has merged since the last one, and what’s next.',
     image: '/og/home.png',
     index: false,
   },
