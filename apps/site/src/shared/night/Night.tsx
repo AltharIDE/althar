@@ -1,9 +1,8 @@
-import { drawGrain } from '@althar/ui/opening'
-import { type ReactNode, useLayoutEffect, useRef } from 'react'
+import { type ReactNode, useRef } from 'react'
 
 import { addDisplay } from '../../home/display'
 import { cx } from '../../lib/cx'
-import { seeded } from '../footer/random'
+import { useGrain } from '../grain'
 import { LightUnder } from '../lightUnder'
 import s from './Night.module.css'
 
@@ -56,14 +55,7 @@ export function Readout({
 /** The window: its instruments along the top, then what the page puts in it, the planet's lit edge behind. */
 export function Window({ deck, className, children }: { deck: ReactNode; className?: string; children: ReactNode }) {
   const grain = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const tile = document.createElement('canvas')
-    tile.width = tile.height = 128
-    const context = tile.getContext('2d')
-    if (!context || !grain.current) return
-    drawGrain(context, 128, seeded(11))
-    grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
-  }, [])
+  useGrain(grain, 11)
   return (
     <header className={cx(s.window, className)}>
       <div className={s.sky} aria-hidden="true">

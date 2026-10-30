@@ -1,17 +1,16 @@
 import { CopyButton } from '@althar/ui'
-import { drawGrain } from '@althar/ui/opening'
-import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import { preload } from 'react-dom'
 
 import { AGENTS } from '../content/agents'
 import { INSTALL } from '../content/facts'
 import { HERO } from '../content/home'
-import { useHydrated } from '../lib/browser'
+import { askedSecond, useHydrated } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { AgentMark } from '../shared/AgentMark'
 import { Get } from '../shared/Close'
-import { seeded } from '../shared/footer/random'
 import { LightUnder } from '../shared/lightUnder'
+import { useGrain } from '../shared/grain'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
 import { type Fire, makeFire } from './hero/fire'
@@ -68,8 +67,8 @@ const WAIT = 1800
 
 /** The second to hold at, if any: `?t=`, or the last frame with reduced motion. */
 const heldAt = () => {
-  const t = Number(new URLSearchParams(window.location.search).get('t') ?? Number.NaN)
-  if (Number.isFinite(t)) return t
+  const t = askedSecond()
+  if (t !== null) return t
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? AT.settled : null
 }
 
@@ -211,14 +210,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   preload(skyUrl, { as: 'image' })
   preload(plasmaUrl, { as: 'image' })
 
-  useLayoutEffect(() => {
-    const tile = document.createElement('canvas')
-    tile.width = tile.height = 128
-    const context = tile.getContext('2d')
-    if (!context || !grain.current) return
-    drawGrain(context, 128, seeded(7))
-    grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
-  }, [])
+  useGrain(grain, 7)
 
   useEffect(() => {
     const el = root.current
@@ -369,7 +361,12 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
           settled = true
           rest()
         }
-      } else frame = requestAnimationFrame(tick)
+      } else if (seen) frame = requestAnimationFrame(tick)
+      else {
+        // Begun off screen (the page opened scrolled down): it waits at its first frame, and coming into view starts it.
+        pausedAt = 0
+        runs.forEach((run) => run.pause())
+      }
     }
     const waited = window.setTimeout(begin, WAIT)
     void Promise.all([picture(skyUrl), picture(plasmaUrl)]).then(
@@ -408,6 +405,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
         if (pausedAt !== null) start = performance.now() - pausedAt * 1000
         pausedAt = null
         runs.forEach((run) => run.play())
+        cancelAnimationFrame(frame)
         frame = requestAnimationFrame(tick)
       }
     })

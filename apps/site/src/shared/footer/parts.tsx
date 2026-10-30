@@ -2,6 +2,7 @@ import { Logo } from '@althar/ui'
 import { type RefObject, useEffect, useState } from 'react'
 
 import { LINKS } from '../../content/facts'
+import { askedSecond } from '../../lib/browser'
 import { cx } from '../../lib/cx'
 import { useDownload } from '../../lib/download'
 import s from './parts.module.css'
@@ -61,8 +62,7 @@ export function Links({ className }: { className?: string }) {
 }
 
 /** Whether to hold still: reduced motion, or a still picture asked for with ?t. */
-export const still = () =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')
+export const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || askedSecond() !== null
 
 /** Whether `ref` is on screen at all, for what draws on every frame only while it is seen. */
 export function useOnScreen(ref: RefObject<Element | null>) {

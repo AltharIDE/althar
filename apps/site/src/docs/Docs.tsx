@@ -3,6 +3,7 @@ import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
 import { Nav } from '../shared/Nav'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
+import { Out } from '../shared/Out'
 import s from './Docs.module.css'
 
 /*
@@ -17,12 +18,6 @@ const WAYS = [
   { href: '/thesis', name: 'The thesis', note: 'What Althar is for, and why', out: false },
   { href: LINKS.issues, name: 'Issues', note: 'Ask, or tell us what’s missing', out: true },
 ] as const
-
-const OUT = (
-  <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-    <path d="M3 1.5h5.5V7M8.5 1.5 1.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-  </svg>
-)
 
 export function Docs() {
   const latest = RELEASES[0]
@@ -58,7 +53,7 @@ export function Docs() {
                 <a href={way.href}>
                   <b>
                     {way.name}
-                    {way.out && OUT}
+                    {way.out && <Out size={10} />}
                   </b>
                   <span>{way.note}</span>
                 </a>

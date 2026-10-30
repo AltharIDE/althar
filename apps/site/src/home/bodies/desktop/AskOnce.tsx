@@ -1,6 +1,7 @@
 import { Composer, IssueDraft, IssueDraftState, Turn, WorkedFor, You } from '@althar/ui'
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import { askedSecond } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 
 import { Growing, Launch } from '../kit/app'
@@ -69,8 +70,7 @@ function usePlay(watched: boolean) {
   const [frame, setFrame] = useState(LAST)
   useEffect(() => {
     // Held still, it stays on its last frame, where it starts.
-    if (!watched || window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
-      return
+    if (!watched || window.matchMedia('(prefers-reduced-motion: reduce)').matches || askedSecond() !== null) return
     const start = performance.now()
     const tick = () => {
       const next = frameAt((performance.now() - start) % PLAY)

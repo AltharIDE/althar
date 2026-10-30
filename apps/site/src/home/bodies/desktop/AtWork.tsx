@@ -1,6 +1,7 @@
 import { ChromeButton, Room, RoomSwitch, WorkStatus } from '@althar/ui'
 import { useEffect, useRef, useState } from 'react'
 
+import { askedSecond } from '../../../lib/browser'
 import { BoardAtWork, Tabs } from '../kit/app'
 import { useInView } from '../kit/seen'
 import { Shot } from '../kit/Shot'
@@ -26,7 +27,7 @@ export function AtWork() {
   const [beat, setBeat] = useState(0)
   useEffect(() => {
     if (!watched) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || askedSecond() !== null) return
     const id = window.setInterval(() => setBeat((n) => n + 1), BEAT)
     return () => clearInterval(id)
   }, [watched])

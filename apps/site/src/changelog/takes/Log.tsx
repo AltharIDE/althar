@@ -1,21 +1,12 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 
-import {
-  type Change,
-  KIND_WORD,
-  type Kind,
-  type Release,
-  releaseUrl,
-  RELEASES,
-  ROADMAP,
-  type Stage,
-  STAGE_WORD,
-} from '../../content/changelog'
+import { type Change, KIND_WORD, type Kind, type Release, releaseUrl, RELEASES, ROADMAP, STAGE_WORD, STAGES } from '../../content/changelog'
 import { LINKS } from '../../content/facts'
 import { cx } from '../../lib/cx'
 import { useDownload } from '../../lib/download'
 import { Night, night as n, Readout, Window } from '../../shared/night/Night'
 import { OS_NAME, OsMark } from '../../shared/OsMark'
+import { Out } from '../../shared/Out'
 import s from './Log.module.css'
 import { type Highlight, HIGHLIGHTS, PUBLISHED } from './LogData'
 import { LogPicture } from './LogPictures'
@@ -92,12 +83,6 @@ const runs = (changes: readonly Change[], shown: readonly number[] = []) =>
     return all
   }, [])
 
-const OUT = (
-  <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
-    <path d="M3 1.5h5.5V7M8.5 1.5 1.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-  </svg>
-)
-
 /** The mission clock: the build's day in the prerender, then the reader's time, every second while it is in sight. */
 function Clock() {
   const el = useRef<HTMLElement>(null)
@@ -165,7 +150,7 @@ function Released({ release, className }: { release: Release; className?: string
       link={
         <a className={s.out} href={releaseUrl(release.version)}>
           On GitHub
-          {OUT}
+          <Out />
         </a>
       }
     />
@@ -316,7 +301,6 @@ function Entry({ release }: { release: Release }) {
  * Later and on into the dark. Drawn across the chart's width, each stage a
  * third of it, its waypoint at the start of its third and on the course.
  */
-const STAGES: readonly Stage[] = ['now', 'next', 'later']
 /** The course's height, in px, and its height at a share `x` of the way across. */
 const COURSE_H = 120
 const courseY = (x: number) => 108 - 96 * x ** 1.5
@@ -340,7 +324,7 @@ function Ahead() {
             <span>
               <span className={s.long}>Plans </span>on GitHub
             </span>
-            {OUT}
+            <Out />
           </a>
         }
       />

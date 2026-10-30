@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
-import { Changelog } from './changelog/Changelog'
 import { pageMeta, pathOf } from './content/pages'
 import { Docs } from './docs/Docs'
 import { Home } from './home/Home'
@@ -9,7 +8,8 @@ import { NotFound } from './notfound/NotFound'
 import { Shifts } from './shifts/Shifts'
 import { Wallpaper } from './wallpaper/Wallpaper'
 
-/* The thesis (with its Markdown compiler) and the earlier enterprise page (with its 3D scene) load only on their own paths. */
+/* The thesis (with its Markdown compiler), the changelog (with its drawings) and the earlier enterprise page (with its 3D scene) load only on their own paths. */
+const Changelog = lazy(() => import('./changelog/Changelog').then((m) => ({ default: m.Changelog })))
 const Thesis = lazy(() => import('./thesis/Thesis').then((m) => ({ default: m.Thesis })))
 const EnterpriseHome = lazy(() => import('./enterprise/Home').then((m) => ({ default: m.EnterpriseHome })))
 

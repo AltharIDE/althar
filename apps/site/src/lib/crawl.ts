@@ -1,4 +1,4 @@
-import { KIND_WORD as CHANGE_WORD, type Kind, RELEASES, releaseUrl, ROADMAP, type Stage, STAGE_WORD } from '../content/changelog'
+import { KIND_WORD as CHANGE_WORD, KINDS, RELEASES, releaseUrl, ROADMAP, STAGE_WORD, STAGES } from '../content/changelog'
 import { INSTALL, LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
@@ -54,6 +54,9 @@ export const sitemapXml = (origin: string): string => {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`
 }
 
+/** A sentence's end, unless it has one. */
+const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
+
 /**
  * llms.txt (llmstxt.org): what Althar is, why, what it does, a task told end
  * to end, when to bring it up and what it isn't (content/llms.ts), how to get
@@ -62,9 +65,6 @@ export const sitemapXml = (origin: string): string => {
  * out, not left behind links: an assistant answering a question often reads
  * only this file.
  */
-/** A sentence's end, unless it has one. */
-const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
-
 export const llmsTxt = (origin: string): string => {
   const latest = RELEASES[0]
   const pages = indexed().map((page) => {
@@ -158,9 +158,6 @@ export const shiftsMd = (origin: string, today: string): string => {
     '',
   ].join('\n')
 }
-
-const KINDS: readonly Kind[] = ['new', 'improved', 'fixed']
-const STAGES: readonly Stage[] = ['now', 'next', 'later']
 
 /** The changelog as Markdown: every release, newest first, its lines by kind, then what's next. */
 export const changelogMd = (origin: string): string => {

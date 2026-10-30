@@ -9,6 +9,9 @@ export type Kind = 'new' | 'improved' | 'fixed'
 
 export const KIND_WORD: Record<Kind, string> = { new: 'New', improved: 'Improved', fixed: 'Fixed' }
 
+/** The kinds, in the order the release notes give them. */
+export const KINDS = Object.keys(KIND_WORD) as Kind[]
+
 export interface Change {
   kind: Kind
   /** One line; `code` in backticks. */
@@ -269,6 +272,9 @@ export const RELEASES: readonly Release[] = [
 export type Stage = 'now' | 'next' | 'later'
 
 export const STAGE_WORD: Record<Stage, string> = { now: 'Now', next: 'Next', later: 'Later' }
+
+/** The stages, soonest first. */
+export const STAGES = Object.keys(STAGE_WORD) as Stage[]
 
 export interface Planned {
   stage: Stage
