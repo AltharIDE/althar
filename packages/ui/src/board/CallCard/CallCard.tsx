@@ -91,7 +91,7 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
           </div>
         )
       )}
-      <NextSteps className={b.next} aria-hidden="true">
+      <NextSteps className={b.strip} aria-hidden="true">
         <NextStep signal>{t.decide}</NextStep>
       </NextSteps>
     </article>

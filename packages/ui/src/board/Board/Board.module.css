@@ -359,15 +359,18 @@ span.you {
   font-size: 11.5px;
   color: var(--t-3);
 }
-/* what a card offers to do, its last row (NextSteps): its width, inside its 1px edge, its corners as round */
-.next {
+/*
+ * what a card offers to do, its last row (NextSteps): its width, inside its 1px edge, its corners as round. Not `.next`,
+ * the Up next lane's class (Board.tsx names a column's class after its lane).
+ */
+.strip {
   margin: 4px -13px -11px;
   border-radius: 0 0 11px 11px;
 }
-.next svg {
+.strip svg {
   transition: transform var(--fast) var(--ease);
 }
-.card:hover .next svg {
+.card:hover .strip svg {
   transform: translateX(2px);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -376,7 +379,7 @@ span.you {
   .collapsed,
   .card,
   .row,
-  .next svg {
+  .strip svg {
     transition: none;
   }
 }
