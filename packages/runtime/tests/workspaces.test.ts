@@ -5,8 +5,9 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect, Layer, Schedule } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { until } from '@althar/testing/effect'
 
 import { Connections, NotConnected, OtherAccount } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -289,9 +290,9 @@ describe('several Linear workspaces', () => {
 
       yield* Effect.gen(function* () {
         const connections = yield* Connections
-        const learned = yield* Effect.map(connections.list, (all) => all.map((one) => [one.id, one.workspace?.name ?? null])).pipe(
-          Effect.repeat({ until: (pairs) => pairs.every(([, key]) => key !== null), schedule: Schedule.spaced('20 millis') }),
-          Effect.timeout('5 seconds'),
+        const learned = yield* until(
+          Effect.map(connections.list, (all) => all.map((one) => [one.id, one.workspace?.name ?? null])),
+          (pairs) => pairs.every(([, key]) => key !== null),
         )
         assert.sameDeepMembers(learned, [
           [althar.id, 'althar'],

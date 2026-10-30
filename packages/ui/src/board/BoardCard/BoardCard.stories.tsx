@@ -26,10 +26,29 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, NextStep, PullChip } from './Chips'
+import { BranchChip, Fact, FactLine, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
+import { NextStep } from '../../primitives/NextStep/NextStep'
 
 const resolveNow = fn()
+
+/**
+ * Where a card's next steps are: at most one violet, and, where there is layout to measure (a browser, not jsdom), the
+ * strip they are in is the card's last row, its width, under every fact.
+ */
+const mainActionPlace = async (canvasElement: HTMLElement) => {
+  const violet = canvasElement.querySelectorAll('button[class*="signal"], span[class*="signal"]')
+  await expect(violet.length).toBeLessThanOrEqual(1)
+  const card = canvasElement.querySelector('article')
+  const strip = violet[0]?.closest('[class*="steps"]')
+  if (card == null || strip == null || strip.getBoundingClientRect().width === 0) return
+  const at = strip.getBoundingClientRect()
+  const edge = card.getBoundingClientRect()
+  await expect(Math.abs(edge.bottom - at.bottom)).toBeLessThanOrEqual(2)
+  await expect(at.width).toBeGreaterThanOrEqual(edge.width - 4)
+  for (const fact of canvasElement.querySelectorAll('[class*="fact"]'))
+    await expect(at.top).toBeGreaterThanOrEqual(fact.getBoundingClientRect().bottom)
+}
 
 const meta = {
   title: 'Board/BoardCard',
@@ -76,7 +95,7 @@ export const ReadyToAccept: Story = {
 }
 /*
  * A ready change's foot, as the board says it: what blocks first, then what to do, then what is fine. Where the facts
- * don't fit on one line they are a list, a glyph column and no middots; the next step sits under them, with them.
+ * don't fit on one line they are a list, a glyph column and no middots; the next step is the strip under them.
  */
 const readyFoot = (
   width: number,
@@ -94,20 +113,20 @@ const readyFoot = (
         title="Drop any file or folder onto the composer"
         object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
         foot={
-          <>
-            <FactLine stacked={stacked}>
-              {facts.map((one) => (
-                <Fact key={one.words} {...(one.icon === undefined ? {} : { icon: one.icon })} tone={one.tone}>
-                  {one.words}
-                </Fact>
-              ))}
-            </FactLine>
-            {step !== undefined && (
-              <NextStep signal onPress={fn()} label={`${step} to #344`}>
-                {step}
-              </NextStep>
-            )}
-          </>
+          <FactLine stacked={stacked}>
+            {facts.map((one) => (
+              <Fact key={one.words} {...(one.icon === undefined ? {} : { icon: one.icon })} tone={one.tone}>
+                {one.words}
+              </Fact>
+            ))}
+          </FactLine>
+        }
+        next={
+          step !== undefined && (
+            <NextStep signal onPress={fn()} label={`${step} to #344`}>
+              {step}
+            </NextStep>
+          )
         }
       />
     </div>
@@ -164,6 +183,36 @@ export const ReadyFactsMeasuredNarrow: Story = {
     const line = canvasElement.querySelector('[class*="factLine"]')
     // jsdom has no layout to measure; a browser does.
     if (line !== null && line.scrollWidth > 0) await expect(line).toHaveAttribute('data-stacked')
+  },
+}
+/** What needs the lead is words with an arrow in the strip, not a button: the card opens its task, where the lead is told. */
+export const ReadyAskTheLead: Story = {
+  render: () => (
+    <div style={{ width: 300 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Not ready to accept"
+        kind={TaskKind.Change}
+        at="1h"
+        title="Queue refunds that hit the rate limit"
+        object={<PullChip host={GITHUB} repo="meridian-api" number={1191} add={236} del={41} />}
+        foot={
+          <FactLine>
+            <Fact icon="close" tone="danger">
+              harness / verify failed
+            </Fact>
+          </FactLine>
+        }
+        next={<NextStep>Ask the lead to fix it</NextStep>}
+        onOpen={fn()}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Ask the lead to fix it')).toBeInTheDocument()
+    // Only the card's own button: the words are its link.
+    await expect(card.getAllByRole('button')).toHaveLength(1)
   },
 }
 /** Failed checks block, so they come before what is still running. */
@@ -287,16 +336,16 @@ export const MergeConflictNotAsked: Story = {
     ...CHANGE_CONFLICT,
     why: undefined,
     foot: (
-      <>
-        <FactLine>
-          <Fact icon="branch" tone="warm">
-            You stopped it, so Althar doesn’t start its lead for a conflict.
-          </Fact>
-        </FactLine>
-        <NextStep signal onPress={resolveNow}>
-          Resolve now
-        </NextStep>
-      </>
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          It has no lead yet to ask.
+        </Fact>
+      </FactLine>
+    ),
+    next: (
+      <NextStep signal onPress={resolveNow}>
+        Resolve now
+      </NextStep>
     ),
   },
   play: async ({ canvasElement, args }) => {
@@ -389,7 +438,67 @@ export const WaitingOverTheNumber: Story = {
     await expect(within(canvasElement).getByText('6 of 6 agents busy on this Mac, and 1 more')).toBeInTheDocument()
   },
 }
-export const Stopped: Story = { args: CHANGE_STOPPED }
+/** Stopped, as the board shows it: Carry on, which tells its lead to go on, the strip at its foot. */
+export const Stopped: Story = {
+  args: {
+    ...CHANGE_STOPPED,
+    next: (
+      <NextStep signal onPress={fn()}>
+        Carry on
+      </NextStep>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await mainActionPlace(canvasElement)
+  },
+}
+const carryOn = fn()
+/**
+ * Stopped, with a conflict its lead wasn't asked about: what stopped it and when lead, the conflict is one quiet line under them,
+ * and Carry on, which tells the lead to merge the default branch in on its way, is the one thing to press, on the strip at its foot.
+ */
+export const StoppedInConflict: Story = {
+  args: {
+    status: TaskStatus.Stopped,
+    word: 'Stopped',
+    kind: TaskKind.Change,
+    at: 'Oct 27',
+    title: 'Nightly dependency check, 27 Oct',
+    why: 'Stopped by Althar',
+    from: 'Nightly dependency check',
+    object: <BranchChip name="althar/nightly-dependency-check-27-oct" add={287} del={375} />,
+    foot: (
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          Conflicts with the default branch
+        </Fact>
+      </FactLine>
+    ),
+    next: (
+      <NextStep signal onPress={carryOn}>
+        Carry on
+      </NextStep>
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Stopped by Althar')).toBeInTheDocument()
+    await expect(card.getByText('Conflicts with the default branch')).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await expect(carryOn).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
+    await mainActionPlace(canvasElement)
+  },
+}
+/** A failed check and Push: the check at its foot, Push the strip under it, the card's width. */
+export const ReadyChecksFailedWithPush: Story = {
+  ...readyFoot(340, false, [{ words: '7 checks failed', icon: 'close', tone: 'danger' }], 'Push 1 commit'),
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Push 1 commit to #344' }).className).toMatch(/signal/)
+    await mainActionPlace(canvasElement)
+  },
+}
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {
   args: {

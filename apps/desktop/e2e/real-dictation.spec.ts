@@ -27,7 +27,6 @@ const words = process.env.ALTHAR_REAL_WORDS ?? ''
 test.skip(models === undefined || voice === undefined, 'Set ALTHAR_REAL_SPEECH and ALTHAR_REAL_VOICE to run it with the real model')
 
 test('writes down a real voice with the real model', async () => {
-  test.setTimeout(120_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-speech-'))
   const meridian = repository(home, 'meridian')
   mkdirSync(join(meridian, 'src'))
@@ -59,13 +58,13 @@ test('writes down a real voice with the real model', async () => {
     await page.getByRole('button', { name: 'Dictate', exact: true }).click()
     const stop = page.getByRole('button', { name: /^Stop dictating/ })
     // Words show as they are said.
-    await expect(page.locator('[aria-hidden="true"][class*="interim"]')).not.toHaveText('', { timeout: 30_000 })
+    await expect(page.locator('[aria-hidden="true"][class*="interim"]')).not.toHaveText('')
     process.stdout.write(`Heard so far: ${await page.locator('[aria-hidden="true"][class*="interim"]').innerText()}\n`)
     await page.screenshot({ path: 'test-results/dictation-real-live.png', animations: 'disabled' })
     // Past the end of the recording, so all of it is heard.
-    await expect(stop).toHaveAccessibleName(/Stop dictating, 0:1\d/, { timeout: 30_000 })
+    await expect(stop).toHaveAccessibleName(/Stop dictating, 0:1\d/)
     await stop.click()
-    await expect(box).toHaveValue(new RegExp(words), { timeout: 60_000 })
+    await expect(box).toHaveValue(new RegExp(words))
     await page.screenshot({ path: 'test-results/dictation-real.png', animations: 'disabled' })
     process.stdout.write(`Heard: ${await box.inputValue()}\n`)
   } finally {

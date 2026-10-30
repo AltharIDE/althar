@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -56,7 +56,6 @@ describe('what the host says of a ready pull request’s conflicts', () => {
             both.board.conflicts === conflicts &&
             both.home.conflicts === conflicts &&
             both.board.target !== undefined,
-          Duration.seconds(20),
         )
       const [conflicting] = yield* saying(true)
       assert.deepStrictEqual(conflicting, { board: { target: 'main', conflicts: true }, home: { target: 'main', conflicts: true } })
@@ -93,7 +92,7 @@ describe('a pull request, by the person and the lead', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]',
         pushByHand,
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = ready?.taskId ?? ''
 
       yield* changes.markReady(taskId)
@@ -175,7 +174,7 @@ describe('a pull request, by the person and the lead', () => {
       assert.strictEqual(tip(), plain?.change?.localHead)
       // The host is the last word: where it is rewound behind what was pushed, what is ahead of it is the person's to push again.
       git(bare, 'update-ref', 'refs/heads/althar/add-a-retry', 'althar/add-a-retry~1')
-      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
       // A commit that isn't on the branch any more isn't pushed.
       const gone = yield* Effect.flip(changes.push(taskId, '0000000000000000000000000000000000000000'))
       assert.strictEqual(gone instanceof Error ? gone.name : String(gone), 'ChangedSinceSeen')
@@ -207,7 +206,7 @@ describe('an abandoned task’s pull request', () => {
     Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(github.changes[0]?.state, 'open')
       return { projectId, taskId: ready?.taskId ?? '', threadId: ready?.threadId ?? '', url: github.changes[0]?.url ?? '' }
     })
@@ -276,7 +275,7 @@ describe('an abandoned task’s pull request', () => {
         Effect.gen(function* () {
           const queries = yield* Queries
           const onBoard = Effect.map(queries.board(projectId), (board) => board.tasks.filter((task) => task.taskId === taskId))
-          const [card] = yield* until(onBoard, ([one]) => one?.change?.state === 'closed', Duration.seconds(20))
+          const [card] = yield* until(onBoard, ([one]) => one?.change?.state === 'closed')
           assert.strictEqual(card?.phase, 'settled')
           assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads + 1)
         }).pipe(Effect.provide(runtimeWith({ github }, database))),
@@ -384,7 +383,7 @@ describe('a branch that parted from its pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
       const threadId = ready?.threadId ?? ''
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
         branch: string
@@ -415,7 +414,7 @@ describe('a branch that parted from its pull request', () => {
       const changes = yield* Changes
       const sql = yield* SqlClient.SqlClient
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = ready?.taskId ?? ''
       const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
       const here = workspace?.path ?? ''
@@ -509,7 +508,7 @@ describe('a branch that parted from its pull request', () => {
         .trim()
       at(bare, 'update-ref', `refs/heads/${branch}`, theirs)
       at(here, 'commit', '-q', '--allow-empty', '-m', 'Mine')
-      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved', Duration.seconds(20))
+      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved')
       assert.deepStrictEqual(moved?.change?.diverged, { kind: 'moved', local: 0, onPullRequest: null })
       assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, moved?.change?.localHead ?? ''))), 'PushRefused:behind')
       // Bringing its commits in: fetched here, and the lead merges them.

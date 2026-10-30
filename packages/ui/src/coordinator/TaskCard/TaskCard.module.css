@@ -70,12 +70,9 @@
   margin: 14px 0 0;
 }
 
+/* its facts on a band at its foot, then, where it opens, the strip every card ends in: Answer, or Open task */
 .foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   margin: 14px -16px 0;
-  padding: 9px 10px 9px 16px;
   border-top: 1px solid var(--line);
   background: var(--n-1);
   font-size: 11.5px;
@@ -84,6 +81,9 @@
 .you .foot {
   background: color-mix(in srgb, var(--paper) 50%, transparent);
   border-top-color: var(--signal-line);
+}
+.you .next {
+  border-top-color: color-mix(in srgb, var(--signal) 14%, transparent);
 }
 .lead {
   display: inline-flex;
@@ -113,11 +113,12 @@
 }
 .facts {
   display: flex;
-  flex: 1 1 0;
   align-items: center;
   min-width: 0;
+  min-height: 48px;
+  padding: 9px 16px;
   gap: 14px;
-  /* last resort, for a long issue key or model name: clip here, never into the button */
+  /* last resort, for a long issue key or model name: clip here, never past the card's edge */
   overflow: hidden;
 }
 .facts > :not(.pr) {
@@ -185,10 +186,6 @@
     overflow: hidden;
     clip-path: inset(50%);
   }
-}
-.open {
-  flex: none;
-  margin-left: auto;
 }
 
 /* arriving from the plan: the card lands, then the track fills in step by step */

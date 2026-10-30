@@ -68,6 +68,7 @@ import { forkOf } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
+  branchOn,
   commitOf,
   commitsAhead,
   commitsOf,
@@ -100,8 +101,10 @@ import {
   commentForLead,
   commentLine,
   fromAlthar,
+  leftQueueNote,
   nameOf,
   outsidersLine,
+  queuedNote,
   reviewForLead,
   reviewLine,
   signed,
@@ -188,6 +191,14 @@ const Snapshot = Schema.Struct({
    * opens another.
    */
   attached: Schema.optional(Schema.Boolean),
+  /**
+   * In its target branch's merge queue, as Althar put it there and its host
+   * says since: the host merges it once the queue's checks pass. Asked about
+   * on each listening turn while it is; absent once it isn't, or never was.
+   */
+  queued: Schema.optional(Schema.Boolean),
+  /** How many times the merge queue took it out unmerged: a merge after each is another, at the same head too. */
+  leftQueue: Schema.optional(Schema.Number),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -438,6 +449,7 @@ const snapshotOf = (
   target: change.target,
   conflicts: change.conflicts ?? null,
   source: change.source,
+  ...(change.queued === true ? { queued: true } : {}),
 })
 
 type Store =
@@ -632,6 +644,14 @@ export class Changes extends Context.Service<
      * agent), not a code host's: what they would run themselves.
      */
     pushHere(taskId: string): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
+    /**
+     * Asks the remote of each of a task's branches with no pull request
+     * where that branch is, as the person looks at it, in the background:
+     * the task's screens read it again once it says (`askedAt`).
+     */
+    askRemotes(taskId: string): Effect.Effect<void>
+    /** The commit a task's worktree was at when its branch's remote last said where that branch is, this launch; null before. */
+    askedAt(worktree: string, branch: string): Effect.Effect<string | null>
     /** Pushes a task's branch to each of its repositories' remotes, with the person's own git, up to the commits they saw. */
     pushBranch(
       taskId: string,
@@ -2196,8 +2216,8 @@ export class Changes extends Context.Service<
               subject: { type: 'external_link', id: link.id },
               target: `${host.product}:${snapshot.repository.join('/')}`,
               operation: 'merge',
-              // A merge at another head is another merge.
-              key: `merge:${link.id}:${head}`,
+              // A merge at another head is another merge, as is one after the merge queue took it out.
+              key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}`,
               request: { number: snapshot.number, head },
               retryable: false,
               perform: host.merge(repository, { ...read, headSha: head }).pipe(
@@ -2222,8 +2242,14 @@ export class Changes extends Context.Service<
                 )
               return
             }
+            // In its target branch's merge queue, it merges once the queue's checks pass, which takes as long as they do: kept so,
+            // said in its thread, and asked about the queue on each listening turn until it lands or the queue takes it out.
+            if (merged.queued === true) {
+              yield* seenNow(link, snapshot, merged)
+              if (snapshot.queued !== true) yield* sayOn(link, queuedNote(nameOf(snapshot), snapshot.target))
+            }
             // Taken but not landed yet (Bitbucket answers 202 to one that takes long): asked about again soon, until it has.
-            if (merged.state === 'open') yield* Effect.forkIn(landing(taskId, link.id), scope)
+            else if (merged.state === 'open') yield* Effect.forkIn(landing(taskId, link.id), scope)
           }
           const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
           if (now !== undefined) yield* poll(now)
@@ -2260,6 +2286,7 @@ export class Changes extends Context.Service<
             draft: read.draft,
             title: read.title,
             headSha: read.headSha ?? before.headSha,
+            ...(read.queued === true ? { queued: true } : {}),
           }
           const settled = after.state !== 'open'
           yield* saveSnapshot(link, after, settled ? { listening: 0 } : {})
@@ -2456,6 +2483,64 @@ export class Changes extends Context.Service<
         return Effect.fail(failed)
       }
 
+      /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
+      const remotesAsked = new Map<string, string>()
+      const asking = new Set<string>()
+
+      /**
+       * Asks the remote of each of a task's branches with no pull request
+       * where that branch is: through its host where Althar is connected,
+       * else with the person's own git. The branch's ref for that remote here
+       * then says what it said, fetched where the remote has commits this
+       * computer doesn't, gone where it has no such branch; what isn't
+       * pushed is counted from that, not from a ref that never saw a push
+       * made elsewhere. What it says holds while the worktree stays where it
+       * was asked at. Where none answers, nothing changes.
+       */
+      const askRemotes = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; branch: string }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
+          const asked = yield* Effect.forEach(
+            repositories,
+            (repository) =>
+              Effect.gen(function* () {
+                const { root, branch } = repository
+                const remote = yield* remoteOf(root, repository.base)
+                const [head = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+                if (remote === null || head === null) return false
+                const url = (yield* namedRemotes(root)).find((one) => one.name === remote)?.url
+                const found = url === undefined ? null : yield* connections.hostOf([url]).pipe(Effect.orElseSucceed(() => null))
+                const signed =
+                  found === null
+                    ? null
+                    : yield* Effect.flatMap(found.host.repository(found.path), (repo) => found.host.pushTarget(repo)).pipe(
+                        Effect.orElseSucceed(() => null),
+                      )
+                const ref = `refs/remotes/${remote}/${branch}`
+                for (const source of [...(signed === null ? [] : [signed]), { url: remote, header: null }]) {
+                  const tip = yield* branchOn(root, source, branch)
+                  if (tip === undefined) continue
+                  if (tip === null) yield* git(root, 'update-ref', '-d', ref)
+                  else if ((yield* commitsOf(root, [tip]))[0] == null) {
+                    if ((yield* fetchInto(root, source, branch, ref)) === null) continue
+                  } else yield* git(root, 'update-ref', ref, tip)
+                  remotesAsked.set(`${repository.worktree} ${branch}`, head)
+                  return true
+                }
+                return false
+              }).pipe(Effect.orElseSucceed(() => false)),
+            { concurrency: 'unbounded' },
+          )
+          if (asked.includes(true)) yield* touchTask(taskId)
+        }).pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => asking.delete(taskId))))
+
       /**
        * Pushes a task's branch, in each repository without a pull request, to
        * the remote that repository's work goes to, as the person would from a
@@ -2502,7 +2587,10 @@ export class Changes extends Context.Service<
             )
             yield* settle
             // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
+            // That is as good as asking it, at where the worktree is now.
             yield* gitWithin(10_000, repository.root, 'update-ref', `refs/remotes/${remote}/${repository.branch}`, sent).pipe(Effect.ignore)
+            const [now = null] = yield* commitsOf(repository.worktree, ['HEAD'])
+            if (now !== null) remotesAsked.set(`${repository.worktree} ${repository.branch}`, now)
             pushed.push({ branch: repository.branch, remote })
           }
           if (pushed.length === 0) return yield* new NotFound({ kind: 'remote', id: taskId })
@@ -2942,7 +3030,7 @@ export class Changes extends Context.Service<
                 SELECT kind, observed_at AS at, json_extract(payload, '$.sha') AS sha, json_extract(payload, '$.outcome') AS outcome,
                   json_extract(payload, '$.how') AS how, json_extract(payload, '$.why') AS why
                 FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
-                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed')
+                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed', 'pushed')
                 ORDER BY observed_at, rowid`
               const head = snapshot.headSha
               const outcome = snapshot.checks !== null && snapshot.checks.sha === head ? snapshot.checks.outcome : null
@@ -2961,7 +3049,8 @@ export class Changes extends Context.Service<
                 (last, sha) => (last === null || (first.get(sha) ?? '') > (first.get(last) ?? '') ? sha : last),
                 null,
               )
-              // Stopped by the person once its checks were under way, as while a conflict round's ran: that commit's failure is theirs.
+              // Stopped by the person once Althar pushed that commit, or its checks were under way, as while a conflict round's ran: its
+              // failure is theirs. From the push: a stop before Althar first looks at the commit's checks is after the commit all the same.
               const since =
                 latest === null ? null : (said.find((one) => one.kind !== 'taken' && one.sha === latest)?.at ?? first.get(latest) ?? null)
               const stopped = since !== null && said.some((one) => one.kind === 'taken' && one.how !== 'pushed' && one.at >= since)
@@ -2978,7 +3067,7 @@ export class Changes extends Context.Service<
               const failing = outcome === 'failed'
               // Whether the person said anything on the task since its head's checks were first seen: what the lead commits may be for
               // that, and waits for their push.
-              const seenAt = head === null ? undefined : said.find((one) => one.sha === head)?.at
+              const seenAt = head === null ? undefined : said.find((one) => one.kind !== 'pushed' && one.sha === head)?.at
               const spoken = link.spokenAt !== null && (seenAt === undefined || link.spokenAt >= seenAt)
               const handed = handedOf(head)
               return {
@@ -3158,7 +3247,8 @@ export class Changes extends Context.Service<
           const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
-          const answer = yield* host.change(repository, before.number)
+          // In its merge queue, it is asked about the queue too: whether it is in it still, and why the queue took it out.
+          const answer = yield* host.change(repository, before.number, before.queued === true ? { queue: true } : undefined)
           // Merged, it stays so: for a moment after a merge, a host can still answer it as it was.
           const read: ChangeRequest = before.state === 'merged' ? { ...answer, state: 'merged' } : answer
           const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
@@ -3317,10 +3407,22 @@ export class Changes extends Context.Service<
             if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
+          // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
+          // otherwise, open, the queue took it out unmerged: it is the person's to merge again.
+          const lands = before.queued === true && now.state === 'open' && now.queued === false && now.leftQueue === 'merged'
+          const leftQueue = before.queued === true && now.state === 'open' && now.queued !== true && !lands
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
             ...(before.attached === true ? { attached: true } : {}),
+            ...(lands ? { queued: true } : {}),
+            ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
+          }
+          // While it is in the queue, it is worth asking about often: it lands, or comes back, as soon as the queue's checks end.
+          if (after.queued === true) happened = true
+          if (leftQueue) {
+            happened = true
+            yield* sayOn(link, leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
             happened = true
@@ -3834,8 +3936,15 @@ export class Changes extends Context.Service<
       ): Effect.Effect<Askable, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; state: string; resolveConflicts: number | null; run: string | null }>`
+          const [task] = yield* sql<{
+            projectId: ProjectId
+            threadId: string | null
+            state: string
+            resolveConflicts: number | null
+            run: string | null
+          }>`
             SELECT k.project_id, k.state, k.resolve_conflicts,
+              (SELECT id FROM threads WHERE task_id = k.id AND kind = 'task' LIMIT 1) AS thread_id,
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
             FROM tasks k WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'open') return 'off'
@@ -3857,7 +3966,14 @@ export class Changes extends Context.Service<
             return { why: 'Its run is still going, so Althar asks its lead once it ends.', shown: false }
           if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
           if (force) return 'yes'
-          if (task.run === 'suspended') return { why: 'You stopped it, so Althar doesn’t start its lead for a conflict.', shown: true }
+          if (task.run === 'suspended') {
+            // Told to go on without its run carried on, its lead is at work all the same: nothing for the person to resolve now.
+            const lead = task.threadId === null ? Option.none() : yield* sessions.running(task.threadId)
+            if (Option.exists(lead, (session) => session.turnRunning))
+              return { why: 'Its lead is at work, so Althar doesn’t ask it about a conflict now.', shown: false }
+            // Whoever stopped it, the person, a command they declined, or Althar: its card says which.
+            return { why: 'It’s stopped, so Althar doesn’t start its lead for a conflict.', shown: true }
+          }
           // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
           if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
             const left = yield* decodeEnded(latest.ended)
@@ -5960,6 +6076,14 @@ export class Changes extends Context.Service<
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
         mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
         pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
+        // Once at a time for a task, whoever looks.
+        askRemotes: (taskId) =>
+          Effect.suspend(() => {
+            if (asking.has(taskId)) return Effect.void
+            asking.add(taskId)
+            return Effect.asVoid(Effect.forkIn(provide(askRemotes(taskId)), scope))
+          }),
+        askedAt: (worktree, branch) => Effect.sync(() => remotesAsked.get(`${worktree} ${branch}`) ?? null),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),

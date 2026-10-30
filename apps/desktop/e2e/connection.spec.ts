@@ -20,9 +20,13 @@ import { launch, openFirstProject, planTask, say } from './support'
  * Shots: test-results/connection-*.png.
  */
 
-/** The agents' service: anything at all answers, while it listens. */
+/** The agents' service: anything at all answers, while it listens; and how many times it was asked. */
 const service = () => {
-  const server: Server = createServer((_request, response) => response.end())
+  let asked = 0
+  const server: Server = createServer((_request, response) => {
+    asked += 1
+    response.end()
+  })
   const listen = (port = 0) =>
     new Promise<number>((resolve) => server.listen(port, '127.0.0.1', () => resolve((server.address() as AddressInfo).port)))
   const stop = () =>
@@ -30,7 +34,7 @@ const service = () => {
       server.close(() => resolve())
       server.closeAllConnections()
     })
-  return { listen, stop }
+  return { listen, stop, asked: () => asked }
 }
 
 /** The computer online or not: as the main process reads it, which it tells the runtime, and as the window hears it. */
@@ -64,24 +68,27 @@ test('waits for the connection rather than go Stuck, and carries on by itself on
     await anthropic.stop()
     await start.click()
     const waiting = page.getByText('Waiting for the connection').first()
-    await expect(waiting).toBeVisible({ timeout: 15_000 })
+    await expect(waiting).toBeVisible()
     // The computer says it's offline too: once, for the whole app.
     await online(electronApp, page, false)
     const offline = page.getByRole('status').filter({ hasText: /^Offline$/ })
-    await expect(offline).toBeVisible({ timeout: 10_000 })
+    await expect(offline).toBeVisible()
     await page.screenshot({ path: 'test-results/connection-waiting.png', scale: 'css', animations: 'disabled' })
 
-    // Anthropic answers again, but the computer still says it's offline: the step goes on waiting, never Stuck.
+    // Anthropic answers again, but the computer still says it's offline: the step goes on waiting, never Stuck. A step looks
+    // again when the computer's connection changes, or after half a minute, and no service is asked while it is offline; that
+    // it waits out a while unreminded is the runtime's to show (connectionLost.test.ts), where no clock is raced.
     writeFileSync(connection, '')
+    const before = anthropic.asked()
     await anthropic.listen(port)
-    await page.waitForTimeout(5_000)
     await expect(waiting).toBeVisible()
     await expect(page.getByText(/Stuck|stopped twice without saying/)).toHaveCount(0)
 
-    // Back: the step carries on by itself, in the same session, and finishes.
+    // Back: the step asks its service, which answers, and carries on by itself, in the same session, and finishes.
     await online(electronApp, page, true)
     await expect(offline).toHaveCount(0)
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect.poll(anthropic.asked).toBeGreaterThan(before)
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await expect(page.getByText(/Stuck|stopped twice without saying/)).toHaveCount(0)
     await page
       .getByRole('button', { name: /^Open task/ })
@@ -109,7 +116,7 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     // The connection goes: the coordinator's turn ends in its error, as Claude Code's did.
     writeFileSync(connection, 'offline')
     await say(page, 'What is left on the checkout?')
-    await expect(page.getByText("Claude Code couldn't answer.")).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText("Claude Code couldn't answer.")).toBeVisible()
     const again = page.getByRole('button', { name: 'Try again' })
     await expect(again).toBeVisible()
     await page.screenshot({ path: 'test-results/connection-coordinator-try-again.png', scale: 'css', animations: 'disabled' })
@@ -117,7 +124,7 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     writeFileSync(connection, '')
     await again.click()
     // The fake answers with all it was told, its brief and then the person's words: the turn that failed is under it.
-    await expect(page.getByText(/^echo: /)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/^echo: /)).toBeVisible()
     await expect(page.getByText('What is left on the checkout?', { exact: true })).toHaveCount(2)
     await expect(again).toHaveCount(0)
   } finally {

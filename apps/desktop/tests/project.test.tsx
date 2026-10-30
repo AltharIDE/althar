@@ -216,16 +216,17 @@ describe('the Talk room', () => {
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
     withServices(<Project room={Room.Talk} onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
-    // Its front page says what it is made of, never where it is on this Mac.
-    const made = await screen.findByRole('list', { name: 'Made of' })
-    await waitFor(() =>
-      expect(
-        within(made)
-          .getAllByRole('listitem')
-          .map((part) => part.textContent),
-      ).toEqual(['meridian-api', 'meridian-web', 'meridian-infra']),
-    )
+    // Its header's ⋯ says what it is made of, never where it is on this computer.
+    await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
+    const made = await screen.findByRole('menu', { name: 'Made of' })
+    expect(
+      within(made)
+        .getAllByRole('menuitem')
+        .map((part) => part.textContent),
+    ).toEqual([expect.stringMatching(/^meridian-api/), expect.stringMatching(/^meridian-web/), expect.stringMatching(/^meridian-infra/)])
     expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Made of' })).toBeNull())
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()

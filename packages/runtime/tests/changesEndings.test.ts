@@ -85,7 +85,7 @@ describe('a task that ends in a pull request', () => {
         end: null,
       })
       yield* plans.start(planId, instance.personId)
-      yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.lengthOf(github.changes, 0)
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -123,7 +123,6 @@ describe('a task that ends in a pull request', () => {
       const [call] = yield* until(
         Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
         (attention) => attention.length === 1,
-        Duration.seconds(20),
       )
       assert.deepInclude(call?.stuck, { step: 'publish', why: 'not_connected' })
       // Meanwhile something is left in the worktree: Althar doesn't commit it, and says so.
@@ -137,7 +136,7 @@ describe('a task that ends in a pull request', () => {
         attentionId: call?.id ?? '',
         answer: { kind: 'retry', agentId: 'claude-code' },
       })
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(ready?.change?.number, 1)
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, "Opened draft pull request #1. Left out what the lead didn't commit: `notes.txt`.")
@@ -180,7 +179,6 @@ describe('a task that ends in a pull request', () => {
       const [call] = yield* until(
         Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
         (attention) => attention.length === 1,
-        Duration.seconds(20),
       )
       // It says the sign-in is lost, in the words for a refused one, not that nothing is connected, nor an error's name.
       assert.deepInclude(call?.stuck, {
@@ -195,7 +193,7 @@ describe('a task that ends in a pull request', () => {
         attentionId: call?.id ?? '',
         answer: { kind: 'retry', agentId: 'claude-code' },
       })
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(ready?.change?.number, 1)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -247,7 +245,6 @@ describe('a task that ends in a pull request', () => {
         const [call] = yield* until(
           Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
           (attention) => attention.length === 1,
-          Duration.seconds(20),
         )
         // It says the sign-in is lost, in the words for a refused one, not that nothing is connected, nor an error's name.
         assert.deepInclude(call?.stuck, {
@@ -262,7 +259,7 @@ describe('a task that ends in a pull request', () => {
           attentionId: call?.id ?? '',
           answer: { kind: 'retry', agentId: 'claude-code' },
         })
-        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
         assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
         assert.strictEqual(github.forkOf(1), 'you/api')
         assert.strictEqual(github.changes[0]?.target, 'trunk')
@@ -282,7 +279,7 @@ describe('a task that ends in a pull request', () => {
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:scratch]',
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       // Told its scratch file wasn't committed, the lead deleted it; what was pushed is what it committed, and nothing was left out.
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, 'Opened draft pull request #1.')
@@ -303,7 +300,7 @@ describe('a task that ends in a pull request', () => {
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence]',
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const queries = yield* Queries
       const thread = yield* queries.thread(ready?.threadId ?? '')
       const implement = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'implement')
@@ -336,7 +333,7 @@ describe('a task that ends in a pull request', () => {
       const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
       assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
       // The evidence is the person's, in Althar: the pull request is described as the lead wrote it, with none of it.
-      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`)
+      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\nOpened by [Althar](https://github.com/AltharIDE/althar).`)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -350,7 +347,7 @@ describe('a task that ends in a pull request', () => {
         working,
         'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [lead:set-aside] [review:findings] [review:evidence]',
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const all = yield* items(ready?.threadId ?? '')
       const results = all.flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
       // The reviewer read the screenshot, which isn't in its copy, and the run's output, each from where its brief said.
@@ -381,7 +378,7 @@ describe('a task that ends in a pull request', () => {
           working,
           'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
         )
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
         const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
         assert.deepStrictEqual(
           results.map((result) => [result.step, result.built ?? null]),
@@ -402,35 +399,31 @@ describe('a task that ends in a pull request', () => {
     },
   )
 
-  it.live(
-    'gives a reviewer carrying on to another round the evidence the lead handed settling',
-    () => {
-      const { working, bare } = hosted()
-      const github = makeFakeService({ pushUrl: () => bare })
-      github.addRepository(['meridian', 'api'])
-      return Effect.gen(function* () {
-        yield* connect('github', HOST)
-        // Settling commits a fix, so the review looks again, in the same session.
-        const projectId = yield* ask(
-          working,
-          'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [review:findings] [review:evidence]',
-        )
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
-        const reviews = (yield* items(ready?.threadId ?? '')).flatMap((item) =>
-          item.kind === 'step_result' && item.content.step === 'review' ? [String(item.content.summary)] : [],
-        )
-        assert.lengthOf(reviews, 2)
-        assert.notInclude(reviews[0] ?? '', '3-test_run')
-        // The second round read the run the lead handed settling, written out for it then.
-        assert.match(reviews[1] ?? '', / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\), 3-test_run\.txt \(\d+ bytes\)\./)
-        const sql = yield* SqlClient.SqlClient
-        const [sessions] = yield* sql<{ n: number }>`
+  it.live('gives a reviewer carrying on to another round the evidence the lead handed settling', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // Settling commits a fix, so the review looks again, in the same session.
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [review:findings] [review:evidence]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const reviews = (yield* items(ready?.threadId ?? '')).flatMap((item) =>
+        item.kind === 'step_result' && item.content.step === 'review' ? [String(item.content.summary)] : [],
+      )
+      assert.lengthOf(reviews, 2)
+      assert.notInclude(reviews[0] ?? '', '3-test_run')
+      // The second round read the run the lead handed settling, written out for it then.
+      assert.match(reviews[1] ?? '', / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\), 3-test_run\.txt \(\d+ bytes\)\./)
+      const sql = yield* SqlClient.SqlClient
+      const [sessions] = yield* sql<{ n: number }>`
         SELECT count(*) AS n FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'step' AND t.node_key = 'review'`
-        assert.strictEqual(sessions?.n, 1)
-      }).pipe(Effect.provide(runtimeWith({ github })))
-    },
-    60_000,
-  )
+      assert.strictEqual(sessions?.n, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
 
   it.live('goes on without its pull request when the person says so', () => {
     const { working } = hosted()
@@ -461,14 +454,13 @@ describe('a task that ends in a pull request', () => {
       const [call] = yield* until(
         Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
         (attention) => attention.length === 1,
-        Duration.seconds(20),
       )
       yield* runs.answerStuck({
         envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
         attentionId: call?.id ?? '',
         answer: { kind: 'abandon' },
       })
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(10))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.isNull(ready?.change)
     }).pipe(Effect.provide(runtimeWith({})))
   })

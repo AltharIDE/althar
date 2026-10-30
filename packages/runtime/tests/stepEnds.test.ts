@@ -140,14 +140,13 @@ describe("a quick task's round of work", () => {
         (rows) => rows.length === 1,
       )
       if (task === undefined) return yield* Effect.die(new Error('No task'))
-      yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded', Duration.seconds(20))
+      yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       yield* say(task.threadId, 'And the docs? [lead:finish]')
       const said = yield* until(
         Effect.map(items(task.threadId), (rows) =>
           rows.filter((row) => row.kind === 'agent_message' && String(row.content.text).includes('changed this round')),
         ),
         (rows) => rows.length === 1,
-        Duration.seconds(20),
       )
       assert.strictEqual(
         said[0]?.content.text,

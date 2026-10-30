@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 export default defineConfig({
   test: {
+    ...testing('small'),
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     coverage: {

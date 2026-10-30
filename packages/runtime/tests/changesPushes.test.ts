@@ -53,7 +53,7 @@ describe('the Push button', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]',
         pushByHand,
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
       const taskId = ready?.taskId ?? ''
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
         path: string
@@ -264,7 +264,7 @@ describe('a push the lead asks the person for', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:push]',
         pushByHand,
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{
         path: string
@@ -614,7 +614,7 @@ describe('what a lead commits after the person has looked', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:commit] [lead:push]',
         rules,
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
         path: string
         branch: string
@@ -643,7 +643,6 @@ describe('what a lead commits after the person has looked', () => {
       yield* until(
         Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
         (log) => log.includes('Tidy up'),
-        Duration.seconds(20),
       )
       // Up, as the lead made it: nothing is asked of the person, and the card has no Push for it.
       assert.strictEqual(git(bare, 'rev-parse', task.branch), git(task.path, 'rev-parse', 'HEAD'))
@@ -657,7 +656,6 @@ describe('what a lead commits after the person has looked', () => {
       yield* until(
         Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
         (log) => log.includes('Tidy up before pushing'),
-        Duration.seconds(20),
       )
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -670,7 +668,7 @@ describe('what a lead commits after the person has looked', () => {
     return Effect.gen(function* () {
       const task = yield* opened(working, pushByHand)
       yield* say(task.threadId, 'tidy pls')
-      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 1)
       // Well past the lead's turn: still only here, and the card's Push is the person's, with nothing to say why.
       yield* Effect.sleep(Duration.seconds(2))
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Tidy up')
@@ -690,11 +688,7 @@ describe('what a lead commits after the person has looked', () => {
       git(task.path, 'push', '-q', bare, `HEAD:refs/heads/${task.branch}`)
       const theirs = git(task.path, 'rev-parse', 'HEAD')
       yield* say(task.threadId, 'tidy pls')
-      const [card] = yield* until(
-        cards(task.projectId),
-        (all) => all[0]?.change?.pushing?.held != null && all[0]?.change?.unpushed === 1,
-        Duration.seconds(20),
-      )
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null && all[0]?.change?.unpushed === 1)
       // What they pushed stays the pull request's head; the lead's commit waits for their Push, and the card says why.
       assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
       assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
@@ -722,7 +716,7 @@ describe('what a lead commits after the person has looked', () => {
         }),
       )
       yield* say(task.threadId, 'tidy pls')
-      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null, Duration.seconds(20))
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null)
       offline = false
       yield* Fiber.join(failing)
       // Not said to be on its way: the person's Push, with why, and nothing went up.

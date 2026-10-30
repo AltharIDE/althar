@@ -3,6 +3,7 @@ import { MessageChannel } from 'node:worker_threads'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from 'effect'
 import { Rpc, RpcClient, RpcGroup, RpcServer } from 'effect/rpc'
+import { until } from '@althar/testing/effect'
 
 import { clientProtocol, type DomMessagePort, domPort, emitterPort, type PortLike, serverProtocol } from '../src/transport'
 
@@ -57,11 +58,8 @@ const client = (port: PortLike) =>
     return yield* RpcClient.make(Echo).pipe(Effect.provideContext(protocol))
   })
 
-const settled = (check: () => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 100 && !check(); tries += 1) yield* Effect.sleep('10 millis')
-    return check()
-  })
+/** Waits until the check holds (@althar/testing), and says it does. */
+const settled = (check: () => boolean) => until(Effect.sync(check), (done) => done)
 
 describe('the transport', () => {
   it.live('carries a call, a typed failure and a stream over a message port', () =>

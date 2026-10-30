@@ -274,7 +274,7 @@ describe('connections', () => {
     expect(await screen.findByText('git.example.com isn’t a GitHub server')).toBeTruthy()
     await userEvent.clear(field)
     await userEvent.type(field, 'git.meridian.dev')
-    expect(await screen.findByText('GitHub Enterprise Server answers at git.meridian.dev', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await screen.findByText('GitHub Enterprise Server answers at git.meridian.dev')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make a token' }))
     expect(screen.getByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open git.meridian.dev’s token page' }))
@@ -427,13 +427,13 @@ describe('connections', () => {
     expect(screen.getByRole('heading', { name: 'Type this code on GitHub' })).toBeTruthy()
     expect(open).toHaveBeenCalledWith('https://github.com/login/device', '_blank')
     state = 'done'
-    expect(await screen.findByRole('heading', { name: 'Let Althar into northwind' }, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Let Althar into northwind' })).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Install Althar on northwind' }))
     expect(open).toHaveBeenLastCalledWith('https://github.com/apps/althar/installations/new', '_blank')
     // Asked again, a little apart, until it is let in.
-    expect(await screen.findByRole('heading', { name: 'Connected as you' }, { timeout: 6000 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('says how a browser sign-in ended, starts it again once, and cancels one left for another way', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
@@ -447,7 +447,7 @@ describe('connections', () => {
     withServices(<Connections />, client)
     await connect(0)
     await userEvent.click(await screen.findByRole('button', { name: /Continue with GitHub/ }))
-    expect(await screen.findByText('Sign-in was declined.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByText('Sign-in was declined.')).toBeTruthy()
     vi.mocked(client.getSignIn).mockResolvedValue({ state: 'waiting' })
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('ABCD-1234')).toBeTruthy()
@@ -456,7 +456,7 @@ describe('connections', () => {
     expect(await screen.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     expect(client.cancelSignIn).toHaveBeenCalledWith('flow1')
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('drops what answers late for a way, a token or a sign-in left behind, and goes on once a server answers', async () => {
     /** A call answered when the test says, in the order it was made. */
@@ -545,7 +545,7 @@ describe('connections', () => {
       reason: null,
       tokenPage: 'https://git.meridian.dev/settings/tokens/new',
     }
-    await waitFor(() => expect(servers.call.mock.calls.length).toBe(2), { timeout: 2000 })
+    await waitFor(() => expect(servers.call.mock.calls.length).toBe(2))
     await act(async () => {
       servers.answer(0, answer)
       servers.answer(1, answer)
@@ -553,7 +553,7 @@ describe('connections', () => {
     expect(await within(panel).findByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
     expect(closed).not.toHaveBeenCalled()
     open.mockRestore()
-  }, 20_000)
+  })
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({

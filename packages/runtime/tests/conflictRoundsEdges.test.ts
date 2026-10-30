@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { Conflict } from '../src/conflicts'
@@ -52,7 +52,6 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(
         Effect.sync(() => [asks]),
         ([now]) => (now ?? 0) >= seen + 3,
-        Duration.seconds(10),
       )
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])

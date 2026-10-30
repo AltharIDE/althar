@@ -100,7 +100,9 @@ const descriptionOf = (control: HTMLElement) =>
     .join(' ')
 
 /** The ink the front page's wash is drawn in. */
-const washOf = (name: string) => screen.getByRole('heading', { level: 1, name }).closest('header')?.getAttribute('style')
+/** The ink of the project's mark in its header, beside its name. */
+const inkOf = (name: string) =>
+  screen.getByRole('heading', { level: 1, name }).closest('header')?.querySelector('[data-ink]')?.getAttribute('data-ink')
 
 /** A task on the board, from an issue on Linear, read through a connection where it names one. */
 const taskFrom = (key: string, connectionId?: string): BoardTask => ({
@@ -181,17 +183,17 @@ describe('a project’s settings', () => {
   it('draws the project in another ink, at once and everywhere; another project’s ink says whose it is', async () => {
     const { client } = windowAt('/projects/p1')
     await screen.findByRole('heading', { level: 1, name: 'meridian' })
-    expect(washOf('meridian')).toContain('--project-teal')
+    expect(inkOf('meridian')).toBe('teal')
     await openSettings()
     const general = sheet('General')
     expect(general.getByRole('radio', { name: 'Teal' })).toHaveProperty('ariaChecked', 'true')
     expect(general.getByRole('radio', { name: 'Clay, Halyard’s' })).toBeTruthy()
     await userEvent.click(general.getByRole('radio', { name: 'Rose' }))
-    expect(washOf('meridian')).toContain('--project-rose')
+    expect(inkOf('meridian')).toBe('rose')
     await waitFor(() => expect(client.setProjectInk).toHaveBeenCalledWith('p1', 'rose'))
     // The projects are read again, so the tabs and the home draw it in its new ink too.
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
-    expect(washOf('meridian')).toContain('--project-rose')
+    expect(inkOf('meridian')).toBe('rose')
   })
 
   it('puts the name back and says why when a rename doesn’t hold', async () => {

@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -410,7 +410,6 @@ describe('a task of several repositories', () => {
           thread.items.flatMap((item) => (item.kind === 'step_result' && item.content.step === 'publish' ? [item.content.summary] : [])),
         ),
         (found) => found.length === 1,
-        Duration.seconds(20),
       )
       assert.match(published ?? '', /^api: Opened draft pull request #\d+\.\nweb: Opened draft pull request #\d+\.$/)
       // The reviewer read a copy of each.
