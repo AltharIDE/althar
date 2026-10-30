@@ -763,11 +763,11 @@ describe('a task', () => {
     }
     const pushIn = async () => {
       const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-      await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+      await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
       return outputs
     }
 
-    it('offers connecting GitLab where it didn’t accept the sign-in, opened beside the outputs, and keeps git’s words behind Details', async () => {
+    it('says GitLab didn’t accept the sign-in, keeps git’s words behind Details, and leaves connecting to the card’s own button', async () => {
       const said =
         "remote: HTTP Basic: Access denied.\nfatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'\nExit code 128."
       withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', said))
@@ -781,16 +781,18 @@ describe('a task', () => {
       expect(alert.textContent).toContain("fatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'")
       await userEvent.click(within(alert).getByRole('button', { name: 'Hide details' }))
       expect(alert.textContent).not.toContain('Authentication failed')
-      expect(alert.textContent).toContain('Or open a pull request with Althar’s sign-in:')
-      await userEvent.click(within(alert).getByRole('button', { name: 'Connect GitLab' }))
+      // Connecting, which opens a pull request with Althar's sign-in in place of the push, is the card's: offered once.
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      expect(outputs.getAllByRole('button', { name: 'Connect GitLab' })).toHaveLength(1)
+      await userEvent.click(outputs.getByRole('button', { name: 'Connect GitLab' }))
       expect(await screen.findByRole('complementary', { name: 'Connect GitLab' })).toBeTruthy()
     })
 
     it('once GitLab is connected, opens a pull request with Althar’s sign-in in place of the push that failed', async () => {
       withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', '', { connected: true }))
       const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-      expect(await outputs.findByRole('button', { name: 'Open a pull request' })).toBeTruthy()
-      expect(outputs.queryByRole('button', { name: 'Push the branch to origin' })).toBeNull()
+      expect(await outputs.findByRole('button', { name: 'Open a draft pull request' })).toBeTruthy()
+      expect(outputs.queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
     })
 
     it('says how to sign git in, with no Connect, where connecting wouldn’t change the push: a branch still being worked on', async () => {
@@ -798,9 +800,10 @@ describe('a task', () => {
       withServices(<Task />, failing('denied', message, 'fatal: Authentication failed', { phase: 'running' as 'ready' }))
       // Under way, Outputs is a tab away.
       await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
-      const alert = await (await pushIn()).findByRole('alert')
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
       await waitFor(() => expect(alert.textContent).toContain(message))
-      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      expect(outputs.queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
     })
 
     it('says how to sign git in, with no Connect, for a push of what merged here', async () => {
@@ -848,14 +851,15 @@ describe('a task', () => {
       await waitFor(() => expect(client.pushBranch).toHaveBeenCalledTimes(2))
     })
 
-    it('offers connecting and trying again where it got no answer, as from a sign-in git couldn’t ask for', async () => {
+    it('offers trying again where it got no answer, as from a sign-in git couldn’t ask for, beside the card’s Connect', async () => {
       withServices(
         <Task />,
         failing('unanswered', 'GitLab didn’t answer in time, so the push was stopped.', 'Stopped after a minute with no answer.'),
       )
-      const alert = await (await pushIn()).findByRole('alert')
-      expect(within(alert).getByRole('button', { name: 'Connect GitLab' })).toBeTruthy()
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
       expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
+      expect(outputs.getAllByRole('button', { name: 'Connect GitLab' })).toHaveLength(1)
     })
 
     it('says a missing permission or a protected branch in words alone, where no press here puts it right', async () => {

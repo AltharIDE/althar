@@ -206,16 +206,13 @@ export function Outputs({
   // Each card is read out by the task's title, as what it changed; and opens what it changed, or a file of it.
   const files = { onReviewDiff: () => onOpenFile(), diffKey: text.diffKey, onOpenFile }
   const label = { label: task.title }
-  // What went wrong, in the card it went wrong in: its way out, where one press is, and all git said behind Details. Connecting
-  // is one only where it changes how the work goes up: a ready branch then opens a pull request with Althar's sign-in. Pushing
-  // what merged here, or a branch still being worked on, stays the person's own git, connected or not.
-  const failure = (onRetry?: () => void, connects = false) =>
+  // What went wrong, in the card it went wrong in: Try again where that may be all it takes, and all git said behind Details.
+  // Connecting, where it changes how the work goes up, is the branch card's own action already.
+  const failure = (onRetry?: () => void) =>
     error === null
       ? {}
       : {
-          error: (
-            <Failure message={error} more={errorMore} host={snapshot.host} onConnect={connects ? onConnect : undefined} onRetry={onRetry} />
-          ),
+          error: <Failure message={error} more={errorMore} onRetry={onRetry} />,
         }
   // Only the button pressed shows as working; while it does, the others wait.
   const pressed = (key: Doing) => ({ busy: acting === key, disabled: pending && acting !== key })
@@ -441,11 +438,7 @@ export function Outputs({
               {...(first === undefined && review !== undefined ? { review } : {})}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(first !== undefined
-                ? {}
-                : conflict !== null && onResolve !== undefined
-                  ? { error: conflicted }
-                  : failure(onPushBranch, ready))}
+              {...(first !== undefined ? {} : conflict !== null && onResolve !== undefined ? { error: conflicted } : failure(onPushBranch))}
               text={label}
             />
           )
