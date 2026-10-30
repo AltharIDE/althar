@@ -11,13 +11,13 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { Permissions, type RequestContext } from '../src/Permissions'
 import { Policies } from '../src/Policies'
-import { guard } from '../src/pushGuard'
+import { guard, guardHolds } from '../src/pushGuard'
 import { decide, decideInside, decideLeaving, decideReader, type Hold, runsInside, type RuleContext, tallyKindOf } from '../src/rules'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { stoppedIn, tallyOf } from '../src/tally'
 import { recorder } from '../src/threads'
-import { runtime, task, turns, until } from './support'
+import { launches, runtime, task, turns, until } from './support'
 
 /*
  * The sandbox is the boundary (ADR-071): where a session's sandbox holds
@@ -350,7 +350,10 @@ describe('a lead whose sandbox Althar holds', () => {
       })
       assert.strictEqual((yield* Fiber.join(asking)).decision, 'allow')
       // The lead's git lets that push through for a while: its guard has the session's pass.
-      assert.isTrue(existsSync(join(guard().passes, sessionId)))
+      // On Windows there is no guard (`guardHolds`): the lead's git runs as it is, so there is no pass to write.
+      const env = launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}
+      assert.strictEqual('ALTHAR_GUARD_PASS' in env, guardHolds)
+      if (guardHolds) assert.isTrue(existsSync(join(guard().passes, sessionId)))
       // Only the ask and the refusal were counted: what ran inside the sandbox wasn't.
       const kinds = yield* sql<{ kind: string | null; outcome: string }>`
         SELECT kind, outcome FROM decisions WHERE project_id = ${project.projectId} ORDER BY decided_at`
