@@ -57,6 +57,12 @@ export const closeText = {
   branchKept: (name: string, why: string) => `${name} is closed, but its branch stays on its host. ${why}`,
 }
 
+/** More of what went wrong than its sentence: a failed push's reason, for its way out, and all git said. */
+export interface ErrorMore {
+  readonly why: string | null
+  readonly detail: string | null
+}
+
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
@@ -71,6 +77,8 @@ export interface TaskModel {
   readonly error: string | null
   /** The error is a code host or tracker that no longer takes Althar's sign-in: signing in to it again in Settings puts it right. */
   readonly hostSignedOut: boolean
+  /** Where the error is a push that failed, or git's own failure: why (`denied`, `unreachable`…) and all git said, for Details. */
+  readonly errorMore: ErrorMore | null
   /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
   readonly conflict: string | null
   readonly dismissConflict: () => void
@@ -280,9 +288,13 @@ export const useTask = (threadId: string): TaskModel => {
 
   // What a code host or tracker said as it stopped taking Althar's sign-in, so the error offers signing in to it again.
   const [hostSaid, setHostSaid] = useState<string | null>(null)
+  // A push that failed, or git: why and all git said, kept with its sentence so it goes when the error does.
+  const [gitSaid, setGitSaid] = useState<(ErrorMore & { readonly message: string }) | null>(null)
   const fail = useCallback((failure: unknown) => {
     setError(messageOf(failure))
     if (failure instanceof ApiError && failure.reason === 'ConnectorFailed' && failure.why === 'unauthorized') setHostSaid(failure.message)
+    if (failure instanceof ApiError && (failure.reason === 'PushRefused' || failure.reason === 'GitFailed'))
+      setGitSaid({ message: failure.message, why: failure.why ?? null, detail: failure.detail ?? null })
   }, [])
 
   const arrived = useCallback(
@@ -486,6 +498,7 @@ export const useTask = (threadId: string): TaskModel => {
     agentsKnown: status !== undefined,
     error,
     hostSignedOut: error !== null && error === hostSaid,
+    errorMore: error !== null && gitSaid !== null && error === gitSaid.message ? { why: gitSaid.why, detail: gitSaid.detail } : null,
     conflict,
     dismissConflict: () => setConflict(null),
     refused,

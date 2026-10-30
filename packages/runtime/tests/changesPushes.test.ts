@@ -9,6 +9,7 @@ import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import type { PushRefused } from '../src/errors'
 import { words } from '../src/words'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
@@ -199,7 +200,11 @@ describe('the Push button', () => {
       writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 })
       const refused = yield* Effect.flip(changes.push(taskId, seen?.change?.localHead ?? ''))
       assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'PushRefused')
-      assert.strictEqual(words(refused, String).message, 'PR #1 refused the push: pre-receive hook declined.')
+      assert.strictEqual((refused as PushRefused).why, 'protected')
+      assert.strictEqual(
+        words(refused, String).message,
+        'The branch is protected, so PR #1 didn’t take the push. Push to another branch or a fork, or ask its owners to let you push to it.',
+      )
       // Nothing went, and the card says so: the same two to push.
       assert.strictEqual(tip(), before)
       const [still] = yield* cards(projectId)

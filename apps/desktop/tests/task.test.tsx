@@ -726,6 +726,96 @@ describe('a task', () => {
     expect(await outputs.findByText('origin/althar/add-a-retry refused the push: protected branch.')).toBeTruthy()
   })
 
+  describe('a push of its branch that failed', () => {
+    const failing = (why: string, message: string, detail: string) => {
+      const base = thread({ session: null })
+      return fakeClient({
+        getThread: vi.fn(async () => ({
+          ...base,
+          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected: false },
+          task: {
+            ...base.task,
+            phase: 'ready' as const,
+            commits: 1,
+            here: [
+              {
+                repository: 'engine',
+                name: 'engine',
+                branch: 'main',
+                head: 'abc111',
+                remote: { name: 'origin', branch: 'althar/set-up-character-image-folders', newPullRequest: null, pushed: false, ahead: 1 },
+              },
+            ],
+          },
+        })),
+        pushBranch: vi.fn(async () => Promise.reject(new ApiError({ reason: 'PushRefused', message, why, detail }))),
+      }).client
+    }
+    const pushIn = async () => {
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      await userEvent.click(outputs.getByRole('button', { name: 'Push the branch to origin' }))
+      return outputs
+    }
+
+    it('offers connecting GitLab where it didn’t accept the sign-in, opened beside the outputs, and keeps git’s words behind Details', async () => {
+      const said =
+        "remote: HTTP Basic: Access denied.\nfatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'\nExit code 128."
+      withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', said))
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain('GitLab didn’t accept your sign-in, so nothing was pushed.'))
+      // git's own words stay out of the sentence until asked for.
+      expect(alert.textContent).not.toContain('Authentication failed')
+      expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+      await userEvent.click(within(alert).getByRole('button', { name: 'Details' }))
+      expect(alert.textContent).toContain("fatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'")
+      await userEvent.click(within(alert).getByRole('button', { name: 'Hide details' }))
+      expect(alert.textContent).not.toContain('Authentication failed')
+      await userEvent.click(within(alert).getByRole('button', { name: 'Connect GitLab' }))
+      expect(await screen.findByRole('complementary', { name: 'Connect GitLab' })).toBeTruthy()
+    })
+
+    it('offers trying again where GitLab couldn’t be reached', async () => {
+      const client = failing('unreachable', 'Althar couldn’t reach GitLab, so nothing was pushed.', 'Could not resolve host: gitlab.com')
+      withServices(<Task />, client)
+      const alert = await (await pushIn()).findByRole('alert')
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(client.pushBranch).toHaveBeenCalledTimes(2))
+    })
+
+    it('offers connecting and trying again where it got no answer, as from a sign-in git couldn’t ask for', async () => {
+      withServices(
+        <Task />,
+        failing('unanswered', 'GitLab didn’t answer in time, so the push was stopped.', 'Stopped after a minute with no answer.'),
+      )
+      const alert = await (await pushIn()).findByRole('alert')
+      expect(within(alert).getByRole('button', { name: 'Connect GitLab' })).toBeTruthy()
+      expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
+    })
+
+    it('says a missing permission or a protected branch in words alone, where no press here puts it right', async () => {
+      for (const [why, message] of [
+        [
+          'forbidden',
+          'Your account can’t push to this repository on GitLab, so nothing was pushed. Push to a fork of it, or ask its owners for access.',
+        ],
+        [
+          'protected',
+          'The branch is protected on GitLab, so it didn’t take the push. Push to another branch or a fork, or ask its owners to let you push to it.',
+        ],
+      ] as const) {
+        const view = withServices(<Task />, failing(why, message, 'remote: You are not allowed to push code to this project.'))
+        const alert = await (await pushIn()).findByRole('alert')
+        await waitFor(() => expect(alert.textContent).toContain(message))
+        expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+        expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+        expect(within(alert).getByRole('button', { name: 'Details' })).toBeTruthy()
+        view.unmount()
+      }
+    })
+  })
+
   it('names each repository’s pull request page by its host, and says how far behind its remote is', async () => {
     const base = thread({ session: null })
     const repo = (name: string, page: string | null, pushed: boolean, ahead: number) => ({
