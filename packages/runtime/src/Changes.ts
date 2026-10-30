@@ -2935,7 +2935,7 @@ export class Changes extends Context.Service<
                 SELECT kind, observed_at AS at, json_extract(payload, '$.sha') AS sha, json_extract(payload, '$.outcome') AS outcome,
                   json_extract(payload, '$.how') AS how, json_extract(payload, '$.why') AS why
                 FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
-                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed')
+                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed', 'pushed')
                 ORDER BY observed_at, rowid`
               const head = snapshot.headSha
               const outcome = snapshot.checks !== null && snapshot.checks.sha === head ? snapshot.checks.outcome : null
@@ -2954,7 +2954,8 @@ export class Changes extends Context.Service<
                 (last, sha) => (last === null || (first.get(sha) ?? '') > (first.get(last) ?? '') ? sha : last),
                 null,
               )
-              // Stopped by the person once its checks were under way, as while a conflict round's ran: that commit's failure is theirs.
+              // Stopped by the person once Althar pushed that commit, or its checks were under way, as while a conflict round's ran: its
+              // failure is theirs. From the push: a stop before Althar first looks at the commit's checks is after the commit all the same.
               const since =
                 latest === null ? null : (said.find((one) => one.kind !== 'taken' && one.sha === latest)?.at ?? first.get(latest) ?? null)
               const stopped = since !== null && said.some((one) => one.kind === 'taken' && one.how !== 'pushed' && one.at >= since)
@@ -2971,7 +2972,7 @@ export class Changes extends Context.Service<
               const failing = outcome === 'failed'
               // Whether the person said anything on the task since its head's checks were first seen: what the lead commits may be for
               // that, and waits for their push.
-              const seenAt = head === null ? undefined : said.find((one) => one.sha === head)?.at
+              const seenAt = head === null ? undefined : said.find((one) => one.kind !== 'pushed' && one.sha === head)?.at
               const spoken = link.spokenAt !== null && (seenAt === undefined || link.spokenAt >= seenAt)
               const handed = handedOf(head)
               return {

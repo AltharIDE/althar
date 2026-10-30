@@ -12,11 +12,15 @@ export interface Flaky {
   readonly error?: string | undefined
 }
 
+/* A terminal's colours, which Playwright's messages carry. */
+// eslint-disable-next-line no-control-regex -- a terminal's colours are control characters
+const COLOURS = /\u001b\[[0-9;]*m/g
+
 /** An error's message and where it was thrown, short enough for an issue: only the frames in the repository's own code. */
 export const said = (error: { readonly message?: string; readonly stack?: string } | undefined) => {
   if (error === undefined) return undefined
   const frames = (error.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line) && !/node_modules|node:|<anonymous>/.test(line))
-  return [error.message ?? '', ...frames.slice(0, 3)].join('\n').trim().slice(0, 1500) || undefined
+  return [error.message ?? '', ...frames.slice(0, 3)].join('\n').replace(COLOURS, '').trim().slice(0, 1500) || undefined
 }
 
 /**
