@@ -791,6 +791,51 @@ describe('merging a task here', () => {
       )
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('puts a checkout back with the person’s changes to other files as they were, staged, partly staged or not', () =>
+    Effect.gen(function* () {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const [web, docs] = ['web', 'docs'].map((name) => {
+        const root = join(folder, name)
+        mkdirSync(root)
+        git(root, 'init', '-q', '-b', 'main')
+        commit(root, 'notes.md', 'notes\n')
+        commit(root, 'todo.md', 'one\ntwo\n')
+        commit(root, 'plan.md', 'plan\n')
+        return root
+      })
+      const planOf = (root: string) =>
+        Effect.gen(function* () {
+          git(root, 'checkout', '-q', '-b', 'task', 'main')
+          const head = commit(root, 'retry.ts', 'retry\n')
+          git(root, 'checkout', '-q', 'main')
+          const plan = yield* planMerge(root, 'main', head, 'Merge task')
+          if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+          return { root, branch: 'main', plan, before: git(root, 'rev-parse', 'main') }
+        })
+      const moves = [yield* planOf(web ?? ''), yield* planOf(docs ?? '')]
+      // In web, the person's own work in files the merge leaves alone: one staged, one partly staged, one not.
+      writeFileSync(join(web ?? '', 'notes.md'), 'notes, staged\n')
+      git(web ?? '', 'add', 'notes.md')
+      writeFileSync(join(web ?? '', 'todo.md'), 'one, staged\ntwo\n')
+      git(web ?? '', 'add', 'todo.md')
+      writeFileSync(join(web ?? '', 'todo.md'), 'one, staged\ntwo, not yet\n')
+      writeFileSync(join(web ?? '', 'plan.md'), 'plan, not yet\n')
+      const diffs = (root: string) => [git(root, 'diff', '--cached'), git(root, 'diff')]
+      const was = diffs(web ?? '')
+      // Web moves first, then docs refuses, a file written where the merge puts one since it was planned: web goes back.
+      writeFileSync(join(docs ?? '', 'retry.ts'), 'mine\n')
+      const refused = yield* applyMerges(moves)
+      assert.strictEqual(refused?.root, docs)
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      assert.deepStrictEqual(diffs(web ?? ''), was)
+      assert.isFalse(existsSync(join(web ?? '', 'retry.ts')))
+      assert.strictEqual(readFileSync(join(web ?? '', 'todo.md'), 'utf8'), 'one, staged\ntwo, not yet\n')
+    }).pipe(Effect.provide(runtime())),
+  )
 })
 
 describe('a merge here, worked out', () => {

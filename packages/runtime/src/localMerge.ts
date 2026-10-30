@@ -217,12 +217,20 @@ const stillOn = (checkout: string, branch: string, at: string) =>
     return on.stdout.trim() === `refs/heads/${branch}` && (yield* commitOf(checkout, 'HEAD').pipe(Effect.orElseSucceed(() => ''))) === at
   })
 
-/** Puts `branch` back where `plan` found it, only while it's where the merge left it, and, in a checkout, nothing changed since. */
+/**
+ * Puts `branch` back where `plan` found it, only while it's where the merge
+ * left it, and, in a checkout, nothing changed since in the files it moves.
+ * There it goes back as switching commits would, so the person's changes to
+ * other files, staged or not, stay exactly as they were.
+ */
 export const undoMerge = (root: string, branch: string, plan: Move) =>
   Effect.gen(function* () {
     if (plan.checkout === null) return yield* git(root, 'update-ref', `refs/heads/${branch}`, plan.from, plan.to)
     if (!(yield* stillOn(plan.checkout, branch, plan.to))) return ''
-    return yield* git(plan.checkout, '-c', 'submodule.recurse=false', 'reset', '--keep', '--quiet', plan.from)
+    // A file only touched since, its content the same, isn't counted as changed.
+    yield* gitOutcome(plan.checkout, 'update-index', '-q', '--refresh')
+    yield* git(plan.checkout, 'read-tree', '-m', '-u', plan.to, plan.from)
+    return yield* git(plan.checkout, 'update-ref', `refs/heads/${branch}`, plan.from, plan.to)
   })
 
 /**
