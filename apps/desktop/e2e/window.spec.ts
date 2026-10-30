@@ -102,11 +102,10 @@ test('closes from the first screen, before any project', async () => {
 test('maximizes and restores from the failure screen, before any project', async () => {
   test.skip(process.platform === 'darwin', 'macOS keeps the system menu bar and traffic lights')
   // The failure screen comes after the wait for the runtime's port, which never comes here.
-  test.setTimeout(60_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page } = await launch(home, { ALTHAR_NO_RUNTIME: '1' })
   try {
-    await expect(page.getByRole('button', { name: 'Maximize the window' })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Maximize the window' })).toBeVisible()
     // Catch what the button asks for, and tell the window, so the third button's name is judged.
     await electronApp.evaluate(({ BrowserWindow }) => {
       globalThis.windowCalls = []

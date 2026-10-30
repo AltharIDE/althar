@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Duration, Effect, Exit, Layer } from 'effect'
+import { Cause, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -82,7 +82,7 @@ describe('a task from an issue in its own repository', () => {
       const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
-      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready')
       assert.strictEqual(ready?.branch, 'althar/issue-12-fix-the-limit')
       assert.strictEqual(github.changes[0]?.title, 'Fix the limit')
       assert.include(github.changes[0]?.body, 'Issue: #12')
@@ -305,7 +305,7 @@ const onItsBranch = (path: string, before: Effect.Effect<unknown, unknown, Conne
     const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
       snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
     )
-    yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+    yield* until(cards, (all) => all[0]?.phase === 'ready')
     return {
       task,
       projectId: project.projectId,
@@ -361,13 +361,82 @@ describe('a task that ends on its branch', () => {
         title: 'Not started',
       })
       assert.strictEqual(((yield* Effect.flip(runs.publish(fresh.taskId))) as NoChangeToOpen).why, 'working')
-      // Work that stopped short has none; a settled task keeps its branch as it is.
+      // A settled task keeps its branch as it is.
       const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = ${task.taskId}`
-      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'stopped')
       yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${task.taskId}`
       assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'settled')
       assert.instanceOf(yield* Effect.flip(runs.publish('task_none')), NotFound)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
+  it.live('opens a stopped task’s draft pull request, with what it has so far', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
+      const { task, said } = yield* onItsBranch(working)
+      yield* connect('github')
+      // Stopped, as the person stops a task: its run waits to be carried on, and what it committed can go up as a draft meanwhile.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${task.taskId}`
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual(
+        github.changes.map((change) => change.draft),
+        [true],
+      )
+      assert.include(
+        (yield* said).map((item) => (item.kind === 'step_result' ? item.content.summary : '')),
+        'Opened draft pull request #1.',
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
+  })
+
+  it.live('opens the draft pull request of a task whose lead’s turn was cut short, once no agent is on its way to it', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:meridian/api.git'], { cwd: working })
+      const { task, projectId } = yield* onItsBranch(working)
+      yield* connect('github')
+      // Its run still going, as the person interrupting its lead leaves it; its lead about to carry on once it has a place.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE runs SET state = 'running' WHERE task_id = ${task.taskId}`
+      yield* sql`UPDATE threads SET waits_for_place = '2026-10-29T09:00:00.000Z' WHERE task_id = ${task.taskId}`
+      assert.strictEqual(((yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen).why, 'working')
+      // Nor while anything else of it carries on by itself: its step held for a place, a reset or the connection, an answer kept
+      // for a place. Each is undone with the transaction it is asked in, before anything that starts it can see it.
+      yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${task.taskId}`
+      const [step] = yield* sql<{ id: string }>`
+        SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+        JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} ORDER BY a.admitted_at DESC LIMIT 1`
+      const refusedWhile = (queued: Effect.Effect<unknown, unknown>) =>
+        Effect.flip(sql.withTransaction(Effect.andThen(queued, runs.publish(task.taskId))))
+      for (const reason of ['machine_busy', 'usage_limit', 'agent_unavailable']) {
+        const held = sql`UPDATE node_attempts SET state = 'held', hold_reason = ${reason} WHERE id = ${step?.id ?? ''}`
+        assert.strictEqual(((yield* refusedWhile(held)) as NoChangeToOpen).why, 'working', reason)
+      }
+      const kept = sql`INSERT INTO attention_requests ${sql.insert({
+        id: `attn_${'9'.repeat(32)}`,
+        projectId,
+        taskId: task.taskId,
+        kind: 'question',
+        payload: JSON.stringify({ threadId: task.threadId, message: 'Which lockfile?', waitsForPlace: '2026-10-29T09:00:00.000Z' }),
+        state: 'answered',
+        createdAt: '2026-10-29T08:59:00.000Z',
+        answeredAt: '2026-10-29T09:00:00.000Z',
+      })}`
+      assert.strictEqual(((yield* refusedWhile(kept)) as NoChangeToOpen).why, 'working')
+      assert.lengthOf(github.changes, 0)
+      // No agent at work on it, nor on its way: what it committed goes up as a draft.
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual(
+        github.changes.map((change) => change.draft),
+        [true],
+      )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
   })
 

@@ -51,7 +51,7 @@ const withPullRequest = (github: FakeService, bare: string, working: string) =>
     const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
       snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
     )
-    const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(20))
+    const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null)
     void bare
     return { projectId: project.projectId as ProjectId, taskId: ready?.taskId ?? '', threadId: ready?.threadId ?? '', cards }
   })

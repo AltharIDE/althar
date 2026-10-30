@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,9 +17,9 @@ import { launch, openFirstProject, say } from './support'
  * thread says so as a line, and what it changed still reads. Run brings
  * the folder back, its header saying so while it is set up again, and runs
  * once it is; cleaned up again, a message to its lead brings it back before
- * the lead starts. Its repository's install takes a few seconds, so its
- * coming back shows. The screenshots it takes are this change's own
- * evidence (test-results/folders-*.png).
+ * the lead starts. Its repository's install waits for the test to let it
+ * go, so its coming back shows. The screenshots it takes are this change's
+ * own evidence (test-results/folders-*.png).
  */
 
 /** A page that answers on a port of its own and says where. */
@@ -29,10 +29,18 @@ server.listen(0, () => console.log('Listening on http://localhost:' + server.add
 
 const TITLE = 'Sketch a status page prototype'
 
+/** An install's first step, which goes on once the file `gate` names is there. */
+const held = (gate: string) => `const { existsSync } = require('node:fs')
+const wait = () => existsSync(${JSON.stringify(gate)}) || setTimeout(wait, 20)
+wait()
+`
+
 test('a finished task’s folder goes from Settings, its work still reads, and it comes back as it runs or is written to', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
-  // An install with a package of its own, offline, that takes a few seconds; and a page to run.
+  // An install with a package of its own, offline, held while the test says; and a page to run.
+  const gate = join(home, 'install-goes-on')
+  writeFileSync(gate, '')
   mkdirSync(join(repo, 'status'))
   writeFileSync(join(repo, 'status', 'package.json'), JSON.stringify({ name: 'status', version: '1.0.0' }))
   writeFileSync(
@@ -41,7 +49,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
       {
         name: 'meridian',
         private: true,
-        scripts: { preinstall: 'node -e "setTimeout(() => {}, 4000)"', dev: 'node serve.js' },
+        scripts: { preinstall: 'node held.js', dev: 'node serve.js' },
         dependencies: { status: 'file:./status' },
       },
       null,
@@ -49,6 +57,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     ),
   )
   writeFileSync(join(repo, 'serve.js'), SERVER)
+  writeFileSync(join(repo, 'held.js'), held(gate))
   writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
   execFileSync('git', ['add', '.'], { cwd: repo, env: { ...process.env, ...author } })
   execFileSync('git', ['commit', '-q', '-m', 'Serve'], { cwd: repo, env: { ...process.env, ...author } })
@@ -90,7 +99,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
 
     // A quick task that commits a change and finishes; Done settles it.
     await say(page, `${TITLE} [coordinator:start] [lead:finish] [lead:edit]`)
-    await expect(work.getByText('Finished', { exact: true })).toBeVisible({ timeout: 60_000 })
+    await expect(work.getByText('Finished', { exact: true })).toBeVisible()
     await work.getByRole('button', { name: TITLE }).click()
     const header = page.getByRole('banner', { name: TITLE })
     await header.getByRole('button', { name: 'Done' }).click()
@@ -111,14 +120,14 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     // Work on this computer lists its folder as one that can go; Clean up removes it, and says what it freed.
     await thisComputer()
     const legend = row.getByRole('button', { name: /Can go now/ })
-    await expect(legend).toBeVisible({ timeout: 30_000 })
-    await expect(legend).toHaveAccessibleName(/Can go now\s*12 MB/, { timeout: 30_000 })
+    await expect(legend).toBeVisible()
+    await expect(legend).toHaveAccessibleName(/Can go now\s*12 MB/)
     await legend.click()
     await expect(page.getByRole('region', { name: 'Goes with Clean up' }).getByText(TITLE)).toBeVisible()
     await page.screenshot({ path: 'test-results/folders-1-settings.png', animations: 'disabled', scale: 'css' })
     await page.keyboard.press('Escape')
     await row.getByRole('button', { name: 'Clean up' }).click()
-    await expect(row.getByText(/^Freed 12 MB just now$/)).toBeVisible({ timeout: 30_000 })
+    await expect(row.getByText(/^Freed 12 MB just now$/)).toBeVisible()
     expect(existsSync(kept ?? '')).toBe(false)
     await page.screenshot({ path: 'test-results/folders-2-freed.png', animations: 'disabled', scale: 'css' })
     await backToProject()
@@ -133,11 +142,13 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     await page.getByRole('radio', { name: /Conversation/ }).click()
 
     // Run brings it back: its header says so while it is set up again, and it runs once it is.
+    rmSync(gate)
     await header.getByRole('button', { name: 'Run', exact: true }).click()
-    await expect(header.getByText('Bringing its folder back')).toBeVisible({ timeout: 15_000 })
+    await expect(header.getByText('Bringing its folder back')).toBeVisible()
     await header.screenshot({ path: 'test-results/folders-5-coming-back.png', animations: 'disabled', scale: 'css' })
+    writeFileSync(gate, '')
     const card = page.getByRole('article', { name: `Run of ${TITLE}` })
-    await expect(card.getByRole('button', { name: /^Open localhost:\d+$/ })).toBeVisible({ timeout: 60_000 })
+    await expect(card.getByRole('button', { name: /^Open localhost:\d+$/ })).toBeVisible()
     await expect(header.getByText('Bringing its folder back')).toHaveCount(0)
     await expect(page.getByText('Folder back from its branch')).toBeVisible()
     expect(existsSync(join(kept ?? '', 'node_modules', 'status'))).toBe(true)
@@ -146,13 +157,13 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
 
     // Cleaned up again, a message to its lead brings it back before the lead starts.
     await thisComputer()
-    await expect(row.getByRole('button', { name: 'Clean up' })).toBeEnabled({ timeout: 30_000 })
+    await expect(row.getByRole('button', { name: 'Clean up' })).toBeEnabled()
     await row.getByRole('button', { name: 'Clean up' }).click()
-    await expect.poll(() => existsSync(kept ?? ''), { timeout: 30_000 }).toBe(false)
+    await expect.poll(() => existsSync(kept ?? '')).toBe(false)
     await backToProject()
     await expect(header).toBeVisible()
     await say(page, 'Add a dark theme too [lead:finish]')
-    await expect(page.getByText('Folder back from its branch')).toHaveCount(2, { timeout: 60_000 })
+    await expect(page.getByText('Folder back from its branch')).toHaveCount(2)
     expect(existsSync(kept ?? '')).toBe(true)
   } finally {
     await electronApp.close()

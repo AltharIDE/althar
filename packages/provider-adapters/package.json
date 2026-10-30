@@ -29,6 +29,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@althar/testing": "workspace:*",
     "@effect/vitest": "4.0.0-rc.118",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "5.0.5",

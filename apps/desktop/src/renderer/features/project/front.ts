@@ -3,21 +3,16 @@ import { type MarkGlance, PermissionPolicy, permissionPolicyText, type ProjectPa
 import { projectRulesText } from '@althar/ui/screens'
 
 import { productBrand, productName } from '../../shared/products'
-import { ago } from '../../shared/time'
 import type { Lanes } from '../board/lanes'
 
 /*
- * What a project's front page says, worked out from what the window read:
- * what settled last, what the project is made of (each repository with its
+ * What a project's header says, worked out from what the window read:
+ * what the project is made of (each repository with its
  * host's mark, as the runtime read its remote, and the tracker its tasks
  * name, where they name one), and its rules in a line.
  */
 
 export const text = {
-  merged: (change: string, at: string) => `${change} merged ${at}`.trim(),
-  closed: (change: string, at: string) => `${change} closed ${at}`.trim(),
-  done: (title: string, at: string) => `${title}, done ${at}`.trim(),
-  abandoned: (title: string, at: string) => `${title}, abandoned ${at}`.trim(),
   /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards. */
   issues: (tracker: Pick<Tracker, 'product' | 'key'>) =>
     `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : 'issues'}`,
@@ -32,19 +27,6 @@ export const text = {
 
 /** The code host or tracker a project is on, as its coordinator's thread says. */
 export type Host = NonNullable<CoordinatorSnapshot['host']>
-
-/** What settled last, in a line: its pull request merged or closed, or the task done or abandoned, and when. */
-export const lastSettledOf = (lanes: Lanes, now: Date = new Date()): string | undefined => {
-  const [last] = lanes.settled
-  if (last === undefined) return undefined
-  const at = last.settledAt === null ? '' : ago(last.settledAt, now)
-  const change = last.change
-  if (change !== null && change.state !== 'open') {
-    const named = `${change.short} ${change.number}`
-    return change.state === 'merged' ? text.merged(named, at) : text.closed(named, at)
-  }
-  return last.state === 'abandoned' ? text.abandoned(last.title, at) : text.done(last.title, at)
-}
 
 /** An address's host name, lower case; null for one that isn't an address. */
 export const hostNameOf = (url: string | null): string | null => {

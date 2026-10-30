@@ -5,92 +5,58 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, openFirstProject, say, startTask } from './support'
+import { chooseFolder, holdRuntime, launch, openFirstProject, say, startTask } from './support'
 
 /*
- * Going back to a project's tab, once it has been open, is instant: its
- * conversation is there in the frame after the click, never the outline of
- * one being read, scrolled where the person left it, with what they were
- * writing still in the composer. Timed from the click to the frame painted
- * with the project's conversation in it, for a project with a long
- * conversation and a board of tasks.
+ * Going back to a project's tab, once it has been open, is instant: the
+ * window shows the screen it kept (`KeptScreens`), the very one the person
+ * left, never the outline of one being read, scrolled where they left it,
+ * with what they were writing still in the composer. Shown while the runtime
+ * is held, as one too busy to answer would be, it can only be what the
+ * window had: a screen that needed the runtime first would wait, and its
+ * outline show. For a project with a long conversation and a board of tasks.
  */
 
 /** What the outline of a conversation being read is called, as `ThreadPending` and the project's own say. */
 const READING = 'Reading the conversation'
 
-/** How long a busy runtime takes to answer, in ms: more than the router's glance before the outline shows. */
-const BUSY = 250
+/** From now on, whether the outline of a conversation being read has shown, at any moment, until it is asked. */
+const watchOutline = (page: Page) =>
+  page.evaluate((reading) => {
+    const seen = window as unknown as { outlined: boolean }
+    seen.outlined = document.querySelector(`[aria-label="${reading}"]`) !== null
+    new MutationObserver(() => {
+      if (document.querySelector(`[aria-label="${reading}"]`) !== null) seen.outlined = true
+    }).observe(document.body, { childList: true, subtree: true })
+  }, READING)
+const outlined = (page: Page) => page.evaluate(() => (window as unknown as { outlined: boolean }).outlined)
 
-/**
- * Clicks a project's tab and times it, in the window itself: from the click
- * to the first frame painted with that project's heading and conversation,
- * in ms and in frames (the one it is painted in, from 1), and whether the
- * outline of a conversation being read showed on the way.
- */
-const timeSwitch = (page: Page, name: string, last: string) =>
-  page.evaluate(
-    ({ name, last, reading }) =>
-      new Promise<{ ms: number; frames: number; outline: boolean }>((resolve) => {
-        const tab = [...document.querySelectorAll('nav[aria-label="Projects"] button')].find(
-          (button) => button.getAttribute('aria-label')?.startsWith(name) || button.textContent?.trim().startsWith(name),
-        ) as HTMLElement | undefined
-        if (tab === undefined) throw new Error(`No tab for ${name}`)
-        let outline = false
-        const seen = () => {
-          if (document.querySelector(`[aria-label="${reading}"]`) !== null) outline = true
-        }
-        const watching = new MutationObserver(seen)
-        watching.observe(document.body, { childList: true, subtree: true })
-        const shown = (element: Element | null): element is HTMLElement => element instanceof HTMLElement && element.offsetParent !== null
-        const ready = () => {
-          const heading = [...document.querySelectorAll('h1')].find((h) => shown(h) && h.textContent?.trim() === name)
-          const thread = [...document.querySelectorAll('section[aria-label="Conversation"]')].find(shown)
-          return heading !== undefined && thread !== undefined && thread.textContent?.includes(last) === true
-        }
-        const start = performance.now()
-        tab.click()
-        let frames = 0
-        const check = () => {
-          seen()
-          if (!ready()) {
-            frames += 1
-            return void requestAnimationFrame(check)
-          }
-          // The frame with it is painted once the next one starts.
-          requestAnimationFrame(() => {
-            watching.disconnect()
-            resolve({ ms: performance.now() - start, frames, outline })
-          })
-        }
-        check()
-      }),
-    { name, last, reading: READING },
-  )
+/** The project's conversation that shows. */
+const conversation = (page: Page) => page.locator('section[aria-label="Conversation"]:visible')
 
 /** The scroller of the conversation that shows. */
-const scroller = (page: Page) =>
-  page.locator('section[aria-label="Conversation"]:visible').locator('xpath=ancestor::div[contains(@class, "scroll")][1]')
+const scroller = (page: Page) => conversation(page).locator('xpath=ancestor::div[contains(@class, "scroll")][1]')
 
-test('going back to an open project is instant, without the outline, where the person left it', async () => {
-  test.setTimeout(300_000)
+test('going back to an open project shows the screen it kept, where the person left it, without reading it again', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const meridian = repository(home, 'meridian')
   const halyard = repository(home, 'halyard')
   const { electronApp, page } = await launch(home)
+  const tabs = page.getByRole('navigation', { name: 'Projects' })
+  const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
   try {
     await openFirstProject(electronApp, page, meridian)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // A busy board, and a long conversation with the coordinator.
     for (const title of ['Add a retry to checkout', 'Name the limits better', 'Log the refunds']) await startTask(page, title)
-    const said = 40
+    const said = 16
     for (let n = 1; n <= said; n += 1)
       await say(page, `Message ${n}: ${'what the person says about the checkout and its retries, at some length. '.repeat(6)}`)
-    const meridianLast = `Message ${said}:`
     // Every message answered: nothing queued, and no turn running.
-    await expect(page.getByText(/queued/i)).toHaveCount(0, { timeout: 180_000 })
-    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0, { timeout: 60_000 })
+    await expect(page.getByText(/queued/i)).toHaveCount(0)
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
+    await expect(conversation(page)).toContainText(`Message ${said}:`)
 
     // Another project, in a tab of its own, with a conversation of its own.
     await page.keyboard.press('ControlOrMeta+n')
@@ -100,45 +66,42 @@ test('going back to an open project is instant, without the outline, where the p
     await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await say(page, 'Halyard first words')
-    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0, { timeout: 60_000 })
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
 
-    // Back and forth between the two tabs, timed. Each time the person leaves meridian, its coordinator has more to
-    // answer, which it does while they are on halyard, as a busy project's does.
-    // A runtime as busy as one with agents at work answers slower than a glance: every call to it here waits a while first.
-    await page.evaluate((late) => {
-      // oxlint-disable-next-line typescript/unbound-method -- applied to the port it was called on
-      const post = MessagePort.prototype.postMessage
-      MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
-        setTimeout(() => post.apply(this, args), late)
-      } as MessagePort['postMessage']
-    }, BUSY)
-    const timings: Array<{ to: string; ms: number; frames: number; outline: boolean }> = []
-    for (let round = 0; round < 6; round += 1) {
-      timings.push({ to: 'meridian', ...(await timeSwitch(page, 'meridian', meridianLast)) })
-      await page.waitForTimeout(300)
-      for (const more of ['a', 'b', 'c']) await say(page, `More ${round}${more}: ${'and another thing. '.repeat(10)}`)
-      timings.push({ to: 'halyard', ...(await timeSwitch(page, 'halyard', 'Halyard first words')) })
-      await page.waitForTimeout(800)
-    }
-    const ms = timings.map((timing) => Math.round(timing.ms))
-    process.stdout.write(`switch timings: ${JSON.stringify(timings.map((timing) => ({ ...timing, ms: Math.round(timing.ms) })))}\n`)
-    process.stdout.write(`median ${ms.toSorted((a, b) => a - b)[Math.floor(ms.length / 2)]} ms, max ${Math.max(...ms)} ms\n`)
-    await test.info().attach('switch timings', { body: JSON.stringify(timings, null, 2), contentType: 'application/json' })
-
-    // Scrolled up in meridian's conversation, with something half written: both are there again on coming back.
-    await timeSwitch(page, 'meridian', meridianLast)
-    const meridianScroll = scroller(page)
-    await meridianScroll.evaluate((element) => (element.scrollTop = 400))
-    await page.waitForTimeout(100)
-    const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+    // Back on meridian: said one more thing, then scrolled up, with something half written, as the person leaves it.
+    await tabs.getByRole('button', { name: /^meridian/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await say(page, `More: ${'and another thing. '.repeat(10)}`)
+    await scroller(page).evaluate(
+      (element) =>
+        new Promise((resolve) => {
+          element.addEventListener('scroll', resolve, { once: true })
+          element.scrollTop = 400
+        }),
+    )
     await box.fill('Half a thought about')
-    await timeSwitch(page, 'halyard', 'Halyard first words')
-    const back = await timeSwitch(page, 'meridian', meridianLast)
-    expect(back.outline).toBe(false)
-    await expect(page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })).toHaveValue('Half a thought about')
-    expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
+    const left = await conversation(page).elementHandle()
+    await tabs.getByRole('button', { name: /^halyard/ }).click()
+    await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
+    await expect(conversation(page)).toContainText('Halyard first words')
 
-    // What a kept screen costs: the window's memory with meridian's kept, hidden, while halyard shows, and once its tab is closed.
+    // Back to meridian with the runtime held: what shows is what the window kept, the conversation the person left.
+    await watchOutline(page)
+    const release = await holdRuntime(page)
+    await tabs.getByRole('button', { name: /^meridian/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await expect(conversation(page)).toContainText(`Message ${said}:`)
+    expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
+    await expect(box).toHaveValue('Half a thought about')
+    expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
+    // The runtime answers again, and the kept screen catches up from there: still the one the person left, and never the outline.
+    await release()
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
+    expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
+    expect(await outlined(page)).toBe(false)
+
+    // What a kept screen costs: the window's memory with meridian's kept, hidden, while halyard shows, and once its tab is
+    // closed. Said, to read; how much is the performance run's to judge, not this test's.
     const devtools = await page.context().newCDPSession(page)
     const memory = async () => {
       await devtools.send('HeapProfiler.collectGarbage')
@@ -146,18 +109,13 @@ test('going back to an open project is instant, without the outline, where the p
       const { nodes } = await devtools.send('Memory.getDOMCounters')
       return { heapMB: Math.round(usedSize / 1e5) / 10, nodes }
     }
-    await timeSwitch(page, 'halyard', 'Halyard first words')
-    await page.waitForTimeout(500)
+    await tabs.getByRole('button', { name: /^halyard/ }).click()
+    await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     const withMeridian = await memory()
-    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close meridian' }).click()
-    await page.waitForTimeout(500)
+    await tabs.getByRole('button', { name: 'Close meridian' }).click()
+    await expect(page.locator('section[aria-label="Conversation"]')).toHaveCount(1)
     const without = await memory()
     process.stdout.write(`memory with meridian kept: ${JSON.stringify(withMeridian)}; its tab closed: ${JSON.stringify(without)}\n`)
-    await expect(page.locator('section[aria-label="Conversation"]')).toHaveCount(1)
-
-    // No skeleton on any switch back, and each painted within a couple of frames of the click.
-    expect(timings.filter((timing) => timing.outline)).toEqual([])
-    for (const timing of timings) expect(timing.frames).toBeLessThanOrEqual(2)
   } finally {
     await electronApp.close()
   }

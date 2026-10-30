@@ -14,7 +14,7 @@ import {
   transition,
 } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Order } from './Busy'
@@ -938,6 +938,31 @@ export class Runs extends Context.Service<
        * next (ADR-034), whatever another repository's pull request is doing;
        * a merged task with such commits is open again for it.
        */
+      /**
+       * Whether an agent is at work on a task, or on its way to it, as the
+       * task's card counts it under way: a turn of its lead or reviewer
+       * running, a session starting, a step admitted, or what carries on by
+       * itself: a step held for a place, a reset or the connection, its lead
+       * about to be asked about a conflict, an answer kept for a place, or a
+       * thread waiting for one.
+       */
+      const atWork = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ coming: number }>`
+            SELECT (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND s.state = 'starting')
+              + (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND r.state = 'running' AND a.state IN ('admitted', 'held'))
+              + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = ${taskId} AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+              + (SELECT count(*) FROM attention_requests x WHERE x.task_id = ${taskId} AND x.kind = 'question' AND x.state = 'answered'
+                AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL)
+              + (SELECT count(*) FROM threads h WHERE h.task_id = ${taskId} AND h.waits_for_place IS NOT NULL) AS coming`
+          if ((row?.coming ?? 0) > 0) return true
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          const live = yield* Effect.forEach(threads, (thread) => sessions.running(thread.id))
+          return live.some((session) => Option.exists(session, (one) => one.turnRunning))
+        })
+
       const publish = (taskId: string) =>
         changes.exclusive(
           taskId,
@@ -957,9 +982,14 @@ export class Runs extends Context.Service<
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
             JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
             WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
-            if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
+            // Work under way opens its pull request as it ends; work that stopped short, stopped or failed, opens it now, as a draft:
+            // so does a run whose lead's turn was cut short, as the person interrupting it leaves it, with no agent at work on it.
+            if (
+              last === undefined ||
+              !['succeeded', 'suspended', 'failed', 'cancelled', 'running'].includes(last.state) ||
+              (last.state === 'running' && (yield* atWork(taskId)))
+            )
               return yield* new NoChangeToOpen({ taskId, why: 'working' })
-            if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
             if (opened.length > 0 && after.length === 0)
               return yield* new NoChangeToOpen({ taskId, why: opened.some((change) => change.state === 'open') ? 'opened' : 'nothing' })
             // Its new work going out, a merged task is open again, until that merges too: before it goes, so a try that opens
@@ -2229,9 +2259,10 @@ export class Runs extends Context.Service<
           const model = yield* limits.modelFor({ agentId: next, projectId: run.projectId, planned })
           const [from, to] = [yield* limits.named(planned.agentId, null), yield* limits.named(next, model)]
           const instead = { ...to, ownWork: next === other }
+          const now = yield* Clock.currentTimeMillis
           const said = Option.isSome(low)
-            ? lowWords({ from: from.agent, room: low.value, step, to: instead })
-            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, step, to: instead })
+            ? lowWords({ from: from.agent, room: low.value, now, step, to: instead })
+            : outWords({ from: from.agent, resetsAt: Option.getOrThrow(out).resetsAt, now, step, to: instead })
           if (!quiet) yield* sayOut(run.threadId, run.projectId, said)
           return { agentId: next, model, said }
         })
@@ -2293,7 +2324,13 @@ export class Runs extends Context.Service<
           const [from, to] = [yield* limits.named(agentId, null, accountId), yield* limits.named(agentId, null, next.id)]
           return Option.some({
             accountId: next.id,
-            said: lowWords({ from: from.agent, room: room.value, step, to: { agent: to.agent, model: null } }),
+            said: lowWords({
+              from: from.agent,
+              room: room.value,
+              now: yield* Clock.currentTimeMillis,
+              step,
+              to: { agent: to.agent, model: null },
+            }),
           })
         })
 
@@ -2440,6 +2477,7 @@ export class Runs extends Context.Service<
               const said = outWords({
                 from: (yield* limits.named(agentId, null, accountId)).agent,
                 resetsAt: out?.resetsAt ?? null,
+                now: yield* Clock.currentTimeMillis,
                 ...(step === undefined ? {} : { step }),
                 to: { ...(yield* limits.named(next, model, to)), ownWork: next === other },
               })
@@ -2491,8 +2529,15 @@ export class Runs extends Context.Service<
             on.run.threadId,
             on.run.projectId,
             low === undefined
-              ? outWords({ from, resetsAt, ...(step === undefined ? {} : { step }), waits: 'step', nothingFree })
-              : lowWords({ from, room: low, ...(step === undefined ? {} : { step }) }),
+              ? outWords({
+                  from,
+                  resetsAt,
+                  now: yield* Clock.currentTimeMillis,
+                  ...(step === undefined ? {} : { step }),
+                  waits: 'step',
+                  nothingFree,
+                })
+              : lowWords({ from, room: low, now: yield* Clock.currentTimeMillis, ...(step === undefined ? {} : { step }) }),
           )
           yield* touchCard(on.run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -2537,13 +2582,13 @@ export class Runs extends Context.Service<
                 threadId,
                 agentId: next,
                 ...(model === null ? {} : { model }),
-                said: outWords({ from, resetsAt, to: yield* limits.named(next, model, to) }),
+                said: outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, to: yield* limits.named(next, model, to) }),
                 about: 'limit',
               })
               return
             }
           }
-          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, waits: 'message' }))
+          yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, now: yield* Clock.currentTimeMillis, waits: 'message' }))
           // Back at its reset, it takes what waits: the same loop as a held step's, so after a restart too.
           yield* Queue.offer(holdsChanged, undefined)
         })
@@ -3529,7 +3574,7 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until)}, when ${from} is back, as you said.`,
+            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until, yield* Clock.currentTimeMillis)}, when ${from} is back, as you said.`,
           })
           yield* touchCard(current.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -4372,7 +4417,7 @@ export class Runs extends Context.Service<
             yield* Queue.take(holdsChanged)
             continue
           }
-          const wait = next.at - Date.now()
+          const wait = next.at - (yield* Clock.currentTimeMillis)
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(holdsChanged), Effect.sleep(Duration.millis(wait)))
             continue
