@@ -1,0 +1,135 @@
+/* Althar's board, open on its own project, in the app's light on a warm dark desk. */
+
+.page { background: var(--n-2); }
+
+/* The desk: warm near-black, the sky's blue faint at its head and the fire's glow at its foot, as the homepage's cabin. */
+.desk {
+  position: relative;
+  padding: 84px 48px 96px;
+  border-radius: 0 0 32px 32px;
+  background:
+    radial-gradient(1100px 420px at 50% 100%, rgba(255, 138, 60, 0.2), transparent 70%),
+    radial-gradient(1200px 380px at 50% -120px, rgba(80, 120, 255, 0.16), transparent 70%),
+    #0e0b09;
+}
+/* Dark under the nav, the whole desk. */
+.under { top: 0; bottom: 0; }
+
+.hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* The window, lit up on the desk. Clipped, not scrolled, so the lanes' heads can stick. */
+.window {
+  max-width: 1440px;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: clip;
+  background: var(--n-2);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14);
+}
+
+/* ---- the bar ---- */
+/* The system's lights, drawn at rest; a tab's ×, which here has nothing to close, not at all. */
+.bar > span[aria-hidden='true'] > i { visibility: visible; background: var(--traffic); }
+.bar li button[aria-label^='Close'] { display: none; }
+
+.ready { display: flex; align-items: baseline; gap: 10px; margin: 0 4px 0 0; font-size: 11.5px; color: var(--t-3); white-space: nowrap; }
+.readyWhat { color: var(--t-2); }
+.readyVersion { font-family: var(--mono); font-size: 11px; }
+.readyGo { color: var(--t-1); font-weight: 550; text-decoration: underline; text-decoration-color: var(--line-3); text-underline-offset: 3px; }
+.readyGo:hover { text-decoration-color: currentColor; }
+
+/* ---- the board: as tall as what it holds, so the page scrolls, not each lane ---- */
+.window .board { height: auto; overflow: clip; padding: 16px 0 0 16px; }
+
+/* What a lane says at its head or foot: quiet. */
+.laneLead { margin: 0 0 2px; padding: 0 2px; font-size: 12px; line-height: 1.45; color: var(--t-3); }
+.laneFoot { margin: 6px 0 0; padding: 0 2px; font-size: 11.5px; color: var(--t-3); }
+.laneFoot a, .releaseLinks a { display: inline-flex; align-items: center; gap: 4px; color: var(--t-2); font-weight: 550; text-decoration: none; }
+.laneFoot a:hover, .releaseLinks a:hover { color: var(--t-1); }
+
+/* Up next: a plan is a row of the queue, its title quieter than what runs until it is now. */
+.plan { display: grid; gap: 4px; padding: 11px 10px 12px; }
+.planTitle { margin: 0; font-size: 13px; line-height: 1.36; font-weight: 500; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
+.now .planTitle { color: var(--t-1); font-weight: 550; }
+.planDetail { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--t-3); text-wrap: pretty; }
+
+/* Running: each pull request a card, and the card its link. */
+.pull {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  padding: 13px 14px 12px;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-card);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.pull:hover { background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-3), var(--lift-card); }
+.pullTitle { margin: 0; font-size: 13.5px; line-height: 1.36; font-weight: 550; letter-spacing: -0.012em; color: var(--t-1); text-wrap: pretty; }
+.chip { justify-self: start; }
+
+/* Settled: a release is a card that opens in place; open, it is ringed in ink, as the card open beside the board is. */
+.release {
+  position: relative;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-card);
+  transition: background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.release:hover { background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-3), var(--lift-card); }
+.release.open { background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--ink-fill), var(--lift-card); }
+.releaseHead { margin: 0; font: inherit; }
+.toggle {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 13px 38px 12px 14px;
+  border-radius: 12px;
+  text-align: left;
+}
+.toggle:focus-visible { outline: 1.5px solid var(--signal); outline-offset: 2px; }
+.releaseTop { display: flex; align-items: center; gap: 8px; min-height: 20px; font-size: 11px; color: var(--t-3); }
+.version { display: inline-flex; align-items: center; gap: 5px; font: 600 11.5px/1 var(--mono); letter-spacing: -0.02em; color: var(--t-1); }
+.version svg { color: var(--ok); }
+.latest { font-weight: 550; color: var(--ok); }
+.at { margin-left: auto; font-variant-numeric: tabular-nums; }
+.releaseTitle { font-size: 13.5px; line-height: 1.36; font-weight: 550; letter-spacing: -0.012em; color: var(--t-1); text-wrap: pretty; }
+.chevron { position: absolute; right: 14px; bottom: 15px; color: var(--t-3); transition: transform var(--base) var(--ease); }
+.open .chevron { transform: rotate(180deg); }
+
+/* What it changed, opening under its head without a jump: the height eases from none to all of it. */
+.body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 260ms var(--ease); }
+.open .body { grid-template-rows: 1fr; }
+.bodyInner { min-height: 0; overflow: hidden; }
+.group { padding: 0 14px; }
+.group:first-child { padding-top: 4px; }
+.kind { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 11.5px; font-weight: 500; color: var(--t-3); }
+.kind::after { content: ''; flex: 1; border-top: 1px solid var(--line-2); }
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { position: relative; padding: 6px 0 6px 14px; font-size: 12.5px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; overflow-wrap: anywhere; }
+.list li::before { content: ''; position: absolute; left: 1px; top: 14px; width: 5px; height: 5px; border-radius: 99px; box-shadow: inset 0 0 0 1.2px var(--t-4); }
+.new .list li::before { background: var(--t-3); box-shadow: none; }
+.list code { padding: 1px 4px; border-radius: 4px; background: var(--chip); font: 500 11.5px/1 var(--mono); color: var(--t-1); }
+.releaseLinks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 8px 14px 0; padding: 12px 0 14px; border-top: 1px solid var(--line-2); font-size: 12px; }
+.get { margin-left: auto; height: 28px; padding: 0 10px; border-radius: 8px; background: var(--n-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.get:hover { background: var(--n-3); }
+
+@media (max-width: 900px) {
+  .desk { padding: 76px 20px 72px; }
+}
+@media (max-width: 640px) {
+  .desk { padding: 72px 8px 56px; border-radius: 0 0 24px 24px; }
+  .window { border-radius: 12px; }
+  .window .board { padding: 12px 0 0; --lane-min: 236px; }
+  .readyWhat { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull, .release, .chevron, .body { transition: none; }
+}
