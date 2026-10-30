@@ -49,6 +49,7 @@ import { statements as lookupIndexes } from './0044_lookup_indexes'
 import { statements as inputFiles } from './0045_input_files'
 import { statements as shownPictures } from './0046_shown_pictures'
 import { statements as taskRequestInputs } from './0047_task_request_inputs'
+import { statements as threadItemsByUserInput } from './0048_thread_items_by_user_input'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -115,6 +116,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0045_input_files', statements: inputFiles },
   { key: '0046_shown_pictures', statements: shownPictures },
   { key: '0047_task_request_inputs', statements: taskRequestInputs },
+  { key: '0048_thread_items_by_user_input', statements: threadItemsByUserInput },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

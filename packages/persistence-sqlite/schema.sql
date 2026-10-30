@@ -1310,3 +1310,5 @@ CREATE TABLE task_request_inputs (
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id)
 ) STRICT;
+
+CREATE INDEX thread_items_by_user_input ON thread_items (user_input_id) WHERE kind = 'user_message';
