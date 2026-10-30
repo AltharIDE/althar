@@ -5,7 +5,8 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { guard, guardEnv, passGuard } from '../src/pushGuard'
+import { guard, guardEnv, guardStopIn, passGuard } from '../src/pushGuard'
+import { gitCommandsOf } from '../src/rules'
 
 /*
  * A lead's git stops what can't be undone from its task (ADR-071), wherever
@@ -105,10 +106,41 @@ describe("a lead's git", () => {
     assert.include(loop.said, 'Althar stopped this:')
   })
 
-  it('lets through what the person allowed, for two minutes', () => {
+  it('names the kind it stopped on a line of its own, for the record to count', () => {
     const { work } = repository()
-    passGuard(sessionId, at)
-    assert.strictEqual(run(work, 'git', 'push', '-q', 'origin', 'althar/retry:main').status, 0)
-    assert.strictEqual(run(work, 'git', 'push', '-q', 'origin', '--delete', 'feature/other').status, 0)
+    assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', 'althar/retry:main').said), 'default-branch')
+    assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', '--delete', 'feature/other').said), 'delete-branch')
+    assert.strictEqual(guardStopIn(run(work, 'git', 'branch', '-D', 'feature/other').said), 'delete-branch')
+    assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', 'althar/retry').said), undefined)
+  })
+
+  it('lets through the one git the person allowed, once, and nothing else on its pass', () => {
+    const { work } = repository()
+    const allowed = 'git push -q origin althar/retry:main'
+    passGuard(sessionId, gitCommandsOf(`${allowed} 2>&1`), at)
+    // Another irreversible git, in a script or plainly, gets nothing from it.
+    const other = run(
+      work,
+      'python3',
+      '-c',
+      "import subprocess, sys; sys.exit(subprocess.run(['git', 'push', 'origin', '--delete', 'feature/other']).returncode)",
+    )
+    assert.notStrictEqual(other.status, 0)
+    assert.include(other.said, 'deleting feature/other on origin')
+    assert.notStrictEqual(run(work, 'git', 'branch', '-D', 'feature/other').status, 0)
+    // What was allowed goes, once.
+    assert.strictEqual(run(work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'the allowed push')
+    run(work, 'git', 'commit', '-q', '--allow-empty', '-m', 'Again')
+    const again = run(work, 'git', ...allowed.split(' ').slice(1))
+    assert.notStrictEqual(again.status, 0, 'its pass was spent on the first')
+    assert.include(again.said, 'a push to main, the default branch')
+  })
+})
+
+describe('the git commands a pass names', () => {
+  it('are git’s own words: unquoted, without the shell’s redirects or assignments', () => {
+    assert.deepStrictEqual(gitCommandsOf(`git push --force origin 'althar/retry' 2>&1 | tail -3`), ['git push --force origin althar/retry'])
+    assert.deepStrictEqual(gitCommandsOf('GIT_TRACE=1 /usr/bin/git  push origin HEAD:main && echo done'), ['git push origin HEAD:main'])
+    assert.deepStrictEqual(gitCommandsOf('ls'), [])
   })
 })

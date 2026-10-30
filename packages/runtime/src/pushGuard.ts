@@ -14,8 +14,13 @@ import { join } from 'node:path'
  * repository's own, as it would have run.
  *
  * Where the person allows a request that is one of these, Althar writes the
- * session a pass for the next two minutes, which the hooks let through: the
- * command that asked runs as it was allowed.
+ * session a pass naming the git commands they allowed, for the next two
+ * minutes. The guard lets through only a git whose own words (`ps`) are one
+ * of those, and only that one run of it: the pass is spent on the git it
+ * first lets through, and nothing else gets past on it.
+ *
+ * What it stops it names on a line of its own (`STOPPED`), which Althar
+ * reads on the failed call to count it as a refusal (`guardStopIn`).
  *
  * It holds against a mistake, not an agent set on getting past it: one that
  * changes its environment or git's config gets past it, as one outside its
@@ -58,6 +63,9 @@ const GUARDED = ['pre-push', 'reference-transaction']
  */
 const SHIM = `#!/bin/sh
 # Althar's hooks folder (ADR-071): its guard, then the repository's own hook.
+# The git that runs this hook, whose words a pass names.
+ALTHAR_GIT_PID=$PPID
+export ALTHAR_GIT_PID
 here=$(cd "$(dirname "$0")" && pwd)
 name=$(basename "$0")
 own=$(git config --local --get core.hooksPath 2>/dev/null || git config --global --get core.hooksPath 2>/dev/null || git config --system --get core.hooksPath 2>/dev/null)
@@ -83,22 +91,47 @@ exit 0
 const HOW =
   'If it should happen, run it as a plain git command on a line of its own, outside your sandbox: Althar asks the person, and lets it through once they allow it. Otherwise find another way.'
 
+/** The line after what the guard says, naming the kind it stopped, for the record to count. */
+const STOPPED = '(stopped by Althar: %s)'
+
+/** The kind of what git's guard stopped, where a failed command's output says it did. */
+export const guardStopIn = (printed: string): 'default-branch' | 'force-push' | 'delete-branch' | undefined =>
+  /\(stopped by Althar: (default-branch|force-push|delete-branch)\)/.exec(printed)?.[1] as
+    | 'default-branch'
+    | 'force-push'
+    | 'delete-branch'
+    | undefined
+
 /**
  * The guard: a push of the default branch, of a branch over commits it
  * doesn't have, or deleting a branch that isn't the task's; a branch that
  * isn't the task's deleted or moved so it loses commits here. Tags and
- * remotes' branches go as before. A fresh pass lets everything through.
+ * remotes' branches go as before. A fresh pass lets through the git it
+ * names, once: the run that first spends it.
  */
 const GUARD = `#!/bin/sh
 # Althar's guard (ADR-071): stops what can't be undone from a task, at git itself.
 hook=$1
 shift
 pass=\${ALTHAR_GUARD_PASS:-}
-if [ -n "$pass" ] && [ -f "$pass" ] && [ -n "$(find "$pass" -mmin -2 2>/dev/null)" ]; then exit 0; fi
+git=\${ALTHAR_GIT_PID:-}
 task=\${ALTHAR_TASK_BRANCH:-}
 defaults=" \${ALTHAR_DEFAULT_BRANCHES:-} "
 how='${HOW.replaceAll("'", "'\\''")}'
-stop() { printf 'Althar stopped this: %s\\n%s\\n' "$1" "$how" >&2; exit 1; }
+# Whether the person allowed this git: a fresh pass names its words, and no other git has spent it.
+passes() {
+  [ -n "$pass" ] && [ -n "$git" ] && [ -f "$pass" ] && [ -n "$(find "$pass" -mmin -2 2>/dev/null)" ] || return 1
+  spent=$(sed -n 's/^spent //p' "$pass")
+  if [ -n "$spent" ]; then [ "$spent" = "$git" ]; return; fi
+  words=$(ps -o args= -p "$git" 2>/dev/null | sed -E -e 's#^[^ ]*/git( |$)#git\\1#' -e 's/[[:space:]]+/ /g' -e 's/ $//')
+  [ -n "$words" ] && grep -Fqx -e "$words" "$pass" || return 1
+  printf 'spent %s\\n' "$git" >> "$pass"
+}
+stop() {
+  passes && return 0
+  printf 'Althar stopped this: %s\\n%s\\n${STOPPED}\\n' "$2" "$how" "$1" >&2
+  exit 1
+}
 zero() { case "$1" in *[!0]*) return 1 ;; esac; return 0; }
 case "$hook" in
   pre-push)
@@ -106,17 +139,17 @@ case "$hook" in
     while read -r local_ref local_sha remote_ref remote_sha; do
       case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac
       branch=\${remote_ref#refs/heads/}
-      case "$defaults" in *" $branch "*) stop "a push to $branch, the default branch, can't be undone from the task." ;; esac
+      case "$defaults" in *" $branch "*) stop default-branch "a push to $branch, the default branch, can't be undone from the task." ;; esac
       if zero "$local_sha"; then
         [ "$branch" = "$task" ] && continue
-        stop "deleting $branch on $remote can't be undone: it isn't this task's branch."
+        stop delete-branch "deleting $branch on $remote can't be undone: it isn't this task's branch."
       fi
       zero "$remote_sha" && continue
       if git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
         git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null ||
-          stop "a force push to $branch can't be undone: it throws away commits $remote has there."
+          stop force-push "a force push to $branch can't be undone: it throws away commits $remote has there."
       else
-        stop "$remote has commits on $branch this repository doesn't, and pushing over them by force can't be undone. Fetch them first (fetch_from_remote), then push what includes them."
+        stop force-push "$remote has commits on $branch this repository doesn't, and pushing over them by force can't be undone. Fetch them first (fetch_from_remote), then push what includes them."
       fi
     done
     ;;
@@ -126,10 +159,10 @@ case "$hook" in
       case "$ref" in refs/heads/*) ;; *) continue ;; esac
       branch=\${ref#refs/heads/}
       [ "$branch" = "$task" ] && continue
-      if zero "$new"; then stop "deleting the branch $branch can't be undone from the task: it isn't this task's."; fi
+      if zero "$new"; then stop delete-branch "deleting the branch $branch can't be undone from the task: it isn't this task's."; fi
       zero "$old" && continue
       git merge-base --is-ancestor "$old" "$new" 2>/dev/null ||
-        stop "moving $branch so it loses commits can't be undone from the task: it isn't this task's branch."
+        stop force-push "moving $branch so it loses commits can't be undone from the task: it isn't this task's branch."
     done
     ;;
 esac
@@ -188,12 +221,16 @@ export const guardEnv = (input: {
   }
 }
 
-/** Lets a session's git past the guard for the next two minutes: the person allowed what it stops. */
-export const passGuard = (sessionId: string, at: Guard | undefined = made): void => {
-  if (at === undefined) return
+/**
+ * Lets past the guard, for the next two minutes, the one run of git whose
+ * words are among `commands` (`gitCommandsOf`): the person allowed what it
+ * stops. A new pass takes the place of the one before, spent or not.
+ */
+export const passGuard = (sessionId: string, commands: ReadonlyArray<string>, at: Guard | undefined = made): void => {
+  if (at === undefined || commands.length === 0) return
   try {
     // Its file's own time is what the hook reads, so writing it again starts the two minutes again.
-    writeFileSync(passOf(sessionId, at), sessionId)
+    writeFileSync(passOf(sessionId, at), commands.map((each) => `${each}\n`).join(''))
   } catch {
     // A pass that can't be written leaves the guard as it is: the command says what stopped it.
   }

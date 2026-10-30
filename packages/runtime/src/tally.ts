@@ -1,6 +1,8 @@
 import { type KindTally, TALLY_DAYS, TallyKind } from '@althar/contracts'
+import { SECRET_PLACES } from '@althar/provider-adapters'
 import { Clock, Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { guardStopIn } from './pushGuard'
 
 /*
  * How each kind of ask and refusal went (ADR-071), for the project's rules:
@@ -11,7 +13,10 @@ import { SqlClient } from 'effect/sql'
  *
  * An ask is a permission card (its kind in the card's `counted`); a refusal
  * is a decision the rules or the coordinator made against a request no one
- * was asked about (its kind on the decision). Worked around: the agent's
+ * was asked about (its kind on the decision), or one the boundary made
+ * itself, which no rule saw: git's guard, or the sandbox saying a command
+ * couldn't do something there (`stoppedIn`, on the failed call's item).
+ * Worked around: the agent's
  * turn went on, and a call it made after the one it wasn't allowed
  * completed, as it does when it finds another way. Read from the record
  * each time; what was decided before kinds were kept isn't counted.
@@ -40,6 +45,11 @@ export const tallyOf = (projectId: string) =>
         JOIN permission_requests p ON p.id = d.permission_request_id
         WHERE d.project_id = ${projectId} AND d.decided_at >= ${since} AND d.outcome = 'reject' AND d.kind IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM attention_requests a WHERE a.permission_request_id = p.id)
+        UNION ALL
+        SELECT json_extract(i.content, '$.stopped'), 0, 0, 1, 'reject', i.provider_session_id, i.tool_call_id
+        FROM thread_items i
+        WHERE i.project_id = ${projectId} AND i.kind = 'tool_call' AND i.created_at >= ${since}
+          AND json_extract(i.content, '$.stopped') IS NOT NULL
       )
       SELECT kind, sum(asked) AS asked, sum(coalesce(allowed, 0)) AS allowed, sum(refused) AS refused,
         sum(coalesce(outcome, '') <> 'allow' AND EXISTS (
@@ -58,3 +68,21 @@ export const tallyOf = (projectId: string) =>
         : [],
     )
   })
+
+/** What a sandbox says when it stops a command: macOS's, and a read-only bind on Linux (bubblewrap). */
+const REFUSED_THERE = /operation not permitted|read-only file system/i
+
+/** Where the person keeps keys, as a path a refusal names. */
+const KEPT_KEYS = new RegExp(`/(?:${SECRET_PLACES.map((place) => place.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?:/|\\b)`)
+
+/**
+ * What the boundary refused a command, from what the failed command printed:
+ * the kind git's guard names, or, where a sandbox holds the session and it
+ * says the command couldn't, reading where keys are kept or writing outside.
+ */
+export const stoppedIn = (printed: string, sandboxed: boolean): TallyKind | undefined => {
+  const guarded = guardStopIn(printed)
+  if (guarded !== undefined) return guarded
+  if (!sandboxed || !REFUSED_THERE.test(printed)) return undefined
+  return KEPT_KEYS.test(printed) ? 'credentials' : 'outside'
+}

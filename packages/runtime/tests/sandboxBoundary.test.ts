@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Ids } from '@althar/domain'
+import { Ids, type ProjectId } from '@althar/domain'
 import { codexLikeMeanings } from '@althar/provider-adapters/testing'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
@@ -12,10 +12,11 @@ import { Instance } from '../src/Instance'
 import { Permissions, type RequestContext } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { guard } from '../src/pushGuard'
-import { decide, decideInside, decideReader, type Hold, runsInside, type RuleContext, tallyKindOf } from '../src/rules'
+import { decide, decideInside, decideLeaving, decideReader, type Hold, runsInside, type RuleContext, tallyKindOf } from '../src/rules'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { tallyOf } from '../src/tally'
+import { stoppedIn, tallyOf } from '../src/tally'
+import { recorder } from '../src/threads'
 import { runtime, task, turns, until } from './support'
 
 /*
@@ -119,8 +120,18 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules never allow deploying and publishing.",
     })
     assert.strictEqual(decideInside(command('rm -rf build'), never).verdict, 'deny')
-    // What it can't read runs, though Never lists something: the sandbox holds it.
-    assert.strictEqual(decideInside(command(TODAY.loop), never).verdict, 'allow')
+    // What it can't read could be what Never lists where nothing at the boundary would stop it: a deploy, a command the project
+    // named. A python script's `npm publish` is refused as the plain one is, saying how to run it so it can be read.
+    const publish = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['npm', 'publish'])\nEOF"
+    assert.include((decideInside(command(publish), never) as { reason: string }).reason, 'run its commands written out')
+    assert.strictEqual(
+      decideInside(command(TODAY.loop), context('allow', { commands: [{ pattern: 'rm -rf', decision: 'never' }] })).verdict,
+      'deny',
+    )
+    // Where Never lists only what the sandbox and git's guard stop themselves, what it can't read runs: they hold it.
+    const held = context('allow', { never: ['force-push', 'default-branch', 'delete-branch', 'outside'] })
+    for (const line of [TODAY.loop, TODAY.heredoc, publish]) assert.strictEqual(decideInside(command(line), held).verdict, 'allow', line)
+    assert.strictEqual(decideInside(command('git push --force origin main'), held).verdict, 'deny')
     const asks = context('allow', { commands: [{ pattern: 'terraform', decision: 'ask' }] })
     assert.deepStrictEqual(decideInside(command('terraform plan'), asks), {
       verdict: 'ask',
@@ -140,15 +151,42 @@ describe('what crosses a lead’s sandbox', () => {
   it('meets the rules: a push to main or a force push asks, even with everything allowed', () => {
     for (const line of ['git push origin main', 'git push --force origin althar/retry', 'git push origin +althar/retry'])
       assert.strictEqual(decide(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'ask', line)
-    // What the words of a script hide the rules can't see: git's guard stops it where it happens (pushGuard.test.ts).
-    const hidden = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push', 'origin', 'HEAD:main'])\nEOF"
-    assert.strictEqual(decide(command(hidden, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow')
     // What else crosses goes ahead with everything allowed.
-    assert.strictEqual(decide(command('bunx playwright test'), context('allow')).verdict, 'allow')
+    assert.strictEqual(decideLeaving(command('bunx playwright test'), context('allow')).verdict, 'allow')
     assert.strictEqual(
-      decide(command('git push origin althar/retry', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
+      decideLeaving(command('git push origin althar/retry', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
       'allow',
     )
+    assert.strictEqual(decideLeaving(command('git push origin main', { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'ask')
+  })
+
+  it('isn’t a script Althar can’t read, with everything allowed: outside, nothing would stop it writing to the person’s checkout', () => {
+    const writes = "python3 - <<'EOF'\nimport pathlib\npathlib.Path('/work/meridian/main/src/app.ts').write_text('x')\nEOF"
+    const pushes = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push', 'origin', 'HEAD:main'])\nEOF"
+    for (const line of [
+      writes,
+      pushes,
+      'python3 tools/fix.py',
+      './tools/fix.sh',
+      'bash < fix.sh',
+      'n=$(date +%s); echo $n > /work/meridian/main/stamp',
+    ]) {
+      const verdict = decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'))
+      assert.strictEqual(verdict.verdict, 'deny', line)
+      assert.include((verdict as { reason: string }).reason, 'Run it inside your sandbox, where it runs without asking', line)
+      // Inside, it runs; where no sandbox could hold it, everything allowed lets it through as before (ADR-067).
+      assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'allow', line)
+      assert.strictEqual(decide(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow', line)
+    }
+    // What the project runs outside from the start goes as it said, and so does what Althar can read.
+    assert.strictEqual(decideLeaving(command('node scripts/e2e.ts'), context('allow')).verdict, 'allow')
+    assert.strictEqual(decideLeaving(command('bash -c "ls"', { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow')
+    assert.strictEqual(
+      decideLeaving(command('git status && ls docs', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
+      'allow',
+    )
+    // Where the person is asked anyway, they read it on the card.
+    assert.strictEqual(decideLeaving(command(writes, { dangerouslyDisableSandbox: true }), context('ask')).verdict, 'ask')
   })
 
   it('is counted by the kind that kept it', () => {
@@ -171,7 +209,8 @@ const held = (sandbox: Hold = lead) =>
     const instance = yield* Instance
     const sessions = yield* Sessions
     const sql = yield* SqlClient.SqlClient
-    yield* policies.set(project.projectId, { allowEverything: true, never: ['deploy'] }, instance.personId)
+    // Never lists only what the boundary stops itself, so what the rules can't read still runs inside (`HELD_INSIDE`).
+    yield* policies.set(project.projectId, { allowEverything: true, never: ['force-push'] }, instance.personId)
     const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
     yield* until(turns(created.threadId), (rows) => rows.length > 0 && rows.every((row) => row.state === 'completed'))
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
@@ -187,6 +226,61 @@ const held = (sandbox: Hold = lead) =>
     return { requestContext, project, sql, sessionId }
   })
 
+describe('what the boundary refuses itself', () => {
+  it('is read from what the failed command printed: the kind git’s guard names, or the sandbox’s refusal where one holds it', () => {
+    const guarded =
+      "Althar stopped this: deleting feature/other on origin can't be undone.\nIf it should happen…\n(stopped by Althar: delete-branch)"
+    assert.strictEqual(stoppedIn(guarded, false), 'delete-branch')
+    assert.strictEqual(stoppedIn("PermissionError: [Errno 1] Operation not permitted: '/work/meridian/main/a.ts'", true), 'outside')
+    assert.strictEqual(stoppedIn('touch: /work/meridian/main/a.ts: Read-only file system', true), 'outside')
+    assert.strictEqual(stoppedIn('head: /Users/someone/.ssh/config: Operation not permitted', true), 'credentials')
+    // Where no sandbox holds the session, a refusal like it is the system's, not the boundary's.
+    assert.strictEqual(stoppedIn('kill: 1: Operation not permitted', false), undefined)
+    assert.strictEqual(stoppedIn('AssertionError: expected 1 to be 2', true), undefined)
+  })
+
+  it.live('is counted beside what the rules refused, and as worked around where a later call of the turn completed', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { project, task: created } = yield* task('Retry checkout')
+      const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+      const [turn] = yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
+      const where = { projectId: project.projectId as ProjectId, threadId: created.threadId, sessionId, deliveryId: turn?.id ?? '' }
+      const failed = (record: ReturnType<typeof recorder>, toolCallId: string, said: string) =>
+        record.record({
+          _tag: 'ToolCall',
+          toolCallId,
+          title: toolCallId,
+          kind: 'execute',
+          status: 'failed',
+          rawInput: { command: toolCallId },
+          rawOutput: { stderr: said, exitCode: 1 },
+        })
+      const held = recorder({ ...where, sandboxed: true })
+      yield* failed(
+        held,
+        'git push origin --delete feature/other',
+        'Althar stopped this: deleting feature/other…\n(stopped by Althar: delete-branch)',
+      )
+      yield* failed(held, 'python3 - <<EOF', "PermissionError: [Errno 1] Operation not permitted: '/work/meridian/main/a.ts'")
+      yield* failed(held, 'head ~/.ssh/config', 'head: /Users/someone/.ssh/config: Operation not permitted')
+      // It found another way: a later call of the same turn completed.
+      yield* held.record({ _tag: 'ToolCall', toolCallId: 'other-way', title: 'Write it here', kind: 'edit', status: 'completed' })
+      // A session no sandbox holds says the same of something else: not counted.
+      yield* failed(recorder(where), 'kill 1', 'kill: 1: Operation not permitted')
+      const tally = yield* tallyOf(project.projectId)
+      assert.deepStrictEqual(
+        [...tally].sort((a, b) => a.kind.localeCompare(b.kind)),
+        [
+          { kind: 'credentials', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
+          { kind: 'delete-branch', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
+          { kind: 'outside', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
+        ],
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
 describe('a lead whose sandbox Althar holds', () => {
   it.live(
     'runs today’s commands without a card, asks before a push to main that crosses, and counts each ask and refusal',
@@ -197,10 +291,10 @@ describe('a lead whose sandbox Althar holds', () => {
         for (const line of Object.values(TODAY))
           assert.strictEqual((yield* permissions.decide(requestContext, command(line))).decision, 'allow', line)
         // What the project never allows is refused inside too, and counted by its kind.
-        const published = yield* permissions.decide(requestContext, command('npm publish'))
-        assert.deepStrictEqual(published, {
+        const forced = yield* permissions.decide(requestContext, command('git push --force origin althar/retry'))
+        assert.deepStrictEqual(forced, {
           decision: 'reject',
-          reason: "The project's rules never allow deploying and publishing.",
+          reason: "The project's rules never allow force pushes.",
           decidedBy: 'rules',
         })
         // A push to main asked to run outside the sandbox: a card, which the person allows.
@@ -230,7 +324,7 @@ describe('a lead whose sandbox Althar holds', () => {
         assert.deepStrictEqual(
           kinds.filter((row) => row.kind !== null),
           [
-            { kind: 'deploy', outcome: 'reject' },
+            { kind: 'force-push', outcome: 'reject' },
             { kind: 'default-branch', outcome: 'allow' },
           ],
         )
@@ -239,7 +333,7 @@ describe('a lead whose sandbox Althar holds', () => {
           [...tally].sort((a, b) => a.kind.localeCompare(b.kind)),
           [
             { kind: 'default-branch', asked: 1, allowed: 1, refused: 0, workedAround: 0 },
-            { kind: 'deploy', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
+            { kind: 'force-push', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
           ],
         )
       }).pipe(Effect.provide(runtime())),

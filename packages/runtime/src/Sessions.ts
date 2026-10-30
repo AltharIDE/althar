@@ -1494,6 +1494,7 @@ export class Sessions extends Context.Service<
             sessionId: running.sessionId,
             deliveryId: turnId,
             folders: foldersOf(thread),
+            sandboxed: running.requestContext.sandbox !== undefined,
           })
           // What it was saying between turns ends here: what follows belongs after this turn's input.
           yield* running.settleBetween
@@ -2284,7 +2285,13 @@ export class Sessions extends Context.Service<
           )
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
-          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
+          const between = recorder({
+            projectId: thread.projectId,
+            threadId: thread.threadId,
+            sessionId,
+            folders: foldersOf(thread),
+            sandboxed: requestContext.sandbox !== undefined,
+          })
           const heard = yield* betweenTurns(between, scope)
           running.settleBetween = heard.close
           // A turn that already started records itself; between turns, this one does.

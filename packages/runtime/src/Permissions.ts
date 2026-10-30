@@ -35,8 +35,10 @@ import {
   commandOf,
   decide,
   decideInside,
+  decideLeaving,
   decideReader,
   essentials,
+  gitCommandsOf,
   type Hold,
   lasting,
   pathsOf,
@@ -299,7 +301,7 @@ export class Permissions extends Context.Service<
           // A lead's git lets through what the person allowed of what can't be undone, which its guard would stop (pushGuard.ts).
           const rules = input.context.rules
           if (input.decision.decision === 'allow' && rules.role === 'task' && lasting(input.request, rules.context))
-            yield* Effect.sync(() => passGuard(input.context.sessionId))
+            yield* Effect.sync(() => passGuard(input.context.sessionId, gitCommandsOf(commandOf(input.request))))
         })
 
       const release = releaseSession
@@ -367,14 +369,26 @@ export class Permissions extends Context.Service<
         })
 
       /** A task's request as the rules decide it now, with the context they read it in and the revision they are. */
-      const byRules = (projectId: ProjectId, taskId: string | null, rules: RuleContext, request: PermissionRequest, inside = false) =>
+      const byRules = (
+        projectId: ProjectId,
+        taskId: string | null,
+        rules: RuleContext,
+        request: PermissionRequest,
+        inside = false,
+        held = false,
+      ) =>
         Effect.gen(function* () {
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
           const { policy, project } = yield* rulesNow(projectId, taskId)
           const context: RuleContext = { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) }
           // A command the session's sandbox holds meets only what the project said itself (ADR-071).
-          return { context, project, verdict: inside ? decideInside(request, context) : decide(request, context), policyId: policy.id }
+          return {
+            context,
+            project,
+            verdict: inside ? decideInside(request, context) : held ? decideLeaving(request, context) : decide(request, context),
+            policyId: policy.id,
+          }
         })
 
       /** What the rules answer, as the decision sent: refused with why, or allowed, by the allow rules that did where they did. */
@@ -461,6 +475,7 @@ export class Permissions extends Context.Service<
                 waiter.rules,
                 waiter.request,
                 waiter.inside,
+                waiter.context.sandbox !== undefined,
               )
               if (settles(verdict)) yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
             }).pipe(Effect.ignore),
@@ -617,7 +632,14 @@ export class Permissions extends Context.Service<
             }
             const rules = requestContext.rules.context
             // The rules first, the allow rules among them: the coordinator judges only what none of them answers.
-            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
+            const ruled = yield* byRules(
+              requestContext.projectId,
+              requestContext.taskId,
+              rules,
+              request,
+              inside,
+              requestContext.sandbox !== undefined,
+            )
             const kind = tallyKindOf(request, ruled.context)
             let ruleContext = ruled.context
             let policyId = ruled.policyId
@@ -709,7 +731,14 @@ export class Permissions extends Context.Service<
             // then it is decided again now.
             const now = yield* rulesNow(requestContext.projectId, requestContext.taskId)
             if (now.policy.id !== policyId || now.project.mode !== ruleContext.project?.mode) {
-              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
+              const again = yield* byRules(
+                requestContext.projectId,
+                requestContext.taskId,
+                rules,
+                request,
+                inside,
+                requestContext.sandbox !== undefined,
+              )
               if (settles(again.verdict)) yield* settle(attentionId, waiter, decisionOf(again.verdict, again.policyId))
             }
             if (waiting.has(attentionId))
@@ -812,8 +841,14 @@ export class Permissions extends Context.Service<
                 keep = {
                   scope: always,
                   rule,
-                  context: (yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request, waiter.inside))
-                    .context,
+                  context: (yield* byRules(
+                    waiter.context.projectId,
+                    waiter.context.taskId,
+                    waiter.rules,
+                    waiter.request,
+                    waiter.inside,
+                    waiter.context.sandbox !== undefined,
+                  )).context,
                 }
               }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }

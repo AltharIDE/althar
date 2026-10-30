@@ -3063,14 +3063,88 @@ export const decideInside = (request: PermissionRequest, context?: RuleContext):
   if (context === undefined || project === undefined) return ALLOW
   const named = commandRule(command, project.commands, system)
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
-  if (project.never.length > 0) {
-    const never = commandKinds(command, context).find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
-    if (never !== undefined && never.rule !== 'unclear')
-      return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
-  }
+  const kinds = project.never.length > 0 || project.commands.length > 0 ? commandKinds(command, context) : []
+  const never = kinds.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
+  if (never !== undefined && never.rule !== 'unclear')
+    return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
+  // What it can't read could be what the project never allows, where nothing at the boundary stops that: a deploy, a command it named.
+  const unheld = project.never.some((rule) => !HELD_INSIDE.includes(rule)) || project.commands.some((rule) => rule.decision === 'never')
+  const unread = unheld ? unreadOf(command, kinds) : undefined
+  if (unread !== undefined)
+    return {
+      verdict: 'deny',
+      reason: `${unread} The project's rules never allow some things that could be in it, so it's refused: run its commands written out, where Althar can read them.`,
+    }
   if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   return ALLOW
 }
+
+/**
+ * Why Althar can't read what a line does, where it can't: a part the shell
+ * works out as it runs (`$(…)`, backticks, `eval`), a script in another
+ * language (`python3 - <<'EOF'`, `node fix.js`), a shell given a file or its
+ * input, a program run from a folder of the task's (`./fix.sh`), or what the
+ * rules themselves can't tell.
+ */
+const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
+  const parsed = parseCommandLine(command)
+  if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
+  for (const words of parsed.commands) {
+    const program = words.find((word) => !assignment.test(word)) ?? ''
+    const name = program.slice(program.lastIndexOf('/') + 1)
+    const after = words.slice(words.indexOf(program) + 1)
+    if (SCRIPT_LANGUAGES.test(name) && name !== 'bun' && name !== 'deno')
+      return `Althar can't read what this runs: a \`${name}\` script does what its code says, not its words.`
+    // A shell given a script to run, from a file or its input, rather than one on the line (`sh -c '…'`, which the rules read).
+    if (SHELLS.test(name) && !after.some((word) => /^-\w*c\w*$/.test(word)))
+      return `Althar can't read what this runs: \`${name}\` runs a script from a file or its input.`
+    if (program.startsWith('./') || program.startsWith('../'))
+      return `Althar can't read what this runs: \`${program}\` does what its file says.`
+  }
+  const unclear = kinds.find((each) => each.rule === 'unclear')
+  return unclear?.reason.replace(/,? so it asks\.$/, '.')
+}
+
+/**
+ * The kinds the boundary itself stops, whatever a command hides: the
+ * sandbox a write outside the task's worktree, git's guard a push to the
+ * default branch, a force push and deleting another branch (pushGuard.ts).
+ * A project that never allows only these needn't read what runs inside.
+ */
+const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-push', 'delete-branch']
+
+/**
+ * Decides a shell command that leaves the sandbox its session has (ADR-071):
+ * as the rules decide any request, but with everything allowed, what they
+ * can't read is refused, with how to run it, rather than let through. Outside
+ * the sandbox nothing would stop a script changing the person's checkout or
+ * another branch, and inside it, it runs without asking.
+ */
+export const decideLeaving = (request: PermissionRequest, context: RuleContext): Verdict => {
+  const verdict = decide(request, context)
+  if (verdict.verdict !== 'allow' || (context.project ?? MVP_RULES).mode !== 'allow') return verdict
+  // Only what the agent asked to run outside: what the project runs outside from the start (its tests, its build) goes as it said.
+  if (request.kind !== 'execute' || field(request.rawInput, 'dangerouslyDisableSandbox') !== true) return verdict
+  const unread = unreadOf(commandOf(request), keptOf(request, context))
+  if (unread === undefined) return verdict
+  return {
+    verdict: 'deny',
+    reason: `${unread} Outside your sandbox nothing would stop it changing another checkout or a branch that isn't the task's, so it's refused. Run it inside your sandbox, where it runs without asking; or, if it has to run outside, as plain commands Althar can read.`,
+  }
+}
+
+/**
+ * The git commands of a line as git's own words would show them (`ps`): its
+ * program by name, its words unquoted, one space between. What a pass from
+ * the person lets past git's guard, and no other (pushGuard.ts).
+ */
+export const gitCommandsOf = (command: string): ReadonlyArray<string> =>
+  parseCommandLine(command)
+    .commands.map((words) => words.filter((word, at) => !words.slice(0, at + 1).every((each) => assignment.test(each))))
+    .filter((words) => words.length > 0 && words[0]!.slice(words[0]!.lastIndexOf('/') + 1) === 'git')
+    // Its redirects, which the parse puts last, are the shell's, not git's.
+    .map((words) => words.slice(0, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0))
+    .map((words) => ['git', ...words.slice(1)].join(' ').replace(/\s+/g, ' ').trim())
 
 // ---- What each ask and refusal is counted as ------------------------------
 
