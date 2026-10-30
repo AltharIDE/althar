@@ -1,11 +1,10 @@
 <img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
 
-<h1 align="center">Every coding agent. One crew. Become your 10x self.</h1>
+<h1 align="center">Building software has never felt so fast.</h1>
 
 <p align="center">
-  Althar runs Claude Code, Codex, GitHub Copilot, OpenCode and more as one team, on the plans you already pay for.<br />
-  A coordinator plans the work, one agent builds it, another reviews it, and when one runs out the next takes over.<br />
-  <b>Never has software engineering felt so good.</b>
+  Althar is an open-source IDE for building with AI agents.<br />
+  It runs the ones you already pay for, and keeps going whatever the labs change.
 </p>
 
 <p align="center">
@@ -22,181 +21,21 @@
 
 <br />
 
-<h3 align="center">The most beautiful IDE ever built, at your fingertips.</h3>
-
 <img src="brand/export/screenshots/framed/home.jpg" width="100%" alt="Althar's home: two things that need you, five tasks in progress across three projects, and what happened since you last looked." />
 
 ## Why Althar
 
-The best coding agent right now is Claude Code. Or Codex. Or an open model. Ask again next month. New models ship most weeks, open models keep closing the gap, and prices and limits move with all of it. And when you swap, all your chats, your context, your integrations, lost.
+The best coding agent right now is Claude Code. Or Codex. Or Gemini. Or an open model. Ask again next month. New models ship most weeks, open models keep closing the gap, and prices and limits move with all of it. The safe bet is not to bet on one.
 
-The industry pace rewards optionality. The tools we use punish it.
+But switch agents today and your threads, your context and your setup stay behind. Althar is built the other way round: the agents are interchangeable, and your projects are what lasts.
 
-Meet Althar:
+**Usage gets cut. Models get pulled. Althar stays.**
 
-- **Everything stays on your computer.** Projects, threads and history live in a local database on your machine. No Althar account, no Althar cloud, nothing of ours between you and the model.
+- **Your computer, your data.** Projects, threads and history live in a local database on your machine. No Althar account, no Althar cloud, nothing of ours between you and the model.
 - **Open source, for real.** Apache 2.0. Read every line, fork it, run it. If we disappear, your setup doesn't.
-- **Every plan, every account.** Claude, ChatGPT and your API keys, side by side, with as many accounts on each as you have. Yes, we know, the second account is worth it. Althar uses them all.
-- **Runs out? It swaps.** When an account hits its limit, the work moves to the next account or agent with room: same thread, same plan, same branch. No more waiting for a reset.
-- **Reviews, baked in.** Ever felt like a meat proxy, pasting one agent's answer into another and typing "review this"? Every task is reviewed by another model, and the lead fixes what it finds before you see it.
-- **Works with your tools.** GitHub, GitLab, Bitbucket, Linear, Jira and Trello. Issues in, pull requests out, named the way your team names them.
+- **Every plan you pay for.** Claude, ChatGPT, Copilot, JetBrains AI, SuperGrok, Kimi, Le Chat or a plain API key, side by side, with every account you have on most of them. No new account, no new bill.
 
-Subscriptions come and go. Your projects stay. Althar, stays.
-
-## What it does
-
-<table>
-  <tr>
-    <td width="44%" valign="top">
-      <h3>No new account. No new bill.</h3>
-      <p>Althar uses the sign-ins already on your machine: your Claude plan, your ChatGPT plan, your keys. No token reselling, no proxy, nothing of ours between you and the model.</p>
-      <p>Add several accounts per agent, and pick any agent's model and effort from one picker. New agents join through the <a href="https://agentclientprotocol.com">Agent Client Protocol</a>: an adapter, not a rewrite.</p>
-    </td>
-    <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: the agents found on this computer, which are signed in, and the repositories a first project could work in." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Tell it what. It picks the team.</h3>
-      <p>Each project has a coordinator. Ask it about the code, or say what you want changed. It reads the repositories and your rules, turns the ask into a task, and proposes who does each step.</p>
-      <p>Change anyone, or hold it. Leave it alone and it starts. Tasks run side by side, each in a worktree of its own.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a backfill; the coordinator answers with one task: Opus 5 implements, Codex reviews, then a draft pull request. It starts in 29 seconds unless changed or held." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Implement. Review. Fix. Review again.</h3>
-      <p>Tasks don't stop at a first draft. By default a model from another maker reviews the lead's work. The lead fixes each finding or sets it aside with its reason, and review goes round again until it's clean.</p>
-      <p>Then the task opens a pull request with your team's branch name, title and template, or merges locally. You only step in to merge.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A settled review: three findings, two fixed by the lead in the second round and one set aside with its reason." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>It keeps going while you're away.</h3>
-      <p>An agent hits its limit: the work moves to the next one with room, or waits for the reset. A turn goes quiet: it's carried on, then started afresh, then brought to you.</p>
-      <p>Every task sits on a board by lane, and you hear about it only when something needs a person.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Stays with you. Out of the way.</h3>
-      <p>On a Mac, Althar hangs round the notch, or sits in the menu bar. At rest it's a sliver with a count of what needs you. Point at it and it drops open: allow a command or open a change without leaving what you're in.</p>
-      <p>It never pings you for progress. Only for a call that's yours.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Made with care.</h3>
-      <p>The window opens in its own light. Every agent and every account sits in one place. You pick the icon your Dock wears. And when nothing needs you, it says so and gets out of the way.</p>
-      <p>Small things, done properly, because you'll spend your day in it.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/reels/details.gif" width="100%" alt="Details: the launch rising out of its own light, the agents and their accounts, choosing the app icon, and the home at rest." />
-    </td>
-  </tr>
-</table>
-
-### And the rest
-
-- **Projects** of one repository, several, or a folder inside one, in tabs across the top, with a home across all of them.
-- **Talk to any lead, any time.** Interrupt it, queue a message for its next turn, change its model, or hand the task to another agent.
-- **Changes file by file** before you accept them. Push stays yours.
-- **Code hosts and trackers:** GitHub, GitLab and Bitbucket for pull requests; Linear, Jira, Trello and GitHub issues for work coming in.
-- **Never miss a call.** A notification when something needs you, and a count on the Dock.
-- **Dictation that stays on your computer.** After a one-time model download, nothing you say leaves it.
-
-## How it works
-
-<table>
-  <tr>
-    <td width="150" align="center">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/project-dark.svg" />
-        <img src="brand/export/crew/project.svg" width="140" alt="The project: a paper cabinet with drawers of tasks, a clock of its history, a ruler of its rules, and its repositories stacked on its head." />
-      </picture>
-    </td>
-    <td>
-      <b>Project</b><br />
-      One or more repositories you open in Althar, with their own rules, tasks and history. It's the thing that lasts.
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/coordinator-dark.svg" />
-        <img src="brand/export/crew/coordinator.svg" width="140" alt="The coordinator: a cobalt block with a screen for a face, handing out a task from its stack." />
-      </picture>
-    </td>
-    <td>
-      <b>Coordinator</b><br />
-      The project's agent that you talk to. It answers questions, plans tasks and hands them out. It never writes code itself.
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/task-dark.svg" />
-        <img src="brand/export/crew/task.svg" width="140" alt="A task: a card on its own feet, its first step ticked, carrying the sapling of its worktree." />
-      </picture>
-    </td>
-    <td>
-      <b>Task</b><br />
-      One piece of work with an outcome, usually one change, growing in a worktree of its own.
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/lead-dark.svg" />
-        <img src="brand/export/crew/lead.svg" width="140" alt="The lead: an ink cylinder in a cobalt headband, a coffee in one hand and a pencil in the other." />
-      </picture>
-    </td>
-    <td>
-      <b>Lead</b><br />
-      The agent that owns a task. It implements, then settles what review finds: fixes it, or sets it aside with a reason.
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/step-dark.svg" />
-        <img src="brand/export/crew/step.svg" width="140" alt="A step, here the reviewer: a paper cylinder with a monocle, a moustache and a bow tie, reading the change." />
-      </picture>
-    </td>
-    <td>
-      <b>Step</b><br />
-      Part of a task, today implement and review. Each step can run on a different agent and model, and reports back to the lead.
-    </td>
-  </tr>
-</table>
-
-Everything runs on your machine. The project's tasks, threads and history are kept in a local database you can read.
-
-## What agents may do on your computer
-
-Each task works in a git worktree of its own, under `~/Althar`, never in your checkout. What an agent asks to do beyond its sandbox comes to Althar, which answers by the project's rules (Rules, in each project):
-
-- **By default,** what stays in the task goes ahead. These wait for you: pushing to the default branch, force pushes, pushing every branch or tags, deleting branches that aren't the task's, deploying and publishing, and writing outside the task's worktree, installing software for the whole computer among it.
-- **If the coordinator decides,** it answers the rest for you, never what waits for you or what could lose work.
-- **Allow everything,** for a project or one task, lets everything go ahead but what's under Never and what could lose work. These still wait for you: a force push, pushing to or deleting the default branch, deleting or moving by force a branch that isn't the task's, dropping or clearing git's stash, git throwing away work in another checkout or replacing a file there, deleting anything outside the task's worktree, a delete whose target Althar can't read until it runs (`xargs rm`, `rm -rf $DIR`), and reading a `.env` file outside it. Always allowing writes outside the worktree doesn't let these through either.
-- **On Windows,** the same holds for cmd's and PowerShell's commands, such as `rd /s`, `del` and `Remove-Item -Recurse`, and for paths with drive letters.
-- **Never, in any project:** reading your keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc`, the keychain and the like), or changing anything on GitHub or GitLab except through Althar. Agents run without your SSH agent, git's credential helpers and `gh`'s sign-in.
-
-Althar's own git never force pushes unless you press Push on rewritten commits, merges into your checkout only as a fast-forward with nothing uncommitted there, and never deletes your branches or worktrees.
-
-The rules see what reaches Althar. A command an agent's sandbox runs without asking (Claude Code and Codex run what stays in the worktree), and what a script does beyond its words, they don't. Keep work you care about committed and pushed.
+Subscriptions come and go. Your projects stay.
 
 ## Your agents
 
@@ -297,32 +136,183 @@ The rules see what reaches Althar. A command an agent's sandbox runs without ask
   </tr>
 </table>
 
-Althar runs Claude Code and Codex through the ACP adapters it ships, and the others as you installed them. It starts each in a mode where it asks, and answers from your project's rules; what each still does without asking is in [its registry entry](packages/provider-adapters/src/registry.ts).
+Claude Code and Codex come with Althar, through the ACP adapters it ships. Althar can download OpenCode, GitHub Copilot and Google Antigravity for you, and runs the others as you installed them. It starts each in a mode where it asks, and answers from your project's rules; what each still does without asking is in [its registry entry](packages/provider-adapters/src/registry.ts).
+
+## What it does
+
+<table>
+  <tr>
+    <td width="44%" valign="top">
+      <h3>Every project has a manager.</h3>
+      <p>It's called the coordinator, and it knows your whole project. Ask it about the code, or say what you want changed: it reads the repositories and your rules, turns the ask into tasks, and proposes which agent and model takes each step.</p>
+      <p>Change anyone, or hold it. Leave it alone and it starts.</p>
+    </td>
+    <td width="56%" valign="top">
+      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a backfill; the coordinator answers with one task: Opus 5 implements, Codex reviews, then a draft pull request. It starts in 29 seconds unless changed or held." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>No more meat proxying.</h3>
+      <p>Every change is reviewed by a model from another lab, fixed by its lead, and reviewed again until it's clean. You never paste one agent's answer into another and type "review this" again.</p>
+      <p>Then the task opens a pull request with your team's branch name, title and template, or merges locally. You step in to merge.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A settled review: three findings, two fixed by the lead in the second round and one set aside with its reason." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Every plan you have. One agent.</h3>
+      <p>Althar uses the sign-ins already on your machine, on whatever plans you pay for: Claude, ChatGPT, Copilot, your keys. No token reselling, no proxy, nothing of ours between you and the model.</p>
+      <p>Add every account you have. When one runs out, the work moves to the next account or agent with room, on the same thread, the same plan and the same branch. Any agent's model and effort, from one picker.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: the agents found on this computer, which are signed in, and the repositories a first project could work in." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>It keeps going while you're away.</h3>
+      <p>Usage limits, stalled turns, review rounds: Althar handles them and carries on. A turn goes quiet: it's carried on, then started afresh, then brought to you.</p>
+      <p>Every task sits on a board by lane, and you hear about it only when something needs a person.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Wherever you are, still in reach.</h3>
+      <p>On a Mac, Althar sits round the notch or in the menu bar: a sliver with a count of what needs you. Point at it to allow a command or open a pull request, and carry on with what you're in. On Windows and Linux, it waits in the tray.</p>
+      <p>It never pings you for progress. Only for a call that's yours.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>The craft of a paid app.</h3>
+      <p>The window opens in its own light. Every agent and every account sits in one place. You pick the app's icon. And when nothing needs you, it says so and gets out of the way.</p>
+      <p>The freedom of open source, made with the care of something you'd pay for, because you'll spend your day in it.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/details.gif" width="100%" alt="Details: the launch rising out of its own light, the agents and their accounts, choosing the app icon, and the home at rest." />
+    </td>
+  </tr>
+</table>
+
+### And the rest
+
+- **Work that starts itself.** Ask once, for a time of day. It runs on your computer while Althar is open, and not until you turn it on.
+- **Ten at once, none in each other's way.** Tasks run side by side, each in a git worktree of its own.
+- **Conflicts, settled.** Each lead settles its own task's conflicts with the default branch; only the odd one comes to you.
+- **Every workspace, side by side.** Day job on Linear, a client on Jira, side projects on GitHub or Trello? Plug them all in, and every issue lands in the right project. Pull requests go out to GitHub, GitLab or Bitbucket.
+- **One home for everything.** What needs you across every project, answered where it is, and what happened since you looked. Projects sit in tabs across the top.
+- **Plan usage at a glance.** Every account's window and when it resets, with new work steered to the one with room.
+- **Talk to any lead, any time.** Interrupt it, queue a message for its next turn, change its model, or hand the task to another agent.
+- **Changes file by file** before you accept them. Push stays yours.
+- **Never miss a call.** A notification when something needs you, and a count of what's waiting.
+- **Dictation that stays on your computer.** After a one-time model download, nothing you say leaves it.
+
+## How it works
+
+<table>
+  <tr>
+    <td width="150" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/project-dark.svg" />
+        <img src="brand/export/crew/project.svg" width="140" alt="The project: a paper cabinet with drawers of tasks, a clock of its history, a ruler of its rules, and its repositories stacked on its head." />
+      </picture>
+    </td>
+    <td>
+      <b>Project</b><br />
+      One or more repositories you open in Althar, with their own rules, tasks and history. It's the thing that lasts.
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/coordinator-dark.svg" />
+        <img src="brand/export/crew/coordinator.svg" width="140" alt="The coordinator: a cobalt block with a screen for a face, handing out a task from its stack." />
+      </picture>
+    </td>
+    <td>
+      <b>Coordinator</b><br />
+      The project's agent that you talk to. It answers questions, plans tasks and hands them out. It never writes code itself.
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/task-dark.svg" />
+        <img src="brand/export/crew/task.svg" width="140" alt="A task: a card on its own feet, its first step ticked, carrying the sapling of its worktree." />
+      </picture>
+    </td>
+    <td>
+      <b>Task</b><br />
+      One piece of work with an outcome, usually one change, growing in a worktree of its own.
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/lead-dark.svg" />
+        <img src="brand/export/crew/lead.svg" width="140" alt="The lead: an ink cylinder in a cobalt headband, a coffee in one hand and a pencil in the other." />
+      </picture>
+    </td>
+    <td>
+      <b>Lead</b><br />
+      The agent that owns a task. It implements, then settles what review finds: fixes it, or sets it aside with a reason.
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/crew/step-dark.svg" />
+        <img src="brand/export/crew/step.svg" width="140" alt="A step, here the reviewer: a paper cylinder with a monocle, a moustache and a bow tie, reading the change." />
+      </picture>
+    </td>
+    <td>
+      <b>Step</b><br />
+      One stage of a task: implement, review, verify. Each step can run on a different agent and model, and reports back to the lead.
+    </td>
+  </tr>
+</table>
+
+Everything runs on your machine. The project's tasks, threads and history are kept in a local database you can read.
 
 ## Get started
 
 > [!NOTE]
 > **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden. Crash reports go on their own, masked the same way and never with your code, until you turn them off on the first screen or in Settings.
 
-Sign in each agent you want to use with its own tool first:
+[Download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen finds the agents on your computer and shows which are signed in.
 
-```bash
-claude auth login
-```
-
-```bash
-codex login
-```
+Claude Code, Codex and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
 
 ```bash
 opencode auth login
 ```
 
-The others sign in with their own tools too: `copilot login`, `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
-
-Then [download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen shows which agents are ready.
+And `copilot login`, `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
 
 To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
+## What agents may do on your computer
+
+Each task works in a git worktree of its own, under `~/Althar`, never in your checkout. What an agent asks to do beyond its sandbox comes to Althar, which answers by the project's rules (Rules, in each project):
+
+- **By default,** what stays in the task goes ahead. These wait for you: pushing to the default branch, force pushes, pushing every branch or tags, deleting branches that aren't the task's, deploying and publishing, and writing outside the task's worktree, installing software for the whole computer among it.
+- **If the coordinator decides,** it answers the rest for you, never what waits for you or what could lose work.
+- **Allow everything,** for a project or one task, lets everything go ahead but what's under Never and what could lose work. These still wait for you: a force push, pushing to or deleting the default branch, deleting or moving by force a branch that isn't the task's, dropping or clearing git's stash, git throwing away work in another checkout or replacing a file there, deleting anything outside the task's worktree, a delete whose target Althar can't read until it runs (`xargs rm`, `rm -rf $DIR`), and reading a `.env` file outside it. Always allowing writes outside the worktree doesn't let these through either.
+- **On Windows,** the same holds for cmd's and PowerShell's commands, such as `rd /s`, `del` and `Remove-Item -Recurse`, and for paths with drive letters.
+- **Never, in any project:** reading your keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc`, the keychain and the like), or changing anything on GitHub or GitLab except through Althar. Agents run without your SSH agent, git's credential helpers and `gh`'s sign-in.
+
+Althar's own git never force pushes unless you press Push on rewritten commits, merges into your checkout only as a fast-forward with nothing uncommitted there, and never deletes your branches or worktrees.
+
+The rules see what reaches Althar. A command an agent's own sandbox runs without asking (Claude Code's and Codex's run what stays in the worktree), and what a script does beyond its words, they don't. Keep work you care about committed and pushed.
 
 ## The thesis
 
@@ -339,7 +329,7 @@ Althar comes out of a broader hypothesis: what happens to software engineering o
 | [Open questions](docs/open-questions.md) | What hasn't been decided yet |
 | [Glossary](docs/glossary.md) | The words the interface uses |
 | [Components](packages/ui) | The interface, piece by piece, with every state as a story |
-| [Brand](brand) | The mark, lockups, banners, screenshots and the crew |
+| [Brand](brand) | The mark, lockups, banners, screenshots and the characters |
 
 ## Contributing
 
@@ -349,4 +339,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, Codex, Gemini, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
