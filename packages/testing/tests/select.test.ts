@@ -255,9 +255,14 @@ describe('what a file names', () => {
 
 describe('this repository', () => {
   const known = graph(repository(join(import.meta.dirname, '../../..')))
-  /** Code in a string isn't an import: samples a story shows, a file a spec writes into a test repository, prototypes. */
+  /**
+   * Code in a string isn't an import: samples a story shows, a file a spec writes into a test repository, prototypes,
+   * and this file's own small repository.
+   */
   const sample = (one: string) =>
-    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:)/.test(one)
+    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
+      one,
+    )
 
   it('has every relative import lead to a file', () => {
     expect(known.unresolved.filter((one) => !sample(one))).toEqual([])
