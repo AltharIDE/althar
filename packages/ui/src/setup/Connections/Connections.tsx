@@ -47,7 +47,6 @@ export interface ServiceConnection {
 export interface ConnectionsText {
   notConnected: string
   signedInAs: (account: string) => string
-  needsSignIn: string
   connect: string
   signInAgain: string
   addServer: string
@@ -58,7 +57,6 @@ export interface ConnectionsText {
 export const connectionsText: ConnectionsText = {
   notConnected: 'Not connected',
   signedInAs: (account) => `Signed in as ${account}`,
-  needsSignIn: 'Its sign-in stopped working',
   connect: 'Connect',
   signInAgain: 'Sign in again',
   addServer: 'Add a server',
@@ -154,11 +152,7 @@ export function Connections({
                     <li key={connection.id} className={cx(s.connection, connection.needsSignIn && s.needs)}>
                       <span className={s.who}>
                         <span className={s.first}>{first}</span>
-                        {connection.needsSignIn ? (
-                          <span className={cx(s.then, s.calls)}>{t.needsSignIn}</span>
-                        ) : (
-                          then !== undefined && <span className={s.then}>{then}</span>
-                        )}
+                        {then !== undefined && <span className={s.then}>{then}</span>}
                       </span>
                       <span className={s.actions}>
                         <ActionButton

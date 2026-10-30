@@ -333,8 +333,7 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('Its sign-in stopped working')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in again' }))
     expect(await screen.findByRole('heading', { name: 'Make a new API token' })).toBeTruthy()
     expect(screen.getByText('Its token stopped working. Tasks can’t reach it until it’s back.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
@@ -574,7 +573,7 @@ describe('connections', () => {
     })
     withServices(<Connections />, client)
     expect(await screen.findByText(/git\.meridian\.dev/)).toBeTruthy()
-    expect(screen.getByText('Its sign-in stopped working')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
     // A connected service that runs on companies' own servers takes another, by its address.
     await userEvent.click(screen.getByRole('button', { name: 'Add a server' }))
     expect(await screen.findByLabelText('Server address')).toBeTruthy()
