@@ -1,5 +1,4 @@
-import { drawGrain } from '@althar/ui/opening'
-import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 
 import {
   type Change,
@@ -13,11 +12,9 @@ import {
   STAGE_WORD,
 } from '../../content/changelog'
 import { LINKS } from '../../content/facts'
-import { addDisplay } from '../../home/display'
 import { cx } from '../../lib/cx'
 import { useDownload } from '../../lib/download'
-import { seeded } from '../../shared/footer/random'
-import { LightUnder } from '../../shared/lightUnder'
+import { Night, night as n, Readout, Window } from '../../shared/night/Night'
 import { OS_NAME, OsMark } from '../../shared/OsMark'
 import s from './Log.module.css'
 import { type Highlight, HIGHLIGHTS, PUBLISHED } from './LogData'
@@ -41,8 +38,6 @@ import { LogPicture } from './LogPictures'
  *
  * With reduced motion the clock reads once.
  */
-
-addDisplay()
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
@@ -102,26 +97,6 @@ const OUT = (
     <path d="M3 1.5h5.5V7M8.5 1.5 1.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
   </svg>
 )
-
-/** An instrument: what it reads, and the reading; a way into the log. Set at the strip's start, middle or end. */
-function Readout({
-  label,
-  href,
-  at = 'start',
-  children,
-}: {
-  label: string
-  href: string
-  at?: 'start' | 'mid' | 'end'
-  children: ReactNode
-}) {
-  return (
-    <a className={cx(s.readout, at === 'mid' && s.mid, at === 'end' && s.end)} href={href}>
-      <i>{label}</i>
-      {children}
-    </a>
-  )
-}
 
 /** The mission clock: the build's day in the prerender, then the reader's time, every second while it is in sight. */
 function Clock() {
@@ -197,59 +172,47 @@ function Released({ release, className }: { release: Release; className?: string
   )
 }
 
-/** The window: its instruments along the top, the newest release's highlight in the middle, the planet's lit edge behind. */
-function Window() {
-  const grain = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const tile = document.createElement('canvas')
-    tile.width = tile.height = 128
-    const context = tile.getContext('2d')
-    if (!context || !grain.current) return
-    drawGrain(context, 128, seeded(11))
-    grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
-  }, [])
+/** The window: the mission's clock, the launch and the version along its top, the newest release in the middle. */
+function Opening() {
   const lead = HIGHLIGHTS[LATEST.version]?.[0]
-
   return (
-    <header className={s.window}>
-      <h1 className={s.sr}>Changelog</h1>
-      <div className={s.sky} aria-hidden="true">
-        <div className={s.haze} />
-        <div className={s.limb} />
-        <div ref={grain} className={s.grain} />
-      </div>
-      <div className={s.deck}>
-        <Readout label="Mission elapsed" href={`#v${FIRST.version}`}>
-          <Clock />
-        </Readout>
-        <Readout label="Launch" href={`#v${FIRST.version}`} at="mid">
-          <b>{dated(FIRST.date)}</b>
-        </Readout>
-        <Readout label="Current version" href="#changes" at="end">
-          <b>{LATEST.version}</b>
-        </Readout>
-      </div>
+    <Window
+      deck={
+        <>
+          <Readout label="Mission elapsed" href={`#v${FIRST.version}`}>
+            <Clock />
+          </Readout>
+          <Readout label="Launch" href={`#v${FIRST.version}`} at="mid">
+            <b>{dated(FIRST.date)}</b>
+          </Readout>
+          <Readout label="Current version" href="#changes" at="end">
+            <b>{LATEST.version}</b>
+          </Readout>
+        </>
+      }
+    >
+      <h1 className={n.sr}>Changelog</h1>
       {/* The newest release: when it went out, its version and title over its lead, large in the middle, and the lead shown. */}
-      <div className={s.lead} id={`v${LATEST.version}`}>
+      <div className={cx(n.head, s.lead)} id={`v${LATEST.version}`}>
         {/* On a phone its stamp waits for the log, under the window, so the window keeps to the clock and the release. */}
         <Released release={LATEST} className={s.wideOnly} />
-        <h2 className={s.release}>
-          <span className={s.leadV}>{LATEST.version}</span>
+        <h2 className={n.over}>
+          <span className={n.overLit}>{LATEST.version}</span>
           <span>{LATEST.title}</span>
         </h2>
         {lead && (
           <>
-            <h3 className={s.headline}>{lead.title}</h3>
-            <p className={s.why}>{lead.why}</p>
+            <h3 className={n.headline}>{lead.title}</h3>
+            <p className={n.why}>{lead.why}</p>
           </>
         )}
       </div>
       {lead && (
-        <div className={s.heroPic}>
+        <div className={n.picture}>
           <LogPicture picture={lead.picture} />
         </div>
       )}
-    </header>
+    </Window>
   )
 }
 
@@ -447,10 +410,8 @@ function End() {
 
 export function Log() {
   return (
-    <main id="main" tabIndex={-1} className={s.main}>
-      {/* Dark all the way down: the nav turns to smoked glass over it. */}
-      <LightUnder tone="ink" className={s.under} />
-      <Window />
+    <Night className={s.main}>
+      <Opening />
       <ol className={s.log} aria-label="Log">
         {RELEASES.map((release) => (
           <Entry key={release.version} release={release} />
@@ -458,6 +419,6 @@ export function Log() {
       </ol>
       <Ahead />
       <End />
-    </main>
+    </Night>
   )
 }

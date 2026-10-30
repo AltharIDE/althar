@@ -21,6 +21,7 @@ export const GROUPS = [
     links: [
       { href: '/thesis', name: 'Thesis' },
       { href: '/shifts', name: 'Shifts' },
+      { href: '/changelog', name: 'Changelog' },
       { href: '/wallpaper', name: 'Wallpaper' },
     ],
   },
