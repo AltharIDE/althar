@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { installLocalCatalog, setActive } from '@althar/skills'
 import { writeCatalog } from '../../skills/tests/support'
-import { Cause, Duration, Effect, Fiber, Exit, Layer, Stream } from 'effect'
+import { Cause, Effect, Fiber, Exit, Layer, Stream } from 'effect'
 import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
@@ -233,7 +233,10 @@ describe('skills for a task’s lead', () => {
             const { task: created } = yield* task()
             const launchedBefore = launches.length
             const starting = yield* Effect.forkScoped(sessions.start({ threadId: created.threadId, agentId: 'codex' }))
-            for (let attempt = 0; attempt < 100 && !existsSync(marker); attempt += 1) yield* Effect.sleep(Duration.millis(10))
+            yield* until(
+              Effect.sync(() => existsSync(marker)),
+              Boolean,
+            )
             assert.isTrue(existsSync(marker), 'the host Codex version probe started')
             yield* Fiber.interrupt(starting)
             const interrupted = yield* Fiber.await(starting)
