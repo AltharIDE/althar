@@ -126,7 +126,7 @@ export interface ChangeSetProps {
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
-  /** Why the last action did not go through. */
+  /** Why the last action did not go through: a note in a line or two, with a quiet button where one puts it right. */
   error?: ReactNode
   /** Open the whole diff. */
   onReviewDiff?: () => void

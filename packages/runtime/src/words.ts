@@ -247,7 +247,13 @@ export const words = (
       }
       case 'CantMerge': {
         const detail = text(error, 'detail')
-        return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
+        const files = fieldOf(error, 'files')
+        const said = {
+          detail,
+          into: text(error, 'into') === '' ? 'the default branch' : text(error, 'into'),
+          files: Array.isArray(files) ? files.filter((file): file is string => typeof file === 'string') : [],
+        }
+        return cantMerge[text(error, 'why') as CantMerge['why']]?.(said) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
@@ -345,25 +351,40 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
-/** Why Althar won't merge a task here, by reason. */
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
+
+/** What a refused merge says of itself: the branch, and the files in the way. */
+interface MergeSaid {
+  readonly detail: string
+  readonly into: string
+  readonly files: ReadonlyArray<string>
+}
+
+/** Why Althar won't merge a task here, by reason: in a few words, a couple of files by name. */
 const cantMerge = {
   pull_request: () => 'The task has a pull request: merge it there.',
   settled: () => 'The task is settled, so its branch stays as it is.',
   changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
-  conflicts: (files: string) =>
-    `It conflicts with the default branch, in ${files}. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.`,
-  resolving: (files: string) =>
-    `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
-  busy: (where: string) =>
-    `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
-  submodule: (where: string) =>
-    `The merge moves the submodule at ${where}, which has changes not committed or isn’t at the commit the default branch has for it. Commit or put them away, or bring it along (git submodule update), then merge again.`,
-  unreadable: (detail: string) =>
+  conflicts: ({ into, files, detail }) => `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}.`,
+  resolving: ({ into, files, detail }) =>
+    `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}. The lead is resolving it.`,
+  busy: ({ into, files }) =>
+    files.length > 0
+      ? `Your ${into} checkout has uncommitted changes to ${fewOf(files)}.`
+      : `Your ${into} checkout has changes in the way.`,
+  submodule: ({ files, detail }) => `Submodule ${files[0] ?? detail} has uncommitted changes, or isn’t at the commit recorded for it.`,
+  unreadable: ({ detail }) =>
     `Althar couldn’t read the default branch’s checkout, or a submodule the merge moves, so nothing was merged. Where, and what git said:\n${detail}`,
-  untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
-  moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
-  missing: (branch: string) => `${thisDevice().replace(/^t/, 'T')} has no ${branch} branch to merge into.`,
-} as const satisfies Record<CantMerge['why'], (detail: string) => string>
+  untracked: ({ into, files }) =>
+    `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
+  moved: ({ detail }) => `${detail} moved while Althar was merging, so nothing was merged. Merge again.`,
+  missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+} as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {

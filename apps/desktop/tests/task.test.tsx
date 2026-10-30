@@ -681,7 +681,7 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
     expect(outputs.getByText('Althar opens its pull request once GitHub is connected.')).toBeTruthy()
     expect(outputs.getByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
     expect(outputs.queryByText(/Not on origin/)).toBeNull()
@@ -828,7 +828,7 @@ describe('a task', () => {
     expect(outputs.getByText('althar/add-a-retry')).toBeTruthy()
     expect(outputs.getByText('checkout.ts')).toBeTruthy()
     expect(screen.getByText('Ready to accept')).toBeTruthy()
-    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main on this Mac' }))
     await waitFor(() => expect(client.mergeHere).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
     // c for the conversation, o for the outputs; not while typing.
     await userEvent.keyboard('c')
@@ -910,8 +910,8 @@ describe('a task', () => {
     )
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
-    expect(await outputs.findByText(/It conflicts with main as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main on this Mac' }))
+    expect(await outputs.findByText(/It conflicts with main in README\.md\./)).toBeTruthy()
     await userEvent.click(outputs.getByRole('button', { name: 'Ask the lead to resolve it' }))
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith(
@@ -960,8 +960,8 @@ describe('a task', () => {
       new ApiError({ reason: 'CantMerge', message: 'It conflicts.', why: 'conflicts', detail: 'web: README.md' }),
     )
     withServices(<Task />, conflicted.client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
-    expect(await screen.findByText(/It conflicts with web’s develop as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch on this Mac' }))
+    expect(await screen.findByText(/It conflicts with web’s develop in README\.md\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Ask the lead to resolve it' }))
     await waitFor(() =>
       expect(conflicted.client.send).toHaveBeenCalledWith(
@@ -1960,7 +1960,7 @@ describe('a task', () => {
       getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2, here } })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch on this Mac' }))
     await waitFor(() =>
       expect(client.mergeHere).toHaveBeenCalledWith('t1', [
         { repository: 'api', head: 'abc111' },
@@ -1980,7 +1980,7 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main on this Mac' }))
     await waitFor(() =>
       expect(client.mergeHere).toHaveBeenCalledWith('t1', [
         { repository: 'tools', head: 'abc111' },

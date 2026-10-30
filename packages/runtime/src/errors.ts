@@ -140,9 +140,10 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
  * A task's branch can't be merged here: it has a pull request to merge
  * instead, it's settled, what the person saw isn't on its branch any more,
  * it conflicts (and, where the project says so, the lead is resolving it),
- * or the default branch is checked out with changes not committed, or with
- * changes in a submodule the merge moves, or either could not be read.
- * `detail` says where.
+ * or the default branch is checked out with changes not committed to files
+ * the merge changes, or with changes in a submodule the merge moves, or
+ * either could not be read. `detail` says where, and `into` and `files` say
+ * it in a few words.
  */
 export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   taskId: Schema.String,
@@ -160,6 +161,10 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
     'missing',
   ]),
   detail: Schema.String,
+  /** The branch it would merge into, named by its repository in a task of several: main, web’s main. */
+  into: Schema.optional(Schema.String),
+  /** The files in the way, by their path in the repository: those that conflict, have changes not committed, or git doesn't track; or the submodule. */
+  files: Schema.optional(Schema.Array(Schema.String)),
 }) {}
 
 /**
