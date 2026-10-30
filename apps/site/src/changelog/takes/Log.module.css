@@ -24,17 +24,16 @@
 }
 .main > .under { top: 0; bottom: 0; }
 
-/* ---- the window ---- */
+/* ---- the window: its instruments along the top, the newest release shown in it ---- */
 
 .window {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: clamp(440px, calc(100svh - 330px), 580px);
+  justify-items: center;
   margin: 0 16px;
-  padding: 34px 40px 40px;
+  padding: 30px 40px 0;
   border-radius: 30px;
   background: #090706;
   box-shadow:
@@ -49,16 +48,16 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 46% 34% at 50% 100%, rgba(43, 59, 255, 0.3), transparent 72%),
-    radial-gradient(ellipse 30% 22% at 66% 100%, rgba(122, 63, 240, 0.14), transparent 70%),
-    radial-gradient(ellipse 90% 70% at 50% 0, rgba(255, 236, 214, 0.035), transparent 70%);
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(43, 59, 255, 0.34), transparent 72%),
+    radial-gradient(ellipse 34% 24% at 68% 100%, rgba(122, 63, 240, 0.16), transparent 70%),
+    radial-gradient(ellipse 90% 50% at 50% 0, rgba(255, 236, 214, 0.04), transparent 70%);
 }
 /* The night side of the planet, its edge lit: the top border of a wide ellipse thins away along its curve on its own. */
 .limb {
   position: absolute;
   left: -45%;
   right: -45%;
-  top: calc(100% - 46px);
+  top: calc(100% - 150px);
   height: 1600px;
   border-radius: 50%;
   border-top: 1.5px solid #b4bcff;
@@ -66,34 +65,43 @@
   box-shadow:
     0 -2px 10px -2px var(--glow),
     0 -14px 50px -10px rgba(43, 59, 255, 0.55),
-    0 -50px 140px -30px rgba(43, 59, 255, 0.4);
+    0 -60px 160px -30px rgba(43, 59, 255, 0.45);
 }
 .grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.55; mix-blend-mode: overlay; }
 
-.row { display: flex; justify-content: space-between; align-items: start; gap: 24px; }
+/* The instruments along the top: the clock and the launch at the left, what's next and what's current at the right, the window's nameplate between. */
+.deck { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 24px; width: 100%; }
+.pair { display: flex; gap: 44px; }
+.pair.end { justify-content: flex-end; }
 
 /* A readout, as the first screen's flight deck reads: a small label over the figure. */
-.readout { display: grid; justify-items: start; gap: 9px; color: inherit; text-decoration: none; }
+.readout { display: grid; justify-items: start; align-content: start; gap: 9px; color: inherit; text-decoration: none; }
 .readout.end { justify-items: end; text-align: right; }
-.readout i { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.6); }
-.readout b { font: 500 17px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: #fff; }
+.readout i { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.6); white-space: nowrap; }
+.readout b { display: flex; align-items: center; gap: 10px; font: 500 16px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: #fff; white-space: nowrap; }
 .readout:hover i { color: rgba(255, 248, 240, 0.9); }
 /* The clock keeps its width as it counts. */
 .clock { min-width: 15ch; }
 /* One mark for each change aboard, lit. */
-.meter { display: flex; gap: 4px; margin-top: 2px; }
+.meter { display: flex; gap: 3px; }
 .meter span { width: 2px; height: 11px; border-radius: 1px; background: var(--lit); box-shadow: 0 0 6px rgba(70, 86, 255, 0.8); }
 
-.name { display: grid; align-content: center; justify-items: center; gap: 18px; padding: 40px 0 56px; text-align: center; }
-.h1 {
-  font-family: 'Inter Display', var(--display);
-  font-size: clamp(48px, 6.4vw, 92px);
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.05em;
-  color: #fff;
-}
-.lead { max-width: 36em; font-size: 16px; line-height: 1.5; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.68); text-wrap: balance; }
+/* The window's nameplate: the page's name, engraved small. */
+.plate { padding: 7px 13px 6px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.14); font: 500 10.5px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 248, 240, 0.82); white-space: nowrap; }
+
+/* The newest release, shown: when it went out, what it gives you, why, and the picture. */
+.lead { display: grid; justify-items: center; gap: 16px; max-width: 860px; margin-top: 64px; text-align: center; }
+.leadStamp { display: flex; gap: 14px; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 248, 240, 0.55); }
+.leadStamp .met { color: var(--lit); }
+.headline { font-family: 'Inter Display', var(--display); font-size: clamp(34px, 4.5vw, 64px); font-weight: 500; line-height: 1.02; letter-spacing: -0.045em; color: #fff; text-wrap: balance; }
+.why { max-width: 40em; font-size: 16.5px; line-height: 1.55; letter-spacing: -0.006em; color: rgba(255, 248, 240, 0.72); text-wrap: pretty; }
+.more { color: var(--lit); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.more::after { content: ' ↓'; }
+.more:hover { color: #fff; }
+/* The picture stands on the planet's lit edge, on the window's own ground. */
+.heroPic { width: min(940px, 100%); margin-top: 44px; }
+.heroPic > [role='img'] { background: none; box-shadow: none; }
+.heroPic > [role='img']::before { display: none; }
 
 /* ---- the log ---- */
 
@@ -177,6 +185,40 @@ a.v:hover { color: var(--lit); }
   .newest .text > span::after { animation: caret 1.1s steps(1, end) infinite; }
 }
 @keyframes caret { 50% { opacity: 0; } }
+
+/* ---- a highlight: what it gives you, why, and the picture ---- */
+
+.shown { display: grid; gap: 10px; margin-bottom: 40px; }
+.coming { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--lit); margin-bottom: 4px; }
+.hl { font-family: 'Inter Display', var(--display); font-size: 23px; font-weight: 550; line-height: 1.2; letter-spacing: -0.025em; color: #fff; text-wrap: balance; }
+.hlWhy { max-width: 40em; font-size: 15.5px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.hlPic { margin-top: 14px; }
+.prIn { font: 500 12px/1 var(--mono); color: var(--ink-3); text-decoration: none; }
+.prIn:hover { color: #fff; }
+
+/* What was improved and fixed, folded until asked for, opening in place. */
+.fold summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 104px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  list-style: none;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary:hover { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.3); }
+.fold summary svg { transition: transform var(--base) var(--ease); }
+.fold[open] summary svg { transform: rotate(180deg); }
+.fold:not([open]) .opened, .fold[open] .closed { display: none; }
+.fold > .runs { margin-top: 26px; }
 
 /* ---- what's next: a course on a chart ---- */
 
@@ -278,13 +320,28 @@ a.v:hover { color: var(--lit); }
   .plot { margin-top: 28px; padding-left: 6px; }
 }
 
+@media (max-width: 960px) {
+  .deck { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); row-gap: 22px; }
+  .plate { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
+}
+
 @media (max-width: 640px) {
   .main { --in: 26px; padding-top: 72px; border-radius: 0 0 24px 24px; }
-  .window { min-height: 540px; margin: 0 10px; padding: 22px 20px 26px; border-radius: 24px; }
-  .limb { top: calc(100% - 34px); left: -80%; right: -80%; }
+  .window { margin: 0 10px; padding: 18px 16px 0; border-radius: 24px; }
+  .limb { top: calc(100% - 110px); left: -90%; right: -90%; }
+  .deck { gap: 18px 12px; }
+  .pair { flex-direction: column; gap: 16px; }
+  .pair.end { align-items: flex-end; }
   .readout b { font-size: 14px; }
-  .name { gap: 14px; padding: 32px 0 44px; }
-  .lead { font-size: 15px; }
+  .lead { gap: 12px; margin-top: 34px; }
+  .leadStamp { gap: 10px; letter-spacing: 0.1em; }
+  .headline { font-size: 32px; }
+  .why { font-size: 15px; }
+  .heroPic { margin-top: 26px; }
+  .shown { margin-bottom: 32px; }
+  .hl { font-size: 20px; }
+  .hlWhy { font-size: 15px; }
+  .fold summary { margin-left: 0; }
   .log { margin-top: 72px; }
   .entry { padding-bottom: 64px; }
   .head { gap: 2px 12px; margin: 16px 0 22px; }
