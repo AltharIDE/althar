@@ -76,6 +76,7 @@ The developer page's drafts are in `althar-designs/althar-dev/` (`a.html` is the
 
 - Bring Gemini back into the headline, the cards and `agents.ts` once Althar runs it (it isn't in the agent registry yet).
 - Check every shift against its source, and swap secondary sources for the company's own post where there is one (see the note at the top of `content/shifts.ts`).
-- Replace the placeholders in `facts.ts`: the Homebrew cask and the clone URL.
+- Publish the `althar` cask in our tap, [AltharIDE/homebrew-tap](https://github.com/AltharIDE/homebrew-tap): the site gives `brew install --cask altharide/tap/althar` (`facts.ts`), and the tap is empty.
+- Replace the clone URL in `facts.ts`, a placeholder.
 - Re-check that Claude plans may still be used through third-party apps; the page's first claim depends on it.
 - Split the main bundle further; most of it is `@althar/ui`.

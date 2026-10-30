@@ -24,9 +24,9 @@ export const LINKS = {
 /** GitHub's API for the latest published release: its files are what the download links give (src/lib/download.ts). Unauthenticated, 60 calls an hour per address. */
 export const LATEST_RELEASE = 'https://api.github.com/repos/AltharIDE/althar/releases/latest'
 
-/** How to install it. The releases are published; the cask and the clone URL are placeholders until they ship. */
+/** How to install it. The releases are published; the cask is in our own tap (AltharIDE/homebrew-tap) for now; the clone URL is a placeholder until it ships. */
 export const INSTALL = {
-  brew: 'brew install --cask althar',
+  brew: 'brew install --cask altharide/tap/althar',
   clone: 'git clone github.com/AltharIDE/althar',
   platforms: 'For macOS, Windows and Linux.',
 } as const

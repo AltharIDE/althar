@@ -1,5 +1,5 @@
 import { KIND_WORD as CHANGE_WORD, type Kind, RELEASES, releaseUrl, ROADMAP, type Stage, STAGE_WORD } from '../content/changelog'
-import { LINKS } from '../content/facts'
+import { INSTALL, LINKS } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
 import { KIND_WORD, type Shift, SHIFTS, UPCOMING, type Upcoming } from '../content/shifts'
@@ -101,7 +101,7 @@ export const llmsTxt = (origin: string): string => {
     '## Get it',
     '',
     '- Free and open source, under the Apache License 2.0. For macOS, Windows and Linux, tested most on macOS. Early, and moving fast.',
-    `- Download it from [GitHub Releases](${LINKS.releases}), or run it from source: see the [README](${LINKS.repo}#readme).`,
+    `- Download it from [GitHub Releases](${LINKS.releases}); on a Mac, Homebrew installs it from our tap: \`${INSTALL.brew}\`. Or run it from source: see the [README](${LINKS.repo}#readme).`,
     '- Claude Code, Codex and Google Antigravity sign in from inside Althar; the others sign in with their own tools first (for example `opencode auth login` or `copilot login`). Althar’s first screen finds the agents on your computer and shows which are ready.',
     `- Agents join through the [Agent Client Protocol](${LINKS.acp}). The [README](${LINKS.repo}#your-agents) lists the ones Althar runs today, and the ones on the way.`,
     '- Every page on this site may be read and quoted.',
