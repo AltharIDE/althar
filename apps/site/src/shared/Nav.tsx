@@ -32,6 +32,7 @@ import s from './Nav.module.css'
 export const PAGES = [
   { href: '/', name: 'Home' },
   { href: '/shifts', name: 'Shifts' },
+  { href: '/changelog', name: 'Changelog' },
   { href: '/docs', name: 'Docs' },
 ]
 
