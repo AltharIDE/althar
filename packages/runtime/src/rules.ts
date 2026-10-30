@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from 'node:fs'
+import { readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { posix, win32 } from 'node:path'
 
@@ -74,13 +74,16 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
  * force a branch that isn't the task's, git discarding work in another
  * checkout, deleting or moving away what's outside the task's worktree,
  * changing another checkout, and a push the rules can't read. It asks the
- * person even with everything allowed.
+ * person even with everything allowed, where the rules read it as one of
+ * those (`lastingOf`): what they can't tell goes ahead there.
  */
 interface Kept {
   readonly reason: string
   readonly rule: RuleId | 'unclear'
   readonly floor?: boolean
   readonly irreversible?: boolean
+  /** Found only reading it from a folder the rules can't tell, as the worst it could be: `cd "$DIR" && git reset --hard`. */
+  readonly blind?: boolean
 }
 
 /** How firmly a kind is kept: `floor` past the coordinator, `irreversible` past allowing everything too. */
@@ -179,6 +182,12 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /**
+   * The folder `$TMPDIR`, `$TMP` and `$TEMP` name in the agent's commands,
+   * where Althar knows it: its own, as its launch made it (`privateTemp`).
+   * Other agents name a temp folder of their own choosing.
+   */
+  readonly temp?: string
   /** The system the agent works on, whose paths and commands it names: this computer's unless a test gives one. */
   readonly platform?: NodeJS.Platform
   /** The person's home folder: this computer's unless a test gives one. */
@@ -331,6 +340,7 @@ const secretCommandReason = (text: string, cwd?: string, system: System = system
     paths,
     folder: isFolder,
     unknown: paths.parse(home).root,
+    unsettled: (word) => unsettled(word),
   }
   // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
   const inSecret = (folders: ReadonlyArray<Folder>) => folders.some(({ at }) => at !== undefined && secretPath(at, paths.sep, system))
@@ -827,9 +837,10 @@ const takesText = (words: ReadonlyArray<string>): boolean => {
  * `cat <<'EOF' | sh`, a function or script, a continued line): there the rules
  * judge it as they would have, as a command. The operator and the line it is on
  * stay; the body and its closing line go. Comments are skipped, as `# <<'EOF'`
- * opens nothing.
+ * opens nothing. `reads` says which commands leave a body unread as commands:
+ * those that take only text, unless the caller says more.
  */
-export const withoutQuotedHeredocs = (text: string): string => {
+export const withoutQuotedHeredocs = (text: string, reads: (words: ReadonlyArray<string>) => boolean = takesText): string => {
   if (!text.includes('<<')) return text
   /** The commands of a pipeline, and of what is grouped with it in parentheses: the readers a heredoc's body can reach. */
   interface Group {
@@ -1013,13 +1024,28 @@ export const withoutQuotedHeredocs = (text: string): string => {
       !chunk.closed ||
       !chunk.heredoc.quoted ||
       chunk.heredoc.shadowed ||
-      !chunk.heredoc.group.commands.every(takesText)
+      !chunk.heredoc.group.commands.every(reads)
         ? typeof chunk === 'string'
           ? chunk
           : chunk.text
         : '',
     )
     .join('')
+}
+
+/** Interpreters that read a script in their own language, not the shell's: `python3 - <<'EOF'`. */
+const SCRIPT_LANGUAGES = /^(python[\d.]*|node|ruby|perl|php|bun|deno)$/
+
+/**
+ * Whether a command takes a heredoc's body as text or as a script in a
+ * language other than the shell's, whose words aren't commands: `python3 -`,
+ * `node`. What such a script does the rules can't read either way.
+ */
+const takesScript = (words: ReadonlyArray<string>): boolean => {
+  if (takesText(words)) return true
+  if (changesNames(words)) return false
+  const program = words.find((word) => !assignment.test(word)) ?? ''
+  return SCRIPT_LANGUAGES.test(program.slice(program.lastIndexOf('/') + 1))
 }
 
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
@@ -1584,9 +1610,13 @@ interface Places {
   readonly exists: (path: string) => boolean
   /** Whether a path is a folder that's there. */
   readonly folder: (path: string) => boolean
+  /** The names in a folder that's there; none where it isn't. */
+  readonly names: (path: string) => ReadonlyArray<string>
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
+  /** The folder `$TMPDIR` names in the agent's commands, where the rules know it (`RuleContext`'s `temp`). */
+  readonly temp: string | undefined
 }
 
 const places = (context: RuleContext): Places => {
@@ -1608,16 +1638,27 @@ const places = (context: RuleContext): Places => {
       return false
     }
   }
+  const names = (path: string) => {
+    try {
+      return readdirSync(follow(path))
+    } catch {
+      return []
+    }
+  }
+  // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
+  const scratch = [
+    ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
+  ].map(real)
+  const temp = context.temp === undefined ? undefined : real(context.temp)
   return {
     system,
     exists,
     folder,
+    names,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
-    scratch: [
-      ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
-    ].map(real),
+    scratch: temp === undefined ? scratch : [...scratch, temp],
+    temp,
   }
 }
 
@@ -1626,9 +1667,37 @@ const within = ({ paths }: System, root: string, path: string) => {
   return inner === '' || (!inner.startsWith(`..${paths.sep}`) && inner !== '..' && !paths.isAbsolute(inner))
 }
 
-/** Where a path a command names really is, from the folder the command runs in. */
-const locate = (where: Places, cwd: string, path: string) =>
-  where.real(where.system.paths.resolve(cwd, path.replace(HOME_WORD, where.system.home)))
+/** The temp folder, as a command may name it at the start of a path. */
+const TEMP_WORD = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%)(?=$|[/\\])/i
+
+/** The folder a command runs in, as it may name it at the start of a path. */
+const HERE_WORD = /^(\$PWD|\$\{PWD\})(?=$|[/\\])/
+
+/** Whether a path that starts with the temp folder's name climbs out of it: `$TMPDIR/../notes.md`. */
+const leavesTemp = (word: string) => {
+  const rest = word.replace(TEMP_WORD, '')
+  if (rest === word) return false
+  const inner = posix.normalize(`.${rest.replaceAll('\\', '/')}`)
+  return inner === '..' || inner.startsWith('../')
+}
+
+/**
+ * Where a path a command names really is, from the folder the command runs
+ * in: with the home folder, the temp folder and `$PWD` written out, so
+ * `cp $TMPDIR/x ./y` reads as `cp /…/x ./y`. Where the rules don't know the
+ * agent's temp folder, a path in it is read as in Althar's: what is in any
+ * temp folder is the task's own, whichever it is; one that climbs out of it
+ * is worked out only when the command runs (`unsettled`).
+ */
+const locate = (where: Places, cwd: string, path: string) => {
+  const { paths, home } = where.system
+  const temp = where.temp ?? where.scratch[0]
+  const written = path
+    .replace(HOME_WORD, home)
+    .replace(HERE_WORD, cwd)
+    .replace(TEMP_WORD, (word) => temp ?? word)
+  return where.real(paths.resolve(cwd, written))
+}
 
 const outside = (where: Places, path: string) =>
   !where.worktrees.some((root) => within(where.system, root, path)) && !where.scratch.some((root) => within(where.system, root, path))
@@ -1648,6 +1717,87 @@ const checkoutOf = (where: Places, path: string): string | undefined => {
   }
 }
 
+/** A wildcard's characters in a path's name: `*.log`, `b-?.png`, `[ab].txt`. */
+const WILDCARD = /[*?[]/
+
+/**
+ * What a shell may make of a word besides `*`, `?` and `[…]`, where the
+ * rules don't read what it names: braces (`{a,b}.txt`), escapes, zsh's and
+ * extglob's patterns (`(a|b)`, `<1-9>`, `^*.ts`, `a#`, `*~x`, `=ls`).
+ */
+const EXPANDED = /[{}()<>|^#\\]|.~|^=/
+
+/**
+ * What a shell's wildcard in a name matches, as a test of a name: `*` any
+ * run of characters, `?` one, `[…]` one listed or in a range, `[!…]` or
+ * `[^…]` one not. None where it can't read it as the shell would, such as a
+ * class (`[[:digit:]]`), an equivalence (`[[=a=]]`), an unclosed `[` or one
+ * that starts `[]`. A name matches where it does as written or with case
+ * ignored, as a shell may (`nocaseglob`): ignoring case alone narrows a
+ * class left out, `[!A-Z]` then missing `l`. Matching more than the shell
+ * would only reads more as there.
+ */
+const wildcardPattern = (name: string): ((each: string) => boolean) | undefined => {
+  let pattern = '^'
+  for (let at = 0; at < name.length; at++) {
+    const char = name.charAt(at)
+    if (char === '*') pattern += '.*'
+    else if (char === '?') pattern += '.'
+    else if (char === '[') {
+      const negated = name.charAt(at + 1) === '!' || name.charAt(at + 1) === '^'
+      const from = at + (negated ? 2 : 1)
+      const end = name.indexOf(']', from)
+      const listed = end === -1 ? '' : name.slice(from, end)
+      // `[]a]` and `[!]a]` list `]` itself, not read; with `[` or `\` in it, it is a class, an equivalence or an escape.
+      if (listed === '' || /[[\\]/.test(listed)) return undefined
+      pattern += `[${negated ? '^' : ''}${listed.replace(/[\\^]/g, '\\$&')}]`
+      at = end
+    } else pattern += char.replace(/[.+^${}()|\]\\]/g, '\\$&')
+  }
+  try {
+    const exact = new RegExp(`${pattern}$`)
+    const caseless = new RegExp(`${pattern}$`, 'i')
+    return (each) => exact.test(each) || caseless.test(each)
+  } catch {
+    // A range out of order, `[z-a]`.
+    return undefined
+  }
+}
+
+/**
+ * Whether what a command names is surely not there now: it isn't, while its
+ * folder is; or, named relatively from a folder the rules guess the shell is
+ * in (`guessed`), nor is its folder, as where the shell is elsewhere (its
+ * folder holds from one command to the next) or a `cd` they followed leads
+ * nowhere. With a wildcard in its name, nothing in its folder matches it;
+ * with one before, the folder before it is named from there and isn't there.
+ * Never what the shell could expand otherwise (`EXPANDED`).
+ */
+const missing = (where: Places, word: string, path: string, guessed: boolean) => {
+  if (EXPANDED.test(word.replace(HOME_WORD, ''))) return false
+  const { paths } = where.system
+  const relative = guessed && !paths.isAbsolute(word.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+  const folder = paths.dirname(path)
+  if (!WILDCARD.test(path)) return !where.exists(path) && (relative || where.exists(folder))
+  if (WILDCARD.test(folder)) {
+    const parts = path.split(/[/\\]/)
+    return (
+      relative &&
+      !where.exists(
+        parts
+          .slice(
+            0,
+            parts.findIndex((part) => WILDCARD.test(part)),
+          )
+          .join(paths.sep) || paths.sep,
+      )
+    )
+  }
+  if (!where.exists(folder)) return relative
+  const matches = wildcardPattern(paths.basename(path))
+  return matches !== undefined && where.folder(folder) && !where.names(folder).some(matches)
+}
+
 const changesCheckout = (path: string) =>
   kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', 'irreversible')
 
@@ -1658,8 +1808,13 @@ const changesCheckout = (path: string) =>
  */
 const KNOWN_START = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%|\$PWD|\$\{PWD\})(?=$|[/\\])/i
 
-/** Whether a word is worked out only when the command runs: `$DIR`, `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`. */
-const unsettled = (word: string) => /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
+/**
+ * Whether a word is worked out only when the command runs: `$DIR`,
+ * `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`; and, where the rules
+ * don't know the agent's temp folder, a path climbing out of it.
+ */
+const unsettled = (word: string, where?: Places) =>
+  (where?.temp === undefined && leavesTemp(word)) || /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -2278,16 +2433,22 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     paths: where.system.paths,
     folder: where.folder,
     unknown: where.system.paths.parse(where.system.home).root,
+    unsettled: (word) => unsettled(word, where),
   }
   for (const line of lines)
     walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
       const unseenKinds: Array<Kept> = []
-      for (const { at = context.worktree, blind: unseen } of folders)
+      for (const { at = context.worktree, blind: unseen, guessed } of folders)
         for (const words of readings(written)) {
-          const found = kindsOf(words, at, where, context)
-          kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+          const found = kindsOf(words, at, where, context, guessed === true)
+          // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
+          const anywhere = unseen ? kindsOf(words, context.worktree, where, context).kinds.map((one) => JSON.stringify(one)) : []
+          const read = unseen
+            ? found.kinds.map((one) => (anywhere.includes(JSON.stringify(one)) ? one : { ...one, blind: true }))
+            : found.kinds
+          kinds.push(...read.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           if (unseen) unseenKinds.push(...found.kinds)
         }
@@ -2314,6 +2475,11 @@ interface Folder {
   /** None where the folder the line started in isn't known. */
   readonly at: string | undefined
   readonly blind: boolean
+  /**
+   * Reached from where the line starts by relative `cd`s alone, or none: a
+   * folder the rules read from the worktree's top, where the shell may not be.
+   */
+  readonly guessed?: boolean
 }
 
 /** How to follow a line's `cd`s. */
@@ -2325,10 +2491,12 @@ interface Following {
   readonly folder: (path: string) => boolean
   /** Where a `cd` that shows only when it runs is read as going: the root of the disk, the worst it could be. */
   readonly unknown: string
+  /** Whether a word is worked out only when the command runs (`unsettled`). */
+  readonly unsettled: (word: string) => boolean
 }
 
 const distinct = (folders: ReadonlyArray<Folder>): Array<Folder> => [
-  ...new Map(folders.map((one) => [`${one.blind}\0${one.at}`, one])).values(),
+  ...new Map(folders.map((one) => [`${one.blind}\0${one.guessed === true}\0${one.at}`, one])).values(),
 ]
 
 /**
@@ -2347,7 +2515,7 @@ const walkFolders = (
 ): ReadonlyArray<Folder> => {
   const unknown: Folder = { at: following.unknown, blind: true }
   // Where the command before succeeded and where it failed, which `&&` and `||` pick between.
-  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false }]
+  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false, guessed: true }]
   let failed: ReadonlyArray<Folder> = []
   // Every folder the line has been in, where `cd -` and `popd` go back to.
   let seen: ReadonlyArray<Folder> = ok
@@ -2377,13 +2545,17 @@ const walkFolders = (
             certain = false
             return seen
           }
-          if (target !== undefined && unsettled(target)) {
+          if (target !== undefined && following.unsettled(target)) {
             certain = false
             return [unknown]
           }
           const path = target ?? '~'
-          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/'))
-          const went = folders.map(({ at, blind }) => ({ at: following.resolve(at, path), blind: blind && relative }))
+          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/').replace(TEMP_WORD, '/'))
+          const went = folders.map(({ at, blind, guessed }) => ({
+            at: following.resolve(at, path),
+            blind: blind && relative,
+            guessed: guessed === true && relative,
+          }))
           if (!went.every(({ at }) => at !== undefined && following.folder(at))) certain = false
           // A loop or a function may take a relative `cd` many times: `cd ..` again and again.
           return [...went, ...(scope.repeats === true && relative ? [unknown] : [])]
@@ -2415,6 +2587,8 @@ const kindsOf = (
   cwd: string,
   where: Places,
   context: RuleContext,
+  /** Whether `cwd` is where the rules guess the shell is: `Folder`'s `guessed`. */
+  guessed = false,
 ): { readonly kinds: ReadonlyArray<Kept>; readonly redirected: ReadonlyArray<Kept>; readonly cwd?: string } => {
   const follow = context.realPath ?? realpathSync
   // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
@@ -2450,7 +2624,13 @@ const kindsOf = (
             return false
           }
         })
-      if (discards(git, isPath))
+      // In a folder that is there but in no checkout, git has no work to throw away: it fails. Not the root of the disk, which
+      // stands for a folder the rules can't tell.
+      const noCheckout =
+        elsewhere !== where.system.paths.parse(where.system.home).root &&
+        where.folder(elsewhere) &&
+        checkoutOf(where, elsewhere) === undefined
+      if (!noCheckout && discards(git, isPath))
         kinds.push(
           kept(
             `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
@@ -2480,9 +2660,12 @@ const kindsOf = (
   }
   if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
   // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
-  const gone = commandsIn(words)
+  const removed = commandsIn(words)
     .flatMap(removes)
-    .find((path) => outside(where, locate(where, cwd, path)))
+    .filter((path) => outside(where, locate(where, cwd, path)))
+  // What isn't there when it asks loses no one anything: the line made it itself, or it runs from a folder the shell never reaches.
+  const gone = removed.find((path) => !missing(where, path, locate(where, cwd, path), guessed))
+  const absent = removed[0]
   const target = writes(words)
     .filter((path) => !redirects(words).includes(path))
     .find((path) => outside(where, locate(where, cwd, path)))
@@ -2497,6 +2680,8 @@ const kindsOf = (
         'irreversible',
       ),
     )
+  else if (absent !== undefined)
+    kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${absent}`, 'outside'))
   else if (replaced !== undefined) kinds.push(changesCheckout(replaced))
   else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
@@ -2526,9 +2711,9 @@ const programNamed = (words: ReadonlyArray<string>) => {
  */
 const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: RuleContext): ReadonlyArray<ReadonlyArray<string>> => {
   const xargs = xargsRuns(unwrap(words))
-  if (!words.some(unsettled) && xargs === undefined) return []
+  if (!words.some((word) => unsettled(word, where)) && xargs === undefined) return []
   return [where.system.paths.parse(where.system.home).root, context.defaultBranch].map((worst) => {
-    const read = words.map((word) => (unsettled(word) ? worst : word))
+    const read = words.map((word) => (unsettled(word, where) ? worst : word))
     return xargs === undefined ? read : [...(xargsRuns(unwrap(read)) ?? []), worst]
   })
 }
@@ -2700,10 +2885,21 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
 }
 
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
-const evenAllowed = (reason: string) =>
-  reason
-    .replace(/ always asks/, ' asks even with everything allowed')
-    .replace(/, so it asks\.$/, ", so it asks even with everything allowed: it could do what can't be undone.")
+const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
+
+/**
+ * What can't be undone in a request with everything allowed (ADR-067's
+ * amendment): only what the rules read as that. Not what they can't tell
+ * (`Kept`'s `unclear`, or what is only the worst a folder it can't tell
+ * could be, `blind`), nor the words of a script in a language other than
+ * the shell's (`python3 - <<'EOF'`).
+ */
+const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
+  const lasting = (kinds: ReadonlyArray<Kept>) =>
+    kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
+  if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
+}
 
 /** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */
 const BROADER_THAN_FLOOR: ReadonlyArray<Kept['rule']> = ['outside', 'unclear']
@@ -2722,9 +2918,9 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  *   the project named;
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can; and short of what can't be
- *   undone from the task (`Kept`'s `irreversible`, ADR-067), which asks the
- *   person;
+ *   refused, with how to run it so they can; and short of what the rules
+ *   read as what can't be undone from the task (`lastingOf`, ADR-067),
+ *   which asks the person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what could lose work or a secret asks the person where the project would
@@ -2770,8 +2966,9 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
         verdict: 'deny',
         reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
       }
-    // What can't be undone from the task still asks: allowing everything is for what the person could take back if it went wrong.
-    const lasting = found.find((each) => each.irreversible === true)
+    // What can't be undone from the task still asks, where the rules read it as that: allowing everything is for what the person
+    // could take back if it went wrong, and trusts the agent with what the rules can't read.
+    const lasting = lastingOf(request, context)
     return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))

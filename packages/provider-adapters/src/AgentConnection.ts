@@ -306,6 +306,8 @@ export interface ProcessInfo {
   readonly pid: number
   readonly osStartedAt?: string
   readonly environmentDigest: string
+  /** Its temporary folder, which `$TMPDIR`, `$TMP` and `$TEMP` name in its commands, where its launch made it one of its own. */
+  readonly temp?: string
   /** Completes once the connection's scope has stopped the process group, with what it took. */
   readonly stopped: Effect.Effect<StopReport>
 }
@@ -1139,6 +1141,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               pid: owned.pid,
               ...(owned.osStartedAt === undefined ? {} : { osStartedAt: owned.osStartedAt }),
               environmentDigest: owned.environmentDigest,
+              ...(owned.temp === undefined ? {} : { temp: owned.temp }),
               stopped: Deferred.await(owned.stopped),
             },
           }),

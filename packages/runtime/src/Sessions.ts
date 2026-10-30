@@ -1997,7 +1997,8 @@ export class Sessions extends Context.Service<
               launchedAt: yield* timestamp,
             })}`
           }
-          const requestContext: RequestContext = {
+          // Read again once the agent is spawned, before it asks anything: the rules then know its temp folder.
+          let requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
             taskId: thread.role === 'coordinator' ? null : thread.taskId,
@@ -2154,6 +2155,10 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
+          // Where its launch made it a temp folder of its own, the rules read `$TMPDIR` in its commands as that.
+          const temp = connection.process?.temp
+          if (temp !== undefined && requestContext.rules.role === 'task')
+            requestContext = { ...requestContext, rules: { ...requestContext.rules, context: { ...requestContext.rules.context, temp } } }
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
