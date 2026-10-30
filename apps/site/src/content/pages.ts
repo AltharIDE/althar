@@ -63,6 +63,15 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: false,
   },
+  /** What changed, release by release, and what's next: kept out of search while its direction is chosen. */
+  '/changelog': {
+    path: '/changelog',
+    name: 'Changelog',
+    title: 'Changelog · Althar',
+    description: 'What changed in Althar, release by release, what has merged since the last one, and what’s next.',
+    image: '/og/home.png',
+    index: false,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

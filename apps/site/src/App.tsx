@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
+import { Changelog } from './changelog/Changelog'
 import { pageMeta, pathOf } from './content/pages'
 import { Docs } from './docs/Docs'
 import { Home } from './home/Home'
@@ -18,6 +19,7 @@ const PAGES: Record<string, ComponentType> = {
   '/thesis': Thesis,
   '/wallpaper': Wallpaper,
   '/docs': Docs,
+  '/changelog': Changelog,
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
   /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */

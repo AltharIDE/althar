@@ -1,0 +1,44 @@
+.page { min-height: 100vh; }
+
+/* The directions, along the bottom while one is chosen. */
+.takes {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(20, 16, 13, 0.82);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(16px);
+}
+.takes a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px 0 6px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  font: 500 13px/1 var(--sans, Inter, system-ui, sans-serif);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.takes a:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.takes a[aria-current='page'] { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.takes kbd {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  font: 600 11px/1 var(--mono, 'JetBrains Mono', monospace);
+}
+@media (max-width: 560px) {
+  .takes a { padding: 0 8px 0 6px; font-size: 12px; }
+  .takes a span { display: none; }
+}
