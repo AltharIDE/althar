@@ -54,11 +54,12 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await expect(writing).toBeVisible()
     await page.screenshot({ path: 'test-results/drafts-4-writing.png', animations: 'disabled' })
 
-    // Away while it is written down; it lands meanwhile, in the composer the window keeps hidden behind the home.
+    // Away while it is written down; it lands meanwhile, in the draft, which the pill that carries it to the home reads.
     const both = 'Before the PR, look at why checkout is slow. Also check the webhook retry path.'
+    const card = page.getByRole('region', { name: 'To the coordinator · meridian' })
     await toHome()
     await expect(box).toBeHidden()
-    await expect(page.getByRole('textbox', { name: /^Tell .* something/, includeHidden: true })).toHaveValue(both)
+    await expect(card.getByRole('textbox', { name: 'What you said' })).toHaveValue(both)
     await toProject()
     await expect(box).toHaveValue(both)
     await expect(page.getByText('What you said was written down while you were away.')).toBeVisible()
@@ -83,7 +84,6 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await pill.getByRole('button', { name: /^Stop and write it down/ }).click()
     await expect(pill).toContainText('Writing it down…')
     await pill.screenshot({ path: 'test-results/drafts-7-writing-on-home.png', scale: 'css', animations: 'disabled' })
-    const card = page.getByRole('region', { name: 'To the coordinator · meridian' })
     const said = card.getByRole('textbox', { name: 'What you said' })
     await expect(said).toHaveValue('Also check the webhook retry path.')
     await card.screenshot({ path: 'test-results/drafts-8-written-on-home.png', scale: 'css', animations: 'disabled' })
