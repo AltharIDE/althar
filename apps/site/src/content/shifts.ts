@@ -7,8 +7,9 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
- * feature launches were dropped, since a shift is a change that costs
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters, and on 30 October with
+ * OpenAI cancelling the ChatGPT Pro cut and Google ending Gemini Code Assist sales; pure
+ * feature launches were dropped, whoever made them, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
  * post where there is one.
@@ -55,6 +56,27 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'chatgpt-pro-cut-cancelled',
+    date: '2026-10-29',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'OpenAI cancels the Pro $200 cut and doubles allowances',
+    what: 'The drop to 10x Plus usage in Codex and Work, due 30 October, is off. Pro 100 and Pro 500 get twice their old allowance; Pro 200 is raised to match.',
+    source: {
+      name: 'gHacks',
+      url: 'https://www.ghacks.net/2026/10/30/openai-doubles-chatgpt-pro-and-business-premium-usage-limits-after-dropping-a-planned-pro-200-cut/',
+    },
+  },
+  {
+    id: 'gemini-code-assist-sales-end',
+    date: '2026-10-09',
+    kind: ShiftKind.Access,
+    who: 'Google',
+    title: 'Google stops selling Gemini Code Assist Standard and Enterprise',
+    what: 'New subscriptions ended on 9 October. Existing annual plans can renew until 31 January 2027 and monthly plans until 31 December 2027; Google points buyers to Antigravity.',
+    source: { name: 'Gemini for Google Cloud release notes', url: 'https://docs.cloud.google.com/gemini/docs/release-notes' },
+  },
   {
     id: 'claude-api-sampling-removed',
     date: '2026-10-21',
@@ -176,18 +198,6 @@ export const SHIFTS: readonly Shift[] = [
     source: { name: 'AI Business', url: 'https://aibusiness.com/foundation-models/reflection-s-beam-model-signals-deepening-split' },
   },
   {
-    id: 'claude-haiku-5-5-copilot',
-    date: '2026-10-07',
-    kind: ShiftKind.Model,
-    who: 'Anthropic',
-    title: 'Claude Haiku 5.5 in GitHub Copilot',
-    what: 'Anthropic’s lightweight model is generally available in Copilot on Pro and up, billed at list price under usage-based billing.',
-    source: {
-      name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-10-07-claude-haiku-5-5-in-github-copilot',
-    },
-  },
-  {
     id: 'claude-spend-limit-pause',
     date: '2026-10-07',
     kind: ShiftKind.Outage,
@@ -238,7 +248,7 @@ export const SHIFTS: readonly Shift[] = [
     kind: ShiftKind.Pricing,
     who: 'OpenAI',
     title: 'ChatGPT Pro reopens with less usage',
-    what: 'The $200 plan comes back with roughly half its old allowance, beside a new $500 tier. Existing subscribers keep the old allowance until 29 October.',
+    what: 'The $200 plan came back with roughly half its old allowance, beside a new $500 tier. OpenAI cancelled the cut for existing subscribers on 29 October.',
     source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
   },
   {
@@ -281,18 +291,6 @@ export const SHIFTS: readonly Shift[] = [
     source: {
       name: 'Crowdfund Insider',
       url: 'https://www.crowdfundinsider.com/2026/09/312279-openai-expands-gpt-6-lineup-with-more-economical-sol-and-luna-models/',
-    },
-  },
-  {
-    id: 'claude-code-agents-md',
-    date: '2026-09-18',
-    kind: ShiftKind.Tools,
-    who: 'Anthropic',
-    title: 'Claude Code reads AGENTS.md',
-    what: 'Claude Code now reads AGENTS.md in projects that have no CLAUDE.md.',
-    source: {
-      name: 'Enterprise DNA',
-      url: 'https://enterprisedna.co/resources/ai-pulse/ai-pulse-2026-09-19-claude-code-adopts-agents-md-standard/',
     },
   },
   {
@@ -399,19 +397,6 @@ export const SHIFTS: readonly Shift[] = [
  * passed; move it into SHIFTS then, with what actually happened.
  */
 export const UPCOMING: readonly Upcoming[] = [
-  {
-    id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-30',
-    announced: '2026-09-29',
-    kind: ShiftKind.Limits,
-    who: 'OpenAI',
-    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
-    source: {
-      name: 'Engadget',
-      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
-    },
-  },
   {
     id: 'usage-policy-takes-effect',
     date: '2026-11-12',
