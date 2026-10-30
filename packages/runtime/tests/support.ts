@@ -5,8 +5,9 @@ import { basename, join } from 'node:path'
 
 import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
-import { Duration, Effect, Layer } from 'effect'
+import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { type AdapterOptions, type Fetch, products } from '@althar/connectors'
 import { byToken, type FakeService } from '@althar/connectors/testing'
@@ -151,10 +152,11 @@ export const definition = (
 })
 
 /**
- * Agents for tests: the fake agent, in this process, under any id. The id
- * `process` runs it as a real process with Bun, and `process-temp` too, with
- * a temp folder of its own as Antigravity's launch asks (`privateTemp`);
- * `missing` names a command that doesn't exist.
+ * Agents for tests: the fake agent, in this process, under any id, on the
+ * runtime's clock. The id `process` runs it as a real process with Bun, on
+ * the system's, and `process-temp` too, with a temp folder of its own as
+ * Antigravity's launch asks (`privateTemp`); `missing` names a command that
+ * doesn't exist.
  */
 export const fakeAgents = (
   options: FakeAgentOptions = {},
@@ -165,39 +167,49 @@ export const fakeAgents = (
   oneAccount: ReadonlyArray<string> = [],
   unsure: ReadonlyArray<string> = [],
 ) => {
-  const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
-    transport: (cwd, env = {}, session) => {
-      launches.push({ agentId, cwd, env, options: session })
-      // As a real process, it carries whose work it is, as every agent does (machine.ts).
-      const work = env[WORK]
-      return agentId === 'process' || agentId === 'process-temp'
-        ? {
-            _tag: 'Process',
-            spec: {
-              command: 'bun',
-              args: [fakeAgentMain],
-              ...(work === undefined ? {} : { env: { [WORK]: work } }),
-              ...(agentId === 'process-temp' ? { privateTemp: true as const } : {}),
-            },
-            cwd,
-          }
-        : agentId === 'missing'
-          ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
-          : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
-            {
-              _tag: 'InProcess',
-              agent: fakeAgent({
-                ...options,
-                ...each[agentId],
-                ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
-              }),
+  const entry =
+    (clock: Clock.Clock) =>
+    (agentId: string): AgentEntry => ({
+      definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
+      transport: (cwd, env = {}, session) => {
+        launches.push({ agentId, cwd, env, options: session })
+        // As a real process, it carries whose work it is, as every agent does (machine.ts).
+        const work = env[WORK]
+        return agentId === 'process' || agentId === 'process-temp'
+          ? {
+              _tag: 'Process',
+              spec: {
+                command: 'bun',
+                args: [fakeAgentMain],
+                ...(work === undefined ? {} : { env: { [WORK]: work } }),
+                ...(agentId === 'process-temp' ? { privateTemp: true as const } : {}),
+              },
+              cwd,
             }
-    },
-  })
-  return Layer.succeed(
+          : agentId === 'missing'
+            ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
+            : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
+              {
+                _tag: 'InProcess',
+                agent: fakeAgent({
+                  now: () => clock.currentTimeMillisUnsafe(),
+                  ...options,
+                  ...each[agentId],
+                  ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
+                }),
+              }
+      },
+    })
+  return Layer.effect(
     Agents,
-    Agents.of({ list: ['claude-code', 'codex', 'opencode'].map(entry), get: (agentId) => Effect.succeed(entry(agentId)) }),
+    Clock.clockWith((clock) =>
+      Effect.succeed(
+        Agents.of({
+          list: ['claude-code', 'codex', 'opencode'].map(entry(clock)),
+          get: (agentId) => Effect.succeed(entry(clock)(agentId)),
+        }),
+      ),
+    ),
   )
 }
 
@@ -385,21 +397,47 @@ export const task = (title = 'Retry checkout') =>
   })
 
 /**
- * An agent out of usage until a reset some seconds after it first says so: after another task's lead (`[lead:wait]`)
- * takes the one place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start
- * may fall either side on a busy machine.
+ * A reset two minutes off, for a test on its clock (`onTestClock`): the test moves the clock to it (`atReset`) once
+ * what comes before it has, as another task's lead taking the one place, however long getting there took. Further
+ * than any test takes to get there, and nearer than what else the runtime does by the clock meanwhile, which the move
+ * brings on too: a quiet turn's stall at ten minutes, a plan's countdown at five.
  */
-export const outUntilSoon = () => {
-  let until: number | undefined
-  return {
-    get until() {
-      return (until ??= Date.now() + 2_500)
-    },
-  }
-}
+export const later = () => Date.now() + 2 * 60_000
+
+/** The test's clock moved on to a reset as an agent's error gives it, to the second, and no further: nothing due after it comes yet. */
+export const atReset = (at: number) => TestClock.setTime(Math.ceil(at / 1000) * 1000)
 
 /** Waits until a query returns rows that pass the check, as long as its test may take (@althar/testing). */
 export { until } from '@althar/testing/effect'
+
+/**
+ * Runs a test on its TestClock (`it.effect`), set to now and kept going with real time: what the runtime waits a
+ * moment for, as a plan's countdown or a git process, comes as it would, and the test moves the clock on at once
+ * (`TestClock.adjust`, `TestClock.setTime`) to what it would wait minutes or hours for, as a reset or a sweep. The
+ * runtime and the fake agents in this process read that clock, so what waits for a time goes on exactly when the test
+ * moves the clock past it: never before, on a slow machine, and never later.
+ */
+export const onTestClock = <A, E, R>(test: Effect.Effect<A, E, R>) =>
+  TestClock.testClockWith((clock) =>
+    Effect.gen(function* () {
+      let last = Date.now()
+      yield* clock.setTime(last)
+      // Forked from the test, it ends with it.
+      yield* Effect.forkChild(
+        Effect.forever(
+          Effect.andThen(
+            clock.withLive(Effect.sleep(Duration.millis(10))),
+            Effect.suspend(() => {
+              const passed = Date.now() - last
+              last += passed
+              return clock.adjust(passed)
+            }),
+          ),
+        ),
+      )
+      return yield* test
+    }),
+  )
 
 /** The thread's items, oldest first, with their content parsed. */
 export const items = (threadId: string) =>

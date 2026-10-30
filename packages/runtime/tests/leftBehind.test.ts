@@ -8,6 +8,7 @@ import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { makeFakeService } from '@althar/connectors/testing'
 
@@ -24,7 +25,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, onTestClock, repository, runtime, until } from './support'
 
 /*
  * What a task leaves running once it settles, checked against the processes
@@ -318,7 +319,7 @@ describe.skipIf(windows)('a task opened again before settling has stopped it', (
 })
 
 describe.skipIf(windows)('what settled tasks left running that Althar lost track of', () => {
-  it.live(
+  it.effect(
     'goes once Althar looks after it starts again, and nothing else does',
     () => {
       const database = join(mkdtempSync(join(tmpdir(), 'althar-left-')), 'althar.sqlite')
@@ -346,6 +347,8 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           yield* sql`UPDATE projects SET archived_at = ${new Date().toISOString()} WHERE id = ${removed.projectId}`
           const run = loner(`run:${removed.projectId}`)
           open.push(run)
+          // Its first look, an hour in, comes now: after all of that, never before it.
+          yield* TestClock.adjust(Duration.hours(1))
           yield* nothingLeft(task.taskId)
           yield* stopped(outlived)
           yield* until(
@@ -356,8 +359,9 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
           assert.isTrue(stillOpen.every(alive))
           assert.isTrue(alive(others.unknown))
           assert.isTrue(alive(others.unmarked))
-        }).pipe(Effect.provide(runtime(database, {}, { leftFirst: Duration.millis(500), leftEvery: Duration.seconds(1) })))
+        }).pipe(Effect.provide(runtime(database)))
       }).pipe(
+        onTestClock,
         Effect.ensuring(
           Effect.sync(() => {
             for (const pid of [others.unknown, others.unmarked, ...open]) if (alive(pid)) process.kill(pid, 'SIGKILL')

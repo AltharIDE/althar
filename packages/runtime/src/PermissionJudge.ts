@@ -190,10 +190,9 @@ export class PermissionJudge extends Context.Service<
                     Effect.onExit((exit) =>
                       processId === undefined
                         ? Effect.void
-                        : change('processes', processId, {
-                            state: Exit.isSuccess(exit) ? 'exited' : 'unknown',
-                            endedAt: new Date().toISOString(),
-                          }).pipe(Effect.orDie),
+                        : Effect.flatMap(timestamp, (endedAt) =>
+                            change('processes', processId, { state: Exit.isSuccess(exit) ? 'exited' : 'unknown', endedAt }),
+                          ).pipe(Effect.orDie),
                     ),
                   )
                 }),

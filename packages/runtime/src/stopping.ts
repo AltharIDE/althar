@@ -1,4 +1,4 @@
-import { Duration, Effect } from 'effect'
+import { Clock, Duration, Effect } from 'effect'
 
 import { holding, processes, treeOf } from './ports'
 
@@ -42,9 +42,9 @@ const signal = (pid: number, sent: 'SIGTERM' | 'SIGKILL') => {
 /** Waits for each to end, up to `limit`; those still running. */
 const survivorsOf = (pids: ReadonlyArray<number>, limit: Duration.Duration) =>
   Effect.gen(function* () {
-    const until = Date.now() + Duration.toMillis(limit)
+    const until = (yield* Clock.currentTimeMillis) + Duration.toMillis(limit)
     let left = pids.filter(alive)
-    while (left.length > 0 && Date.now() < until) {
+    while (left.length > 0 && (yield* Clock.currentTimeMillis) < until) {
       yield* Effect.sleep(Duration.millis(50))
       left = left.filter(alive)
     }

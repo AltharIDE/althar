@@ -1508,8 +1508,8 @@ export class Sessions extends Context.Service<
            * command's output that grew, as its last lines.
            */
           const streaming = { sentAt: 0, trailing: false }
-          const sendOpen = Effect.suspend(() => {
-            streaming.sentAt = Date.now()
+          const sendOpen = Effect.flatMap(Clock.currentTimeMillis, (now) => {
+            streaming.sentAt = now
             const open = items.current()
             const message =
               open === undefined
@@ -1529,8 +1529,8 @@ export class Sessions extends Context.Service<
               }),
             )
           })
-          const stream = Effect.suspend(() => {
-            const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)
+          const stream = Effect.flatMap(Clock.currentTimeMillis, (now) => {
+            const wait = STREAM_EVERY - (now - streaming.sentAt)
             if (wait <= 0) return sendOpen
             if (streaming.trailing) return Effect.void
             streaming.trailing = true

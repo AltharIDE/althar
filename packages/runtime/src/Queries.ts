@@ -41,7 +41,7 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
-import { Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
@@ -2308,7 +2308,7 @@ export class Queries extends Context.Service<
             looked: string | null
           }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
           const looked = device?.looked ?? null
-          const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
+          const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
             WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (

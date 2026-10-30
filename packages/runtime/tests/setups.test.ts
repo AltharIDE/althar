@@ -390,12 +390,18 @@ describe('setting up a task’s worktree', () => {
   it.live('stops a lead that waits on its worktree’s setup at once, and the setup goes on', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
-      const { task } = yield* taskIn(repository(), `node -e "setTimeout(() => require('fs').writeFileSync('kept.txt', 'ready'), 2000)"`)
+      // A setup that finishes only once the test lets it.
+      const gate = join(mkdtempSync(join(tmpdir(), 'althar-gate-')), 'open').replaceAll('\\', '/')
+      const { task } = yield* taskIn(
+        repository(),
+        `node -e "const fs = require('fs'); const t = setInterval(() => fs.existsSync('${gate}') && (clearInterval(t), fs.writeFileSync('kept.txt', 'ready')), 20)"`,
+      )
       yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code' })
-      const asked = Date.now()
       yield* sessions.stop(task.threadId)
-      assert.isBelow(Date.now() - asked, 1_500)
+      // Stopped while the setup still waits, so stopping didn't wait for it.
+      assert.isFalse(existsSync(join(task.worktree, 'kept.txt')))
       assert.lengthOf(yield* turnsOf(task.threadId), 0)
+      writeFileSync(gate, '')
       const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { code: 0 })
       assert.isTrue(existsSync(join(task.worktree, 'kept.txt')))
