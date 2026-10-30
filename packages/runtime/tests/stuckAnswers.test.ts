@@ -72,7 +72,6 @@ const stuckCall = (taskId: string, not?: string) =>
       sql<{ id: string; payload: string }>`
         SELECT id, payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
       (rows) => rows.length === 1 && rows[0]?.id !== not,
-      Duration.seconds(15),
     )
     return {
       id: call?.id ?? '',
@@ -359,7 +358,7 @@ describe('a step held for a usage limit, handed to an agent that can’t start',
     return Effect.gen(function* () {
       const runs = yield* Runs
       const task = yield* planned('Do it. [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }], true)
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'held', Duration.seconds(15))
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'held')
       yield* runs.handOverHeld({
         envelope: yield* Runtime.envelope('task.hand_over_held', {}),
         taskId: task.taskId,

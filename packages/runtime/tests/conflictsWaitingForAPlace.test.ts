@@ -48,52 +48,48 @@ const oneAtOnce = (github: ReturnType<typeof hostOf>) =>
   )
 
 describe('checks that fail on the merge Althar pushed, with no place for the lead', () => {
-  it.live(
-    'wait for a place, then are fixed by the lead and the fix pushed',
-    () => {
-      const { working, bare } = hosted()
-      // The merge's checks run until the test says, then fail; the lead's fix passes.
-      let failing = false
-      const checks = (sha: string): Checks => (holdsMain(bare, sha) ? (holdsFix(bare, sha) ? PASSED : failing ? FAILED : RUNNING) : PASSED)
-      const github = hostOf(bare, checks)
-      return Effect.gen(function* () {
-        const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
-        moveHostMainOn(working, bare)
-        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-        // Another task takes the one place: its lead works on until it is stopped.
-        const busy = yield* (yield* Projects).createTask({
-          envelope: yield* Runtime.envelope('task.create', {}),
-          projectId,
-          title: 'Work on',
-          description: 'Work on it. [lead:wait]',
-          draft: true,
-        })
-        const plans = yield* Plans
-        const actorId = (yield* Instance).personId
-        const planId = yield* plans.propose({
-          projectId: projectId as ProjectId,
-          taskId: busy.taskId,
-          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-          reason: null,
-          actorId,
-          end: null,
-          held: true,
-        })
-        assert.strictEqual(yield* plans.start(planId, actorId), 'running')
-        failing = true
-        yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-        const said = (yield* notices(threadId)).find((notice) => notice.title === 'The checks failed on what Althar pushed to PR #1: test.')
-        assert.strictEqual(said?.description, 'Althar asks the lead to fix them once an agent is free on this computer.')
-        assert.deepStrictEqual(
-          (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
-          [['resolving', 1]],
-        )
-        // The other task is stopped: its place goes to the round, whose lead fixes the checks, and Althar pushes the fix.
-        yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
-        yield* titled(threadId, 'The lead fixed the checks on the merge, and Althar pushed the fix to PR #1.')
-        assert.isTrue(holdsFix(bare, 'althar/add-a-retry'))
-      }).pipe(Effect.provide(oneAtOnce(github)))
-    },
-    60_000,
-  )
+  it.live('wait for a place, then are fixed by the lead and the fix pushed', () => {
+    const { working, bare } = hosted()
+    // The merge's checks run until the test says, then fail; the lead's fix passes.
+    let failing = false
+    const checks = (sha: string): Checks => (holdsMain(bare, sha) ? (holdsFix(bare, sha) ? PASSED : failing ? FAILED : RUNNING) : PASSED)
+    const github = hostOf(bare, checks)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      // Another task takes the one place: its lead works on until it is stopped.
+      const busy = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'Work on',
+        description: 'Work on it. [lead:wait]',
+        draft: true,
+      })
+      const plans = yield* Plans
+      const actorId = (yield* Instance).personId
+      const planId = yield* plans.propose({
+        projectId: projectId as ProjectId,
+        taskId: busy.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId,
+        end: null,
+        held: true,
+      })
+      assert.strictEqual(yield* plans.start(planId, actorId), 'running')
+      failing = true
+      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
+      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The checks failed on what Althar pushed to PR #1: test.')
+      assert.strictEqual(said?.description, 'Althar asks the lead to fix them once an agent is free on this computer.')
+      assert.deepStrictEqual(
+        (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
+        [['resolving', 1]],
+      )
+      // The other task is stopped: its place goes to the round, whose lead fixes the checks, and Althar pushes the fix.
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
+      yield* titled(threadId, 'The lead fixed the checks on the merge, and Althar pushed the fix to PR #1.')
+      assert.isTrue(holdsFix(bare, 'althar/add-a-retry'))
+    }).pipe(Effect.provide(oneAtOnce(github)))
+  })
 })

@@ -182,7 +182,6 @@ describe('what the coordinator hears since it last spoke', () => {
               SELECT e.type FROM record_events e JOIN external_links x ON x.id = e.aggregate_id
               WHERE x.task_id = ${taskId} AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')`,
             (rows) => rows.length > 0,
-            Duration.seconds(20),
           )
         })
       const moved = yield* fromIssue('Rate-limit refunds', 'MER-1')
@@ -289,7 +288,6 @@ describe('what the coordinator hears since it last spoke', () => {
         yield* until(
           Effect.map(queries.card(task.id), (card) => [card]),
           ([card]) => card?.phase === 'ready',
-          Duration.seconds(20),
         )
         // It has heard of the task starting; speaking again, it has nothing new.
         yield* spoken(threadId)

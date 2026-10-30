@@ -233,10 +233,11 @@ describe('an expiring sign-in', () => {
 })
 
 describe('a sign-in in the browser', () => {
-  const port = () => 43_000 + Math.floor(Math.random() * 2000)
+  /** Where a browser sign-in comes back to: a port the runtime took for it, as its address to sign in at says. */
+  const backTo = (url: URL) => new URL(url.searchParams.get('redirect_uri') ?? '').origin
 
   /** Linear's sign-in, the browser coming back with its code. */
-  const backFromLinear = (at: number, connectionId?: string) =>
+  const backFromLinear = (connectionId?: string) =>
     Effect.gen(function* () {
       const connections = yield* Connections
       const instance = yield* Instance
@@ -246,7 +247,7 @@ describe('a sign-in in the browser', () => {
         ...(connectionId === undefined ? {} : { connectionId }),
       })
       const url = new URL(started.kind === 'browser' ? started.url : '')
-      yield* Effect.promise(() => globalThis.fetch(`http://127.0.0.1:${at}/callback?code=c&state=${url.searchParams.get('state') ?? ''}`))
+      yield* Effect.promise(() => globalThis.fetch(`${backTo(url)}/callback?code=c&state=${url.searchParams.get('state') ?? ''}`))
       const [ended] = yield* until(
         Effect.map(
           Effect.suspend(() => connections.signIn(started.flowId)),
@@ -258,7 +259,6 @@ describe('a sign-in in the browser', () => {
     })
 
   it.live('renews a Linear token at Linear’s own address when a refused call is looked at again, and makes the call', () => {
-    const at = port()
     const linear = makeFakeService({ product: 'linear', account: { id: 'u1', login: 'you', name: 'You' } })
     const { fetch, sent } = stub([
       [
@@ -272,7 +272,7 @@ describe('a sign-in in the browser', () => {
     ])
     return Effect.gen(function* () {
       const connections = yield* Connections
-      assert.strictEqual((yield* backFromLinear(at))?.state, 'done')
+      assert.strictEqual((yield* backFromLinear())?.state, 'done')
       const [connection] = yield* connections.list
       const { tracker } = yield* connections.adapters(connection?.id ?? '')
       // Linear refuses the call once: the second look renews the token that was about to run out, and Linear takes it.
@@ -294,37 +294,35 @@ describe('a sign-in in the browser', () => {
       })
       assert.deepInclude(yield* keptFor(connection?.id ?? ''), { accessToken: 'lin_renewed', refreshToken: 'lin_r2' })
       assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
-    }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: at, linear })))
+    }).pipe(Effect.provide(withGitHub(fetch, { linear })))
   })
 
   it.live('signs a Linear connection in again for its own account, and turns away another', () => {
-    const at = port()
     const linear = makeFakeService({ product: 'linear', account: { id: 'u1', login: 'you', name: 'You' } })
     const { fetch } = stub([['POST', 'https://api.linear.app/oauth/token', { json: { access_token: 'lin_oauth', expires_in: 86_400 } }]])
     return Effect.gen(function* () {
       const connections = yield* Connections
       const sql = yield* SqlClient.SqlClient
-      assert.strictEqual((yield* backFromLinear(at))?.state, 'done')
+      assert.strictEqual((yield* backFromLinear())?.state, 'done')
       const [connection] = yield* connections.list
       const id = connection?.id ?? ''
-      assert.deepStrictEqual(yield* backFromLinear(at, id), { state: 'done', connectionId: id })
+      assert.deepStrictEqual(yield* backFromLinear(id), { state: 'done', connectionId: id })
       assert.deepStrictEqual(
         (yield* factsOf(id)).map((fact) => fact.type),
         ['connection.added', 'connection.renewed'],
       )
       // The connection was someone else's: signing it in as you doesn't take it over.
       yield* sql`UPDATE connections SET account_id = 'u2', account_login = 'them' WHERE id = ${id}`
-      assert.deepStrictEqual(yield* backFromLinear(at, id), {
+      assert.deepStrictEqual(yield* backFromLinear(id), {
         state: 'ended',
         reason: 'failed',
         message: 'That signed in as you, not them.',
       })
       assert.strictEqual((yield* connections.list)[0]?.account.login, 'them')
-    }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: at, linear })))
+    }).pipe(Effect.provide(withGitHub(fetch, { linear })))
   })
 
   it.live('stops listening for the browser once the person cancels it, and makes nothing', () => {
-    const at = port()
     const { fetch } = stub([])
     return Effect.gen(function* () {
       const connections = yield* Connections
@@ -336,10 +334,11 @@ describe('a sign-in in the browser', () => {
       yield* connections.cancelSignIn(started.flowId)
       assert.strictEqual((yield* Effect.flip(connections.signIn(started.flowId)))._tag, 'NotFound')
       // Nothing answers at its address any more.
-      const back = yield* Effect.flip(Effect.tryPromise(() => globalThis.fetch(`http://127.0.0.1:${at}/callback?code=c&state=s`)))
+      const at = backTo(new URL(started.kind === 'browser' ? started.url : ''))
+      const back = yield* Effect.flip(Effect.tryPromise(() => globalThis.fetch(`${at}/callback?code=c&state=s`)))
       assert.isDefined(back)
       assert.lengthOf(yield* connections.list, 0)
-    }).pipe(Effect.provide(withGitHub(fetch, { callbackPort: at, linear: makeFakeService({ product: 'linear' }) })))
+    }).pipe(Effect.provide(withGitHub(fetch, { linear: makeFakeService({ product: 'linear' }) })))
   })
 })
 
