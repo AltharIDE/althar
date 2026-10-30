@@ -21,6 +21,7 @@ import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { fakeGitHub, writeCatalog } from '../../skills/tests/support'
+import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -862,14 +863,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
+          ['SessionFailed', `missing couldn't start. althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
+          description: `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -2283,7 +2284,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', `gh isn't signed in to github.test on ${thisDevice()}.`])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
@@ -2371,7 +2372,7 @@ describe('words', () => {
       [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
       [
         { _tag: 'SignOutFailed', line: 'codex logout' },
-        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+        `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`,
       ],
       [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
       [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
@@ -2507,12 +2508,8 @@ describe('words', () => {
       'The pull request changed since you looked at it. Have another look before you accept it.',
     )
     assert.deepStrictEqual(
-      (['working', 'stopped', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
-      [
-        "The task's work isn't done yet. Its pull request opens when it is.",
-        'The task’s work stopped before it was done, so it has no pull request to open.',
-        'The task is settled, so its branch stays as it is.',
-      ],
+      (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
+      ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
     )
     assert.deepStrictEqual(
       (

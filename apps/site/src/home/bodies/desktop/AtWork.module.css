@@ -1,0 +1,7 @@
+/* The board in Althar's light, lit up on the dark panel, as wide as a screen's picture. */
+.wrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
+.frame { border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14); }
+
+@media (max-width: 700px) {
+  .wrap { margin-top: 40px; }
+}

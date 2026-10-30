@@ -179,6 +179,12 @@ describe('handing a lead to a fresh session', () => {
       // The same, ending a round of work that changed it with finish_step: a break, and the next turn starts afresh.
       yield* say(task.threadId, 'Finish it. [lead:edit] [lead:finish] [context:10/1000000]')
       yield* answered(task.threadId, 4)
+      // Once it is done, as the person reads its answer before writing again: while it still seems at work, as when what it
+      // said last in its turn is heard after the turn, its next turn is the same session's, and the break is the next one's.
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(task.threadId)),
+        (busy) => !busy,
+      )
       yield* say(task.threadId, 'What next?')
       yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
       assert.include(yield* titles(task.threadId), AFRESH)

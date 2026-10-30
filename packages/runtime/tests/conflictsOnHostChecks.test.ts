@@ -197,6 +197,42 @@ describe('a conflict its pull request’s host reports, and the checks on its me
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('leaves the checks to the person who stops the lead before Althar has seen them start, and doesn’t start it again', () => {
+    const { working, bare } = hosted()
+    // The merge's checks aren't there yet as the person stops the lead: their host hasn't said they run.
+    let merged: Checks | undefined = undefined
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? merged : PASSED))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* until(
+        Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) ? [running.value] : [])),
+        (running) => running.length === 1,
+      )
+      const [{ n: started } = { n: 0 }] = yield* sql<{
+        n: number
+      }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${threadId}`
+      yield* sessions.stop(threadId)
+      yield* (yield* Changes).leadStopped({ threadId })
+      yield* titled(threadId, 'You stopped the lead, so the checks on what Althar pushed to PR #1 are yours.')
+      // Then they run, and fail: they are the person's still, as the commit was pushed before they stopped the lead.
+      merged = FAILED
+      yield* until(items(threadId), (all) =>
+        all.some((item) => item.kind === 'arrival' && item.content.kind === 'checks' && item.content.failed === 1),
+      )
+      yield* Effect.sleep('500 millis')
+      assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
+      assert.strictEqual(
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${threadId}`)[0]?.n,
+        started,
+      )
+      assert.isFalse((yield* asked(threadId)).some((body) => body.startsWith('Checks failed')))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('gives the round to the person when they stop listening, and a later conflict starts another', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? RUNNING : PASSED))

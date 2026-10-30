@@ -183,6 +183,10 @@ that reports and doesn't gate.
 
 - In CI a failed test runs once more, and one that passes only then gets an
   issue labelled `flaky` (#409).
+- While that issue is open, the test is quarantined: it runs in every CI job,
+  but its failures go on its issue and the job's summary rather than failing
+  the job, and it gates again once the issue closes. The summary warns when
+  more than ten are. `stress` and `nightly` don't quarantine.
 - A pull request's new and changed tests run 20 times, on Linux and Windows,
   and its changed end-to-end specs 5 times; a flake fails the pull request.
 - Every night the whole suite runs shuffled, and five times over on Windows.
@@ -260,11 +264,52 @@ fixed where it is.
   jobs per entry (the Linux packages in one job) and three entries at a time
   would keep the queue moving.
 
+## Where it stands (30 October)
+
+- **Done:**
+  - **Phases 0 and 1:** retry, flaky issues, sizes, budgets and one way to wait (#409).
+  - **Phase 2:** end-to-end waits (#423).
+  - **Phase 3:** one clock, a lint rule, 21 timer tests on TestClock and four duration checks (#424).
+  - **Phase 5:** stress and nightly runs (#419).
+  - **Phase 6:** the end-to-end run in the queue, fewer jobs, three entries built at a time (#419).
+  - **The five order races,** and three more the flaky issues found (#418).
+  - **Phase 4, in part:**
+    - free ports, and `gh`'s deadline from the budget (#420);
+    - the fake agent's git asynchronous;
+    - testing-library's waits from the budget (#418).
+- **Found on the way, and fixed:**
+  - two catalog reads at once started every agent twice (#418);
+  - a test that depended on the machine having `~/Documents` (#411);
+  - a board class name colliding with the Up next lane's, which broke dragging in Up next (#403);
+  - three tests and a spec that kept state between runs (#402, #411, #418).
+- **Left, none of it a flake the census or the first day of stress and flaky issues saw:**
+  - **Phase 4's git, process and port lookups as services with fakes.** Git has 167 call sites; once phase 3's budget is in, this is about speed on Windows more than flakes. `folderCleanup`'s two flakes were slow git there.
+  - **The fake agent's `[lead:wait]` cap** (5 s) and other timed holds.
+  - **45 tests that pass short real-time timer options** (`listenEvery: 100 ms`).
+  - **Four performance checks among the unit tests** (`diagnostics`, connectors `jiraText`, ui `Code` and `Terminal`), for a performance run that doesn't gate.
+  - **The fake host's 3 s merge,** better as a gate.
+  - **`process.env` writes in eleven runtime test files.** Vitest runs each file in a worker of its own, so they can't reach another file, and each test puts back what it changed.
+
+## Open problems
+
+A running list: each goes when it is fixed, and a new one is added as it is found.
+
+- **#430, `sessionEdges` › "in a task of several repositories, says it carries on in the same worktrees".** It flaked once in the queue: the person's first follow-up was never delivered. It passes 20 runs on a Mac. Its report didn't say which wait timed out; since #433 a wait's report keeps a long prompt's state, so the next one will.
+- **#431 and #434, `models` › "record the process asking starts" on Windows.** The process agent is asked for its models twice, now and then; on 10-30 it hit the queue for #417 and #370's own checks. Two catalog reads at once (#418) are ruled out, and so are a failed probe, `forget`, and a second `Models`. Cause: Windows still held the probe's folder a moment after the agent went, `rmSync` threw, and what the probe found was lost, so the next read asked again. Fixed in #446.
+- **#438, `e2e/graph.spec.ts` › "a task's steps as a graph".** A step never showed "waits on you" in 60 s: the spec wrote its next message before the round's review had ended, so it joined that round. Fixed in #445.
+- **`permissionJudge` › "owns and closes the process used for a coordinator judgment" hangs on Windows.** It ran out its whole time on #442. `PermissionJudge` also removes its folder with `rmSync`, as Models did; being looked into on `judge-folder`.
+- **A lead's permission asked while a round's review runs shows on the reviewer's card in the graph, and on none once the round ends** (`callsOf` in `graph.ts`). Found with #445; where it belongs is a product call.
+- **An agent's last words after its turn read as more work (`Sessions.ts`).** An update the agent sends as its turn ends can reach the runtime after the turn's own stream has closed. It then counts as the agent at work outside a turn, busy for `QUIET_FOR` (30 s), and a lead handover due at that break waits for the next one. #429 made `leadHandover`'s test wait for the lead to be done; the cause needs the agent connection to finish handing over a turn's updates before it ends the turn.
+- **`e2e/agents.spec.ts` counts the agents this computer has.** It expects eight agents not on this computer, and on a Mac with agents installed it finds fewer, on main too. It should give the app a PATH and home without the person's agents, as the other specs do with their profile.
+- **A pull request ran only the end-to-end specs it changed.** One that broke a spec it didn't touch passed its checks and failed first in the queue, taking the pull requests behind it down too: on 10-30, #403 (`line.spec`), #405 (`rounds.spec`) and #217 (styles in Node, then a Mac's keys on Linux), with six others failing behind them. #442 runs the whole end-to-end run on the pull request; until it merges, a desktop change gets `gh workflow run e2e.yml --ref <branch>` before it is queued. `e2eLimits` now also fails a spec that presses a Mac's key on every system.
+- **What only post-merge checks.** The merge queue doesn't run the coverage gates or build the Linux packages, so a pull request can pass the queue and still turn main red on either. Running coverage in the queue for changes to the gated packages would close it.
+- **Phase 4's rest, and the timed fakes** (Where it stands, above): git, processes and ports as services with fakes, the fake agent's `[lead:wait]` cap, the 45 tests on short real-time timer options, and the fake host's 3 s merge.
+
 ## Phases
 
 Each is one pull request, through the queue.
 
-0. **Retry and flaky issues** (#409, with #404's index fix). In the queue.
+0. **Retry and flaky issues** (#409, with #404's index fix).
 1. **Waits and budgets (B, C), in the unit tests.** `@althar/testing` gets
    the sizes, the budget and the scale; one `until` and one `waitFor` replace
    the others; the 87 test times, 419 wait times and the loops that gave up

@@ -1,3 +1,4 @@
+import { modKey } from '../../foundations/keys'
 import { Room } from '../../foundations/vocabulary'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
@@ -33,7 +34,7 @@ export const roomSwitchText: RoomSwitchText = {
     [Room.Automations]: 'Automations',
     [Room.Settings]: 'Settings',
   },
-  key: (n) => `⌘${n}`,
+  key: (n) => modKey(String(n)),
   news: 'new messages',
   yours: 'needs you',
 }

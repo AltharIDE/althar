@@ -160,10 +160,10 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
 
-    // ⌘2 opens the first project's tab, ⌘1 the home's.
-    await page.keyboard.press('Meta+2')
+    // ⌘2 (Ctrl+2 elsewhere) opens the first project's tab, ⌘1 the home's.
+    await page.keyboard.press('ControlOrMeta+2')
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.keyboard.press('Meta+1')
+    await page.keyboard.press('ControlOrMeta+1')
     await expect(projects.getByRole('button', { name: /meridian/ })).toBeVisible()
   } finally {
     await electronApp.close()

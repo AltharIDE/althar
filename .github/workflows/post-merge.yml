@@ -46,6 +46,8 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - env:
           PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/skills apps/cli
         run: |
@@ -87,6 +89,8 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
         working-directory: .
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
       - run: >-
           bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter
@@ -130,9 +134,12 @@ jobs:
           pattern: runtime-blob-*
           path: packages/runtime/.vitest/blob
           merge-multiple: true
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       # The parts' results and coverage as one run's: the thresholds hold for the whole suite, as before it was split.
-      # The parts reported their flaky tests; the merge names its reporters so it doesn't again.
-      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions
+      # The parts reported their flaky and quarantined tests; merging, @althar/testing/reporter only lets the
+      # quarantined ones through again.
+      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions --reporter=@althar/testing/reporter
       # A part that stopped before writing its report leaves out its tests, and the merge alone wouldn't say so.
       - env:
           PARTS: ${{ needs.runtime.result }}
@@ -159,6 +166,8 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: bun run check
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - run: bun run test:coverage
       - run: bun run build
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
@@ -184,6 +193,8 @@ jobs:
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - run: bun run test:coverage
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
