@@ -66,8 +66,8 @@ export const Workspaces: Story = {
   args: { connections: WORKSPACES },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('· Meridian')).toBeInTheDocument()
-    await expect(c.getByText('· Halyard')).toBeInTheDocument()
+    await expect(c.getByText('Meridian')).toBeInTheDocument()
+    await expect(c.getByText('Halyard')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Add a workspace' }))
     await expect(args.onAddWorkspace).toHaveBeenCalledWith('linear')
     const disconnects = c.getAllByRole('button', { name: 'Disconnect' })

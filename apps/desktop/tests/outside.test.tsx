@@ -597,9 +597,9 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('· FNT')).toBeTruthy()
-    expect(screen.getByText('· althar')).toBeTruthy()
-    expect(screen.getAllByText('Signed in as mate.kokai99', { exact: false })).toHaveLength(2)
+    expect(await screen.findByText('FNT')).toBeTruthy()
+    expect(screen.getByText('althar')).toBeTruthy()
+    expect(screen.getAllByText('mate.kokai99')).toHaveLength(2)
     // Each disconnects on its own.
     const [, second] = screen.getAllByRole('button', { name: 'Disconnect' })
     if (second === undefined) throw new Error('no second Disconnect')

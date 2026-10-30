@@ -13,6 +13,8 @@ import s from './Connections.module.css'
  * a service, Sign in again for a connection whose sign-in stopped working,
  * Add a server for a company's own, and Add a workspace for another of a
  * service whose sign-in reaches one, once the service has a connection.
+ * A service's connections sit in one soft group under its name, a row
+ * each: where it reaches, who it signs in as, and its own Disconnect.
  */
 
 export interface ServiceOption {
@@ -90,6 +92,12 @@ const hostOf = (url: string) => {
   }
 }
 
+/** A connection by where it reaches, its workspace or server, over who it signs in as there; by who alone where it reaches only the hosted service. */
+const namesOf = (connection: ServiceConnection, t: ConnectionsText) => {
+  const where = connection.workspace ?? (connection.instance === undefined ? undefined : hostOf(connection.instance))
+  return where === undefined ? { first: t.signedInAs(connection.account), then: undefined } : { first: where, then: connection.account }
+}
+
 /** The services Althar can reach for you, each with who you are there, or how to connect it. */
 export function Connections({
   label,
@@ -138,28 +146,38 @@ export function Connections({
                 </span>
               )}
             </div>
-            {mine.map((connection) => (
-              <div key={connection.id} className={cx(s.row, s.account)}>
-                <span />
-                <span className={s.body}>
-                  <span className={cx(s.line, connection.needsSignIn && s.calls)}>
-                    {connection.needsSignIn ? t.needsSignIn : t.signedInAs(connection.account)}
-                    {connection.instance && <span className={s.instance}> · {hostOf(connection.instance)}</span>}
-                    {connection.workspace && <span className={s.instance}> · {connection.workspace}</span>}
-                  </span>
-                </span>
-                <span className={s.actions}>
-                  <ActionButton {...(connection.needsSignIn ? {} : { flush: 'end' as const })} onClick={() => onDisconnect(connection.id)}>
-                    {t.disconnect}
-                  </ActionButton>
-                  {connection.needsSignIn && (
-                    <Button variant="signal" onClick={() => onSignInAgain(connection.id)}>
-                      {t.signInAgain}
-                    </Button>
-                  )}
-                </span>
-              </div>
-            ))}
+            {mine.length > 0 && (
+              <ul className={s.rows}>
+                {mine.map((connection) => {
+                  const { first, then } = namesOf(connection, t)
+                  return (
+                    <li key={connection.id} className={cx(s.connection, connection.needsSignIn && s.needs)}>
+                      <span className={s.who}>
+                        <span className={s.first}>{first}</span>
+                        {connection.needsSignIn ? (
+                          <span className={cx(s.then, s.calls)}>{t.needsSignIn}</span>
+                        ) : (
+                          then !== undefined && <span className={s.then}>{then}</span>
+                        )}
+                      </span>
+                      <span className={s.actions}>
+                        <ActionButton
+                          {...(connection.needsSignIn ? {} : { flush: 'end' as const })}
+                          onClick={() => onDisconnect(connection.id)}
+                        >
+                          {t.disconnect}
+                        </ActionButton>
+                        {connection.needsSignIn && (
+                          <ActionButton tone="strong" flush="end" onClick={() => onSignInAgain(connection.id)}>
+                            {t.signInAgain}
+                          </ActionButton>
+                        )}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </li>
         )
       })}
