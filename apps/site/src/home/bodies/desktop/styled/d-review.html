@@ -141,6 +141,9 @@
 .s-d-review .s-d-review__mk { position: relative; display: block; flex: none; fill: currentColor; color: var(--mk); width: max(12px, 2.7cqw); height: max(12px, 2.7cqw); }
 .s-d-review .s-d-review__name { position: relative; margin-top: auto; font-size: var(--fs-l); font-weight: 600; letter-spacing: -0.015em; line-height: 1.15; white-space: nowrap; }
 .s-d-review .s-d-review__lab { position: relative; margin-top: 0.5cqw; font-size: var(--fs-m); color: var(--ink2); white-space: nowrap; }
+/* Who does what, in the card's top corner across from its mark: the lead in the light's colour. */
+.s-d-review .s-d-review__role { position: absolute; top: 2.15cqw; right: 2.2cqw; z-index: 1; font: 500 var(--fs-s)/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink2); }
+.s-d-review .s-d-review__role--lead { color: var(--accent); }
 
 /* Inside the loop: the round, what came back, and Clean. */
 .s-d-review .s-d-review__x { position: absolute; left: 0; top: 0; white-space: nowrap; opacity: 0; transform: translateY(0.35em); transition: opacity 0.5s ease, transform 0.8s var(--ease); }
@@ -291,6 +294,7 @@
 }
 @container (max-width: 560px) {
   .s-d-review .s-d-review__card { padding: 1.9cqw 2cqw; }
+  .s-d-review .s-d-review__does { display: none; }
   .s-d-review .s-d-review__round { top: 14.4cqw; }
   .s-d-review .s-d-review__found { top: 18.3cqw; gap: 0.9cqw; }
   .s-d-review .s-d-review__lb { flex-direction: column; gap: 0.25cqw; }
@@ -307,14 +311,16 @@
   <div class="s-d-review__card s-d-review__lead">
     <div class="s-d-review__lit"></div>
     <svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="claude"><path fill-rule="evenodd"/></svg>
-    <div class="s-d-review__name">Opus 5</div>
-    <div class="s-d-review__lab">Anthropic</div>
+    <div class="s-d-review__role s-d-review__role--lead">Lead</div>
+    <div class="s-d-review__name">Opus 5.5</div>
+    <div class="s-d-review__lab">Anthropic<span class="s-d-review__does"> · writes it</span></div>
   </div>
   <div class="s-d-review__card s-d-review__rev">
     <div class="s-d-review__lit"></div>
     <svg class="s-d-review__mk" viewBox="0 0 24 24" data-mk="codex"><path fill-rule="evenodd"/></svg>
-    <div class="s-d-review__name">GPT-5.2 Codex</div>
-    <div class="s-d-review__lab">OpenAI</div>
+    <div class="s-d-review__role">Reviewer</div>
+    <div class="s-d-review__name">GPT-6.1 Sol</div>
+    <div class="s-d-review__lab">OpenAI<span class="s-d-review__does"> · checks it</span></div>
   </div>
 
   <canvas class="s-d-review__fx"></canvas>

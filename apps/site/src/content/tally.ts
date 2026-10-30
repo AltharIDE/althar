@@ -30,7 +30,7 @@ export const STORY: readonly StoryStep[] = [
   {
     id: 'implement',
     name: 'Implement',
-    who: 'Claude Code · Opus 5',
+    who: 'Claude Code · Opus 5.5',
     mark: Brand.Anthropic,
     what: 'The lead. It rotates the session token when a role changes, and gets the failing test, not a summary of it.',
   },
@@ -53,14 +53,14 @@ export const STORY: readonly StoryStep[] = [
   {
     id: 'review',
     name: 'Review',
-    who: 'Codex · GPT-5.2',
+    who: 'Codex · GPT-6.1 Sol',
     mark: Brand.OpenAI,
     what: 'The project’s rules ask for a second lab on session code. It finds the same stale read at three more call sites, then reviews the repair and passes it.',
   },
   {
     id: 'repair',
     name: 'Repair',
-    who: 'Claude Code · Opus 5',
+    who: 'Claude Code · Opus 5.5',
     mark: Brand.Anthropic,
     added: 'Review found three more call sites',
     what: 'Gets the three findings and your answer, with the original criteria, so it can’t fix one problem by bringing back another.',

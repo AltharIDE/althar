@@ -6,6 +6,7 @@ import * as coordinator from '../../../../../../packages/ui/src/fixtures/coordin
 import * as edge from '../../../../../../packages/ui/src/fixtures/edge'
 import * as home from '../../../../../../packages/ui/src/fixtures/home'
 import * as marks from '../../../../../../packages/ui/src/fixtures/marks'
+import * as models from '../../../../../../packages/ui/src/fixtures/models'
 import * as review from '../../../../../../packages/ui/src/fixtures/meridian'
 
 /*
@@ -26,6 +27,9 @@ const say = (text: string) =>
     .replace(/meridian/g, PROJECT_NAME.toLowerCase())
     .replace(/MERIDIAN/g, PROJECT_NAME.toUpperCase())
     .replace(/\bMER-/g, `${PROJECT_NAME.slice(0, 3).toUpperCase()}-`)
+    // The kit's demo world is a model generation behind the one the site shows.
+    .replace(/\b(Opus|Sonnet) 5(?![.\d])/g, '$1 5.5')
+    .replace(/GPT-5\.2 Codex/g, 'GPT-6.1 Sol')
 
 /** A copy of `x` with the project's name said the site's way: in its strings, its arrays, its plain objects and the elements it holds. */
 export function renamed<T>(x: T): T {
@@ -47,4 +51,5 @@ export const { EDGE_NEEDS, EDGE_WORK, NOTCH } = renamed({ ...edge })
 export const { edgeLineOf } = edge
 export const { DECISION, HALYARD, MERIDIAN: TALLY, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } = renamed({ ...home })
 export const { MARKED } = renamed({ ...marks })
+export const { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } = renamed({ ...models })
 export const { PROJECT } = renamed({ ...review })

@@ -19,10 +19,14 @@ import {
 } from '@althar/ui'
 import type { ReactNode } from 'react'
 
-import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import s from './app.module.css'
 import {
   CALLS,
+  CODEX,
+  GEMINI_PRO,
+  OPUS,
+  QWEN,
+  SONNET,
   EDGE_NEEDS,
   EDGE_WORK,
   edgeLineOf,
