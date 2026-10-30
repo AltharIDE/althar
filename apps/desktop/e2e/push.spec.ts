@@ -73,9 +73,11 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
         .toString()
         .trim(),
     )
-    // The host's next looks leave it so: the runtime's tests look again when they say (changesPushes.test.ts), where here
-    // nothing on screen says when the app has looked.
     await page.screenshot({ path: 'test-results/push-after.png', animations: 'disabled' })
+
+    // The next looks leave it so: one more commit, once the app has looked again, is the one left to push, not eleven.
+    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'Step 11'], { cwd: worktree, env: { ...process.env, ...author } })
+    await expect(page.getByRole('button', { name: /^Push \d+ commits?$/ })).toHaveAccessibleName('Push 1 commit')
   } finally {
     await electronApp.close()
   }

@@ -141,8 +141,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     }
     const reviews = PULLS.map((title, index) => `Review #${index + 1}: ${title}`)
 
-    // Down across the whole line: it goes to the back. The line shows an order put until the runtime's list says it, and then
-    // the runtime's (NextLine, and its tests): that the runtime keeps each order put shows once the line starts, in that order.
+    // Down across the whole line: it goes to the back. The line shows an order put until the runtime's list says it, then the
+    // runtime's (NextLine's tests show it does); that the runtime keeps the order put shows at the end, as the line starts in it.
     const bottom = await rows.nth(3).boundingBox()
     if (bottom === null) throw new Error('The line isn’t laid out')
     const down = await grab(JUMP)

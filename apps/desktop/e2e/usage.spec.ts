@@ -103,13 +103,13 @@ test('sends usage data while its switch is on, named events only, and nothing on
     const off = fake.events.length
     await startTask(page, 'Name the limits better')
     await expect(page.getByRole('button', { name: /Open task/ })).toHaveCount(2)
+    expect(fake.requests.slice(before)).toEqual([])
 
     // On again, the next task started is sent: the one started while it was off would have gone before it, and never does.
     await page.keyboard.press('ControlOrMeta+Shift+Comma')
     await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
     await usage.click()
     await expect(usage).toHaveAttribute('aria-checked', 'true')
-    expect(fake.requests.slice(before)).toEqual([])
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     await page
       .getByRole('navigation', { name: 'Projects' })
