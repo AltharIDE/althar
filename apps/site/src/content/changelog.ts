@@ -233,16 +233,45 @@ export interface Planned {
   detail: string
 }
 
-/** What's next, from docs/plans: a draft until it's agreed. */
+/** What's next: a draft until it's agreed. */
 export const ROADMAP: readonly Planned[] = [
-  { stage: 'now', title: 'Automations that start on an event', detail: 'A pull request opened, an issue filed: not only a time of day.' },
-  { stage: 'now', title: 'Docs', detail: 'Install, sign in your agents and run a project, step by step.' },
-  { stage: 'next', title: 'A signed Windows installer', detail: 'No SmartScreen warning the first time.' },
-  { stage: 'next', title: 'Cursor and Gemini CLI', detail: 'As soon as Althar can keep them asking before they act.' },
+  {
+    stage: 'now',
+    title: 'Windows signing',
+    detail: 'A signed installer, so Windows stops warning you the first time you open Althar.',
+  },
+  {
+    stage: 'now',
+    title: 'Event-based automations',
+    detail:
+      'Automations that start when something happens, not only at a time of day: a pull request opened, an issue filed, a check failing on main.',
+  },
   {
     stage: 'next',
-    title: '.deb and .rpm, checked on real desktops',
-    detail: 'Install, sign in, upgrade and remove, on Debian and Fedora.',
+    title: 'Mobile app',
+    detail:
+      'See what needs you and answer it from your phone: allow a command, read a finished change, merge it. The work keeps running on your computer.',
   },
-  { stage: 'later', title: 'Teams', detail: 'Shared projects, hosted agents, and approvals from your phone.' },
+  {
+    stage: 'next',
+    title: 'Integrated browser',
+    detail:
+      'A browser inside Althar. A lead opens the page it changed, clicks through it and shows you what it saw, and you check it without leaving the task.',
+  },
+  {
+    stage: 'next',
+    title: 'Integrated simulators',
+    detail: 'Phone simulators beside the task. A lead runs the app it changed, tries the flow and brings back what it saw.',
+  },
+  {
+    stage: 'later',
+    title: 'Project knowledge store',
+    detail:
+      'What a project has learned, kept: its decisions, conventions and notes, each with where it came from. Every agent starts from it, whichever one you use next.',
+  },
+  {
+    stage: 'later',
+    title: 'Teams, in the cloud',
+    detail: 'Shared projects and hosted agents, for a team working on the same code.',
+  },
 ]
