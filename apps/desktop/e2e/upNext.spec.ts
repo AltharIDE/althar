@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, startTask } from './support'
+import { launch, openFirstProject, planTask, startTask, still } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -53,11 +53,11 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
     await expect(next.getByText('Starts when an agent is free')).toBeVisible()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-board.png', animations: 'disabled' })
 
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-home.png', animations: 'disabled' })
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
@@ -81,7 +81,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(running.getByRole('button', { name: 'Add a retry' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-started.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

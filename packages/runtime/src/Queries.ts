@@ -1780,6 +1780,7 @@ export class Queries extends Context.Service<
             startsAt: string | null
             runState: string | null
             runAt: string | null
+            attemptAt: string | null
             step: string | null
             waiting: number
             review: string | null
@@ -1798,6 +1799,8 @@ export class Queries extends Context.Service<
             SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
+              -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
+              (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
@@ -1908,12 +1911,28 @@ export class Queries extends Context.Service<
             phase !== 'stopped'
               ? undefined
               : yield* Effect.gen(function* () {
+                  // Suspended, its run stopped when its latest attempt ended: what stopped it is the turn that attempt ended in, not
+                  // one its lead was sent after without the run carried on, so a later turn doesn't make it stopped "just now".
+                  // Who suspended it is on record: Althar, as an automation's run out of time, or the coordinator, is no one's call.
+                  const [suspended] =
+                    task.runState === 'suspended'
+                      ? yield* sql<{ endedAt: string | null; actorId: string | null }>`
+                          SELECT
+                            (SELECT a.ended_at FROM run_attempts a WHERE a.run_id = r.id ORDER BY a.attempt_number DESC LIMIT 1) AS ended_at,
+                            (SELECT e.actor_id FROM record_events e WHERE e.aggregate_type = 'run' AND e.aggregate_id = r.id AND e.type = 'run.suspended'
+                              ORDER BY e.sequence DESC LIMIT 1) AS actor_id
+                          FROM runs r WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+                      : []
+                  const until = suspended?.endedAt ?? null
+                  if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
+                    return { by: 'althar' as const, at: until ?? task.runAt ?? '' }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
-                    WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+                    WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
+                    ORDER BY requested_at DESC, rowid DESC LIMIT 1`
                   const [run] = yield* sql<{ endedAt: string | null }>`
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
-                  const at = turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
+                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
@@ -2024,7 +2043,7 @@ export class Queries extends Context.Service<
             leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
             leadEffort,
             branch: task.branch,
-            startedAt: task.runAt ?? task.firstSession,
+            startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).

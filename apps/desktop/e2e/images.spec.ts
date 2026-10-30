@@ -6,7 +6,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Images dropped on a composer, in a real window with the fake agents: shown
@@ -113,7 +113,7 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await page.getByRole('button', { name: 'View wide.png' }).click()
     const dialog = page.getByRole('dialog')
     await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(2000)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/images-sent.png' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)

@@ -26,7 +26,7 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, PullChip } from './Chips'
+import { BranchChip, Fact, FactLine, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
 import { NextStep } from '../../primitives/NextStep/NextStep'
 
@@ -314,7 +314,7 @@ export const MergeConflictNotAsked: Story = {
     foot: (
       <FactLine>
         <Fact icon="branch" tone="warm">
-          You stopped it, so Althar doesn’t start its lead for a conflict.
+          It has no lead yet to ask.
         </Fact>
       </FactLine>
     ),
@@ -428,34 +428,42 @@ export const Stopped: Story = {
     await mainActionPlace(canvasElement)
   },
 }
-/** Two next steps share the strip at its foot, under the conflict line: Carry on quiet, then Resolve now, the one in violet. */
-export const StoppedWithAConflict: Story = {
+const carryOn = fn()
+/**
+ * Stopped, with a conflict its lead wasn't asked about: what stopped it and when lead, the conflict is one quiet line under them,
+ * and Carry on, which tells the lead to merge the default branch in on its way, is the one thing to press, on the strip at its foot.
+ */
+export const StoppedInConflict: Story = {
   args: {
-    ...CHANGE_STOPPED,
+    status: TaskStatus.Stopped,
+    word: 'Stopped',
+    kind: TaskKind.Change,
+    at: 'Oct 27',
+    title: 'Nightly dependency check, 27 Oct',
+    why: 'Stopped by Althar',
+    from: 'Nightly dependency check',
+    object: <BranchChip name="althar/nightly-dependency-check-27-oct" add={287} del={375} />,
     foot: (
       <FactLine>
         <Fact icon="branch" tone="warm">
-          It conflicts with main, and nothing asked its lead to resolve it.
+          Conflicts with the default branch
         </Fact>
       </FactLine>
     ),
     next: (
-      <>
-        <NextStep onPress={fn()}>Carry on</NextStep>
-        <NextStep signal onPress={resolveNow}>
-          Resolve now
-        </NextStep>
-      </>
+      <NextStep signal onPress={carryOn}>
+        Carry on
+      </NextStep>
     ),
   },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const card = within(canvasElement)
-    const resolve = card.getByRole('button', { name: 'Resolve now' })
-    const carry = card.getByRole('button', { name: 'Carry on' })
-    await expect(carry.compareDocumentPosition(resolve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // One violet step, last: Resolve now; Carry on is the quiet one.
-    await expect(resolve.className).toMatch(/signal/)
-    await expect(carry.className).not.toMatch(/signal/)
+    await expect(card.getByText('Stopped by Althar')).toBeInTheDocument()
+    await expect(card.getByText('Conflicts with the default branch')).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await expect(carryOn).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
     await mainActionPlace(canvasElement)
   },
 }

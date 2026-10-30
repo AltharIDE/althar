@@ -33,22 +33,22 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     // A change, done and ready to accept, on its branch: no pull request without a host.
     await planTask(page, 'Retry webhook deliveries with backoff', '[lead:finish] [lead:edit]')
     await page.getByRole('button', { name: 'Start now' }).last().click()
-    await expect(work.getByText('Ready to accept')).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Ready to accept')).toBeVisible()
 
     // A plain task, started with no plan: it finishes, and waits as Finished.
     await say(page, 'Which partners still call the v1 endpoint? [coordinator:start] [lead:finish]')
-    await expect(work.getByText('Finished', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Finished', { exact: true })).toBeVisible()
 
     // A task whose lead asks the person: one card, in Needs you, that says so.
     await planTask(page, 'Move the cache', '[lead:ask]')
     await page.getByRole('button', { name: 'Start now' }).last().click()
-    await expect(work.getByText('Question', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByText('Question', { exact: true })).toBeVisible()
 
     // A change at work, its steps on its card.
     await planTask(page, 'Rate-limit refunds per partner', '[lead:slowly] [lead:finish] [lead:edit]')
     await page.getByRole('button', { name: 'Start now' }).last().click()
     const running = work.getByRole('region', { name: 'Running' }).getByRole('article')
-    await expect(running).toHaveCount(1, { timeout: 30_000 })
+    await expect(running).toHaveCount(1)
     await expect(running).toContainText('Rate-limit refunds per partner')
     await page.screenshot({ path: 'test-results/kinds-board.png', animations: 'disabled', scale: 'css' })
 
@@ -88,7 +88,7 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await settled.getByRole('button', { name: 'Which partners still call the v1 endpoint' }).click()
     await say(page, 'And the v2 ones? [lead:finish]')
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(work.getByRole('region', { name: /^Needs you/ }).getByText('Finished', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(work.getByRole('region', { name: /^Needs you/ }).getByText('Finished', { exact: true })).toBeVisible()
     await expect(settled.getByText('Which partners still call the v1 endpoint')).toHaveCount(0)
     await expect(work.getByText('Ready to accept')).toBeVisible()
     await page.screenshot({ path: 'test-results/kinds-board-again.png', animations: 'disabled', scale: 'css' })

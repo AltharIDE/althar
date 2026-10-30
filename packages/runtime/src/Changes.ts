@@ -3840,8 +3840,15 @@ export class Changes extends Context.Service<
       ): Effect.Effect<Askable, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; state: string; resolveConflicts: number | null; run: string | null }>`
+          const [task] = yield* sql<{
+            projectId: ProjectId
+            threadId: string | null
+            state: string
+            resolveConflicts: number | null
+            run: string | null
+          }>`
             SELECT k.project_id, k.state, k.resolve_conflicts,
+              (SELECT id FROM threads WHERE task_id = k.id AND kind = 'task' LIMIT 1) AS thread_id,
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
             FROM tasks k WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'open') return 'off'
@@ -3863,7 +3870,14 @@ export class Changes extends Context.Service<
             return { why: 'Its run is still going, so Althar asks its lead once it ends.', shown: false }
           if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
           if (force) return 'yes'
-          if (task.run === 'suspended') return { why: 'You stopped it, so Althar doesn’t start its lead for a conflict.', shown: true }
+          if (task.run === 'suspended') {
+            // Told to go on without its run carried on, its lead is at work all the same: nothing for the person to resolve now.
+            const lead = task.threadId === null ? Option.none() : yield* sessions.running(task.threadId)
+            if (Option.exists(lead, (session) => session.turnRunning))
+              return { why: 'Its lead is at work, so Althar doesn’t ask it about a conflict now.', shown: false }
+            // Whoever stopped it, the person, a command they declined, or Althar: its card says which.
+            return { why: 'It’s stopped, so Althar doesn’t start its lead for a conflict.', shown: true }
+          }
           // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
           if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
             const left = yield* decodeEnded(latest.ended)
