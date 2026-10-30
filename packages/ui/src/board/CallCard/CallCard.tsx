@@ -1,6 +1,6 @@
-import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { NextStep, NextSteps } from '../../primitives/NextStep/NextStep'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './CallCard.module.css'
@@ -9,7 +9,8 @@ import s from './CallCard.module.css'
  * A call only you can make, on the board: a decision, an approval, a
  * contradiction the project can't settle alone. Its choices are on the card,
  * so you can see what you are being asked before you open it, and so can
- * anyone glancing at the lane. It says which tasks it holds.
+ * anyone glancing at the lane. It says which tasks it holds, and ends, as
+ * every card does, in a strip that says what to do: Decide, in violet.
  */
 
 export interface CallCardText {
@@ -72,8 +73,8 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
           ))}
         </ol>
       )}
-      <div className={b.foot}>
-        {holds?.length ? (
+      {holds?.length ? (
+        <div className={b.foot}>
           <span className={s.holds}>
             {t.holds}
             {holds.map((h) => (
@@ -82,14 +83,17 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
               </span>
             ))}
           </span>
-        ) : (
-          from && <span>{from}</span>
-        )}
-        <span className={cx(b.go, s.go)} aria-hidden="true">
-          {t.decide}
-          <Icon name="arrow" size={11} />
-        </span>
-      </div>
+        </div>
+      ) : (
+        from && (
+          <div className={b.foot}>
+            <span>{from}</span>
+          </div>
+        )
+      )}
+      <NextSteps className={b.next} aria-hidden="true">
+        <NextStep signal>{t.decide}</NextStep>
+      </NextSteps>
     </article>
   )
 }

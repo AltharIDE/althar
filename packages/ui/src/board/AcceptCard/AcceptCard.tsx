@@ -1,6 +1,7 @@
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
+import { NextStep, NextSteps } from '../../primitives/NextStep/NextStep'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import { BranchChip, PullChip } from '../BoardCard/Chips'
@@ -98,18 +99,17 @@ export function AcceptCard({ task, title, prs = [], host, branch, checks, at, no
           </li>
         )}
       </ul>
-      <div className={b.foot}>
-        {checks !== undefined && (
+      {checks !== undefined && (
+        <div className={b.foot}>
           <span className={s.checks}>
             {checks > 0 && <Icon name="check" size={11} />}
             {t.checks(checks)}
           </span>
-        )}
-        <span className={cx(b.go, s.go)} aria-hidden="true">
-          {t.review}
-          <Icon name="arrow" size={11} />
-        </span>
-      </div>
+        </div>
+      )}
+      <NextSteps className={b.next} aria-hidden="true">
+        <NextStep signal>{t.review}</NextStep>
+      </NextSteps>
     </article>
   )
 }
