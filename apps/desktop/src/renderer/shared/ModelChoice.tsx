@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText } from '@althar/ui'
+import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText, modKey } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
 import { useModelRooms } from '../features/usage/usePlan'
-import { platform } from './device'
 import {
   catalogOf,
   type Choice,
@@ -143,7 +142,7 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
           text={{
             columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' },
             // The pin's shortcut as this system writes it.
-            keys: { ...modelBrowserText.keys, pin: platform === 'darwin' ? '⌘P' : 'Ctrl+P' },
+            keys: { ...modelBrowserText.keys, pin: modKey('P') },
           }}
         />
       )}
