@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -35,7 +36,7 @@ export const loadMeterText: LoadMeterText = {
   cpuShort: 'CPU',
   memoryShort: 'MEM',
   label: (cpu, memory) => `CPU ${cpu}%, MEM ${memory}%`,
-  peek: 'This Mac’s load',
+  peek: `${device.This}’s load`,
 }
 
 /** How many of the steps a share lights, held still near the edge of a step from one render to the next. */

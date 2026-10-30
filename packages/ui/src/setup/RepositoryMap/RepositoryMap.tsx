@@ -1,5 +1,6 @@
 import { type ReactNode, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -111,12 +112,12 @@ export interface RepositoryMapText {
 }
 
 export const repositoryMapText: RepositoryMapText = {
-  here: 'On this computer',
+  here: `On ${device.this}`,
   there: 'Where the work goes',
   roles: repositoryRoleText,
   role: (name) => `Role of ${name}`,
   branch: 'Checked out:',
-  elsewhere: 'Not on this computer',
+  elsewhere: `Not on ${device.this}`,
   more: (name) => `More for ${name}`,
   open: (host) => `Open on ${host}`,
   leaveOut: 'Leave out of the project',
@@ -148,10 +149,10 @@ export const repositoryMapText: RepositoryMapText = {
   connect: (host) => `Connect ${host}`,
   signInAgain: (host) => `Sign in to ${host} again`,
   nowhere: 'No remote',
-  stays: 'Stays on this computer',
+  stays: `Stays on ${device.this}`,
   goes: (path, host) => `Its work goes to ${path} on ${host}.`,
   forkGoes: (fork, pullRequests, host) => `It pushes to ${fork} on ${host}, and its pull requests open on ${pullRequests}.`,
-  staysHere: 'Its work stays on this computer.',
+  staysHere: `Its work stays on ${device.this}.`,
 }
 
 export type RepositoryMapProps = RootProps<

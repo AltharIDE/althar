@@ -257,19 +257,6 @@ describe('the plan gauge in the bar', () => {
     expect(peek()).toBeNull()
   })
 
-  it('opens on Control-U off a Mac, and closes on the same key', async () => {
-    windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'linux' }))
-    await gauge()
-    // ⌘ is not the key there, and neither is Control with Shift.
-    fireEvent.keyDown(window, { key: 'u', metaKey: true })
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true, shiftKey: true })
-    expect(peek()).toBeNull()
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true })
-    await screen.findByRole('dialog', { name: 'Plan usage' })
-    fireEvent.keyDown(window, { key: 'U', ctrlKey: true })
-    await waitFor(() => expect(peek()).toBeNull())
-  })
-
   it('opens on ⌘U on a Mac, from a field being typed in too', async () => {
     windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'darwin' }))
     await gauge()

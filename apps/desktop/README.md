@@ -169,6 +169,30 @@ Also turn on **release immutability** (Settings → General → Releases): once 
 
 With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set CSC_LINK --env release --repo AltharIDE/althar`, or `gh secret set APPLE_API_KEY --env release --repo AltharIDE/althar < AuthKey_<id>.p8`.
 
+#### The Homebrew tap
+
+`brew install --cask altharide/tap/althar` installs Althar on Apple-silicon Macs (macOS 13 or later) from the public repository `AltharIDE/homebrew-tap`. The cask's source of truth is [`packaging/homebrew/althar.rb`](../../packaging/homebrew/althar.rb); the tap holds a copy of it with one release's version and the sha256 of its arm64 dmg filled in (`packaging/homebrew/fill.sh`). The cask has `auto_updates true`, since Althar updates itself, and its `zap` lists the folders the app writes to (the profile in `Application Support/Althar`, the window's in `Application Support/@althar`, caches, logs, preferences), never the task worktrees in `~/Althar`.
+
+[`homebrew-tap.yml`](../../.github/workflows/homebrew-tap.yml) keeps the tap current. Once (the Homebrew tap is a person's to set up, not CI's):
+
+1. Create the public repository `AltharIDE/homebrew-tap` (empty is fine: the first run makes `Casks/althar.rb` on `main`).
+2. Create a fine-grained personal access token whose resource owner is `AltharIDE`, with access to that one repository and the permission Contents: read and write, and nothing else.
+3. Add it as the secret `HOMEBREW_TAP_TOKEN` in the `release` environment (`gh secret set HOMEBREW_TAP_TOKEN --env release --repo AltharIDE/althar`), beside the others above. Fine-grained tokens expire: note the date, and replace the secret before it.
+
+When a release is published (not when it is drafted), the workflow waits for the `release` environment's reviewer, downloads that release's `Althar-<version>-arm64.dmg`, takes its sha256 (it must agree with GitHub's own digest of the file), fills the cask in and pushes `Casks/althar.rb` to the tap. It skips prereleases and any release that isn't the latest. Run again for the same version it changes nothing. It creates and publishes no release.
+
+A release event runs the workflow as it is on the release's tag, so a release made before the workflow existed, or a missed one, is done by hand: Actions → homebrew-tap → Run workflow, on `main`, with the tag (`gh workflow run homebrew-tap.yml --ref main -f tag=v0.5.0`). The `release` environment's deployment rules must allow `main` for that, as for a release run by hand.
+
+On a pull request that changes `packaging/homebrew/`, `cask.yml` runs `brew style` on macOS. Before changing the cask, also audit it with a published release filled in (Homebrew audits casks only from a tap, so make a local one):
+
+    brew tap-new --no-git local/althar && mkdir -p "$(brew --repository local/althar)/Casks"
+    packaging/homebrew/fill.sh 0.5.0 <the dmg's sha256> > "$(brew --repository local/althar)/Casks/althar.rb"
+    brew trust local/althar
+    brew style --cask local/althar/althar && brew audit --cask --strict --online local/althar/althar
+    brew untap local/althar
+
+Getting into the official homebrew-cask list comes later, once the repository is notable enough.
+
 #### Trying a release on a Mac
 
 Releases are published from CI only. To try one before tagging it, with the certificate in the login keychain and Apple's credentials in the environment:
