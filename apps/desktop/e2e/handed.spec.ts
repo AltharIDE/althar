@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * What an agent hands back, in a real window with the fake agent
@@ -37,8 +37,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await expect(page.getByText(/ready in \d+ ms/).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /^Working · / })).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByRole('button', { name: /^Running npm run dev/ })).toHaveAttribute('aria-expanded', 'true')
-    // Once the fold has opened.
-    await page.waitForTimeout(500)
+    await still(page)
     await page.screenshot({ path: 'test-results/handed-streaming.png' })
     await page.getByRole('button', { name: 'Interrupt the lead', exact: true }).click()
     await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
@@ -49,8 +48,8 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     // The screenshot, from the artifact store at its address, drawn large with what the lead said.
     const open = page.getByRole('button', { name: /full size$/ }).last()
     // A picture loads as it nears the screen. The message may still be drawn again as it settles, putting a new button in the old
-    // one's place, so it is scrolled to once one stays.
-    await expect(() => open.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()
+    // one's place, which a scroll already under way loses: it is tried again, finding the new one, until one stays.
+    await expect(() => open.scrollIntoViewIfNeeded()).toPass()
     const shot = open.getByRole('img')
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     expect(await shot.getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)
@@ -65,8 +64,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('img')).toBeVisible()
     await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
-    // Once it has faded in.
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/handed-lightbox.png' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
@@ -76,7 +74,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await page.keyboard.press('Enter')
     const panel = page.getByRole('complementary', { name: 'notes.md' })
     await expect(panel.getByRole('columnheader', { name: 'Budget' })).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/handed-panel.png' })
     await panel.getByRole('button', { name: /Close the panel/ }).click()
     await expect(panel).toHaveCount(0)

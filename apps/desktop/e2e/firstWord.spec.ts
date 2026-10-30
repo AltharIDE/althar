@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * Between sending and the first word back, in a real window with the fake
@@ -100,17 +100,17 @@ const handedOff = async (page: Page, thread: Locator, words: string, name: strin
   const thinking = thinkingIn(thread)
   await expect(thinking).toBeVisible()
   // Its beat, then its fade.
-  await page.waitForTimeout(700)
+  await still(page)
   await shoot(page, thread, `${name}-thinking`)
   // How long, once that's worth saying.
-  await expect(thinking).toContainText(/Thinking\s*[3-5]s/, { timeout: 6_000 })
+  await expect(thinking).toContainText(/Thinking\s*[3-5]s/)
   await shoot(page, thread, `${name}-counted`)
   const before = await placeOf(thread)
-  await expect(thinking).toHaveCount(0, { timeout: 10_000 })
+  await expect(thinking).toHaveCount(0)
   // The name stays where it stood, and what it shows first starts where Thinking was: its words, or a thought or a call.
   expect(await placeOf(thread)).toEqual(before)
   if (first === 'words') await expect(thread.getByRole('article').last().locator('header + *')).toContainText(ANSWER)
-  await page.waitForTimeout(300)
+  await still(page)
   await shoot(page, thread, `${name}-${first === 'words' ? 'words' : 'first'}`)
   expect(await queuedSeen(page)).toEqual([])
 }
@@ -118,25 +118,28 @@ const handedOff = async (page: Page, thread: Locator, words: string, name: strin
 /**
  * Interrupted before its first word, then done without one: each time
  * Thinking goes, stays gone with nothing running, and the composer takes
- * a new message rather than adding to a queue.
+ * a new message rather than adding to a queue. It stays gone once the
+ * thread is no longer busy, which it is while the runtime says a turn runs:
+ * nothing after that could bring it back.
  */
 const endsQuietly = async (page: Page, thread: Locator, name: string) => {
   const thinking = thinkingIn(thread)
   const idle = page.getByRole('textbox', { name: /^Tell .* something/ })
   await say(page, 'Why is checkout slow? [answers-after:20s]')
   await expect(thinking).toBeVisible()
-  await page.waitForTimeout(1000)
+  // Shown, after its beat.
+  await still(page)
   await page.getByRole('button', { name: /^Interrupt the/ }).click()
-  await expect(thinking).toHaveCount(0, { timeout: 5_000 })
+  await expect(thinking).toHaveCount(0)
   await expect(idle).toBeVisible()
-  await page.waitForTimeout(1500)
+  await expect(thread).not.toHaveAttribute('aria-busy')
   await expect(thinking).toHaveCount(0)
   await shoot(page, thread, `${name}-interrupted`)
   await say(page, 'And refunds? [ends-after:3s]')
   await expect(thinking).toBeVisible()
-  await expect(thinking).toHaveCount(0, { timeout: 8_000 })
+  await expect(thinking).toHaveCount(0)
   await expect(idle).toBeVisible()
-  await page.waitForTimeout(1500)
+  await expect(thread).not.toHaveAttribute('aria-busy')
   await expect(thinking).toHaveCount(0)
   await shoot(page, thread, `${name}-ended-empty`)
 }
@@ -160,21 +163,20 @@ const opened = async (env: Record<string, string> = {}) => {
 }
 
 test('holds the reply’s place, thinking, until its first words take it: in the coordinator’s thread and a task’s', async () => {
-  test.setTimeout(120_000)
   const { electronApp, page } = await opened()
   try {
     const conversation = page.getByRole('region', { name: 'Conversation' })
     await handedOff(page, conversation, 'Why is checkout slow? [answers-after:6s]', 'coordinator')
     // A thought ahead of its words takes Thinking's place the same way.
     await handedOff(page, conversation, 'What does it do on a timeout? [thinks-after:4s]', 'coordinator-thought', 'other')
-    await expect(conversation.getByRole('article').last()).toContainText(ANSWER, { timeout: 10_000 })
+    await expect(conversation.getByRole('article').last()).toContainText(ANSWER)
 
     // Where the agent gives up, what it said takes Thinking's place, under the same name.
     await say(page, 'And refunds? [fails-after:4s]')
     await expect(thinkingIn(conversation)).toBeVisible()
-    await expect(conversation.getByText(/couldn't answer/)).toBeVisible({ timeout: 10_000 })
+    await expect(conversation.getByText(/couldn't answer/)).toBeVisible()
     await expect(thinkingIn(conversation)).toHaveCount(0)
-    await page.waitForTimeout(300)
+    await still(page)
     await shoot(page, conversation, 'coordinator-failed')
 
     // Sent while it thinks, a message waits its turn in the composer's queue, where it can be changed: nothing thinks about it
@@ -187,28 +189,27 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     await expect(queue).toBeVisible()
     await expect(queue).toContainText('Then the changelog.')
     await expect(thinking).toHaveCount(1)
-    await page.waitForTimeout(700)
+    await still(page)
     const from = await conversation.getByRole('article', { name: /^You/ }).last().boundingBox()
     const to = await queue.boundingBox()
     if (from === null || to === null) throw new Error('Nothing to shoot')
     const clip = { x: to.x - 20, y: from.y - 16, width: to.width + 40, height: to.y + to.height + 16 - (from.y - 16) }
     await page.screenshot({ path: 'test-results/first-word-coordinator-queued.png', clip, scale: 'css', animations: 'disabled' })
-    await expect(queue).toHaveCount(0, { timeout: 10_000 })
+    await expect(queue).toHaveCount(0)
     await expect(conversation.getByRole('article', { name: /^You/ }).last()).toContainText('Then the changelog.')
-    await expect(conversation.getByText(ANSWER)).toHaveCount(3, { timeout: 10_000 })
+    await expect(conversation.getByText(ANSWER)).toHaveCount(3)
 
     // A task's lead, asked again once it's done; and with a call ahead of its words.
     const thread = await readyTask(page)
     await handedOff(page, thread, 'Why does the retry wait a second? [answers-after:6s]', 'task')
     await handedOff(page, thread, 'Where does it give up? [reads-after:4s]', 'task-call', 'other')
-    await expect(thread.getByRole('article').last()).toContainText(ANSWER, { timeout: 10_000 })
+    await expect(thread.getByRole('article').last()).toContainText(ANSWER)
   } finally {
     await electronApp.close()
   }
 })
 
 test('thinks while the agent starts for what was said: the coordinator’s first, and a stopped task’s lead asked again', async () => {
-  test.setTimeout(120_000)
   // Each agent takes four seconds to start a session, then a second to answer: the start is most of the wait.
   const { electronApp, page } = await opened({ ALTHAR_FAKE_SLOW_START: '4000' })
   try {
@@ -217,13 +218,13 @@ test('thinks while the agent starts for what was said: the coordinator’s first
 
     await startTask(page, 'Keep the session alive', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'More for this task' }).click()
     await page
       .getByRole('menu')
       .getByRole('menuitem', { name: /Stop the task/ })
       .click()
-    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
     // Asked again, the stopped lead starts afresh to read it, and thinks all the while; its step goes on, its work first.
     await handedOff(page, page.getByRole('region', { name: 'Thread' }), 'Why does it wait? [answers-after:1s]', 'start-task', 'other')
   } finally {
@@ -232,7 +233,6 @@ test('thinks while the agent starts for what was said: the coordinator’s first
 })
 
 test('says it’s longer than usual after 30 seconds, and keeps still where motion is reduced: in a task’s thread and the coordinator’s', async () => {
-  test.setTimeout(120_000)
   const { electronApp, page } = await opened()
   try {
     await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -246,7 +246,7 @@ test('says it’s longer than usual after 30 seconds, and keeps still where moti
     await expect(conversation).toBeVisible()
     await say(page, 'Why is checkout slow? [answers-after:36s]')
     const thinking = thinkingIn(conversation)
-    await expect(thinking).toContainText(/Thinking\s*3\d+s\s*longer than usual/, { timeout: 40_000 })
+    await expect(thinking).toContainText(/Thinking\s*3\d+s\s*longer than usual/)
     expect(await moving(thinking)).toEqual([])
     await shoot(page, conversation, 'slow-coordinator')
 
@@ -254,7 +254,7 @@ test('says it’s longer than usual after 30 seconds, and keeps still where moti
     await toConversation(page)
     await expect(thinkingIn(thread)).toContainText(/Thinking\s*3\d+s\s*longer than usual/)
     // Drawn again, it shows after its beat.
-    await page.waitForTimeout(700)
+    await still(page)
     expect(await moving(thinkingIn(thread))).toEqual([])
     await shoot(page, thread, 'slow-task')
 
@@ -267,7 +267,6 @@ test('says it’s longer than usual after 30 seconds, and keeps still where moti
 })
 
 test('lets go of Thinking when the turn ends with nothing said, interrupted or done: in the coordinator’s thread and a task’s', async () => {
-  test.setTimeout(120_000)
   const { electronApp, page } = await opened()
   try {
     await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator')

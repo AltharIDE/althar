@@ -38,9 +38,9 @@ test('offers the speech model on the first press, downloads it, listens, and wri
 
     // Here, with the tray still open: it listens.
     const stop = page.getByRole('button', { name: /^Stop dictating/ })
-    await expect(stop).toBeVisible({ timeout: 10_000 })
+    await expect(stop).toBeVisible()
     await expect(tray).toBeHidden()
-    await expect(stop).toHaveAccessibleName('Stop dictating, 0:01', { timeout: 5_000 })
+    await expect(stop).toHaveAccessibleName('Stop dictating, 0:01')
     // What is heard shows faint where it will land, as it is said, and the field waits.
     const faint = page.locator('[aria-hidden="true"][class*="interim"]')
     // The full stop the model ends each pass with shows only once the stretch settles.
