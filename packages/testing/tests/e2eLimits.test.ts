@@ -6,8 +6,8 @@ import { expect, test } from 'vite-plus/test'
 
 /*
  * No end-to-end spec sets a time of its own either, nor sleeps: Playwright's test and expect times come from the budget
- * (src/budget.ts, in the desktop app's playwright.config.ts), and a spec waits for what it looks for, with Playwright's
- * own waiting, never for a while. A time picked where a spec once ran out is right for the machine it ran out on; a
+ * (src/budget.ts, in the desktop app's playwright.config.ts), and so do the app's actions (its e2e/support.ts), and a
+ * spec waits for what it looks for, with Playwright's own waiting, never for a while. A time picked where a spec once ran out is right for the machine it ran out on; a
  * sleep is too short on a slow one and wasted on a fast one. This finds any that comes back.
  */
 
