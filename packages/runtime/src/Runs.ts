@@ -2515,14 +2515,17 @@ export class Runs extends Context.Service<
             rather: other === undefined ? [] : [other],
             ...(planned === undefined ? {} : { planned }),
           })
-          if (policy === 'ask' || out === null || resetsAt === null)
+          // Where the project asks but no one could take it over, there is nothing to choose: it waits for the reset, as where
+          // nothing was free to move it to (DEV-173). Not started yet, nearly out, starting on what is left is a choice still.
+          const noOne = policy === 'ask' && out !== null && resetsAt !== null && low === undefined && !(yield* limits.canTakeOver(choices))
+          if ((policy === 'ask' && !noOne) || out === null || resetsAt === null)
             return yield* stuck(
               on.run,
               { id: on.attemptId },
               { ...info, limit: { accountId, resetsAt, choices, ...(low === undefined ? {} : { left: low.leftPercent }) } },
             )
-          // Waiting, it says why: the project waits for resets, or it moves on and nothing else was free.
-          const nothingFree = policy === 'move'
+          // Waiting, it says why: the project waits for resets, or nothing else was free to move it to or to ask about.
+          const nothingFree = policy === 'move' || noOne
           yield* holdForLimit(on, agentId, accountId, out, nothingFree ? 'nothing_free' : 'waits', choices, low)
           yield* sayOut(
             on.run.threadId,
