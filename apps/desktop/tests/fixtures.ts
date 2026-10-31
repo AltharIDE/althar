@@ -1263,6 +1263,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
   fault: null,
   noReading: null,
+  resetSince: false,
   ...over,
 })
 
