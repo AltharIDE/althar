@@ -122,6 +122,9 @@ export const Check = Schema.Struct({
   name: Schema.String,
   state: CheckState,
   url: Schema.NullOr(Schema.String),
+  workflow: Schema.optional(Schema.NullOr(Schema.String)),
+  startedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  completedAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** What the check said about itself, when it says. */
   summary: Schema.NullOr(Schema.String),
 })
@@ -358,6 +361,15 @@ export interface CodeHost {
    * keeps but won't give (refused, expired, out of reach) fails, with why.
    */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  checkAnnotations?(
+    repository: Repository,
+    check: Check,
+  ): Effect.Effect<ReadonlyArray<{ path: string; line: number; message: string }>, ConnectorFailed>
+  checkArtifacts?(
+    repository: Repository,
+    check: Check,
+  ): Effect.Effect<ReadonlyArray<{ id: string; name: string; size: number }>, ConnectorFailed>
+  checkArtifact?(repository: Repository, id: string, maxBytes: number): Effect.Effect<Uint8Array, ConnectorFailed>
   /**
    * What a check the host keeps no log of reported of itself, where it said
    * more than its summary: a GitHub check run's own summary and text. Null

@@ -163,6 +163,8 @@ export interface Host {
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** Asks the person for folders for a new project, several at once; a grant for each, none when they cancel. */
   readonly pickFolders: () => Promise<ReadonlyArray<string>>
+  /** Asks the person where a new repository named `name` goes; the grant of the folder it goes in, or null when they cancel. */
+  readonly pickPlace: (name: string) => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
   /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */

@@ -1290,3 +1290,55 @@ describe('GitHub as a tracker', () => {
     }),
   )
 })
+
+it.effect('reads check annotations and run artifacts, and downloads an archive without forwarding credentials', () =>
+  Effect.gen(function* () {
+    const { host, sent } = github([
+      ['GET', `${REPO}/check-runs/7/annotations?per_page=100`, { json: [{ path: 'a.ts', start_line: 3, message: 'uncovered' }] }],
+      ['GET', `${REPO}/actions/jobs/7`, { json: { run_id: 9 } }],
+      [
+        'GET',
+        `${REPO}/actions/runs/9/artifacts?per_page=100`,
+        { json: { artifacts: [{ id: 11, name: 'coverage', size_in_bytes: 2, expired: false }] } },
+      ],
+      ['GET', `${REPO}/actions/artifacts/11/zip`, { status: 302, headers: { location: 'https://storage.example/archive' } }],
+      ['GET', 'https://storage.example/archive', { text: 'PK' }],
+    ])
+    const check = { id: 'run:7:github-actions', name: 'test', state: 'passed' as const, url: null, summary: null }
+    assert.deepEqual(yield* host.checkAnnotations!(repository, check), [{ path: 'a.ts', line: 3, message: 'uncovered' }])
+    assert.deepEqual(yield* host.checkArtifacts!(repository, check), [{ id: '11', name: 'coverage', size: 2 }])
+    assert.deepEqual([...(yield* host.checkArtifact!(repository, '11', 5))], [80, 75])
+    assert.isUndefined(sent.at(-1)?.headers.authorization)
+  }),
+)
+
+it.effect('lists a job with its workflow and timing when GitHub reports them', () =>
+  Effect.gen(function* () {
+    const { host } = github([
+      [
+        'GET',
+        `${REPO}/commits/main/check-runs?per_page=100`,
+        {
+          json: {
+            check_runs: [
+              {
+                id: 7,
+                name: 'verify',
+                status: 'completed',
+                conclusion: 'success',
+                started_at: '2026-10-31T10:00:00Z',
+                completed_at: '2026-10-31T10:01:00Z',
+                check_suite: { id: 4 },
+                app: { slug: 'github-actions' },
+              },
+            ],
+          },
+        },
+      ],
+      ['GET', `${REPO}/commits/main/status`, { json: { statuses: [] } }],
+      ['GET', `${REPO}/actions/runs?branch=main&per_page=100`, { json: { workflow_runs: [{ check_suite_id: 4, name: 'harness' }] } }],
+    ])
+    const [job] = yield* host.checks(repository, 'main')
+    assert.deepInclude(job, { name: 'verify', workflow: 'harness', startedAt: '2026-10-31T10:00:00Z', completedAt: '2026-10-31T10:01:00Z' })
+  }),
+)
