@@ -196,7 +196,7 @@ What isn't alike, as read on 31 October 2026:
 | Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-077, task 1 |
 | Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-076, task 1 |
 | Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
-| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-076, task 5, with an errand standing in |
+| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-076, task 5, with an errand standing in, one merge at a time into each branch |
 | Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
 | A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-076, task 8, publishing as each host does |
 | Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |

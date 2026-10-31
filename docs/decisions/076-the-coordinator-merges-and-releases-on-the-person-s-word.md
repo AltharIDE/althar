@@ -121,9 +121,13 @@
     which has `gh` signed in.
   - **Wakes cost turns** on the person's plan; batching keeps them few.
   - **Stand-ins are Althar's, not the host's.** Where a host has no queue
-    Althar can use, an errand brings the branch up to date before it merges,
-    which costs CI's time as a queue would. Bitbucket Cloud's merge takes no
-    head, so the head is checked by a read just before it, a moment's gap.
+    Althar can use, errands merge into each branch one at a time, each
+    brought up to date and green first. A line of them waits for each one's
+    CI in turn, slower than a queue that tests several together. A write by
+    someone else just before a merge lands can still reach main untested,
+    where the repository's rules don't refuse it. Bitbucket Cloud's merge
+    takes no head, so the head is checked by a read just before it, a
+    moment's gap.
   - **Following every pull request costs requests,** and what people
     outside write on them reaches the coordinator, as data.
   - **An errand kept for days** could merge what the person forgot they
@@ -268,11 +272,12 @@ whoever opened it.
     On an outside author's pull request, a reply or a close sends them a
     notification that can't be taken back, so there it is asked-for.
 - **Asked-for:**
-  - `merge_pull_request`: merge it, or put it in the host's queue or
-    auto-merge where its branch has one Althar can reach, with a method the
-    repository allows, at a head. Where it can't, an errand stands in
-    ([below](#on-every-code-host)). `leave_queue` takes it out until it
-    merges, and can be undone;
+  - `merge_pull_request`: merge it, or put it in the host's queue or merge
+    train where its branch has one Althar can reach, with a method the
+    repository allows, at a head. Where it can't, an errand stands in, one
+    merge at a time into each branch, with auto-merge as its merge where the
+    host has it ([below](#on-every-code-host)). `leave_queue` takes it out
+    until it merges, and can be undone;
   - `push_tag`, on a commit of the default branch, made by Althar, never
     moved or deleted. A lead's `push_tag` still asks the person each time
     (`rules.ts:1939-1941`);
@@ -362,7 +367,7 @@ words and links the host's own button, which is the person's press.
 | | GitHub | GitLab | Bitbucket Cloud | Bitbucket Data Center |
 | --- | --- | --- | --- | --- |
 | Merging at the head read | The head goes with it (`connectors/src/github.ts:772`; `expectedHeadOid` on the queue, `:409`) | The head goes with it (`gitlab.ts:630`) | It takes no head: a read just before it (`bitbucketCloud.ts:530-537`) | The pull request's version (`bitbucketDataCenter.ts:569`) |
-| The queue, or merging once green | The merge queue | A merge train where the project has them, else auto-merge (`auto_merge`; "merge when pipeline succeeds" on older servers) | Its merge queue can be read and left through the API, not entered: the errand stands in | Auto-merge where the server has it, else the errand stands in |
+| The queue, or merging once green | The merge queue | A merge train where the project has them; else the errand stands in, with auto-merge (`auto_merge`; "merge when pipeline succeeds" on older servers) as its merge | Its merge queue can be read and left through the API, not entered: the errand stands in | The errand stands in, with auto-merge as its merge where the server has it |
 | Why the queue sent one back | The pull request's timeline (#458) | The train's own read, and the merge request's notes | The queue's own read | The pull request's activities |
 | A failed check again | An Actions job | A job, or a pipeline's failed jobs | The pipeline again, whole, on the same commit | Its builds are another service's (Jenkins, Bamboo): said, with the build's link |
 | A failed check's log | Actions' | A job's trace | A step's log | Another service's: the build's link |
@@ -373,13 +378,43 @@ words and links the host's own button, which is the person's press.
 | Approving a run | An environment's required reviewers | A deployment approval where the project has them, or a manual job, played | A manual step has no API: the person's press, linked | Another service's |
 | The rate limit | 5,000 an hour; a "not modified" reply is free | The server's own, from its `RateLimit-` headers | 1,000 an hour at least, more with seats, from its `X-RateLimit-` headers | The server's own; without headers, Althar's own count |
 
-- **Where the errand stands in for a queue, it does what a queue does.** It
-  merges a head that is green with the default branch's current head in it.
-  Where main has moved since the checks ran, it brings the branch up to
-  date and waits for green again, three times at most, then says so and
-  waits for the person. Otherwise a branch green against an old main could
-  turn main red. Where the host refuses a plain merge because the branch
-  merges only through its queue, the line links the host's Add to queue.
+- **Where the errand stands in for a queue, it does what a queue does:
+  one merge at a time into each branch.** Two pull requests green against
+  the same main can each merge without ever being tested together, and
+  that can turn main red. Auto-merge isn't a queue either: it merges each
+  one as soon as it's green. So wherever there is no merge queue or merge
+  train, every merge Althar makes into a repository's branch takes that
+  branch's one slot:
+  - Errands wait for the slot in the order the person asked. The one that
+    holds it reads the target's head. Where its pull request doesn't have
+    that head, it brings the branch up to date and waits for green at the
+    new head. Then it reads the target again, and merges at the head that
+    went green, or turns on auto-merge for it.
+  - It holds the slot until a read shows the pull request merged and the
+    target's new head, including a merge that lands later. The next errand
+    then starts again from that head. An errand gives the slot up when its
+    pull request goes red, is refused, or is closed or taken out, and says
+    so.
+  - The person's "merge it now", and their press in the app, wait for a
+    merge in flight but not for the line. The errands behind them start
+    again from the new head.
+  - Where the target moves while an errand holds the slot, someone else
+    wrote to it. The errand brings its branch up to date again, three
+    times at most, then says so and waits for the person.
+  - The slot and the line are kept with the errands, so a restart keeps
+    them.
+  - **What it can't promise:** a write by someone else, another computer's
+    Althar included, between the last read and the merge landing. No host's
+    plain merge takes the target's head, so no host checks it as it merges.
+    Where the repository's rules make the host refuse a branch without the
+    target's head (GitHub's "up to date before merging", GitLab's
+    fast-forward and semi-linear methods, Bitbucket's fast-forward
+    strategies), the host closes the gap itself. Otherwise what slips
+    through shows as main red
+    ([below](#ci-news-and-what-the-coordinator-does-with-it)), which the
+    coordinator hears.
+  - Where the host refuses a plain merge because the branch merges only
+    through its queue, the line links the host's Add to queue.
 - **What a server has is read, not assumed.** GitLab's tier, and Bitbucket
   Data Center's version, decide merge trains, auto-merge, deployment
   approvals and drafts. Each is read when a repository is first used, and
@@ -567,7 +602,7 @@ comes:
 | A reply on, or close of, an outside author's pull request | – | Asked-for | Their notification can't be taken back |
 | No branch update: no connector has one | `connectors/src/model.ts:292` | Lifted | A merge of the default branch into it can be undone; never a rebase |
 | "Agents never merge": the person's Merge alone | ADR-011; `Changes.ts:644`, `:2216`; `contracts/src/Api.ts:3511-3516` | Lifted, when the person asks | It can't be undone, so only on their word, never on its own |
-| The merge queue is entered only inside the person's press | `connectors/src/github.ts:775-786` | Lifted, when the person asks | As merging: on every host, through its queue or auto-merge, or the errand standing in |
+| The merge queue is entered only inside the person's press | `connectors/src/github.ts:775-786` | Lifted, when the person asks | As merging: on every host, through its queue or merge train, or the errand standing in, one merge at a time into each branch |
 | A merge goes at the head the person saw | `Changes.ts:2227` | Kept | It merges at the head it read, or reads again |
 | The merge method is the first the repository allows | `connectors/src/github.ts:770` | Lifted | It takes any method the repository allows |
 | No tag: `push_tag` is a running lead's, and asks the person each time | `Changes.ts:2708-2825`; `rules.ts:1939-1941` | Lifted, when the person asks | A tag may publish elsewhere; their message is the word, so no second card |
@@ -624,7 +659,7 @@ title is a task's, in at most 60 characters.
 | 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why as each host says it, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep, on every host: red, and green again, read again at an unchanged head while main is red. The watch, for task 3's errands and DEV-176: what it watches is read as a task's pull request is until it ends, finished results included, with conditional reads. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone. Tests: a failed run that passes when run again at the same head is heard, on main and on a watched pull request | M | – |
 | 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. The [edge cases](#edge-cases): an objection pauses an errand, one that hears nothing says so, each step reads before it acts, and a lost answer is read back. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes, an objection pauses it, a lost answer isn't acted on twice | L | – |
 | 4 | A stopped lead hears what's meant for it | `message_lead` starts a stopped lead. Reviews, comments and the queue sending its pull request back are queued for it, and wake it (today `Changes.ts:3261` drops them). Shared with DEV-176 | S | – |
-| 5 | Coordinator merges and queues when you ask | `merge_pull_request` at a head, with a method the repository allows: GitHub's queue (at `expectedHeadOid`), GitLab's merge train or auto-merge, Data Center's auto-merge where the server has it, and elsewhere the errand standing in for a queue (green, up to date, three tries), linking the host's Add to queue where a plain merge is refused; `leave_queue` on each. What each server has, read and kept. A merge that lands later is done once read. Any of the project's pull requests, in any of its repositories. "Once it's green" as an errand. The line in the chat. Contract clauses on every host's fake | L | 2, 3 |
+| 5 | Coordinator merges and queues when you ask | `merge_pull_request` at a head, with a method the repository allows: GitHub's queue (at `expectedHeadOid`), GitLab's merge train, and elsewhere the errand standing in for a queue: one slot per repository and branch, taken in the order asked and held until a read shows the merge landed, each branch brought up to date and green against the target's new head (three tries for someone else's writes), auto-merge as its merge where the host has it (GitLab's, Data Center's), the person's "merge it now" waiting only for a merge in flight, and a link to the host's Add to queue where a plain merge is refused; `leave_queue` on each. What each server has, read and kept. A merge that lands later is done once read. Any of the project's pull requests, in any of its repositories. "Once it's green" as an errand. The line in the chat. Contract clauses on every host's fake. Tests: two errands with the first merge held pending, where the second waits, then starts again from the new head; the person's "merge it now" ahead of the line; a write by someone else in the gap, heard as main red; a restart keeps the line | L | 2, 3 |
 | 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. An outside author's branch where the host lets the account push to it, else a reply asks them, asked-for. Never a rebase, never forced | M | 1 |
 | 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. At most a fifth of each host's hourly allowance, by its headers or Althar's own count, backing off as it falls; Bitbucket's lists carry no checks. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
 | 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on a commit of the default branch, on every host. In the connectors: read a release, and publish one as each host does (GitHub's draft, GitLab's release made, Bitbucket Cloud's files in Downloads); approve a run (GitHub's environment, GitLab's deployment approval or manual job), and link the host's own button where only the person can (Bitbucket's manual steps); run a run's failed jobs again; read a run on a tag (with DEV-94). Another repository's release steps, read from it and kept as a note | L | 3 |

@@ -38,10 +38,10 @@
     release, and the feature isn't done until they are.
   - **"Can have it" counts what Althar can stand in for,** not only what
     the service offers. Where Althar can build a feature from what a service
-    does have, it does: an errand that waits for green stands in for
-    auto-merge, Althar's own merge for an update-branch button, the whole
-    pipeline again for one step again. A gap is only what neither the
-    service nor Althar can do.
+    does have, it does: an errand that merges one pull request at a time,
+    each up to date and green, stands in for a merge queue, Althar's own
+    merge for an update-branch button, the whole pipeline again for one
+    step again. A gap is only what neither the service nor Althar can do.
   - **A gap is said, never silent.** The adapter's capabilities say it in
     code (`HostCapabilities`, `TrackerCapabilities`, the agent's registry
     entry). A screen shows a control only where it works. A tool refuses in
