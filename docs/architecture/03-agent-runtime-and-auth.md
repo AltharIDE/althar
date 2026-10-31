@@ -799,6 +799,21 @@ Automatic provider upgrades must not silently change an in-flight run's
 adapter semantics. An app update can add support, but active sessions stay tied
 to the adapter/protocol version with which they began.
 
+### Every agent alike
+
+A feature built for one agent is built for every one that can have it, in
+the same release, and where one can't, its registry entry and this table say
+why
+([ADR-077](../decisions/077-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+What isn't alike, as read on 31 October 2026:
+
+| What | Which agents have it | Why the others don't | What follows |
+| --- | --- | --- | --- |
+| A sandbox that holds the coordinator's and readers' commands (`contains`, `holds`) | Claude Code | Not read for the others yet. Codex has a sandbox of its own | ADR-077, task 4 |
+| A lead's sandbox exceptions worked out from the start (`upFront`) | Claude Code | As above | ADR-077, task 4 |
+| The coordinator judging permissions (`permissionJudge`) | Claude Code | Not read: it needs session settings that drop the agent's built-in tools, hooks and own MCP servers. Without it the person is asked | ADR-077, task 5 |
+| Reviewing a pull request from outside (`reviewing.outside`) | Claude Code, OpenCode | Codex's entry holds it off; the rest aren't read yet | ADR-077, task 6 |
+
 ## Permission routing
 
 Althar must see every permission request to apply the project's rules,

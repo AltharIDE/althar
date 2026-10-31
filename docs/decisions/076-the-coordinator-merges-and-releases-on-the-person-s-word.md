@@ -60,6 +60,11 @@
     a task's, nor stand in for a check or a review
     ([On the code host](#on-the-code-host)). This amends ADR-011 and
     ADR-058.
+  - **On every code host Althar supports,** GitHub, GitLab, Bitbucket Cloud
+    and Bitbucket Data Center, as ADR-077 asks. Where a host lacks
+    something, Althar stands in with what the host has, and where neither
+    can, the tool says so and links the host's own button
+    ([On every code host](#on-every-code-host)).
   - **CI's news reaches the coordinator,** which is woken for what it can
     act on ([CI news](#ci-news-and-what-the-coordinator-does-with-it)).
   - **Every open pull request in the project's repositories is followed,**
@@ -72,7 +77,10 @@
   - **Every restriction on the coordinator is kept or lifted,** each for a
     reason
     ([the list](#every-restriction-on-the-coordinator-kept-or-lifted)).
-  - **The build is thirteen tasks, for 0.7.0** ([Build](#build-for-070)).
+  - **Edge cases are settled by rule,** and what nobody foresaw ends in a
+    line in the chat, not in something done ([Edge cases](#edge-cases)).
+  - **The build is fourteen tasks, for 0.7.0** ([Build](#build-for-070)),
+    beside ADR-077's six.
 - **Alternatives considered:**
   - **A standing release task's lead,** compared
     [below](#the-coordinator-not-a-standing-task).
@@ -96,6 +104,8 @@
     writes, each a commit to a branch, showed how easily one path is missed.
     Families of paths, and a test against the host's published description
     of its API, catch the next one.
+  - **GitHub first, the other hosts later:** ADR-077 settles that a feature
+    ships for every host that can have it.
 - **Trade-off:**
   - **Steering.** In a turn the person started, what the coordinator reads
     there could take it to a target or an action they didn't mean, and
@@ -110,6 +120,10 @@
     keychain's service. It is less exposure than today's side session,
     which has `gh` signed in.
   - **Wakes cost turns** on the person's plan; batching keeps them few.
+  - **Stand-ins are Althar's, not the host's.** Where a host has no queue
+    Althar can use, an errand brings the branch up to date before it merges,
+    which costs CI's time as a queue would. Bitbucket Cloud's merge takes no
+    head, so the head is checked by a read just before it, a moment's gap.
   - **Following every pull request costs requests,** and what people
     outside write on them reaches the coordinator, as data.
   - **An errand kept for days** could merge what the person forgot they
@@ -130,11 +144,16 @@
     instead of press.
   - DEV-177 swaps a task's lead, DEV-94 reads any run's log, and DEV-170
     pushes to a contributor's fork. Each stays its own.
+  - **Proving each code host and tracker on a real account** (the task
+    `prove-each-code-host-and-tracker-on-a-real-accou`, from the person's
+    same message) is where each host's part of tasks 5 to 8 and 14 is first
+    tried for real, with each host's contract clauses.
 - **Revisit when:** Claude Code's sandbox can deny the keychain's service;
   the coordinator acts on a target, or does something, the person didn't
   mean; following every pull request reaches a host's rate limit; the
   person wants something that can't be undone to go ahead unasked; a
-  project is shared, and it matters whose word counts.
+  project is shared, and it matters whose word counts; a host opens an API
+  for what Althar stands in for, such as entering Bitbucket Cloud's queue.
 
 Paths below are in `packages/runtime/src`, or in `packages/` where they
 start with another package's folder, as they stood at 3b4e42f1.
@@ -158,8 +177,8 @@ pull request merges on the person's word like any other.
 
 | Kind | When the coordinator does it | What, here |
 | --- | --- | --- |
-| Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges |
-| **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push a tag; approve a run's `release` environment; publish a release; delete a branch; discard a task; reply on, or close, an outside author's pull request |
+| Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own, where the host can reopen it; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges |
+| **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push a tag; approve a run's `release` environment; publish a release; delete a branch; discard a task; reply on, or close, an outside author's pull request; close one on Bitbucket Cloud, where declining is final |
 | Can't be undone, and the person didn't ask | Never. It says so in a line in its chat, or, where there is a decision to make, on DEV-173's card | The same, prompted by what it read or by news |
 | Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections; the host's settings, in the [never list](#on-the-code-host) |
 
@@ -236,26 +255,31 @@ whoever opened it.
 
 - **Can be undone:**
   - `rerun_check`: a failed job once more, on a pull request or on the
-    default branch;
+    default branch, as each host can ([below](#on-every-code-host));
   - `read_default_branch_checks`;
   - `mark_ready`, on Althar's own;
   - `update_branch`, which merges the default branch in and never rebases:
     GitHub's update-branch, and elsewhere Althar's own merge, pushed
     plainly;
-  - `close_pull_request` and `reopen_pull_request`, on Althar's own;
+  - `close_pull_request` and `reopen_pull_request`, on Althar's own. On
+    Bitbucket Cloud a declined pull request can't be reopened, so there
+    closing is asked-for;
   - `reply_on_pull_request`, on Althar's and the repository's own people's.
     On an outside author's pull request, a reply or a close sends them a
     notification that can't be taken back, so there it is asked-for.
 - **Asked-for:**
-  - `merge_pull_request`: merge it, or put it in the queue where its branch
-    has one, with a method the repository allows, at a head. `leave_queue`
-    takes it out until it merges, and can be undone;
+  - `merge_pull_request`: merge it, or put it in the host's queue or
+    auto-merge where its branch has one Althar can reach, with a method the
+    repository allows, at a head. Where it can't, an errand stands in
+    ([below](#on-every-code-host)). `leave_queue` takes it out until it
+    merges, and can be undone;
   - `push_tag`, on a commit of the default branch, made by Althar, never
     moved or deleted. A lead's `push_tag` still asks the person each time
     (`rules.ts:1939-1941`);
-  - `approve_release_run`: a run's pending `release` environment, where the
-    person's account is a reviewer of it;
-  - `publish_release`;
+  - `approve_release_run`: a run waiting for approval, where the person's
+    account may give it: GitHub's environment, here `release`, or GitLab's
+    deployment approval or manual job;
+  - `publish_release`, as each host publishes one ([A release](#a-release));
   - `delete_branch`.
 - **One gated call, `code_host_api`, for everything else** (the person's
   call, 31 October): a REST request to the host's API with Althar's sign-in,
@@ -300,15 +324,19 @@ whoever opened it.
     - codespaces, each of which can push as the person;
     - anything under `orgs`, `user`, `users`, `admin`, `enterprises`,
       `applications` and `authorizations`.
+  - **On GitLab and both Bitbuckets,** the same families, in their own
+    paths ([below](#the-gated-calls-lists-on-the-other-hosts)).
   - **Each list is written by family of paths, not endpoint by endpoint,** so
     a new endpoint under `contents` or `git` is refused with the rest. A test
     reads GitHub's published description of its API
     (`github/rest-api-description`) and fails on any write it can't place:
-    let through, a typed tool's, content, a gate, or never. At run time a
-    write Althar hasn't placed, such as one GitHub added since, is refused
-    as never until it is. A host with no lists written gets reads only.
-  - GraphQL is for queries only: what a mutation does is in its name and
-    arguments, which Althar would have to read one at a time.
+    let through, a typed tool's, content, a gate, or never. Each other
+    host's test reads its own. At run time a write Althar hasn't placed,
+    such as one a host added since, is refused as never until it is. A host
+    Althar adds later gets reads only until its lists are written.
+  - GraphQL, on GitHub and GitLab, is for queries only: what a mutation
+    does is in its name and arguments, which Althar would have to read one
+    at a time.
   - It shares the connection's rate limit, and stops before what the
     [sweep](#every-open-pull-request) needs.
 - **The gate is Althar's, not the token's.** The GitHub connection here is a
@@ -323,6 +351,71 @@ whoever opened it.
   admin. So the never list is what stops that, not the scopes. A
   fine-grained token given only Contents, Pull requests, Issues and Actions
   would narrow it further.
+
+## On every code host
+
+What this ADR builds, it builds for GitHub, GitLab, Bitbucket Cloud and
+Bitbucket Data Center (ADR-077). Where a host lacks something, Althar stands
+in with what the host has. Where neither can, the tool says so in the host's
+words and links the host's own button, which is the person's press.
+
+| | GitHub | GitLab | Bitbucket Cloud | Bitbucket Data Center |
+| --- | --- | --- | --- | --- |
+| Merging at the head read | The head goes with it (`connectors/src/github.ts:772`; `expectedHeadOid` on the queue, `:409`) | The head goes with it (`gitlab.ts:630`) | It takes no head: a read just before it (`bitbucketCloud.ts:530-537`) | The pull request's version (`bitbucketDataCenter.ts:569`) |
+| The queue, or merging once green | The merge queue | A merge train where the project has them, else auto-merge (`auto_merge`; "merge when pipeline succeeds" on older servers) | Its merge queue can be read and left through the API, not entered: the errand stands in | Auto-merge where the server has it, else the errand stands in |
+| Why the queue sent one back | The pull request's timeline (#458) | The train's own read, and the merge request's notes | The queue's own read | The pull request's activities |
+| A failed check again | An Actions job | A job, or a pipeline's failed jobs | The pipeline again, whole, on the same commit | Its builds are another service's (Jenkins, Bamboo): said, with the build's link |
+| A failed check's log | Actions' | A job's trace | A step's log | Another service's: the build's link |
+| Up to date with the default branch | Its update-branch, a merge | Althar's merge, pushed: GitLab's own is a rebase | Althar's merge, pushed | Althar's merge, pushed |
+| An outside author's branch | Where they let maintainers edit it | Where they allow commits from members | Where the account may push to the fork | As on Cloud |
+| Closing, and reopening | Both can be undone | Both can be undone | Declining is final, so closing is asked-for | Both can be undone |
+| A release | A draft, then Publish | No drafts: making the release is Publish | No releases: the tag, then its files in Downloads, which is Publish | No releases: the tag, and what the repository's CI does with it |
+| Approving a run | An environment's required reviewers | A deployment approval where the project has them, or a manual job, played | A manual step has no API: the person's press, linked | Another service's |
+| The rate limit | 5,000 an hour; a "not modified" reply is free | The server's own, from its `RateLimit-` headers | 1,000 an hour at least, more with seats, from its `X-RateLimit-` headers | The server's own; without headers, Althar's own count |
+
+- **Where the errand stands in for a queue, it does what a queue does.** It
+  merges a head that is green with the default branch's current head in it.
+  Where main has moved since the checks ran, it brings the branch up to
+  date and waits for green again, three times at most, then says so and
+  waits for the person. Otherwise a branch green against an old main could
+  turn main red. Where the host refuses a plain merge because the branch
+  merges only through its queue, the line links the host's Add to queue.
+- **What a server has is read, not assumed.** GitLab's tier, and Bitbucket
+  Data Center's version, decide merge trains, auto-merge, deployment
+  approvals and drafts. Each is read when a repository is first used, and
+  again when a call is refused for it. A missing one falls back to the
+  stand-in, and the line says which was used.
+- **Fast-forward and semi-linear repositories** (GitLab's merge methods,
+  Bitbucket's fast-forward strategies) ask only that the default branch's
+  head be in the branch, and a merge from it puts it there, so nothing is
+  rebased. Where a repository's rule still refuses a branch with a merge in
+  it, the coordinator takes a method that accepts it, such as a squash,
+  where the repository allows one, and otherwise says so.
+- **A merge that lands later** (Bitbucket's 202, GitLab's while it works
+  out whether it can) is done only once a read shows it merged, and the
+  line says "merging" until then.
+- **Main is red** on any host when a check on the default branch's head
+  fails. Here that is `post-merge` (ADR-074).
+- **On any agent.** The tools are Althar's and the person's word is
+  Althar's record, so all of this works whichever of the ten agents runs
+  the coordinator (doc 03). Only Claude Code's sandbox holds its commands
+  (ADR-071); on another agent every command meets Althar's rules, as now,
+  until ADR-077's task 4.
+
+### The gated call's lists on the other hosts
+
+The same families as GitHub's, in each host's paths. Each is tested against
+the host's published description of its API. GitLab's OpenAPI covers only
+part of its API, so what it leaves out is placed by hand, and Data Center's
+is read for each version Althar supports. A write placed nowhere is refused.
+
+| Family | GitLab | Bitbucket Cloud | Bitbucket Data Center |
+| --- | --- | --- | --- |
+| A typed tool's | Merging, merge trains and auto-merge, releases, deployment approvals, a job played or retried | Merging, declining, Downloads, a pipeline run again | Merging, declining and reopening, auto-merge |
+| Content, pointing to a task | `repository/files`; `repository/commits`, a commit made of file actions; cherry-picks and reverts; branches and tags made or deleted | `src`, a commit made of files; `refs/branches`; `refs/tags` | A file edited through `browse`; `branch-utils`; tags made or deleted |
+| A gate | Commit statuses; approving, unapproving and resetting approvals; approval rules | Build statuses; approving and requesting changes | Build statuses and builds; a reviewer's status |
+| Started only at the default branch | A pipeline made, or triggered | A pipeline made | – |
+| Never | `rebase`, since nothing is rebased; the project's settings, transfer, archive and deletion; protected branches, tags and environments; push rules; members, invitations and shares; hooks; deploy keys and tokens; access tokens; CI/CD variables; runners; mirrors; integrations; Pages; anything under `groups`, `users`, `user`, `admin`, `application` and `namespaces` | The repository's settings and deletion; branch restrictions and the branching model; permissions; webhooks; deploy keys; default reviewers; Pipelines' settings, variables and deployment environments; forks made; anything under `workspaces`, `user` and `users` | The repository's settings, moves and deletion; branch permissions; permissions; hooks and webhooks; access keys and tokens; default reviewers; auto-merge's settings; anything under `admin`, `users` and a project's own settings |
 
 ## CI news, and what the coordinator does with it
 
@@ -391,8 +484,12 @@ coordinator now hears it too, beside plans and issue cards:
   [above](#ci-news-and-what-the-coordinator-does-with-it), and a task's own
   pull request is still polled as now.
 - About 30 open pull requests is well inside GitHub's 5,000 requests an
-  hour. The sweep backs off as the remaining budget falls, as a failing
-  service is waited out (ADR-060).
+  hour. On every host, following takes at most a fifth of what the host
+  allows in an hour, by its own headers or Althar's count where it sends
+  none, and the five minutes grow to fit. Bitbucket Cloud allows 1,000 at
+  least, and its lists say nothing of checks, so a repository with many
+  open pull requests there is read more slowly. The sweep backs off as the
+  remaining budget falls, as a failing service is waited out (ADR-060).
 
 ## A release
 
@@ -420,6 +517,44 @@ comes:
   reviewer approves.
 - **`release.yml` doesn't change.** It still checks the tag against the
   version, the notes, main and `post-merge`, and still makes only a draft.
+- **This table is Althar's own release.** Another repository's steps are
+  its own: its release workflow and its docs, read when the person first
+  asks, shown as a line a step with each step's kind, and kept as a project
+  note for the next time. What can't be undone among them is asked-for,
+  whatever it is.
+- **On the other hosts** ([above](#on-every-code-host)), GitLab has no
+  drafts, so making the release is Publish, and the person tries the tag
+  pipeline's files before it. Bitbucket has no releases: on Cloud, Publish
+  puts the files in Downloads; on Data Center the tag is the release, and
+  the repository's CI does the rest.
+
+## Edge cases
+
+- **A new objection pauses an errand.** Changes requested, a reviewer's new
+  unresolved thread, or the pull request turned back to draft after the
+  person asked: the errand waits and says why, and their word again goes on.
+- **An errand that hears nothing says so.** After a day with no news, or a
+  required check that hasn't reported an hour after the rest finished, it
+  says what it waits on, once a day, until it is done or called off.
+- **Each step reads before it acts, and skips what's done:** a tag already
+  at the commit, a release out, a pull request merged. A call whose answer
+  was lost, such as one that timed out, is read back before it is tried
+  again, and its receipt stays pending until then, so a restart or a lost
+  answer doesn't do anything twice.
+- **The target branch changes while an errand waits:** it ends and says so,
+  since the ask was for that branch.
+- **Someone acts on the host meanwhile,** the person included (merges it,
+  closes it, takes it out of the queue): the errand hears it as news and
+  ends.
+- **Several repositories in a project:** "merge the green ones" covers all
+  of them. A release is of one, which the person names or a project note
+  says, and the coordinator asks where neither does.
+- **A refusal Althar doesn't know** is said in the host's words and isn't
+  tried another way: not through the gated call, nor with another method.
+- **Anything nobody foresaw** meets the defaults: what can't be undone waits
+  for the person, a write the gate can't place is refused, and a head that
+  moved is read again. So it ends in a line in the chat, not in something
+  done.
 
 ## Every restriction on the coordinator, kept or lifted
 
@@ -428,11 +563,11 @@ comes:
 | **The code host** | | | |
 | It only reads the host: `read_pull_request`, `read_check_log`, `find_pull_requests` | ADR-058; `Reviews.ts:1321-1348`, `Coordinator.ts:1553` | Lifted | The rows below replace it |
 | No `rerun_check`, `read_default_branch_checks` or `reply_on_pull_request`: leads' alone | `Changes.ts:5861-6075` | Lifted | A rerun changes nothing that lasts, a read only reads, and a reply on Althar's or its own people's can be deleted |
-| No mark ready or close: the person's buttons alone | `Changes.ts:626-640`; `Api.ts:1250`, `:1382` | Lifted for Althar's own | Both can be undone: back to draft, reopened |
+| No mark ready or close: the person's buttons alone | `Changes.ts:626-640`; `Api.ts:1250`, `:1382` | Lifted for Althar's own | Both can be undone: back to draft, reopened. On Bitbucket Cloud, where declining is final, closing is asked-for |
 | A reply on, or close of, an outside author's pull request | – | Asked-for | Their notification can't be taken back |
 | No branch update: no connector has one | `connectors/src/model.ts:292` | Lifted | A merge of the default branch into it can be undone; never a rebase |
 | "Agents never merge": the person's Merge alone | ADR-011; `Changes.ts:644`, `:2216`; `contracts/src/Api.ts:3511-3516` | Lifted, when the person asks | It can't be undone, so only on their word, never on its own |
-| The merge queue is entered only inside the person's press | `connectors/src/github.ts:775-786` | Lifted, when the person asks | As merging |
+| The merge queue is entered only inside the person's press | `connectors/src/github.ts:775-786` | Lifted, when the person asks | As merging: on every host, through its queue or auto-merge, or the errand standing in |
 | A merge goes at the head the person saw | `Changes.ts:2227` | Kept | It merges at the head it read, or reads again |
 | The merge method is the first the repository allows | `connectors/src/github.ts:770` | Lifted | It takes any method the repository allows |
 | No tag: `push_tag` is a running lead's, and asks the person each time | `Changes.ts:2708-2825`; `rules.ts:1939-1941` | Lifted, when the person asks | A tag may publish elsewhere; their message is the word, so no second card |
@@ -444,8 +579,9 @@ comes:
 | A contributor's fork can't be attached or pushed to; the task's own fork can | `Changes.ts:1585-1596` | Kept here | DEV-170 decides it |
 | It posts no review; an outside pull request's waits for the person | `Reviews.ts:59`, `:223-227`, `:957-961` | Kept | An Approve can satisfy branch protection; a review task's lead drafts one |
 | Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Althar's tools are the one way to the host, which is what lets the gate hold |
-| A rerun reaches GitHub Actions' jobs only | `connectors/src/github.ts:867-872` | Kept | The host can't run another service's |
+| A rerun reaches the host's own CI only: Actions' jobs, GitLab's jobs, and now Bitbucket Pipelines', whole | `connectors/src/github.ts:867-872`, `gitlab.ts:719-724`, `bitbucketCloud.ts:598` | Kept | No host can run another service's; Bitbucket Data Center's builds are all another's |
 | *New:* the gated call can't change the repository's content, make a status or a check run, submit or dismiss a review, or start a workflow off the default branch | [On the code host](#on-the-code-host) | Added | A change is always a task, and CI's and a review's gates stay as they are |
+| *New:* what a host lacks is stood in for, or said with a link to the host's own button; never a no-op that looks done | [On every code host](#on-every-code-host) | Added | ADR-077 |
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | News brings what it would have fetched for |
 | Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The record and the review |
@@ -484,22 +620,25 @@ title is a task's, in at most 60 characters.
 
 | # | Task | Scope | Size | After |
 | ---: | --- | --- | :---: | --- |
-| 1 | Coordinator: rerun, mark ready, close and reply on PRs | The coordinator gets `rerun_check`, `read_default_branch_checks`, `mark_ready`, `close_pull_request`, `reopen_pull_request` (a new connector call) and `reply_on_pull_request`, on any of the project's pull requests, within the kinds above. Its brief says what it does unasked, and no longer that a lead can't fetch. Doc 04's tools | S | – |
-| 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep: red, and green again, read again at an unchanged head while main is red. The watch, for task 3's errands and DEV-176: what it watches is read as a task's pull request is until it ends, finished results included, with conditional reads. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone. Tests: a failed run that passes when run again at the same head is heard, on main and on a watched pull request | M | – |
-| 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes | M | – |
+| 1 | Coordinator: rerun, mark ready, close and reply on PRs | The coordinator gets `rerun_check`, `read_default_branch_checks`, `mark_ready`, `close_pull_request`, `reopen_pull_request` (a new connector call) and `reply_on_pull_request`, on any of the project's pull requests, within the kinds above. Its brief says what it does unasked, and no longer that a lead can't fetch. Reruns on every host: GitLab's jobs, Bitbucket Cloud's pipeline again, whole, on the same commit, and on Data Center a line saying whose build it is. Reopening on GitHub, GitLab and Data Center; closing on Bitbucket Cloud asked-for. Doc 04's tools | M | – |
+| 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why as each host says it, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep, on every host: red, and green again, read again at an unchanged head while main is red. The watch, for task 3's errands and DEV-176: what it watches is read as a task's pull request is until it ends, finished results included, with conditional reads. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone. Tests: a failed run that passes when run again at the same head is heard, on main and on a watched pull request | M | – |
+| 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. The [edge cases](#edge-cases): an objection pauses an errand, one that hears nothing says so, each step reads before it acts, and a lost answer is read back. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes, an objection pauses it, a lost answer isn't acted on twice | L | – |
 | 4 | A stopped lead hears what's meant for it | `message_lead` starts a stopped lead. Reviews, comments and the queue sending its pull request back are queued for it, and wake it (today `Changes.ts:3261` drops them). Shared with DEV-176 | S | – |
-| 5 | Coordinator merges and queues when you ask | `merge_pull_request`: merge, or the queue (GitHub's, at `expectedHeadOid`; GitLab's merge when the pipeline succeeds), with a method, at a head; `leave_queue`. Any of the project's pull requests. "Once it's green" as an errand. The line in the chat | M | 2, 3 |
-| 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. Never a rebase, never forced | M | 1 |
-| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. Backing off with the remaining budget. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
-| 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on a commit of the default branch. In the connectors: read a release, publish a draft (GitHub, GitLab), approve a run's pending environment (GitHub), run a run's failed jobs again, read a run on a tag (with DEV-94) | M | 3 |
+| 5 | Coordinator merges and queues when you ask | `merge_pull_request` at a head, with a method the repository allows: GitHub's queue (at `expectedHeadOid`), GitLab's merge train or auto-merge, Data Center's auto-merge where the server has it, and elsewhere the errand standing in for a queue (green, up to date, three tries), linking the host's Add to queue where a plain merge is refused; `leave_queue` on each. What each server has, read and kept. A merge that lands later is done once read. Any of the project's pull requests, in any of its repositories. "Once it's green" as an errand. The line in the chat. Contract clauses on every host's fake | L | 2, 3 |
+| 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. An outside author's branch where the host lets the account push to it, else a reply asks them, asked-for. Never a rebase, never forced | M | 1 |
+| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. At most a fifth of each host's hourly allowance, by its headers or Althar's own count, backing off as it falls; Bitbucket's lists carry no checks. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
+| 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on a commit of the default branch, on every host. In the connectors: read a release, and publish one as each host does (GitHub's draft, GitLab's release made, Bitbucket Cloud's files in Downloads); approve a run (GitHub's environment, GitLab's deployment approval or manual job), and link the host's own button where only the person can (Bitbucket's manual steps); run a run's failed jobs again; read a run on a tag (with DEV-94). Another repository's release steps, read from it and kept as a note | L | 3 |
 | 9 | Release 0.7.0 through the coordinator | The release errand above: the version-and-notes task, then merge, tag, approve, the draft, the decision to try and publish it, Publish, the tap. Each step in the chat. The coordinator's brief for releasing. Proven by releasing 0.7.0 itself, so it goes last | M | 2, 5, 8 |
-| 10 | A gated call to the code host's API | `code_host_api`: REST reads; writes asked-for; GitHub's lists by family of paths: typed tools' (by name), the repository's content (pointing to a task), what stands in for a gate, workflows started only at the default branch, and never. A test that places every write in GitHub's published description of its API; a write not placed is refused at run time. Reads only on GitLab and Bitbucket until their lists are written; GraphQL queries only; receipts and the line in the chat; a floor under the rate limit | L | 3 |
+| 10 | A gated call to the code host's API | `code_host_api`: REST reads; writes asked-for; GitHub's lists by family of paths: typed tools' (by name), the repository's content (pointing to a task), what stands in for a gate, workflows started only at the default branch, and never. A test that places every write in GitHub's published description of its API; a write not placed is refused at run time. The other hosts' lists are task 14; GraphQL queries only; receipts and the line in the chat; a floor under the rate limit | L | 3 |
 | 11 | Coordinator acts on tasks when you ask | Stop, hold, restart and settle a task; discard one, asked-for; `attach_pull_request` from its head without asking; resume an automation, or run it now, on the person's word. Swapping a lead is DEV-177 | M | 3 |
 | 12 | Coordinator files issues at once or as a card | `draft_issue` files at once or drafts, as the coordinator judges from the project's notes; a card's "always" or "never" is kept as a note; "Change issues without asking" becomes a note. Commenting on an issue becomes asked-for in code | M | 3 |
 | 13 | draft_issue takes project, milestone and assignee | On every tracker: project or milestone, assignee, parent, and Jira's issue type; set right after creating where a tracker's create can't take them | M | – |
+| 14 | The gated call on GitLab and both Bitbuckets | GitLab's, Bitbucket Cloud's and Data Center's lists, by [the same families](#the-gated-calls-lists-on-the-other-hosts), each tested against the host's published description: GitLab's, which is partial, completed by hand, and Data Center's for each version Althar supports. A write placed nowhere is refused | M | 10 |
 
 In order:
 1. **First, side by side:** 1, 2, 3 and 4. None waits on another.
 2. **Then:** 5, 6, 7 and 8.
 3. **Then:** 10, 11, 12 and 13.
-4. **Last:** 9, which is 0.7.0's own release.
+4. **Then:** 14, beside ADR-077's tasks 1, 2 and 4.
+5. **Then:** ADR-077's tasks 3, 5 and 6.
+6. **Last:** 9, which is 0.7.0's own release.

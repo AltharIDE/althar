@@ -83,3 +83,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
 | [076](076-the-coordinator-merges-and-releases-on-the-person-s-word.md) | The coordinator merges, queues and releases on the person's word, does what can be undone itself, and hears every pull request and main |
+| [077](077-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |
