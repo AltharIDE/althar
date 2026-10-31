@@ -225,6 +225,9 @@ const program = Effect.gen(function* () {
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
+          // The person's own agents are looked for on the PATH the test gives alone (e2e/support.ts): not in the usual places
+          // outside it, such as Homebrew's, which are this computer's.
+          agentSearch: { env: process.env, dirs: [] },
         }
       : undefined
   const context = yield* Layer.build(

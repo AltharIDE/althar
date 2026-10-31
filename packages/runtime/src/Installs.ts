@@ -95,7 +95,7 @@ export interface InstallsOptions {
   /** A Linux on musl, as Alpine is, which takes the release's musl build where it has one. */
   readonly musl?: boolean
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
-  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
+  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> } | undefined
   /**
    * The device outside a sandbox that cannot see it (a Flatpak): the person's
    * own commands are found and run out there, before any copy that is here;
