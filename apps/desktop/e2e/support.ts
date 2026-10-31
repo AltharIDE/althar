@@ -1,4 +1,5 @@
-import { join } from 'node:path'
+import { accessSync, constants, existsSync, mkdirSync, symlinkSync } from 'node:fs'
+import { delimiter, dirname, join } from 'node:path'
 
 import { budget } from '@althar/testing/budget'
 import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
@@ -38,15 +39,69 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
  */
 const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
 
+/** The commands the app runs as it would on any computer: git, Node and its npm, and Bun. */
+const TOOLS = ['git', 'node', 'npm', 'npx', 'bun', 'bunx'] as const
+
+/** Where `command` is on the tests' own PATH, if it is. */
+const which = (command: string): string | undefined => {
+  const name = process.platform === 'win32' ? `${command}.exe` : command
+  for (const dir of (process.env.PATH ?? process.env.Path ?? '').split(delimiter)) {
+    if (dir === '') continue
+    try {
+      accessSync(join(dir, name), constants.X_OK)
+      return join(dir, name)
+    } catch {
+      // Not here.
+    }
+  }
+  return undefined
+}
+
 /**
- * Launches the app on `home`'s profile. Playwright has the window's `prefers-color-scheme` say light unless told otherwise;
+ * The PATH the app is given: the tools it runs (`TOOLS`), as the tests find them, and the system's own folders, never the
+ * folders the tools came from, which on a person's computer hold their agents too (Homebrew's, `~/.local/bin`). Each tool
+ * is linked into a folder of `home`'s own. On Windows, where a program linked elsewhere no longer finds what it ships
+ * with, each tool's own folder instead, beside the system's.
+ */
+export const appPath = (home: string): string => {
+  if (process.platform === 'win32') {
+    const system = (process.env.SystemRoot ?? 'C:\\Windows').toLowerCase()
+    const own = (process.env.Path ?? process.env.PATH ?? '').split(delimiter).filter((dir) => dir.toLowerCase().startsWith(system))
+    const tools = TOOLS.flatMap((tool) => {
+      const at = which(tool)
+      return at === undefined ? [] : [dirname(at)]
+    })
+    return [...new Set([...tools, ...own])].join(delimiter)
+  }
+  const linked = join(home, '.e2e-path')
+  mkdirSync(linked, { recursive: true })
+  for (const tool of TOOLS) {
+    const at = which(tool)
+    if (at !== undefined && !existsSync(join(linked, tool))) symlinkSync(at, join(linked, tool))
+  }
+  return [linked, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter)
+}
+
+/**
+ * Where the app's home is: `home`, so nothing of the person's (their agents' folders and sign-ins, their git config,
+ * `~/Documents`) is what a test finds. On Windows Node reads it from USERPROFILE, and npm's global commands from APPDATA.
+ */
+const homeIn = (home: string): Record<string, string> =>
+  process.platform === 'win32' ? { HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData', 'Roaming') } : { HOME: home }
+
+/**
+ * Launches the app on `home`'s profile, with `home` as its home and a PATH without the person's agents (`appPath`), so
+ * what a test finds is what it set up, not what this computer has installed. Playwright has the window's `prefers-color-scheme` say light unless told otherwise;
  * `scheme: 'system'` leaves it to the app's own appearance, as it is outside a test.
  */
 export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
+  // Windows names it Path, and a second spelling beside it would leave which one the app reads to chance.
   const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
+    Object.entries(process.env).filter(
+      ([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_') && name.toUpperCase() !== 'PATH',
+    ),
   )
   const electronApp = await electron.launch({
     timeout: budget.medium,
@@ -55,6 +110,8 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
     ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,
+      ...homeIn(home),
+      PATH: appPath(home),
       ALTHAR_PROFILE: join(home, 'profile'),
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_FAKE_AGENTS: '1',
@@ -188,6 +245,15 @@ export const backToWork = async (page: Page) => {
     .getByRole('radiogroup', { name: 'View' })
     .getByRole('radio', { name: /^Conversation/ })
     .click()
+}
+
+/** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
+export const pushByHand = async (page: Page) => {
+  await projectSettings(page, 'General')
+  const pushes = page.getByRole('switch', { name: 'Push the lead’s commits automatically' })
+  await pushes.click()
+  await expect(pushes).not.toBeChecked()
+  await backToWork(page)
 }
 
 /**

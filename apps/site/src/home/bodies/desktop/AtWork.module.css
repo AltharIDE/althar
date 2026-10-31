@@ -1,7 +1,74 @@
 /* The board in Althar's light, lit up on the dark panel, as wide as a screen's picture. */
 .wrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
-.frame { border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14); }
+.frame {
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14);
+  transition: opacity var(--turn) var(--ease);
+}
+
+/* On a phone: a lane at a time, its foot fading into the panel, so it reads as going on; the view glides along with the task it follows. */
+.lane {
+  border-radius: 14px;
+  mask-image: linear-gradient(#000 58%, transparent 96%);
+  transition: opacity var(--turn) var(--ease);
+}
+.lanes [data-picture] { transition: transform var(--glide) var(--ease) var(--follow); }
+/* At the end it fades, and comes back at the first lane without gliding across. */
+.fading .lane, .fading .frame { opacity: 0; }
+.cut [data-picture] { transition: none; }
+
+/* The task it follows: pressed, its card's action strip gives a little under a tap, as it is accepted. */
+.hero { transition: scale 180ms var(--ease); }
+.hero [class*='strip']:last-child { position: relative; transition: opacity 180ms var(--ease); }
+.pressed { scale: 0.985; }
+.pressed [class*='strip']:last-child { opacity: 0.7; }
+.pressed [class*='strip']:last-child::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: var(--signal-line);
+  animation: tap 560ms var(--ease) both;
+}
+@keyframes tap {
+  from { opacity: 1; scale: 0.2; }
+  to { opacity: 0; scale: 2.6; }
+}
+
+/* Claude Code out of usage: the lead a task had dims, struck through; moved on, the lab it moved to comes up in its place. */
+.paused [class*='leadModel'],
+.lanes [data-out='paused'] [class*='leadModel'] {
+  opacity: 0.4;
+  text-decoration: line-through;
+  transition: opacity 300ms var(--ease);
+}
+.moved [class*='leadModel'],
+.lanes [data-out='moved'] [class*='leadModel'] {
+  display: inline-flex;
+  animation: arrive 700ms var(--ease) both;
+}
+@keyframes arrive {
+  from { opacity: 0; translate: 0 7px; filter: blur(3px); }
+  to { opacity: 1; translate: 0 0; filter: none; }
+}
+
+/* On its way between lanes: over the board, what it was and what it becomes one over the other, each on a shadow that comes and goes. */
+.flight { position: absolute; z-index: 2; display: grid; visibility: hidden; }
+.flight > * { position: relative; grid-area: 1 / 1; align-self: start; }
+.lift { position: absolute; inset: 0; border-radius: 12px; box-shadow: 0 16px 30px rgba(40, 28, 10, 0.2), 0 3px 8px rgba(40, 28, 10, 0.1); opacity: 0; }
+/* A row lifted from its list is a card in flight, on paper of its own; it lands as a row again. */
+.flight > :first-child > article { background: var(--n-1); }
 
 @media (max-width: 700px) {
   .wrap { margin-top: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lane, .frame, .lanes [data-picture], .hero { transition: none; }
+  .pressed [class*='strip']:last-child::after,
+  .moved [class*='leadModel'],
+  .lanes [data-out='moved'] [class*='leadModel'] { animation: none; }
 }

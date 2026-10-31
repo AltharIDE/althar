@@ -1,5 +1,5 @@
 import type { ProjectId } from '@althar/domain'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -20,7 +20,8 @@ import { callTool, items, notices, task, turns, until, runtime } from './support
  * a page of it starts at the start of a round.
  */
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+/** The runtime, its agents held (`holds`): a lead that takes a while over something (`[lead:slowly]`) works until it is interrupted. */
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: holds() })))
 
 const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current') =>
   Effect.gen(function* () {

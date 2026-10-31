@@ -5,15 +5,15 @@
 /* A board alone, as the Board room shows it. */
 .board { display: flex; flex: 1; flex-direction: column; min-width: 0; overflow: hidden; padding: 16px 0 0 16px; --lane-min: 186px; }
 
-/* Narrow: the lead's plan without the reasons, each step's name in a column and its agents beside it, wrapping when there are two. */
-.narrowPlan ol[class*='steps'] > li:not([class*='end']) { grid-template-columns: 22px 112px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 6px; padding-bottom: 6px; }
-.narrowPlan ol[class*='steps'] > li > :nth-child(3) { flex-wrap: wrap; gap: 6px; }
-/* Two agents on a step stand one under the other when they wrap: no plus left at a line's end. */
-.narrowPlan ol[class*='steps'] > li > :nth-child(3) > [class*='plus'] { display: none; }
+/* Narrow: the lead's plan without the reasons, each step's name over its agents, the agents side by side, a pill never broken. */
+.narrowPlan ol[class*='steps'] > li:not([class*='end']) { grid-template-columns: 22px minmax(0, 1fr) !important; row-gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+.narrowPlan ol[class*='steps'] > li:not([class*='end']) > :nth-child(3) { grid-column: 2; flex-wrap: wrap; gap: 6px 0; }
+.narrowPlan ol[class*='steps'] > li:not([class*='end']) > :nth-child(3) > * { flex: none; white-space: nowrap; }
 .narrowPlan ol[class*='steps'] > li:not([class*='end']) > :nth-child(n + 4) { display: none; }
-/* Narrow: the estimate on a line of its own over the countdown. */
-.narrowPlan div[class*='foot'] { flex-wrap: wrap; row-gap: 6px; }
+/* Narrow: the estimate on a line of its own over the countdown, and the buttons at the row's end. */
+.narrowPlan div[class*='foot'] { flex-wrap: wrap; row-gap: 8px; padding-top: 12px; padding-bottom: 12px; }
 .narrowPlan div[class*='foot'] > span:first-child { flex-basis: 100%; }
+.narrowPlan div[class*='foot'] > span[class*='when'] { margin-right: auto; }
 /* A plan that grows a step at a time, over the room it will take once whole, so nothing under it moves. */
 .reserve { display: grid; }
 .reserve > * { grid-area: 1 / 1; align-self: start; }

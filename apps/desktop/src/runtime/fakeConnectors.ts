@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+
 import {
   type Access,
   type AccessLine,
@@ -11,7 +13,7 @@ import {
 } from '@althar/connectors'
 import { type FakeCheck, makeFakeService, routed } from '@althar/connectors/testing'
 import { Connectors } from '@althar/runtime'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 
 /*
  * A code host for the end-to-end tests: GitHub, answered by the connectors'
@@ -21,9 +23,10 @@ import { Effect, Layer } from 'effect'
  * ALTHAR_FAKE_REMOTE_WEB is set, with the pull requests ALTHAR_FAKE_PULLS
  * lists for a test to review; what is pushed to one goes to the bare
  * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE, and its commits have the checks
- * ALTHAR_FAKE_CHECKS names, where it does; each call takes as long as
- * ALTHAR_FAKE_LATENCY says by its method, in milliseconds, as JSON: at once
- * unless it does. A pasted token connects it, and so
+ * ALTHAR_FAKE_CHECKS names, where it does; a call of a method
+ * ALTHAR_FAKE_HELD names, as JSON, waits until the file it names for it is
+ * there, which the test writes once it has seen what it looks for meanwhile:
+ * at once unless it does. A pasted token connects it, and so
  * does gh's sign-in, which is signed in to it. Loaded only when
  * ALTHAR_FAKE_AGENTS is set, or, with real agents, ALTHAR_FAKE_CONNECTORS=github.
  */
@@ -34,14 +37,21 @@ export const HOST = 'https://github.test'
 const namedChecks =
   process.env.ALTHAR_FAKE_CHECKS === undefined ? undefined : (JSON.parse(process.env.ALTHAR_FAKE_CHECKS) as ReadonlyArray<FakeCheck>)
 
-/** How long each of its calls takes, by method, where a test says (ALTHAR_FAKE_LATENCY): as a host far away answers. */
-const latencies = JSON.parse(process.env.ALTHAR_FAKE_LATENCY ?? '{}') as Readonly<Record<string, number>>
+/** The file each method's calls wait for, where a test holds them (ALTHAR_FAKE_HELD): as a host far away takes its time. */
+const held = JSON.parse(process.env.ALTHAR_FAKE_HELD ?? '{}') as Readonly<Record<string, string>>
+
+/** Until the test has written the file: read again every 20 ms, as a test's own waits are. */
+const untilThere = (gate: string): Effect.Effect<void> =>
+  Effect.suspend(() => (existsSync(gate) ? Effect.void : Effect.andThen(Effect.sleep(Duration.millis(20)), untilThere(gate))))
 
 // A repository's pushes go to ALTHAR_FAKE_REMOTE_<NAME> where that is set, as a test of several repositories gives each its own.
 const github = makeFakeService({
   pushUrl: (path) => process.env[`ALTHAR_FAKE_REMOTE_${(path.at(-1) ?? '').toUpperCase()}`] ?? process.env.ALTHAR_FAKE_REMOTE ?? '',
   ...(namedChecks === undefined ? {} : { checksFor: () => namedChecks }),
-  latency: (method) => latencies[method] ?? 0,
+  waitsFor: (method) => {
+    const gate = held[method]
+    return gate === undefined ? Effect.void : untilThere(gate)
+  },
 })
 github.addRepository(['meridian', 'api'])
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.

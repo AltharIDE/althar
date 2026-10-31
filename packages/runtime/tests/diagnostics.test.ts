@@ -50,14 +50,16 @@ describe('what a failed command printed', () => {
     assert.isTrue(result?.redacted)
   })
 
-  it('reads a long output in time that grows with its length, not its square', () => {
-    // A run of letters with no name in it (minified code, base64) once took minutes at 256 KB, and seconds at these sizes;
-    // they stay within what is read for credentials, so the reading itself is timed.
-    for (const printed of ['a'.repeat(60_000), `token${'a'.repeat(60_000)}`, `http://${'a:'.repeat(30_000)}`, 'sk-'.repeat(20_000)]) {
-      const started = performance.now()
-      assert.isDefined(failed({ printed }))
-      assert.isBelow(performance.now() - started, 1_000)
+  it('reads a long run with no name in it, and keeps it to its bound', () => {
+    // A run of letters with no name in it (minified code, base64) once took minutes at 256 KB; how long these take is
+    // the performance run's (diagnostics.bench.ts).
+    for (const printed of ['a'.repeat(60_000), `token${'a'.repeat(60_000)}`, `http://${'a:'.repeat(30_000)}`]) {
+      const result = failed({ printed })
+      assert.isTrue(result?.truncated)
+      assert.isFalse(result?.redacted)
+      assert.isAtMost(result?.text.length ?? 0, DIAGNOSTIC_KEPT + 10)
     }
+    assert.strictEqual(failed({ printed: 'sk-'.repeat(20_000) })?.text, '[REDACTED]')
   })
 
   it('takes credentials out of a long output where it is kept, at its start and its end', () => {

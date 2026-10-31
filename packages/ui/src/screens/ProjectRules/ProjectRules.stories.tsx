@@ -13,13 +13,21 @@ import {
   MERIDIAN_TITLES,
 } from '../../fixtures/rules'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
-import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand, type SandboxList } from './ProjectRules'
+import { type CommandPlace, type KindTally, ProjectRules, type ProjectRulesProps, type RuleCommand, type SandboxList } from './ProjectRules'
 
 /** What Meridian's leads' sandboxes let through: what its packages, scripts and setup say, and its code host, registry and tracker. */
 const MERIDIAN_SANDBOX = {
   commands: ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts', 'ps', 'env -i'],
   hosts: ['github.com', 'api.github.com', 'registry.npmjs.org', 'linear.app', 'api.linear.app'],
 }
+
+/** How Meridian's asks and refusals went in the last two weeks: what was asked and allowed, and what agents worked around. */
+const MERIDIAN_TALLY: readonly KindTally[] = [
+  { kind: RuleKind.Outside, asked: 13, allowed: 13, refused: 0, workedAround: 0 },
+  { kind: RuleKind.DefaultBranch, asked: 2, allowed: 1, refused: 0, workedAround: 1 },
+  { kind: 'unclear', asked: 0, allowed: 0, refused: 5, workedAround: 4 },
+  { kind: 'reader', asked: 0, allowed: 0, refused: 1, workedAround: 1 },
+]
 
 /** The screen with its values kept as they are changed, as the app keeps them; each change also goes to its spy. */
 function Live(args: ProjectRulesProps) {
@@ -136,6 +144,7 @@ const meta = {
     allowed: {},
     onAllowedChange: fn(),
     sandbox: { ...MERIDIAN_SANDBOX, onAdd: fn((): string | undefined => undefined), onRemove: fn() },
+    tally: MERIDIAN_TALLY,
   },
 } satisfies Meta<typeof ProjectRules>
 export default meta
@@ -143,6 +152,28 @@ type Story = StoryObj<typeof meta>
 
 /** Meridian's rules: force pushes never, three kinds and three commands asked about, what goes ahead, and the coordinator for the rest. */
 export const AtRest: Story = {}
+
+/** The last two weeks: a line for each kind that asked or was refused, how often the person allowed it, and how often agents found another way. */
+export const LastTwoWeeks: Story = {
+  play: async ({ canvasElement }) => {
+    const weeks = within(within(canvasElement).getByRole('listitem', { name: 'Last 14 days' }))
+    await expect(weeks.getByText('Writing outside the task’s worktree: asked you 13 times, and you allowed all 13.')).toBeInTheDocument()
+    await expect(weeks.getByText('Pushing to the default branch: asked you 2 times, and you allowed 1.')).toBeInTheDocument()
+    await expect(
+      weeks.getByText('Commands Althar couldn’t read: refused 5 times, and agents found another way 4 times.'),
+    ).toBeInTheDocument()
+    await expect(weeks.getByText('What a reader may not do: refused once, and agents found another way that time.')).toBeInTheDocument()
+  },
+}
+
+/** Nothing asked or was refused lately: the sentence says so. */
+export const NothingLately: Story = {
+  args: { tally: [] },
+  play: async ({ canvasElement }) => {
+    const weeks = within(within(canvasElement).getByRole('listitem', { name: 'Last 14 days' }))
+    await expect(weeks.getByText('Nothing asked you or was refused.')).toBeInTheDocument()
+  },
+}
 
 /** Adding a command where it goes ahead: typed in the sentence, Enter adds it, and focus goes back to the +. */
 export const AddingACommand: Story = {

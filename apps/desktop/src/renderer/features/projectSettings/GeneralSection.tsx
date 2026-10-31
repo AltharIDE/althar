@@ -23,6 +23,10 @@ export const text = {
     look: 'Look for conflicts now',
     looking: 'Looking at each open task now.',
   },
+  pushCommits: {
+    title: 'Push the lead’s commits automatically',
+    line: 'When a lead’s turn ends, what it committed goes up to its pull request, even after you’ve looked. If someone else pushed there, it waits for you.',
+  },
   moveIssues: {
     title: 'Move issues along with their tasks',
     line: 'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
@@ -74,6 +78,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
       ? []
       : [
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
+          { rule: 'pushCommits', words: text.pushCommits, on: rules.pushCommits, set: model.setPushCommits },
           { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
           { rule: 'changeIssues', words: text.changeIssues, on: rules.changeIssues, set: model.setChangeIssues },
         ]

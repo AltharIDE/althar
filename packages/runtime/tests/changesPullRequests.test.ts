@@ -21,7 +21,7 @@ import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { HOST, hosted, turns, until } from './support'
 
-import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
+import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -87,7 +87,11 @@ describe('a pull request, by the person and the lead', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const changes = yield* Changes
-      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]',
+        pushByHand,
+      )
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = ready?.taskId ?? ''
 

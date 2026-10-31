@@ -43,7 +43,7 @@
     stapled too. Every submission's log is kept in `out/notary/`. Without
     credentials nothing is notarized, and the packaging says so.
   - **What a release holds.** For Apple silicon, and for Intel since
-    [ADR-071](071-an-intel-mac-build-beside-apple-silicon.md): a dmg to
+    [ADR-075](075-an-intel-mac-build-beside-apple-silicon.md): a dmg to
     install from, a zip for the updater, their blockmaps for smaller
     downloads later, and one `latest-mac.yml` for both. For Linux: an AppImage with `latest-linux.yml`,
     a deb and an rpm (ADR-028). For Windows on x64 (DEV-78): an NSIS
@@ -152,7 +152,7 @@
   - A Mac that releases needs the private key in its keychain, which asks
     once before codesign may use it.
   - ARM Linux and ARM Windows (which runs the x64 build emulated) have no
-    build of their own. Intel Macs have one since ADR-071.
+    build of their own. Intel Macs have one since ADR-075.
   - Windows' releases are unsigned until Althar has a certificate: each
     person gets past SmartScreen once, and an update isn't checked against
     a publisher.

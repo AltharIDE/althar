@@ -254,10 +254,24 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **After the first push, pushing is the person's.** When a plan's steps are
+- **After the first push, a lead's commits go up as its turn ends** (ADR-072),
+  where the project's rules say so (`pushCommits`, "Push the lead's commits
+  automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
-  commits after, answering the person, a review or failed checks, waits on the
-  task's branch until the person has looked at it and pushes it: the task
+  commits after, answering the person, a review or failed checks, Althar
+  pushes to the task's open pull request once the lead's turn has ended and
+  it is done, as a plain push to that pull request's own branch, never the
+  default branch and never forced; `push_to_pull_request` pushes at once.
+  It waits for the person instead, the card's Push saying why, where the
+  pull request's branch isn't where Althar last pushed it (someone pushed
+  there outside Althar), where the person stopped or interrupted the lead
+  since, where the push would need forcing, or where it, or asking the host
+  before it, failed; a fix for failing checks doesn't go past such a hold.
+  Until they're on the pull request, commits going up offer no Push and no
+  Accept: the card says they're going up.
+- **Where the project leaves pushing to the person, it is theirs after the
+  first push.** What the lead commits waits on the task's branch until the
+  person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead never pushes:
   when the person asks it to, or what it committed should go up, it asks them

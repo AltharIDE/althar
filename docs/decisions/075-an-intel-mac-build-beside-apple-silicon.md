@@ -1,4 +1,4 @@
-# ADR-071: An Intel Mac build beside Apple silicon's
+# ADR-075: An Intel Mac build beside Apple silicon's
 
 - **Status:** Accepted
 - **Date:** 2026-10-31

@@ -67,6 +67,7 @@ export const projectRules: ProjectRulesView = {
   commands: [],
   end: null,
   resolveConflicts: false,
+  pushCommits: true,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -80,6 +81,10 @@ export const projectRules: ProjectRulesView = {
     hosts: ['github.com', 'registry.npmjs.org'],
     edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
   },
+  tally: [
+    { kind: 'outside', asked: 13, allowed: 13, refused: 0, workedAround: 0 },
+    { kind: 'unclear', asked: 0, allowed: 0, refused: 5, workedAround: 4 },
+  ],
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
@@ -1258,6 +1263,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
   fault: null,
   noReading: null,
+  resetSince: false,
   ...over,
 })
 

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject } from './support'
+import { connectGitHub, launch, openFirstProject, pushByHand } from './support'
 
 /*
  * Pushing what the lead committed after its pull request opened, in a real
@@ -27,6 +27,7 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await connectGitHub(page)
+    await pushByHand(page)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Rate-limit refunds per partner. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
