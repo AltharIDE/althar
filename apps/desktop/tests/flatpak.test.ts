@@ -32,7 +32,7 @@ describe('the Flatpak manifest', () => {
     expect(finish).not.toMatch(/^\s*-\s+--talk-name=org\.freedesktop\.portal\.Secret/m)
   })
 
-  it('gives the sandbox neither the SSH agent’s socket nor ~/.ssh, and ships the ssh that stands for them (ADR-071)', () => {
+  it('gives the sandbox neither the SSH agent’s socket nor ~/.ssh, and ships the ssh that stands for them (ADR-072)', () => {
     const finish = manifest.slice(manifest.indexOf('finish-args:'), manifest.indexOf('modules:'))
     expect(finish).not.toMatch(/^\s*-\s+--socket=ssh-auth/m)
     expect(finish).not.toMatch(/^\s*-\s+--filesystem=[^\n]*\.ssh/m)

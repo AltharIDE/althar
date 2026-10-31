@@ -124,9 +124,12 @@ describe('the patch to Claude Code’s adapter, in the packaged app', () => {
     const repository = mkdtempSync(join(tmpdir(), 'althar-stage-'))
     execFileSync('git', ['init', '-q'], { cwd: repository })
     const adapter = join(repository, 'out', 'stage', 'node_modules', '@agentclientprotocol', 'claude-agent-acp')
-    mkdirSync(join(adapter, 'dist'), { recursive: true })
     const workspace = dirname(createRequire(import.meta.url).resolve('@agentclientprotocol/claude-agent-acp/package.json'))
-    cpSync(join(workspace, PATCHED_FILE), join(adapter, PATCHED_FILE))
+    // Each file the patch changes, as `git apply -R` needs them all.
+    for (const [, file] of readFileSync(patch, 'utf8').matchAll(/^diff --git a\/(\S+) /gm)) {
+      mkdirSync(dirname(join(adapter, file!)), { recursive: true })
+      cpSync(join(workspace, file!), join(adapter, file!))
+    }
     // The workspace's copy is bun's, patched: undone outside any repository, it is npm's.
     execFileSync('git', ['apply', '-R', patch], { cwd: adapter, env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(adapter) } })
     return adapter

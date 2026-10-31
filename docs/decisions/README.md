@@ -78,6 +78,7 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [068](068-a-settled-task-stops-everything-it-left-running.md) | A settled task stops everything it left running, however it settled, and what Althar lost track of is found by its mark |
 | [069](069-motion-is-one-system-named-by-what-happens.md) | Motion is one system, named by what happens, in CSS and the browser's own animations |
 | [070](070-failing-checks-go-to-the-lead-whoever-has-looked.md) | Failing checks go to the lead, whoever has looked, and it tells a failure of its own from one broken on main |
-| [071](071-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |
-| [072](072-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [073](073-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md) | The sandbox is the boundary: what it holds runs unread, what crosses meets the rules, and git stops what can't be undone |
+| [072](072-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |
+| [073](073-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [074](074-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |

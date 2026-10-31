@@ -553,6 +553,46 @@ export const SandboxReachView = Schema.Struct({
 })
 export type SandboxReachView = typeof SandboxReachView.Type
 
+/**
+ * What an ask or a refusal is counted as (ADR-071): one of the project's
+ * kinds, what the rules can't read (`unclear`), a command the project named,
+ * credentials and keys, the code host, what a role that only reads may not
+ * do, and the rest.
+ */
+export const TallyKind = Schema.Literals([
+  'default-branch',
+  'force-push',
+  'many-branches',
+  'delete-branch',
+  'deploy',
+  'outside',
+  'unclear',
+  'command',
+  'credentials',
+  'code-host',
+  'reader',
+  'other',
+])
+export type TallyKind = typeof TallyKind.Type
+
+/**
+ * How one kind went over the last 14 days, for leads and the coordinator:
+ * how often it asked the person and how often they allowed it, how often it
+ * was refused, and how often the agent carried on in the same turn after
+ * one it wasn't allowed (`workedAround`), which says it found another way.
+ */
+export const KindTally = Schema.Struct({
+  kind: TallyKind,
+  asked: Schema.Number,
+  allowed: Schema.Number,
+  refused: Schema.Number,
+  workedAround: Schema.Number,
+})
+export type KindTally = typeof KindTally.Type
+
+/** How far back a project's tally of asks and refusals goes. */
+export const TALLY_DAYS = 14
+
 /** A project's rules, as its rules screen shows them. */
 /** Skill and OpenSpec files in a project's repositories: three separate permissions, each off until the person turns it on. */
 export const RepositoryFilesSetting = Schema.Struct({
@@ -601,6 +641,8 @@ export const ProjectRulesView = Schema.Struct({
   conventions: Schema.Array(RepositoryConventions),
   /** What its leads' sandboxes let through from the start. */
   sandbox: SandboxReachView,
+  /** Each kind that asked or was refused in the last `TALLY_DAYS` days, the most first (ADR-071). */
+  tally: Schema.Array(KindTally),
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 

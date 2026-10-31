@@ -2,8 +2,7 @@ cask "althar" do
   version "0.5.0"
   sha256 "5f73e969595b6855db95ed97abf5664d3e31028daca8258813d19ba4803f5637"
 
-  url "https://github.com/AltharIDE/althar/releases/download/v#{version}/Althar-#{version}-arm64.dmg",
-      verified: "github.com/AltharIDE/althar/"
+  url "https://github.com/AltharIDE/althar/releases/download/v#{version}/Althar-#{version}-arm64.dmg"
   name "Althar"
   desc "Desktop app for running a software project with AI coding agents"
   homepage "https://althar.ai/"

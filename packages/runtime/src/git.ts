@@ -50,7 +50,7 @@ const HOST_SSH = '/app/bin/althar-host-ssh'
 /**
  * The ssh Althar's own git runs, by its environment: inside a Flatpak, the
  * device's, through the bridge, so the person's SSH agent and known hosts
- * sign it in and nothing of either enters the sandbox (ADR-071). Everywhere
+ * sign it in and nothing of either enters the sandbox (ADR-072). Everywhere
  * else nothing is set, and git runs the ssh the person's would, their
  * `core.sshCommand` included.
  */

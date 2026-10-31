@@ -824,7 +824,7 @@ describe('a role that only reads', () => {
     }
   })
 
-  it('refuses Althar’s own ssh on the device to an agent, however it is named (ADR-011, ADR-071)', () => {
+  it('refuses Althar’s own ssh on the device to an agent, however it is named (ADR-011, ADR-072)', () => {
     for (const command of [
       '/app/bin/althar-host-ssh -T git@github.com',
       'GIT_SSH_COMMAND=/app/bin/althar-host-ssh git push origin main',
