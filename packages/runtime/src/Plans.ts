@@ -7,6 +7,7 @@ import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
+import { countdownNow } from './longRuns'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -24,9 +25,6 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * (`reads`): it has no run, and starting it starts its lead (Reviews.lead);
  * its lead is only ever one its session holds to reading.
  */
-
-/** How long a proposed plan waits before it starts on its own (docs/plans/mvp.md). */
-export const COUNTDOWN = Duration.seconds(25)
 
 type Store = SqlClient.SqlClient | Instance | Runs | Reviews | Ledger | Crypto.Crypto | RuntimeConfig
 
@@ -74,7 +72,8 @@ export class Plans extends Context.Service<
       const instance = yield* Instance
       const runs = yield* Runs
       const reviews = yield* Reviews
-      const countdownOf = (yield* RuntimeConfig).countdown ?? COUNTDOWN
+      // The person's setting (longRuns.ts), read as each plan is proposed; a test's own takes its place.
+      const testCountdown = (yield* RuntimeConfig).countdown
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
       const wake = yield* Queue.sliding<void>(1)
@@ -138,8 +137,8 @@ export class Plans extends Context.Service<
             const planId = yield* newId(Ids.taskPlan)
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
-            const startsAt =
-              input.held === true ? null : new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
+            const countdown = input.startsIn ?? testCountdown ?? (yield* countdownNow)
+            const startsAt = input.held === true ? null : new Date(Date.parse(at) + Duration.toMillis(countdown)).toISOString()
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.

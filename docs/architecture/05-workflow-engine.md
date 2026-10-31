@@ -416,7 +416,7 @@ every running turn instead, every 30 seconds.
   comes long after the last one means the machine slept, and the silence
   doesn't count.
 - **The ladder.** After 10 minutes with no sign of life (20 while a tool such
-  as a command runs), the turn is stopped and the agent told to carry on,
+  as a command runs; Settings' Long runs say 5, 10 or 20, read again at each look), the turn is stopped and the agent told to carry on,
   naming the command that held it up. Stalled again, or not stopping when
   asked, the agent is started afresh on the thread, briefed from it. Stalled
   once more, the person is asked. Each rung says so in the thread.
@@ -429,7 +429,8 @@ every running turn instead, every 30 seconds.
   diff tells two edits apart. A diff's change is kept as a digest, not its text.
 - **A budget.** A step's agents may work 6 hours, or take 40 turns, since the
   person last said anything on the thread or the step began. Past that, the
-  person is asked whether it carries on.
+  person is asked whether it carries on. Settings' Long runs set the hours (2,
+  6, 12, or never, which lifts the turns' limit too).
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
@@ -714,7 +715,7 @@ changes code. Later steps, such as review, receive its result.
 
 **Review and settling loop, within a bound.** After a review, the lead settles
 the findings. If settling changed code, verification and review run again, up
-to a bound (3 rounds by default). Past the bound, the task is Stuck, with the
+to a bound (3 rounds unless Settings' Long runs say 1, 2 or 5). Past the bound, the task is Stuck, with the
 findings still open.
 
 **A later review round builds on the earlier ones.** The reviewer in round 2

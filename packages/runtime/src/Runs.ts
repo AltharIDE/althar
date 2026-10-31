@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { type LimitCall, LimitChoice } from '@althar/contracts'
+import { LONG_RUNS, type LimitCall, LimitChoice } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -34,6 +34,7 @@ import { makeKeyedLock } from './keyedLock'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
+import { roundsNow } from './longRuns'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
@@ -78,9 +79,6 @@ import { signedOutWords, summarize } from './words'
  * finish_step, the reviewer's report_review. What each reported goes into the
  * task's thread as a step result, which the person reads instead of the work.
  */
-
-/** Review rounds before a task is left ready with findings still open. */
-export const ROUNDS = 3
 
 /**
  * How long a step carried on after a restart must have been at work for the
@@ -584,7 +582,7 @@ export class Runs extends Context.Service<
         const [known] = yield* sql<{ id: string }>`
           SELECT v.id FROM workflow_versions v JOIN workflow_definitions d ON d.id = v.definition_id WHERE d.name = 'task' AND v.version = 1`
         if (known !== undefined) return known.id
-        const definition = JSON.stringify({ steps: ['implement', 'review'], review: { rounds: ROUNDS, settledBy: 'lead' } })
+        const definition = JSON.stringify({ steps: ['implement', 'review'], review: { rounds: LONG_RUNS.rounds, settledBy: 'lead' } })
         const definitionId = yield* newId(Ids.workflowDefinition)
         const versionId = yield* newId(Ids.workflowVersion)
         const at = yield* timestamp
@@ -1873,7 +1871,11 @@ export class Runs extends Context.Service<
                   projectId: task.projectId,
                   executionId,
                   revision: 1,
-                  graph: JSON.stringify({ steps: steps.filter((step) => !step.skipped), review: { rounds: ROUNDS }, round: true }),
+                  graph: JSON.stringify({
+                    steps: steps.filter((step) => !step.skipped),
+                    review: { rounds: yield* roundsNow },
+                    round: true,
+                  }),
                   cause: 'materialized',
                   createdAt: at,
                 })}`
@@ -2824,7 +2826,7 @@ export class Runs extends Context.Service<
                 projectId: plan.projectId,
                 executionId,
                 revision: 1,
-                graph: JSON.stringify({ steps: parameters.steps.filter((step) => !step.skipped), review: { rounds: ROUNDS } }),
+                graph: JSON.stringify({ steps: parameters.steps.filter((step) => !step.skipped), review: { rounds: yield* roundsNow } }),
                 cause: 'materialized',
                 createdAt: at,
               })}`
@@ -3116,8 +3118,8 @@ export class Runs extends Context.Service<
                 : 'Althar has your summary. A review starts now; wait for its findings.',
             )
           }
-          // Another round only if settling changed the code, and rounds are left.
-          if (workAfter !== workBefore && attempt.iteration + 1 < ROUNDS) {
+          // Another round only if settling changed the code, and rounds are left: as many as the person's setting says (longRuns.ts).
+          if (workAfter !== workBefore && attempt.iteration + 1 < (yield* roundsNow)) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'
           }
@@ -4756,7 +4758,7 @@ export class Runs extends Context.Service<
               projectId: run.projectId,
               executionId: run.executionId,
               revision: next,
-              graph: JSON.stringify({ steps, review: { rounds: ROUNDS }, ...(round ? { round: true } : {}) }),
+              graph: JSON.stringify({ steps, review: { rounds: yield* roundsNow }, ...(round ? { round: true } : {}) }),
               cause: 'patch',
               createdAt: yield* timestamp,
             })}`

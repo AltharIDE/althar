@@ -15,6 +15,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
+import { setLongRuns } from '../src/longRuns'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -273,6 +274,26 @@ describe('the coordinator loop', () => {
         /\n\nPull request: Althar could not read its state just now\.$/,
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('stops after two rounds when the person set two', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setLongRuns({ rounds: 2 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
+      const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round']), {
+        step: 'review',
+        why: 'round_limit',
+        round: 2,
+      })
+      assert.deepStrictEqual(
+        (yield* results(waiting?.threadId ?? '')).map((step) => step.step),
+        ['implement', 'review', 'settle', 'review', 'settle'],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
   it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
