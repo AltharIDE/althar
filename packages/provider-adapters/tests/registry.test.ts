@@ -442,3 +442,49 @@ describe('the agent registry', () => {
     assert.isUndefined(agents.opencode.permissionJudge)
   })
 })
+
+describe('project web tools', () => {
+  type Meta = { claudeCode: { options: { settings: { permissions: { allow?: string[]; ask: string[]; deny: string[] } } } } }
+  it('allows Claude search and fetch for implementers and project reviewers, with writes still asking', () => {
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    for (const role of ['lead', 'reader'] as const) {
+      const settings = (metaOf(role, { web: true }) as Meta).claudeCode.options.settings
+      assert.includeMembers(settings.permissions.allow ?? [], ['WebSearch', 'WebFetch'])
+      assert.notInclude(settings.permissions.ask, 'WebFetch')
+      assert.include(settings.permissions.ask, 'Bash')
+      assert.includeMembers(settings.permissions.deny, secretReadRules() as string[])
+      const off = (metaOf(role, { web: false }) as Meta).claudeCode.options.settings
+      assert.include(off.permissions.ask, 'WebFetch')
+      const offline = (metaOf('reader', { web: true, offline: true }) as Meta).claudeCode.options.settings
+      assert.includeMembers(offline.permissions.deny, ['WebSearch', 'WebFetch'])
+    }
+  })
+  it('sets live Codex search and fetch, with shell network closed, and disables it when off or offline', () => {
+    const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.test.enabled': false }) }
+    for (const [options, search] of [
+      [{ web: true }, 'live'],
+      [{ web: false }, 'disabled'],
+      [{ web: true, offline: true }, 'disabled'],
+    ] as const) {
+      const config = JSON.parse(agents.codex.sessionEnv?.(own, options).CODEX_CONFIG ?? '{}')
+      assert.strictEqual(config.web_search, search)
+      assert.strictEqual(config['sandbox_workspace_write.network_access'], false)
+      assert.strictEqual(config['mcp_servers.test.enabled'], false)
+    }
+    assert.isFalse(agents.codex.reviewing?.outside)
+  })
+  it('allows OpenCode search and fetch globally and for both agents, but offline and off still ask', () => {
+    const own = agents.opencode.launch('/usr/bin/node').env ?? {}
+    for (const options of [{ web: true }, { web: false }, { web: true, offline: true }]) {
+      const env = { ...own, ...agents.opencode.sessionEnv?.(own, options) }
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')
+      for (const permission of [config.permission, config.agent.build.permission, config.agent.plan.permission]) {
+        assert.strictEqual(permission.webfetch, options.web && !options.offline ? 'allow' : 'ask')
+        assert.strictEqual(permission.websearch, options.web && !options.offline ? 'allow' : 'ask')
+        assert.strictEqual(permission.bash, 'ask')
+        assert.strictEqual(permission.edit, 'ask')
+      }
+    }
+  })
+})

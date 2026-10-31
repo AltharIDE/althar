@@ -1020,3 +1020,12 @@ describe('a project’s repositories, in its settings', () => {
     expect(await sheet('Code and issues').findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
   })
 })
+
+it('keeps the project web switch, default on, with the privacy trade-off visible', async () => {
+  const { client } = windowAt('/projects/p1?room=settings&section=general')
+  const toggle = await screen.findByRole('switch', { name: 'Leads can reach the web' })
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  expect(descriptionOf(toggle)).toContain('Pages could steer a lead into sending private code in a URL')
+  await userEvent.click(toggle)
+  await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', leadsReachWeb: false }))
+})

@@ -657,6 +657,7 @@ export const ProjectRulesView = Schema.Struct({
   pushCommits: Schema.Boolean,
   /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
   postScreenshots: Schema.Boolean,
+  leadsReachWeb: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
@@ -3558,6 +3559,7 @@ export const Api = RpcGroup.make(
       pushCommits: Schema.optional(Schema.Boolean),
       /** Turned on, each open task's screenshots go up to its pull request now, not when they next change. */
       postScreenshots: Schema.optional(Schema.Boolean),
+      leadsReachWeb: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),

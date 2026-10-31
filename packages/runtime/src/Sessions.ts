@@ -61,7 +61,7 @@ import { Limits, type PlanOnly } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
-import type { Policies } from './Policies'
+import { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
@@ -795,6 +795,7 @@ export class Sessions extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const live = yield* Live
+      const policies = yield* Policies
       const permissions = yield* Permissions
       const questions = yield* Questions
       const failures = yield* Failures
@@ -1989,10 +1990,12 @@ export class Sessions extends Context.Service<
                   count: SIGNED_OUT_GIT_CONFIG,
                 })
               : {}
+          const web =
+            thread.role !== 'coordinator' && !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
           const transport = entry.transport(
             cwdOf(thread),
             { ...accounts.env(account), [WORK]: work, ...guarded },
-            untrusted ? { untrusted } : undefined,
+            thread.role === 'coordinator' ? undefined : { web, ...(untrusted ? { untrusted, offline } : {}) },
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
@@ -2036,6 +2039,7 @@ export class Sessions extends Context.Service<
                   }
                 : {
                     role: 'reader',
+                    web,
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-058): never a review's lead.
@@ -2056,13 +2060,16 @@ export class Sessions extends Context.Service<
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
-          const sessionOptions: SessionOptions | undefined = untrusted
-            ? { untrusted, ...(offline ? { offline } : {}) }
-            : thread.role === 'coordinator'
-              ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
-              : upFront === undefined
-                ? undefined
-                : { sandbox: upFront }
+          const sessionOptions: SessionOptions = {
+            ...(thread.role === 'coordinator' ? {} : { web }),
+            ...(untrusted
+              ? { untrusted, ...(offline ? { offline } : {}) }
+              : thread.role === 'coordinator'
+                ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
+                : upFront === undefined
+                  ? {}
+                  : { sandbox: upFront }),
+          }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
           let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
