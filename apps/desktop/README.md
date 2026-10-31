@@ -38,8 +38,8 @@ From `apps/desktop`:
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
-| `bun run package` | Builds that and packages it in `out/dist`: on macOS, `mac-arm64/Althar.app`, signed and notarized where credentials are given, with a dmg, zip and `latest-mac.yml`; on Linux, an AppImage, `.deb`, `.rpm` and `latest-linux.yml`; on Windows, `Althar-<version>-x64-setup.exe` and `latest.yml`. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
-| `bun run release` | Packages, signs and notarizes a release, and checks it, as CI does on a version tag. Releases are published from CI only. See below |
+| `bun run package` | Builds that and packages it in `out/dist`: on macOS, `mac-arm64/Althar.app` for Apple silicon (`--arch=x64` for Intel's, in `mac/`, or `--arch=arm64,x64` for both), signed and notarized where credentials are given, with a dmg and zip each and one `latest-mac.yml`; on Linux, an AppImage, `.deb`, `.rpm` and `latest-linux.yml`; on Windows, `Althar-<version>-x64-setup.exe` and `latest.yml`. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
+| `bun run release` | Packages, signs and notarizes a release, both Mac builds, and checks it, as CI does on a version tag. Releases are published from CI only. See below |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The window's view models and views against a fake client, and its client against the real runtime |
@@ -127,11 +127,12 @@ GPU and the keyring. What the Flatpak reaches and what it does not is in
 
 ### The packaged app
 
-The app is packaged for Apple silicon on macOS, x86_64 Linux and x64 Windows (unsigned for now). Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
+The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x64 Windows (unsigned for now). Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
 
 - **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp, each with only the entitlements it needs (`scripts/entitlements.ts`, ADR-033). It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`), where they're set; else with Althar's Developer ID where a keychain has it. CI puts the release environment's certificate in a keychain of the job's own and points electron-builder at it (`CSC_KEYCHAIN`). Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
 - **Notarizing.** With Apple's credentials in the environment, the signed app is sent to Apple's notary service and stapled before the dmg and the zip are made of it, then the dmg is too. Every submission's log is kept in `out/notary/`; a rejected one names each file it found wrong. The credentials are an App Store Connect API key (`APPLE_API_KEY`, the path to its `.p8`, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or a profile notarytool keeps in the keychain (`APPLE_KEYCHAIN_PROFILE`). Without them nothing is notarized, macOS refuses the app on any other Mac, and in CI the run fails.
 - **Updates.** The macOS app, the Windows app and the Linux AppImage check the latest published release ten seconds after they start and every four hours. On macOS, Check for Updates… in the app menu checks on demand. A newer version downloads in the background and is offered in the window's bar and Settings. The `.deb` and `.rpm` are updated by their package managers.
+- **Intel Macs.** Each Mac build holds only its own processor's Electron, Node, agents and speech engine, and packaging fails where any program in it is for the other one (every Mach-O file is read with `lipo`). Apple silicon builds Intel's too. To check it with no Intel Mac at hand, `node scripts/mac-smoke.ts --arch=x64` runs its programs and opens it under Rosetta until its first screen finds the agents, and leaves a picture of that screen in `out/smoke`; the release run does this for both builds. One `latest-mac.yml` lists both, and the updater takes its own Mac's zip from it by name ([ADR-075](../../docs/decisions/075-an-intel-mac-build-beside-apple-silicon.md)).
 - **Trying an update.** Package one version and keep its app; package a newer one, serve its zip and `latest-mac.yml` from a folder (`python3 -m http.server 8765 --bind 127.0.0.1`), and open the older app with `ALTHAR_UPDATE_FEED=http://127.0.0.1:8765/`. Both must be signed by the same Developer ID.
 - **Node.** The packaged app ships Node for the agent adapters, at Electron's Node version, in `Contents/Resources/node/bin/node` (ADR-033), and `resources\node\bin\node.exe` on Windows. `bun run package` fetches it from nodejs.org once, into `node_modules/.cache/althar-node`, and checks it against the digests in `scripts/node.ts`; raise those with Electron, and for Node's security releases. Electron's `runAsNode` fuse is off, with `NODE_OPTIONS` and the inspector's flags, so nothing can run Althar's binary as Node: `ELECTRON_RUN_AS_NODE=1` starts the app instead. In dev the adapters run on Electron's binary as Node.
 
@@ -142,7 +143,7 @@ The app is packaged for Apple silicon on macOS, x86_64 Linux and x64 Windows (un
 1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it). No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
-4. In Releases, open the draft, download its dmg, and try it on a Mac: it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).
+4. In Releases, open the draft, download its dmgs, and try each on its Mac (the run has opened both already, Intel's under Rosetta): it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).
 5. Publish the draft. Then the updater and the site's Download see it.
 
 Run by hand (Actions → release → Run workflow, on main), it makes the same draft without a tag; publishing it makes the tag. Run again, a release's run brings its draft up to date, and never touches a published release. Where notarizing fails, the run's `notary-logs` artifact names each file Apple found wrong.
@@ -171,7 +172,7 @@ With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set 
 
 #### The Homebrew tap
 
-`brew install --cask altharide/tap/althar` installs Althar on Apple-silicon Macs (macOS 13 or later) from the public repository `AltharIDE/homebrew-tap`. The cask's source of truth is [`packaging/homebrew/althar.rb`](../../packaging/homebrew/althar.rb); the tap holds a copy of it with one release's version and the sha256 of its arm64 dmg filled in (`packaging/homebrew/fill.sh`). The cask has `auto_updates true`, since Althar updates itself, and its `zap` lists the folders the app writes to (the profile in `Application Support/Althar`, the window's in `Application Support/@althar`, caches, logs, preferences), never the task worktrees in `~/Althar`.
+`brew install --cask altharide/tap/althar` installs Althar on Macs with macOS 13 or later, each its own processor's build, from the public repository `AltharIDE/homebrew-tap`. The cask's source of truth is [`packaging/homebrew/althar.rb`](../../packaging/homebrew/althar.rb); the tap holds a copy of it with one release's version and the sha256 of each of its dmgs, arm64 and x64, filled in (`packaging/homebrew/fill.sh`). The cask has `auto_updates true`, since Althar updates itself, and its `zap` lists the folders the app writes to (the profile in `Application Support/Althar`, the window's in `Application Support/@althar`, caches, logs, preferences), never the task worktrees in `~/Althar`.
 
 [`homebrew-tap.yml`](../../.github/workflows/homebrew-tap.yml) keeps the tap current. Once (the Homebrew tap is a person's to set up, not CI's):
 
@@ -179,14 +180,14 @@ With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set 
 2. Create a fine-grained personal access token whose resource owner is `AltharIDE`, with access to that one repository and the permission Contents: read and write, and nothing else.
 3. Add it as the secret `HOMEBREW_TAP_TOKEN` in the `release` environment (`gh secret set HOMEBREW_TAP_TOKEN --env release --repo AltharIDE/althar`), beside the others above. Fine-grained tokens expire: note the date, and replace the secret before it.
 
-When a release is published (not when it is drafted), the workflow waits for the `release` environment's reviewer, downloads that release's `Althar-<version>-arm64.dmg`, takes its sha256 (it must agree with GitHub's own digest of the file), fills the cask in and pushes `Casks/althar.rb` to the tap. It skips prereleases and any release that isn't the latest. Run again for the same version it changes nothing. It creates and publishes no release.
+When a release is published (not when it is drafted), the workflow waits for the `release` environment's reviewer, downloads that release's `Althar-<version>-arm64.dmg` and `Althar-<version>-x64.dmg`, takes each one's sha256 (it must agree with GitHub's own digest of the file), fills the cask in and pushes `Casks/althar.rb` to the tap. It skips prereleases and any release that isn't the latest. Run again for the same version it changes nothing. It creates and publishes no release.
 
 A release event runs the workflow as it is on the release's tag, so a release made before the workflow existed, or a missed one, is done by hand: Actions → homebrew-tap → Run workflow, on `main`, with the tag (`gh workflow run homebrew-tap.yml --ref main -f tag=v0.5.0`). The `release` environment's deployment rules must allow `main` for that, as for a release run by hand.
 
 On a pull request that changes `packaging/homebrew/`, `cask.yml` runs `brew style` on macOS. Before changing the cask, also audit it with a published release filled in (Homebrew audits casks only from a tap, so make a local one):
 
     brew tap-new --no-git local/althar && mkdir -p "$(brew --repository local/althar)/Casks"
-    packaging/homebrew/fill.sh 0.5.0 <the dmg's sha256> > "$(brew --repository local/althar)/Casks/althar.rb"
+    packaging/homebrew/fill.sh <version> <the arm64 dmg's sha256> <the x64 dmg's sha256> > "$(brew --repository local/althar)/Casks/althar.rb"
     brew trust local/althar
     brew style --cask local/althar/althar && brew audit --cask --strict --online local/althar/althar
     brew untap local/althar

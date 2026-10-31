@@ -34,6 +34,17 @@ export function Get({ tone }: { tone: 'blue' | 'paper' }) {
 }
 
 /**
+ * On a Mac, the other chip's build, as a quiet line under the download: for
+ * an Intel Mac where the browser didn't say (Safari and Firefox never do),
+ * or for Apple silicon where it said Intel. Its line is kept on every
+ * system, so nothing moves when the answer comes in.
+ */
+export function OtherMac({ tone }: { tone: 'blue' | 'paper' }) {
+  const { other } = useDownload()
+  return <p className={tone === 'blue' ? s.otherBlue : s.other}>{other && <a href={other.href}>{other.label}</a>}</p>
+}
+
+/**
  * The name, set as large as the page is wide: an SVG whose box is the ink of
  * the word, measured once the font has loaded, so it sits centred and flush
  * on the page's last edge whatever the width.
@@ -90,6 +101,7 @@ export function Close() {
           </div>
           <div>
             <Get tone="blue" />
+            <OtherMac tone="blue" />
             <pre className={s.code}>
               <span aria-hidden="true">$ </span>
               {INSTALL.brew}

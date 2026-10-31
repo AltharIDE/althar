@@ -382,7 +382,7 @@ function Body({
     if (change === null || change.length === 0) return <div className={s.say}>{t.unchanged}</div>
     return (
       <div className={s.diff}>
-        <Diff lines={change} label={found.path} fold={4} oldNumbers />
+        <Diff lines={change} label={found.path} path={found.path} fold={4} oldNumbers />
       </div>
     )
   }
