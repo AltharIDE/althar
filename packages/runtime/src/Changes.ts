@@ -3420,6 +3420,23 @@ export class Changes extends Context.Service<
                   alone = true
                   forLead.push(checksSpentForLead(sum, name, logs, FIX_ROUNDS))
                 } else if (fixing?.stopped !== true) forLead.push(checksForLead(sum, name, logs))
+              } else if (reran === null && !(yield* roundUnderWay(link.taskId))) {
+                // None failed but some were cancelled, which a host holds a merge on as on a failure: run again once by Althar,
+                // whoever has looked, as the person would on the host (DEV-173). Cancelled again, they are the person's.
+                const cancelledChecks = ran.filter((candidate) => candidate.state === 'cancelled')
+                const ranThem =
+                  cancelledChecks.length > 0 &&
+                  (yield* Effect.forEach(cancelledChecks, (check) =>
+                    host.rerun(repository, check).pipe(Effect.orElseSucceed(() => false)),
+                  )).some(Boolean)
+                if (ranThem) {
+                  yield* heard(link, 'checks_rerun', `rerun:${sum.sha}`, { sha: sum.sha, cancelled: true })
+                  yield* sayOn(
+                    link,
+                    `Running ${cancelledChecks.length === 1 ? 'a cancelled check' : `${cancelledChecks.length} cancelled checks`} on ${name} again.`,
+                  )
+                  rerunning = true
+                }
               }
             }
             // Run again, they are running as far as Althar knows: how they end next is heard, however soon.

@@ -524,6 +524,32 @@ describe('what failed, in full', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('runs a cancelled check again once, under way meanwhile, and leaves it to the person cancelled again', () => {
+    const { working, bare } = hosted()
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [passing, { name: 'lint', state: 'cancelled' }],
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      // Run again, it is under way until the host says how it went.
+      const [running] = yield* until(cards(projectId), (all) => github.reruns.length === 1 && all[0]?.change?.checks?.outcome === 'running')
+      assert.strictEqual(running?.phase, 'running')
+      assert.include(yield* notices(running?.threadId ?? ''), 'Running a cancelled check on PR #1 again.')
+      // Cancelled again, it is the person's, and isn't run a third time.
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.checks?.outcome === 'passed')
+      yield* Effect.sleep('500 millis')
+      assert.lengthOf(github.reruns, 1)
+      assert.deepStrictEqual(
+        ready?.change?.checks?.list.map((check) => check.state),
+        ['passed', 'cancelled'],
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('gives its lead a check’s whole log, a page at a time', () => {
     const { working, bare } = hosted()
     const log = Array.from({ length: 700 }, (_, index) => `line ${index + 1}`).join('\n')
