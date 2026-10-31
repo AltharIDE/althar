@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-11
+- **Amended:** 2026-10-31 ([ADR-076](076-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): when the person asks for a release, the coordinator tags it, approves the run's `release` environment, and publishes the draft on their word to publish; `release.yml` doesn't change.
 - **Owner:** Repository maintainers
 - **Context:** Althar goes to its first testers on 11 October (DEV-12, DEV-47,
   DEV-62, DEV-81). Until now `bun run package` made an app signed ad hoc, which opens

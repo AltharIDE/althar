@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-01
+- **Amended:** 2026-10-31 ([ADR-076](076-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): merging stays the person's, but their message to the coordinator is their word for it, and the coordinator merges, queues and releases when they ask, never on its own.
 - **Owner:** Repository maintainers
 - **Context:** A task ends in a pull request, listens to it, and often starts
   from an issue. Teams keep their code on GitHub, GitLab or Bitbucket, hosted
