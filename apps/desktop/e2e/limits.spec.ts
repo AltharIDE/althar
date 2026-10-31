@@ -109,7 +109,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
       shown(page, /^Codex ran out of usage while working on the task\. No other model is free: the work waits until .+\.$/),
     ).toBeVisible()
     // Its header says so too, rather than that it is idle.
-    await expect(shown(page, held)).toBeVisible()
+    await expect(shown(page, /^The work waits: Codex is out of usage until /)).toBeVisible()
     await expect(shown(page, 'Idle', { exact: true })).toHaveCount(0)
     // And the task offers what could carry it on, though nothing is free now.
     await expect(shown(page, /^Codex is out of usage until .+\.$/)).toBeVisible()
@@ -184,7 +184,7 @@ test('lets the person hand a step held for the reset to another model, from the 
       .screenshot({ path: 'test-results/limit-held-card.png', scale: 'css' })
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(shown(page, held)).toBeVisible()
+    await expect(shown(page, /^The work waits: Claude Code is out of usage until /)).toBeVisible()
     await page
       .locator('header[aria-label="Add a retry to the checkout call"]')
       .screenshot({ path: 'test-results/limit-held-header.png', scale: 'css' })
