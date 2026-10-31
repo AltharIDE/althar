@@ -2902,7 +2902,7 @@ export class Sessions extends Context.Service<
             // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-066).
             "You carry no sign-in to the code host, so a `git fetch` or `git pull` that needs one fails, in your sandbox or out of it. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
             // A question shows on the person's cards as its headline; the whole of it is in the thread (Questions.ts).
-            'When you ask the person something, make the question itself one line: the decision in a few words, such as "Open a follow-up PR on its own after a merge?", with the options where there are any. Put the background (what you found, the ADRs, why it matters) in what you write just before you ask, which stays in the thread: the person\'s card shows only the question, and cuts a long one to its first sentence.',
+            'When you ask the person something, make the question one line, the decision in a few words, with options where there are any; put the background in what you write just before, which stays in the thread.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
