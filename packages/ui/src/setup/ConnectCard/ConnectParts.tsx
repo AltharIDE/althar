@@ -120,7 +120,7 @@ export function ConnectSteps({ items, text }: { items: readonly ReactNode[]; tex
             <span className={s.n} aria-hidden="true">
               {i + 1}.
             </span>
-            <span>{item}</span>
+            <div>{item}</div>
           </li>
         ))}
       </ol>
