@@ -13,12 +13,12 @@
 .fading .lane { opacity: 0; }
 .cut [data-picture] { transition: none; }
 
-/* The task it follows: pressed, its action gives a little under a tap, as it is accepted. */
+/* The task it follows: pressed, its card's action strip gives a little under a tap, as it is accepted. */
 .hero { transition: scale 180ms var(--ease); }
-.hero [class*='strip'] { position: relative; transition: opacity 180ms var(--ease); }
+.hero [class*='strip']:last-child { position: relative; transition: opacity 180ms var(--ease); }
 .pressed { scale: 0.985; }
-.pressed [class*='strip'] { opacity: 0.7; }
-.pressed [class*='strip']::after {
+.pressed [class*='strip']:last-child { opacity: 0.7; }
+.pressed [class*='strip']:last-child::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -35,15 +35,10 @@
   to { opacity: 0; scale: 2.6; }
 }
 
-/* On its way between lanes: over the board, lifted, what it was and what it becomes one over the other. */
-.flight {
-  position: absolute;
-  z-index: 2;
-  display: grid;
-  visibility: hidden;
-  filter: drop-shadow(0 16px 26px rgba(40, 28, 10, 0.2)) drop-shadow(0 3px 6px rgba(40, 28, 10, 0.1));
-}
-.flight > * { grid-area: 1 / 1; align-self: start; }
+/* On its way between lanes: over the board, what it was and what it becomes one over the other, each on a shadow that comes and goes. */
+.flight { position: absolute; z-index: 2; display: grid; visibility: hidden; }
+.flight > * { position: relative; grid-area: 1 / 1; align-self: start; }
+.lift { position: absolute; inset: 0; border-radius: 12px; box-shadow: 0 16px 30px rgba(40, 28, 10, 0.2), 0 3px 8px rgba(40, 28, 10, 0.1); opacity: 0; }
 /* A row lifted from its list is a card in flight, on paper of its own; it lands as a row again. */
 .flight > :first-child > article { background: var(--n-1); }
 
@@ -52,5 +47,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .lane, .lanes [data-picture], .hero { transition: none; }
-  .pressed [class*='strip']::after { animation: none; }
+  .pressed [class*='strip']:last-child::after { animation: none; }
 }

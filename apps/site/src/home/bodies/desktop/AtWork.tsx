@@ -5,7 +5,7 @@ import { askedSecond, useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 import { BoardAtWork, type BoardStory, Tabs } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
-import { useInView } from '../kit/seen'
+import { useInView, usePageShown } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
 import { GEMINI_PRO, NEXT, OPUS, READY_TWO_REPOS, SONNET } from '../kit/world'
@@ -194,7 +194,8 @@ const SIDE = 8
 function Flow({ beat, watched }: { beat: number; watched: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const still = useStill()
-  const round = useRound(watched && !still)
+  const shown = usePageShown()
+  const round = useRound(watched && shown && !still)
   const frame = still ? STILL : round
   // Where the lanes are, read once laid out, before it is painted.
   const [lanes, setLanes] = useState<Place[]>([])
@@ -245,9 +246,10 @@ function Flow({ beat, watched }: { beat: number; watched: boolean }) {
 
 /**
  * The task on its way to `lane`, drawn over the board: it lifts from where
- * it `stood` in the lane before, flies to the place held for it, turning
- * from what it was there into what it is here, and lands. Without where it
- * stood, it is there already.
+ * it `stood` in the lane before, its shadow coming up under it, flies to the
+ * place held for it, turning from what it was there into what it is here,
+ * and lands, its shadow going, so it is the card held for it to the pixel
+ * when that takes its place. Without where it stood, it is there already.
  */
 function Flight({
   lane,
@@ -285,21 +287,43 @@ function Flight({
         duration: whole,
         easing: 'ease-out',
       }),
-      ...[...el.children].map((layer, i) =>
-        layer.animate(
-          i === 0
-            ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0, offset: 0.7 }]
-            : [{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1, offset: 0.7 }],
-          { duration: whole, fill: 'both' },
-        ),
-      ),
+      // What it was fades as what it becomes comes up, each held at its end: a keyframe list that stops short of the
+      // end would go back to the layer's own opacity.
+      ...[...el.children].flatMap((layer, i) => {
+        const lift = layer.firstElementChild
+        const leaving = i === 0
+        return [
+          layer.animate(
+            leaving
+              ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0, offset: 0.7 }, { opacity: 0 }]
+              : [{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1, offset: 0.7 }, { opacity: 1 }],
+            { duration: whole, fill: 'both' },
+          ),
+          ...(lift
+            ? [
+                lift.animate(
+                  leaving
+                    ? [{ opacity: 0 }, { opacity: 1, offset: LIFT / whole }, { opacity: 1 }]
+                    : [{ opacity: 1 }, { opacity: 1, offset: 0.82 }, { opacity: 0 }],
+                  { duration: whole, fill: 'both' },
+                ),
+              ]
+            : []),
+        ]
+      }),
     ]
     return () => runs.forEach((one) => one.cancel())
   }, [lane, stood])
   return (
     <div ref={ref} className={s.flight} aria-hidden="true">
-      <div>{leaving}</div>
-      <div>{arriving}</div>
+      <div>
+        <i className={s.lift} />
+        {leaving}
+      </div>
+      <div>
+        <i className={s.lift} />
+        {arriving}
+      </div>
     </div>
   )
 }
