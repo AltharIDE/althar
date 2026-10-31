@@ -14,6 +14,9 @@ import { ago, clock } from '../../shared/time'
  * nothing, and an agent with no other says so in place of a figure. A model's is
  * the runtime's own (`GetModelRooms`), which knows the project's rule for
  * moving work through accounts and a model's own window, such as Opus's week.
+ * A window whose reset has passed is unknown until it is read again, as the
+ * runtime has it: the window leaves it out by its own clock, as one passes
+ * while it shows, rather than show it with the use it had before.
  */
 
 export const text = {
@@ -32,6 +35,15 @@ export const text = {
 const OLD = 15 * 60_000
 
 const leftOf = (window: UsageWindow) => Math.max(0, Math.min(100, Math.round(100 - window.usedPercent)))
+
+/** Whether a reset time has passed: its window has started again, and how much of it is used no one has said yet. */
+const past = (resetsAt: string | null, now: Date) => resetsAt !== null && Date.parse(resetsAt) <= now.getTime()
+
+/** The account with only the windows that haven't reset since they were read. */
+const current = (account: AccountUsage, now: Date): AccountUsage => {
+  const windows = account.windows.filter((window) => !past(window.resetsAt, now))
+  return windows.length === account.windows.length ? account : { ...account, windows }
+}
 
 /** A window as a row names it: 5 hours, Week, Opus week, or its own name. */
 export const windowName = (window: Pick<UsageWindow, 'kind' | 'label'>): string => {
@@ -78,7 +90,10 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAcco
 export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[] } => {
   const agents: PlanAgent[] = []
   const byAgent = new Map<string, AccountUsage[]>()
-  for (const account of usage?.accounts ?? []) byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
+  for (const read of usage?.accounts ?? []) {
+    const account = current(read, now)
+    byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
+  }
   for (const [agentId, accounts] of byAgent) {
     const read = accounts.flatMap((account) => {
       const window = tightest(account)
@@ -137,14 +152,17 @@ export const roomOf = (
   now: Date,
 ): ModelRoom | null | undefined => {
   const { agentId, model } = choiceOf(info.id)
-  const found = rooms.find((room) => room.agentId === agentId && room.model === model)
+  // The runtime's, unless its window has reset since: what's known of the agent's accounts then, until the rooms are read again.
+  const found = rooms.find((room) => room.agentId === agentId && room.model === model && !past(room.resetsAt, now))
   if (found !== undefined)
     return {
       left: Math.max(0, Math.min(100, Math.round(found.leftPercent))),
       until: found.resetsAt === null ? null : clock(found.resetsAt, now),
       account: found.several ? found.accountName : null,
     }
-  const accounts = (usage?.accounts ?? []).filter((account) => account.agentId === agentId && account.paidBy !== 'key')
+  const accounts = (usage?.accounts ?? [])
+    .filter((account) => account.agentId === agentId && account.paidBy !== 'key')
+    .map((account) => current(account, now))
   if (accounts.length === 0) return undefined
   if (model === null) {
     const agent = planOf({ accounts }, now).agents[0]
