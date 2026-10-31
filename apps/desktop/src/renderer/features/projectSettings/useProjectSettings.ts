@@ -21,7 +21,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'moveIssues' | 'changeIssues'
+export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'changeIssues'
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -46,6 +46,8 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
   readonly setPushCommits: (on: boolean) => void
+  /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-076). */
+  readonly setPostScreenshots: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
@@ -145,6 +147,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     client.lookForConflicts(projectId).catch((failure: unknown) => setLooked({ failed: messageOf(failure) }))
   }, [client, projectId])
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
+  const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
   const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
 
@@ -224,6 +227,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     noteFailed,
     setResolveConflicts,
     setPushCommits,
+    setPostScreenshots,
     lookForConflicts,
     looked,
     setMoveIssues,
