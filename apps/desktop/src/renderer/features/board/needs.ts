@@ -20,13 +20,13 @@ export const needsOf = (
   here: string | null = null,
 ): WorkNeed[] => [
   ...lanes.waiting.map(({ task, call }) => {
-    const card = call === null ? null : callCardOf(call, name)
+    const card = callCardOf(call, name)
     return {
-      id: call?.id ?? task.taskId,
-      kind: call === null ? text.status.you : callKindOf(call),
-      title: card?.title ?? task.title,
+      id: call.id,
+      kind: callKindOf(call),
+      title: card.title,
       meta: task.title,
-      ...(card === null ? {} : { at: card.at }),
+      at: card.at,
       ...(task.threadId === here ? { here: true } : {}),
       onOpen: () => onTask(task.threadId),
     }

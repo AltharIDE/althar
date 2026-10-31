@@ -10,6 +10,7 @@ import {
   type AutomationsSnapshot,
   type BoardTask,
   type FieldAnswer,
+  type OnePressAction,
   type FoundAccount,
   type ProjectNote,
   type ProjectRulesView,
@@ -96,6 +97,11 @@ export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<P
     readonly expectedRevision?: number
   }
 
+/** A card in Needs you settled with one press (DEV-173): a call's by the call, else its task's. */
+export type OnePress =
+  | { readonly taskId: string; readonly action: OnePressAction }
+  | { readonly attentionId: string; readonly action: OnePressAction }
+
 export interface Client {
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
@@ -163,6 +169,8 @@ export interface Client {
   readonly leftHome: () => Promise<void>
   /** The person opened a task's screen: a plain task that finished is done once seen. */
   readonly seeTask: (taskId: string) => Promise<void>
+  /** Keeps on this computer that a card in Needs you was settled with one press where it shows (DEV-173): a call's by the call. */
+  readonly settledWithOnePress: (press: OnePress) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (
@@ -640,6 +648,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
+    settledWithOnePress: (press) => command((commandId) => api.SettledWithOnePress({ commandId, ...press })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),

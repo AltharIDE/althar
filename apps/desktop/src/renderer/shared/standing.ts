@@ -110,7 +110,9 @@ export const standingOf = (change: ChangeSummary): Standing => {
   // The checks say one thing: one failed, or they're still running, or, once done, one was cancelled.
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
   if (checks !== null && checks.failed > 0) blockers.push({ kind: 'failed', failing: checks.failing, failed: checks.failed })
-  else if (checks !== null && checks.running > 0) blockers.push({ kind: 'running', passed: checks.passed, total: checks.total })
+  // Run again by Althar, a cancelled check is running before its host shows it so.
+  else if (checks !== null && (checks.running > 0 || checks.outcome === 'running'))
+    blockers.push({ kind: 'running', passed: checks.passed, total: checks.total })
   else if (cancelled.length > 0) blockers.push({ kind: 'cancelled', cancelled })
   return { blockers, next: nextOf(blockers[0]) }
 }

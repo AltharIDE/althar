@@ -1331,3 +1331,14 @@ CREATE TABLE pull_request_pictures (
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   FOREIGN KEY (link_id, project_id) REFERENCES external_links (id, project_id)
 ) STRICT;
+
+CREATE TABLE one_press_settles (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject')),
+    unopened INTEGER NOT NULL CHECK (unopened IN (0, 1)),
+    pressed_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX one_press_settles_by_time ON one_press_settles (pressed_at);

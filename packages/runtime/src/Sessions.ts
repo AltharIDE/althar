@@ -66,6 +66,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
@@ -815,6 +816,8 @@ export class Sessions extends Context.Service<
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      // How long a task is under way after its last agent went or its lead's turn ended, before its card is read again (DEV-173).
+      const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
@@ -1650,7 +1653,11 @@ export class Sessions extends Context.Service<
               },
             )
           // A step can report mid-turn, so its task is ready only once the turn is over: its card is read again.
-          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
+          // Its commits go up a moment after (ADR-072), under way meanwhile: once that moment is over, it is read again (DEV-173).
+          if (thread.role !== 'coordinator') {
+            yield* touchCard(thread.taskId)
+            yield* Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(thread.taskId), betweenAgents))), sessionsScope)
+          }
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
@@ -1923,7 +1930,18 @@ export class Sessions extends Context.Service<
                   Scope.close(running.scope, Exit.void),
                   ended === undefined
                     ? Effect.void
-                    : live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state: ended }),
+                    : Effect.andThen(
+                        live.publish({
+                          _tag: 'SessionEnded',
+                          threadId: running.thread.threadId,
+                          sessionId: running.sessionId,
+                          state: ended,
+                        }),
+                        // Its task is between agents a moment (`betweenAgents`), under way: once that is over, its card is read again.
+                        running.thread.role === 'coordinator'
+                          ? Effect.void
+                          : Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(running.thread.taskId), betweenAgents))), sessionsScope),
+                      ),
                 ),
                 Deferred.succeed(running.ended, undefined),
               ),
@@ -2865,7 +2883,7 @@ export class Sessions extends Context.Service<
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
-            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
+            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.

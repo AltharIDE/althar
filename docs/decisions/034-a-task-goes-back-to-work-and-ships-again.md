@@ -2,6 +2,20 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
+- **Amended:** 2026-10-31: a round that ends with commits after the task's
+  last pull request merged or closed opens the next by itself, as a draft
+  titled "After #N" (the last one's number, ahead of the task's title, under
+  the project's title rule), rather than ending in Needs you with **Open a
+  new pull request** as its only button (DEV-173: a card is there only for a
+  real decision). It opens only where the project's rules would have opened
+  the first, as a plan's ending does, apart from the round's end, since
+  publishing takes the task's lock. A round whose lead says in finish_step
+  that the person only asked something, and what it committed came with
+  answering (`answered`), opens none: its card offers Open a new pull
+  request, as before, and so does one whose pull request couldn't open. The
+  open draft is the person's to merge, close, or take back with **Abandon**.
+  Trade-off: commits a round made in passing that its lead didn't call so
+  reach the host before the person has seen them.
 - **Owner:** Repository maintainers
 - **Context:** A task is a long-lived piece of work the person keeps talking
   to, but its course ended with its plan. Once its steps had run and its pull
@@ -68,7 +82,10 @@
       pushes what the round committed, as it pushed any commit before. With
       its last pull request merged or closed, the card offers **Open a new
       pull request**. With none ever opened, it offers to open one, as it
-      did.
+      did. Amended: with its last pull request merged or closed, the round
+      opens the next by itself, a draft titled "After #N", unless its lead
+      says it only answered a question; the card offers it only then, or
+      where that fails.
   - **The person can skip a round's review,** from the task's menu: the
     round no longer has one, a review under way stops, and a round whose
     lead is done concludes. Rounds follow the plan by default: the next one
@@ -235,6 +252,7 @@
   - **Publish a round's work by itself, as a plan's ending does.** A second
     pull request on a merged task is a bigger step than the first, and the
     person asked to be offered it. Easy to change once people want it.
+    Chosen after all, as amended on 2026-10-31.
   - **A new pull request from the merged branch.** After a squash merge its
     old commits aren't in the default branch, so they would show again, and
     pushing to a merged branch is what this must never do. Merging the

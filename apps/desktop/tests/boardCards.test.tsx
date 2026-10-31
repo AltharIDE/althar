@@ -165,7 +165,7 @@ describe('a review’s card', () => {
 })
 
 describe('a card that waits on the person', () => {
-  it('says it waits on you before its call is read, in when the task came', () => {
+  it('stays under way before its call is read, never in Needs you for a moment (DEV-173)', () => {
     show(
       lanesOf(
         board(
@@ -174,11 +174,9 @@ describe('a card that waits on the person', () => {
         ),
       ),
     )
-    expect(cardOf('Ship it').getByText('Waiting on you')).toBeTruthy()
-    // Older than the call no task waits on, it comes first.
-    const needs = within(screen.getByRole('region', { name: /^Needs you/ }))
-    const titles = needs.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)
-    expect(titles.findIndex((title) => title?.includes('Ship it'))).toBeLessThan(titles.findIndex((title) => title?.includes('make clean')))
+    expect(within(screen.getByRole('region', { name: /^Running/ })).getByText('Ship it')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: /^Needs you/ })).queryByText('Ship it')).toBeNull()
+    expect(screen.queryByText('Waiting on you')).toBeNull()
   })
 
   it('says a permission’s command once, where what it asks is the command itself, many lines of it, or very long', () => {

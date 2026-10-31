@@ -999,6 +999,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
     seeTask: vi.fn(async () => {}),
+    settledWithOnePress: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),

@@ -232,6 +232,12 @@ export class Limits extends Context.Service<
       readonly planned?: { readonly agentId: string; readonly model: string | null }
     }): Effect.Effect<ReadonlyArray<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }>, Failure>
     /**
+     * Whether any of these, as `choices` lists them, could take the work over
+     * now: signed in and not out of usage. Paid per use counts: the person may
+     * choose to spend their money, so that is a call of theirs.
+     */
+    canTakeOver(choices: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>): Effect.Effect<boolean, Failure>
+    /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
      */
@@ -476,6 +482,15 @@ export class Limits extends Context.Service<
                 if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
             }
             return found
+          }),
+        canTakeOver: (choices) =>
+          Effect.gen(function* () {
+            for (const choice of choices) {
+              const account = (yield* accounts.of(choice.agentId)).find((each) => each.id === choice.accountId)
+              if (account === undefined || (yield* signIns.account(account)).status === 'signed_out') continue
+              if (Option.isNone(yield* outOf(account))) return true
+            }
+            return false
           }),
         modelFor,
         named: (agentId, model, accountId = null) =>

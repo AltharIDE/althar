@@ -202,7 +202,7 @@ describe('a project of two repositories on one connected host', () => {
       yield* changes.refresh(task.taskId)
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
-        "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
+        "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
       )
     }).pipe(Effect.provide(withQueries(github)))
   })

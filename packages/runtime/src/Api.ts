@@ -769,6 +769,8 @@ export const handlers = Api.toLayer(
         ),
       // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
       SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
+      SettledWithOnePress: ({ taskId, attentionId, action }) =>
+        api(tasks.pressed({ ...(taskId === undefined ? {} : { taskId }), ...(attentionId === undefined ? {} : { attentionId }), action })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,

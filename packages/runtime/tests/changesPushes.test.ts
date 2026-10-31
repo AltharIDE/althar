@@ -423,7 +423,7 @@ describe('a push the lead asks the person for', () => {
       commit(task.path, 'After')
       assert.strictEqual(
         yield* callTool(task.lead, 'push_to_pull_request', {}),
-        "PR #1 is merged, so there's nothing to push to. What you committed after it goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
+        "PR #1 is merged, so there's nothing to push to. What you committed after it goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -650,7 +650,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(bare, 'rev-parse', task.branch), git(task.path, 'rev-parse', 'HEAD'))
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
-      assert.deepStrictEqual(card?.change?.pushing, { held: null })
+      assert.isNull(card?.change?.pushing?.held ?? null)
       assert.include(yield* notices(task.threadId), "Pushed 1 commit to PR #1 as the lead's turn ended.")
 
       // Asked to push before its turn ends, the lead's tool pushes at once rather than asking the person.
@@ -679,6 +679,25 @@ describe('what a lead commits after the person has looked', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('wait for the person’s push where they were made outside a turn, which nothing pushes: Ready, not going up (DEV-173)', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // A commit in the task's folder well after its lead's turn ended, and what that turn left went up: nothing pushes it.
+      yield* Effect.sleep(Duration.seconds(1))
+      git(task.path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'By hand')
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 1)
+      // The person's to push, as where the rules leave every push to them: in Needs you with its Push, never going up.
+      assert.isUndefined(card?.change?.pushing)
+      assert.strictEqual(card?.phase, 'ready')
+      yield* Effect.sleep(Duration.seconds(1))
+      assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'By hand')
+      assert.strictEqual((yield* cards(task.projectId))[0]?.phase, 'ready')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('wait for the person, saying why, where someone pushed to the pull request outside Althar', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
@@ -695,6 +714,39 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
       assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('have its lead bring in what someone else pushed to the pull request, told once', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      // Someone updates the pull request's branch on the host: a commit this Mac hasn't got, so branch and pull request part.
+      const head = git(bare, 'rev-parse', task.branch)
+      const theirs = git(
+        bare,
+        '-c',
+        'user.name=Dana',
+        '-c',
+        'user.email=dana@althar.test',
+        'commit-tree',
+        `${head}^{tree}`,
+        '-p',
+        head,
+        '-m',
+        'Update branch',
+      )
+      git(bare, 'update-ref', `refs/heads/${task.branch}`, theirs)
+      const told = sql<{ body: string }>`
+        SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE ${`%git merge ${theirs}%`}`
+      yield* until(told, (rows) => rows.length === 1)
+      // Fetched here for it to merge, and said once however often Althar looks again.
+      assert.strictEqual(git(task.path, 'rev-parse', `refs/althar/pull-request/${task.branch}`), theirs)
+      yield* Effect.sleep(Duration.seconds(1))
+      assert.lengthOf(yield* told, 1)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -728,7 +780,7 @@ describe('what a lead commits after the person has looked', () => {
       // Back online, their Push takes it up, and nothing is held any more.
       yield* (yield* Changes).push(card?.taskId ?? '', card?.change?.localHead ?? '')
       const [after] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
-      assert.deepStrictEqual(after?.change?.pushing, { held: null })
+      assert.isNull(after?.change?.pushing?.held ?? null)
       assert.include(git(bare, 'log', '--format=%s', task.branch).split('\n'), 'Tidy up')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

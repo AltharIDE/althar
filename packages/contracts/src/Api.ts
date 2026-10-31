@@ -946,6 +946,10 @@ export const ChecksSummary = Schema.Struct({
 })
 export type ChecksSummary = typeof ChecksSummary.Type
 
+/** What a press that settled a card in Needs you did (DEV-173). */
+export const OnePressAction = Schema.Literals(['merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject'])
+export type OnePressAction = typeof OnePressAction.Type
+
 /** A task's pull request (GitLab's merge request), as last seen, in its host's words. */
 /**
  * Where a task's screenshots stand on one of its pull requests (ADR-077):
@@ -1005,7 +1009,8 @@ export const ChangeSummary = Schema.Struct({
    * Where its project's rules push the lead's commits on their own (ADR-072):
    * `held` null while those here go up as its lead's turn ends, so they are
    * nothing for the person to push; else why they wait for the person's push,
-   * in a few words. Absent where every push is the person's.
+   * in a few words. Absent where every push is the person's, as for
+   * commits made outside its lead's turn, which nothing pushes (DEV-173).
    */
   pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String) })),
   /**
@@ -3108,6 +3113,17 @@ export const Api = RpcGroup.make(
    * nothing to accept and nothing waiting on them, is done once seen.
    */
   command('SeeTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * The person settled a card in Needs you with one press where it shows, the
+   * board or the home, not its task's screen (DEV-173): kept on this computer,
+   * with whether its task went unopened since the card came in. A call's,
+   * by the call; else the task's.
+   */
+  command(
+    'SettledWithOnePress',
+    { taskId: Schema.optional(Schema.String), attentionId: Schema.optional(Schema.String), action: OnePressAction },
+    Schema.Void,
+  ),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
