@@ -94,16 +94,22 @@ coordinator may run in copies of its own
   of the home folder, the person's checkouts or the task folders but its
   folder, the mirrors, the objects its copies borrow, the toolchains and
   git's config files (never its credential store), and never outside it;
-  it loads no settings file and runs no hook. The reader rules hold its own
-  read and search tools to the same places. Claude
+  it loads no settings file and runs no hook. A command Claude Code can't
+  read itself (a `for` loop, `$((…))`, `f=$(…)`, a heredoc) still asks, and
+  Althar lets it run there without reading it
+  ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md));
+  what it can't do the sandbox refuses, with its own error. The reader rules
+  hold its own read and search tools to the same places. Claude
   Code's plan mode
   and OpenCode's plan agent would be simpler, but both refuse MCP tools.
   OpenCode has no sandbox yet, so for it the copy is the boundary.
-- Althar's reader rules are the backstop. They allow reads, searches and
+- Where no sandbox holds it, Althar's reader rules are the backstop. They allow reads, searches and
   fetches, and commands that only look, each with the flags it may take (no
   `rg --pre`, `git -c`, `sort -o`). For the coordinator they also take
   `$(…)` whose commands only look, `uptime` and the like, and `git tag`
   listing. They refuse everything else with a reason, and never ask you.
+  The reason reaches it in the refused call's own result, so no turn of its
+  own follows its reply.
 - Its only way to change anything is its tools. They issue the same commands
   the interface does: validated, recorded, idempotent, and never beyond your
   own authority.

@@ -7,9 +7,17 @@ import {
   type ProjectRulesView,
   runsOutside,
   type SandboxEdits,
+  type TallyKind,
 } from '@althar/contracts'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
-import { type CommandPlace, ProjectRules, type RestMode, type RuleCommand, type SandboxList } from '@althar/ui/screens'
+import {
+  type CommandPlace,
+  ProjectRules,
+  type RestMode,
+  type RuleCommand,
+  type SandboxList,
+  type TallyKind as KitTallyKind,
+} from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
 import { HEADING } from '../projectSettings/sections'
@@ -79,6 +87,10 @@ const KINDS = [
   RuleKind.Deploy,
   RuleKind.Outside,
 ] as const
+
+/** What a tally counts, as the kit names it: one of the kinds by its own name, or the rest by theirs. */
+const tallyKindOf = (kind: TallyKind): KitTallyKind =>
+  KINDS.find((each) => (each as string) === kind) ?? (kind as Exclude<KitTallyKind, RuleKind>)
 
 const modeOf = (permissions: ProjectRulesView['permissions']): RestMode => {
   switch (permissions) {
@@ -361,6 +373,7 @@ export function RulesSection({ model }: { model: RulesModel }) {
             onRemove: (list, value) =>
               model.change((now) => ({ sandbox: { [list]: sandboxEdited(now.sandbox.edits[list], value, 'remove') } })),
           }}
+          tally={rules.tally.map((each) => ({ ...each, kind: tallyKindOf(each.kind) }))}
         />
       )}
     </>

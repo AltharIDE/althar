@@ -336,6 +336,9 @@ export class Agents extends Context.Service<
   }
 }
 
+/** How many entries of git's config `withoutSignIns` sets by the environment: what a lead's guard adds goes after them. */
+export const SIGNED_OUT_GIT_CONFIG = 2
+
 /**
  * What an agent's environment adds so it carries none of the person's
  * sign-ins to code hosts. And a branch it makes from a remote's follows
@@ -347,7 +350,7 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GH_CONFIG_DIR: signedOut,
   GLAB_CONFIG_DIR: signedOut,
   // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
-  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',

@@ -857,7 +857,12 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 - Claude Code's, switched on for every session. A command that stays inside
   runs without asking. One that needs the network asks per host. A write
   outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to. A lead's sandbox also lets commands bind and
+  sandbox unless asked to. Where it can start (macOS; Linux with bubblewrap
+  and socat that start a namespace, outside a Flatpak), a lead's session
+  doesn't start without it, and Althar relies on it
+  ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)):
+  a command Claude Code can't read itself (a loop, `$(…)`, a heredoc, a
+  script) still asks, and Althar lets it run there without reading it. A lead's sandbox also lets commands bind and
   listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
   start a server, and a prototype's throwaway showcase server that the person
   opens from the Running pill, don't have to leave it. The setting is broader
@@ -906,6 +911,49 @@ Every network request keeps its host on the record.
 
 Installing a worktree's dependencies would have to leave it, and needn't:
 Althar does it before the lead starts ([below](#setting-up-a-worktree)).
+
+**What the sandbox holds runs; what crosses meets the rules**
+([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)).
+Where a session's sandbox holds its shell commands (the registry's `holds`:
+Claude Code's lead and coordinator, where the sandbox starts), a shell
+command that doesn't ask to leave it, and starts as none of the commands
+that run outside from the start, is allowed in every mode without the
+rules reading what it does (`runsInside`, `decideInside`). Only what the
+project said itself holds there: a command or kind it never allows, where
+the line plainly is one, is refused; what Althar can't read is refused too
+where Never lists what the boundary doesn't stop (a deploy, a named
+command); a command it asks about asks; and no one reads the keychain or
+git's stored passwords where the words show it, whose service a Mac's
+sandbox still reaches (ADR-071's trade-off). With everything allowed, a
+command the agent asks to run outside that Althar can't read is refused,
+saying to run it inside (`decideLeaving`). Where nothing holds a session (Windows, a Flatpak,
+Codex, OpenCode, a review's lead), every request meets the rules below.
+
+**Git stops what can't be undone, wherever it comes from.** Every lead's
+git but on Windows, where the rules ask first and `ps` can't show git's
+words for a pass (`guardHolds`), takes its hooks from a folder of Althar's, by the environment
+(`core.hooksPath`, `pushGuard.ts`): `pre-push` stops a push to a default
+branch, a push over commits the remote has that this one doesn't, and
+deleting a branch that isn't the task's; `reference-transaction` stops
+deleting such a branch here, or moving one so it loses commits. It says
+what it stopped and to run it plainly outside the sandbox, so Althar asks;
+once the person allows a request the rules read as one of these, the
+session has a two-minute pass naming those git commands, with the
+repository each runs in and a push's remote URL, which the hooks let
+through once, for the git whose own words (`ps`), repository and URL match. Each hook then runs
+the repository's own. It holds against a mistake: an agent that changes
+its environment gets past it.
+
+**Every ask and refusal is counted** by its kind (`tallyKindOf`: the
+project's kinds, what the rules can't read, a command the project named,
+credentials, the code host, what a reader may not do, the rest), on the
+decision (`decisions.kind`) and the card (`counted`). The project's rules
+show how each went over the last 14 days (`tally.ts`): asked and allowed,
+refused, and worked around (the agent's turn went on and a later call
+completed). What the guard or the sandbox refused, which no rule saw, is
+read from the call and counted too (`stoppedIn`): the guard's mark on any
+call, a script's that went on after it included; the sandbox's refusal on
+a call that failed.
 
 A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:

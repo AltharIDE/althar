@@ -24,7 +24,7 @@ import {
 } from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
 import { type Question, type QuestionAnswer, type QuestionField, questionFields } from './questions'
-import type { LaunchSpec, PermissionMeanings } from './registry'
+import { type LaunchSpec, type PermissionMeanings, REFUSAL_META } from './registry'
 
 /*
  * One connection to one agent over ACP (docs/architecture/03). It negotiates
@@ -75,9 +75,10 @@ export interface PermissionRequest {
 }
 
 /**
- * Althar's permission decision. A refusal by the project's rules or the coordinator is explained at the next turn
- * boundary, even when the provider's rejection carries on: the agent's own message says only that the person refused
- * (a session's `refusals` says how). No `decidedBy` is the person's answer on a card.
+ * Althar's permission decision. A refusal by the project's rules or the coordinator is explained in the refused call's
+ * own result where the agent reads it there (`PermissionMeanings.reasonInBand`), else at the next turn boundary, even
+ * when the provider's rejection carries on: the agent's own message says only that the person refused (a session's
+ * `refusals` says how). No `decidedBy` is the person's answer on a card.
  */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
@@ -467,13 +468,20 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         settled = true
         const { decision } = decided
         const chosen = answerFor(request.options, decision, options.permissions)
-        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy !== undefined)
+        // Said with the refusal where the agent reads it there, so no turn of its own follows the reply (ADR-071); else after.
+        const inBand = decision === 'reject' && !chosen.stopsTurn && options.permissions?.reasonInBand === true
+        const explain = decision === 'reject' && !inBand && (chosen.stopsTurn || decided.decidedBy !== undefined)
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
           ...(explain ? { resumeWith: refusalSaid(request.title, decided), stops: chosen.stopsTurn } : {}),
         })
-        return chosen.optionId === null ? CANCELLED : { outcome: { outcome: 'selected', optionId: chosen.optionId } }
+        return chosen.optionId === null
+          ? CANCELLED
+          : {
+              outcome: { outcome: 'selected', optionId: chosen.optionId },
+              ...(inBand ? { _meta: { [REFUSAL_META]: refusalSaid(request.title, decided) } } : {}),
+            }
       }
       // A decision that fails is a rejection: nothing runs that Althar did not allow.
       return Effect.runPromiseWith(context)(options.onPermission(request), { signal: dropped.signal })

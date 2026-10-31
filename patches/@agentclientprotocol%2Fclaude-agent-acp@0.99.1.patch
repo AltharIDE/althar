@@ -30,3 +30,20 @@ index a86e0a1f3fec00bd1d021f84ba5c50a0fb02ba77..fbe9f379d81bc8301de2ca0178b680cf
                          break;
                      }
                      case "conversation_reset": {
+diff --git a/dist/permissions/response.js b/dist/permissions/response.js
+--- a/dist/permissions/response.js
++++ b/dist/permissions/response.js
+@@ -12,8 +12,12 @@
+         toolUseID,
+         durableChangeSet,
+     });
++    // Althar: a refusal says why in the refused call's own result, from the answer's _meta, rather than in a turn after the reply.
++    const refusal = response._meta?.["althar/refusal"];
+     return {
+-        permissionResult,
++        permissionResult: permissionResult.behavior === "deny" && typeof refusal === "string" && refusal !== ""
++            ? { ...permissionResult, message: refusal.slice(0, 8000) }
++            : permissionResult,
+         ...(selection.contextResetMode ? { contextResetMode: selection.contextResetMode } : {}),
+     };
+ }

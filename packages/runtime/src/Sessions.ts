@@ -15,6 +15,7 @@ import {
   type PermissionRequest,
   type Question,
   type SessionEvent,
+  type SessionOptions,
   type StopReport,
 } from '@althar/provider-adapters'
 import {
@@ -39,7 +40,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { thisDevice } from './device'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
-import { Agents, type AgentEntry, RuntimeConfig } from './Config'
+import { Agents, type AgentEntry, RuntimeConfig, SIGNED_OUT_GIT_CONFIG } from './Config'
 import { refusalOf, runSkills, skillsCapabilities, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
@@ -67,6 +68,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
@@ -1512,6 +1514,7 @@ export class Sessions extends Context.Service<
             sessionId: running.sessionId,
             deliveryId: turnId,
             folders: foldersOf(thread),
+            sandboxed: running.requestContext.sandbox !== undefined,
           })
           // What it was saying between turns ends here: what follows belongs after this turn's input.
           yield* running.settleBetween
@@ -2034,7 +2037,7 @@ export class Sessions extends Context.Service<
                 )
               : { skills: undefined }
           const { skills } = setUp
-          const sessionOptions = {
+          const transportOptions = {
             ...(untrusted ? { untrusted } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
           }
@@ -2044,10 +2047,20 @@ export class Sessions extends Context.Service<
             projectId: thread.projectId,
             taskId: thread.role === 'coordinator' ? null : thread.taskId,
           })
+          // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
+          const guarded =
+            thread.role === 'task' && !reads && guardHolds
+              ? guardEnv({
+                  sessionId,
+                  taskBranch: thread.branch,
+                  defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
+                  count: SIGNED_OUT_GIT_CONFIG,
+                })
+              : {}
           const transport = entry.transport(
             cwdOf(thread),
-            { ...accounts.env(account), [WORK]: work },
-            untrusted || skills !== undefined ? sessionOptions : undefined,
+            { ...accounts.env(account), [WORK]: work, ...guarded },
+            untrusted || skills !== undefined ? transportOptions : undefined,
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
@@ -2111,6 +2124,16 @@ export class Sessions extends Context.Service<
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
+          const sessionOptions: SessionOptions | undefined = untrusted
+            ? { untrusted, ...(offline ? { offline } : {}) }
+            : thread.role === 'coordinator'
+              ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
+              : upFront === undefined
+                ? undefined
+                : { sandbox: upFront }
+          // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
+          const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
+          let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
@@ -2123,7 +2146,7 @@ export class Sessions extends Context.Service<
             Effect.gen(function* () {
               const connection = yield* connect({
                 transport,
-                onPermission: (request) => permissions.decide(requestContext, request),
+                onPermission: (request) => permissions.decide(held, request),
                 permissions: definition.permissions,
                 ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
@@ -2154,18 +2177,9 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted || thread.role === 'coordinator' || upFront !== undefined || skills !== undefined
-                          ? {
-                              ...(untrusted
-                                ? { untrusted, ...(offline ? { offline } : {}) }
-                                : thread.role === 'coordinator'
-                                  ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
-                                  : upFront === undefined
-                                    ? {}
-                                    : { sandbox: upFront }),
-                              ...(skills === undefined ? {} : { skills: skills.folder }),
-                            }
-                          : undefined,
+                        sessionOptions === undefined && skills === undefined
+                          ? undefined
+                          : { ...sessionOptions, ...(skills === undefined ? {} : { skills: skills.folder }) },
                       ),
                     }),
               })
@@ -2250,9 +2264,21 @@ export class Sessions extends Context.Service<
 
           // Where its launch made it a temp folder of its own, the rules read `$TMPDIR` in its commands as that.
           const temp = connection.process?.temp
-          if (temp !== undefined && requestContext.rules.role === 'task')
-            requestContext = { ...requestContext, rules: { ...requestContext.rules, context: { ...requestContext.rules.context, temp } } }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, skills, upFront }
+          if (temp !== undefined && held.rules.role === 'task')
+            held = { ...held, rules: { ...held.rules, context: { ...held.rules.context, temp } } }
+          return {
+            sessionId,
+            entry,
+            account,
+            thread,
+            connection,
+            agent,
+            scope,
+            revokeTools: tools.revoke,
+            requestContext: held,
+            skills,
+            upFront,
+          }
         })
 
       type Connected = Effect.Success<ReturnType<typeof connectSession>>
@@ -2376,7 +2402,13 @@ export class Sessions extends Context.Service<
           )
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
-          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
+          const between = recorder({
+            projectId: thread.projectId,
+            threadId: thread.threadId,
+            sessionId,
+            folders: foldersOf(thread),
+            sandboxed: requestContext.sandbox !== undefined,
+          })
           const heard = yield* betweenTurns(between, scope)
           running.settleBetween = heard.close
           // A turn that already started records itself; between turns, this one does.
@@ -3002,7 +3034,7 @@ export class Sessions extends Context.Service<
                 )
                 .join(
                   '\n',
-                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, what stays inside it runs too, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); write such a command plainly, without \`$?\` or \`eval\`, since one your agent can't read asks, and then only what only looks is allowed: a loop, an \`if\` or a variable you set runs then where every command in it only looks, or fetches a copy's \`origin\` where your sandbox holds it. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
+                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then, and reaches no network. Where your sandbox holds your commands to your working folder, anything that stays inside it runs, loops, \`$(…)\` and scripts included, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); a write outside your folder, the network or a socket fails there, saying so, so go another way. Elsewhere only what only looks runs: a loop, an \`if\` or a variable you set runs where every command in it only looks; write it plainly, without \`$?\` or \`eval\`. Anything you write there is thrown away. Althar refuses anything that would install packages, start a server, reach the network or change anything beyond your copies, for your role, not the person. To run the project, use run_project.`,
           [
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,

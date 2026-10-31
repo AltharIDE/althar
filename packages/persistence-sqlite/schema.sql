@@ -685,7 +685,7 @@ CREATE TABLE decisions (
   action_digest TEXT,
   supersedes_decision_id TEXT,
   decided_at TEXT NOT NULL CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  consumed_at TEXT CHECK (consumed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  consumed_at TEXT CHECK (consumed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kind TEXT,
   CHECK ((permission_request_id IS NOT NULL) + (attention_request_id IS NOT NULL) + (finding_id IS NOT NULL) = 1),
   CHECK ((outcome IN ('allow', 'reject')) = (scope IS NOT NULL)),
   CHECK (agent_option_id IS NULL OR permission_request_id IS NOT NULL),

@@ -62,3 +62,8 @@
 .keep {
   white-space: nowrap;
 }
+
+/* Each kind's line of how it went lately. */
+.tallyLine {
+  display: block;
+}
