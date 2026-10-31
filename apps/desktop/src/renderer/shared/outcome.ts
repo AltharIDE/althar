@@ -87,7 +87,10 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
     story,
     // Full size, each is called by what it shows.
     shots: now.flatMap((one): Array<GalleryShot & { readonly key: string }> => {
-      const piece = pieceOf({ kind: 'screenshot', caption: one.caption, picture: one.picture, command: null, exit: null, text: null, dropped: 0 }, one.id)
+      const piece = pieceOf(
+        { kind: 'screenshot', caption: one.caption, picture: one.picture, command: null, exit: null, text: null, dropped: 0 },
+        one.id,
+      )
       return piece.form === 'picture' ? [{ ...piece.shot, id: one.id, key: one.key, caption: one.caption, label: one.caption }] : []
     }),
     checked: rounds.findLast((rest) => rest.length > 0) ?? [],

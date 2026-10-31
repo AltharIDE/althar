@@ -407,7 +407,11 @@ export interface Client {
   /** Marks a task's draft pull request ready for review: in a task of several repositories, the one at `url`. */
   readonly markReady: (taskId: string, url?: string) => Promise<void>
   /** Puts the task's screenshots, as its Outputs show them, in the comment on its pull request at `url`, without the views left out (ADR-076). */
-  readonly postScreenshots: (input: { readonly taskId: string; readonly url: string; readonly leftOut: ReadonlyArray<string> }) => Promise<void>
+  readonly postScreenshots: (input: {
+    readonly taskId: string
+    readonly url: string
+    readonly leftOut: ReadonlyArray<string>
+  }) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */

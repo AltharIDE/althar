@@ -302,7 +302,8 @@ export const makeHttp = (options: HttpOptions): Http => {
             signal,
             ...(init.manual === true ? { redirect: 'manual' as const } : {}),
             ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-            ...(init.raw === undefined ? {} : { body: init.raw.bytes }),
+            // A copy on an ArrayBuffer of its own, which `fetch` takes as a body wherever it runs.
+            ...(init.raw === undefined ? {} : { body: Uint8Array.from(init.raw.bytes) }),
           }),
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })

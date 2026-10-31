@@ -85,7 +85,10 @@ describe('a task’s screenshots on its pull request, from its Outputs', () => {
   })
 
   it('keeps the sheet open, saying what went wrong, where posting failed', async () => {
-    show(task({ screenshots: standing() }), vi.fn(async () => 'GitHub refused (403): Resource not accessible by integration.'))
+    show(
+      task({ screenshots: standing() }),
+      vi.fn(async () => 'GitHub refused (403): Resource not accessible by integration.'),
+    )
     await userEvent.click(screen.getByRole('button', { name: /^Post to PR #1/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Post 2 to PR #1' }))
     expect(await screen.findByText('GitHub refused (403): Resource not accessible by integration.')).toBeTruthy()
@@ -93,7 +96,10 @@ describe('a task’s screenshots on its pull request, from its Outputs', () => {
   })
 
   it('says where they stand: changed since, synced, and what is left out', () => {
-    show(task({ screenshots: standing({ standing: 'changed', changed: 1, leftOut: ['A2'], commentUrl: `${URL}#issuecomment-9` }) }), vi.fn())
+    show(
+      task({ screenshots: standing({ standing: 'changed', changed: 1, leftOut: ['A2'], commentUrl: `${URL}#issuecomment-9` }) }),
+      vi.fn(),
+    )
     expect(screen.getByRole('button', { name: /Update PR #1 · 1 changed/ }).textContent).toContain('1 left out')
   })
 
