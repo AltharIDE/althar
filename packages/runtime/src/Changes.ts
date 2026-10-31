@@ -2696,14 +2696,7 @@ export class Changes extends Context.Service<
               head: tip,
             })
             // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
-            yield* gitWithin(
-              60_000,
-              repository.root,
-              'push',
-              '--',
-              remote.slice(0, at),
-              `${tip}:refs/heads/${remote.slice(at + 1)}`,
-            ).pipe(
+            yield* gitWithin(60_000, repository.root, 'push', '--', remote.slice(0, at), `${tip}:refs/heads/${remote.slice(at + 1)}`).pipe(
               Effect.catchTag('GitFailed', (failed) =>
                 Effect.flatMap(hostOfRemotes(remotesOf(repository)), (host) => refusal(taskId, remote, failed, host?.name)),
               ),
