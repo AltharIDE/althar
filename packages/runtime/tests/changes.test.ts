@@ -506,7 +506,7 @@ describe('a task that ends in a pull request', () => {
         const [queued] = yield* until(cards(projectId), (all) => all[0]?.change?.queued === true)
         assert.deepInclude(queued?.change, { state: 'open', queued: true })
         assert.strictEqual(queued?.phase, 'ready')
-        assert.include(yield* said, "PR #1 is in the merge queue for main. It merges once the queue's checks pass.")
+        assert.include(yield* said, 'PR #1 is in the merge queue for main.')
         // Heard again, it isn't said again.
         yield* changes.refresh(taskId)
         assert.lengthOf(yield* inQueue, 1)
@@ -520,7 +520,7 @@ describe('a task that ends in a pull request', () => {
         yield* changes.refresh(taskId)
         const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
         assert.strictEqual(back?.change?.state, 'open')
-        assert.include(yield* said, "The merge queue took PR #1 out: its checks failed there. It's back in Needs you, to merge again.")
+        assert.include(yield* said, 'The merge queue took PR #1 out: its checks failed.')
         // Put in again from outside, and merged by the queue, it settles.
         github.enqueueByHand(number)
         yield* changes.refresh(taskId)
