@@ -1,7 +1,10 @@
-import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { readFileSync } from 'node:fs'
 
-import { makeGitHub } from '../src/github'
+import { assert, describe, it } from '@effect/vitest'
+import { Duration, Effect } from 'effect'
+import { TestClock } from 'effect/testing'
+
+import { makeGitHub, NO_QUEUE_KEPT_MS } from '../src/github'
 import type { Check, Repository } from '../src/model'
 import { type Route, stubFetch } from './stub'
 
@@ -233,6 +236,72 @@ describe('GitHub answers that leave things out', () => {
         activity.reviews.map((review) => [review.id, review.verdict, review.body]),
         [['3', 'approved', '']],
       )
+    }),
+  )
+
+  it.effect('reads a pull request put in its merge queue on GitHub’s site as queued, as althar#444 was', () =>
+    Effect.gen(function* () {
+      // GitHub's REST answer for althar#444 as it sat in main's merge queue, recorded 2026-10-31: nothing in it says so.
+      const recorded = JSON.parse(readFileSync(new URL('fixtures/pull-444-queued.json', import.meta.url), 'utf8')) as Record<
+        string,
+        unknown
+      >
+      const althar: Repository = { ...repository, path: ['AltharIDE', 'althar'] }
+      const { host, sent } = github([
+        ['GET', `${API}/repos/AltharIDE/althar/pulls/444`, { json: recorded }],
+        // GraphQL's, in GitHub's schema: its branch has a queue, and it is in it.
+        [
+          'POST',
+          `${API}/graphql`,
+          {
+            json: {
+              data: { repository: { pullRequest: { isMergeQueueEnabled: true, isInMergeQueue: true, timelineItems: { nodes: [] } } } },
+            },
+          },
+        ],
+      ])
+      assert.deepInclude(yield* host.change(althar, 444, { queue: true }), { state: 'open', target: 'main', queued: true, leftQueue: null })
+      assert.lengthOf(
+        sent.filter((request) => request.method === 'POST'),
+        1,
+      )
+      // A branch with a queue is asked each time.
+      yield* host.change(althar, 444, { queue: true })
+      assert.lengthOf(
+        sent.filter((request) => request.method === 'POST'),
+        2,
+      )
+    }),
+  )
+
+  it.effect('asks about a merge queue once a while per branch where there is none, and not at all while it knows so', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', /\/pulls\/1[23]$/, { json: pull() }],
+        [
+          'POST',
+          `${API}/graphql`,
+          {
+            json: {
+              data: { repository: { pullRequest: { isMergeQueueEnabled: false, isInMergeQueue: false, timelineItems: { nodes: [] } } } },
+            },
+          },
+        ],
+      ])
+      const asked = () => sent.filter((request) => request.method === 'POST').length
+      // Learned once, for main: no queue, so the read says nothing of one.
+      assert.notProperty(yield* host.change(repository, 12, { queue: true }), 'queued')
+      assert.strictEqual(asked(), 1)
+      // Every pull request to main after, for the while it's kept, costs nothing more.
+      yield* host.change(repository, 12, { queue: true })
+      yield* host.change(repository, 13, { queue: true })
+      yield* TestClock.adjust(Duration.millis(NO_QUEUE_KEPT_MS - 1))
+      yield* host.change(repository, 12, { queue: true })
+      assert.strictEqual(asked(), 1)
+      // Past it, it is asked again, in case the queue was turned on since.
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* host.change(repository, 12, { queue: true })
+      assert.strictEqual(asked(), 2)
     }),
   )
 })
