@@ -638,7 +638,7 @@
   .rp-task .by, .rp-task .drw .dt span { display: none; }
 }
 
-/* A phone: today above, Althar below, each pair side by side. */
+/* A phone: today above, Althar below; today's two windows one over the other, as on a wide screen, so each reads on its own. */
 @container (max-width: 559px) {
   .rp-task { font-size: max(10px, 2.7cqw); }
   .rp-task .half {
@@ -649,12 +649,19 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas: 'hd hd hd' 'a gp b' 'ft ft ft';
   }
-  .rp-task .before { top: 7.6cqw; bottom: auto; height: 59cqw; }
-  .rp-task .after { top: 73.6cqw; bottom: auto; height: 59cqw; }
+  .rp-task .before {
+    top: 7.6cqw;
+    bottom: auto;
+    height: 104cqw;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) 8cqw minmax(0, 1fr) auto;
+    grid-template-areas: 'hd' 'a' 'gp' 'b' 'ft';
+  }
+  .rp-task .after { top: 118.6cqw; bottom: auto; height: 59cqw; }
   .rp-task .rule {
     left: 12cqw;
     right: 12cqw;
-    top: 70.2cqw;
+    top: 115.2cqw;
     bottom: auto;
     width: auto;
     height: 1px;
@@ -662,8 +669,8 @@
   }
   .rp-task::before {
     background:
-      radial-gradient(60% 26% at 50% 27%, rgba(201, 130, 47, 0.085), transparent 70%),
-      radial-gradient(60% 26% at 50% 73%, rgba(43, 59, 255, 0.11), transparent 70%);
+      radial-gradient(60% 30% at 50% 32%, rgba(201, 130, 47, 0.085), transparent 70%),
+      radial-gradient(60% 18% at 50% 80%, rgba(43, 59, 255, 0.11), transparent 70%);
   }
   .rp-task .bar { padding: 0.45em 0.6em; gap: 0.4em; }
   .rp-task .bar .role { display: none; }

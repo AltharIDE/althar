@@ -2,6 +2,22 @@
 .wrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
 .frame { border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14); }
 
+/* On a phone: the lanes in a strip to the panel's edges, a lane to a screen, its neighbours peeking in from them. */
+.strip {
+  margin: 0 calc(-1 * var(--gut));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+.strip:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; border-radius: 14px; }
+.track { position: relative; }
+/* Where the strip comes to rest: a lane in the middle. */
+.snap { position: absolute; top: 0; height: 1px; scroll-snap-align: center; pointer-events: none; }
+/* The lanes' feet fade into the panel, so they read as going on. */
+.lanes { border-radius: 14px; mask-image: linear-gradient(#000 86%, transparent); }
+
 @media (max-width: 700px) {
   .wrap { margin-top: 40px; }
 }

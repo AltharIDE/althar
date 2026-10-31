@@ -15,8 +15,8 @@
   .wrap { margin-top: 32px; padding: 0; }
 }
 
-/* A phone: the drawing stands upright, with the lead above the change and the reviewer below it. */
+/* A phone: the drawing stands upright, today over Althar, today's two windows one over the other. */
 @media (max-width: 559px) {
-  .stage { aspect-ratio: 5 / 7; }
+  .stage { aspect-ratio: 100 / 185; }
 }
 
