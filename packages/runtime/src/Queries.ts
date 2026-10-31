@@ -1978,13 +1978,15 @@ export class Queries extends Context.Service<
             (yield* sql<{ state: string }>`
               SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`)[0]
               ?.state !== 'interrupted'
+          // Its round over, Althar opening its next pull request by itself: under way until it opens or can't (ADR-034).
+          const opening = yield* (yield* Changes).openingNext(taskId)
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
             // A call waiting on the person, and work under way, come before anything else (ADR-034): work sent back isn't ready
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
-            if (busy || queued || resolving !== undefined) return 'running'
+            if (busy || queued || resolving !== undefined || opening) return 'running'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
             // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-051).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'

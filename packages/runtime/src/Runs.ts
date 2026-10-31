@@ -1071,9 +1071,11 @@ export class Runs extends Context.Service<
           if (run.planId === null && !ending.publishes) {
             // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to open.
             const after = ending.here ? [] : yield* changes.unshipped(run.taskId).pipe(Effect.orElseSucceed(() => []))
-            yield* finish(run, 'succeeded')
-            yield* Effect.ignore(changes.settleIfMerged(run.taskId))
-            if (after.length === 0) return
+            if (after.length === 0) {
+              yield* finish(run, 'succeeded')
+              yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+              return
+            }
             const unsaid = addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
@@ -1089,9 +1091,15 @@ export class Runs extends Context.Service<
               WHERE n.execution_id = ${run.executionId} AND n.node_key = 'implement' AND a.state = 'succeeded'
               ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
             if ((end !== 'draft' && end !== 'ready') || last?.answered === 1) {
+              yield* finish(run, 'succeeded')
+              yield* Effect.ignore(changes.settleIfMerged(run.taskId))
               yield* unsaid
               return
             }
+            // Under way from before the round ends until it opens or can't, so its card never reads Ready in between (DEV-173).
+            yield* changes.opensNext(run.taskId, true)
+            yield* finish(run, 'succeeded').pipe(Effect.onError(() => changes.opensNext(run.taskId, false)))
+            yield* Effect.ignore(changes.settleIfMerged(run.taskId))
             // Apart: publishing takes the task's lock, which what ends the round may hold. Where it can't, the card offers it.
             return yield* Effect.forkIn(
               provide(
@@ -1101,6 +1109,7 @@ export class Runs extends Context.Service<
                       ? Effect.interrupt
                       : Effect.andThen(Effect.logWarning('Could not open the next pull request', cause), unsaid),
                   ),
+                  Effect.ensuring(Effect.andThen(changes.opensNext(run.taskId, false), Effect.ignore(touchCard(run.taskId)))),
                 ),
               ),
               scope,

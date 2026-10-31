@@ -670,6 +670,13 @@ export class Changes extends Context.Service<
     askRemotes(taskId: string): Effect.Effect<void>
     /** The commit a task's worktree was at when its branch's remote last said where that branch is, this launch; null before. */
     askedAt(worktree: string, branch: string): Effect.Effect<string | null>
+    /**
+     * Whether Althar is opening a task's next pull request by itself, a round of work ended after its last merged or closed
+     * (ADR-034): under way, not the person's, until it opens or can't. This launch only, as the opening is.
+     */
+    openingNext(taskId: string): Effect.Effect<boolean>
+    /** Says Althar is opening a task's next pull request by itself, from before its round ends (`opening`), or is done with it. */
+    opensNext(taskId: string, opening: boolean): Effect.Effect<void>
     /** Pushes a task's branch to each of its repositories' remotes, with the person's own git, up to the commits they saw. */
     pushBranch(
       taskId: string,
@@ -2531,6 +2538,7 @@ export class Changes extends Context.Service<
 
       /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
       const remotesAsked = new Map<string, string>()
+      const nextOpening = new Set<string>()
       const asking = new Set<string>()
 
       /**
@@ -6173,6 +6181,8 @@ export class Changes extends Context.Service<
             return Effect.asVoid(Effect.forkIn(provide(askRemotes(taskId)), scope))
           }),
         askedAt: (worktree, branch) => Effect.sync(() => remotesAsked.get(`${worktree} ${branch}`) ?? null),
+        openingNext: (taskId) => Effect.sync(() => nextOpening.has(taskId)),
+        opensNext: (taskId, opening) => Effect.sync(() => void (opening ? nextOpening.add(taskId) : nextOpening.delete(taskId))),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
