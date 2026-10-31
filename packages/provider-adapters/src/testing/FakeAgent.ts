@@ -288,9 +288,10 @@ export interface FakeAgentOptions {
    */
   readonly now?: () => number
   /**
-   * What a test holds it at (`holds`): a turn that takes a while, as `[review:slowly]` and `[lead:slowly]` do, goes on
-   * once the test opens its marker's hold, or the turn is stopped, and never by itself. Without, as when it runs as a
-   * process of its own, each takes its time.
+   * What a test holds it at (`holds`): a turn that takes a while, as `[review:slowly]`, `[lead:slowly]` and
+   * `[answers-after:5s]` do, goes on once the test opens its marker's hold, or the turn is stopped, and never by itself.
+   * Without, as in the app or as a process of its own, each takes its time. One that works until it is stopped, as
+   * `[lead:wait]` does, never ends by itself either way: the turn is stopped, or the test opens its hold.
    */
   readonly holds?: Holds
   /**
@@ -311,7 +312,10 @@ export interface FakeAgentOptions {
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
   readonly staysOn?: ReadonlyArray<string>
-  /** How long it takes to make a session, in milliseconds: for what happens while an agent starts. */
+  /**
+   * How long it takes to make a session, in milliseconds: for what happens while an agent starts, in the app. A test holds
+   * it with `beforeNewSession` instead, and lets it go on when it has seen what it looks for.
+   */
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
@@ -353,6 +357,8 @@ interface SessionState {
   /** Empty where the model it is on has no effort levels. */
   effort: string
   cancelled: boolean
+  /** Closed with `session/close`, or its connection gone: nothing it was still at goes on. */
+  closed: boolean
   stubborn: boolean
   abort: AbortController | undefined
   directories: number
@@ -519,9 +525,9 @@ const playStall = async (
 ): Promise<acp.PromptResponse | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const once = (marker: string) => session.markers.has(marker) && !session.played.has(marker) && session.played.add(marker) !== undefined
-  /** Waits until cancelled, or, stubborn, until the test is long over. */
+  /** Waits until cancelled or closed, or, stubborn, until closed: it never ends by itself. */
   const hang = async (stubborn = false) => {
-    for (let waited = 0; (stubborn || !session.cancelled) && waited < 30_000; waited += 10) await pause(10)
+    while ((stubborn || !session.cancelled) && !session.closed) await pause(10)
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
@@ -602,8 +608,8 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, for five seconds at most, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its
- * second round;
+ * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round: never ending
+ * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
@@ -805,6 +811,15 @@ const takesAWhile = async (session: SessionState, marker: string, milliseconds: 
   else while (!session.cancelled && !held.opened(marker)) await pause(10)
 }
 
+/**
+ * Works until it is stopped: until its turn is cancelled or its session closed, or, where the test holds it
+ * (`FakeAgentOptions.holds`), the test opens the marker's hold. Never by itself, so no test waits out a time of the fake's
+ * for a turn to end: one that wants it over stops it, or opens its hold.
+ */
+const untilStopped = async (session: SessionState, marker: string) => {
+  while (!session.cancelled && !session.closed && session.holds?.opened(marker) !== true) await pause(10)
+}
+
 const playRole = async (
   session: SessionState,
   text: string,
@@ -835,8 +850,9 @@ const playRole = async (
     }
     if (available.has('report_review')) {
       // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
-      if (session.markers.has('[review:wait]') || (session.markers.has('[review:wait-later]') && text.startsWith('Round '))) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+      const later = session.markers.has('[review:wait-later]') && text.startsWith('Round ')
+      if (session.markers.has('[review:wait]') || later) {
+        await untilStopped(session, later ? '[review:wait-later]' : '[review:wait]')
         return 'Stopped reviewing.'
       }
       if (session.markers.has('[review:slowly]')) await takesAWhile(session, '[review:slowly]', 3_000)
@@ -1057,7 +1073,7 @@ const playRole = async (
       if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
         return "Couldn't settle the conflict: both sides change the same lines."
       if (merging !== undefined && session.markers.has('[lead:resolve-wait]')) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        await untilStopped(session, '[lead:resolve-wait]')
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
@@ -1065,7 +1081,7 @@ const playRole = async (
       const hold = session.markers.has('[lead:resolve-hold]')
       if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
         await resolveIn(session.cwd, merging)
-        if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (hold) await untilStopped(session, '[lead:resolve-hold]')
         if (fix) {
           await commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
           return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
@@ -1136,14 +1152,14 @@ const playRole = async (
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         await commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
         await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
-        if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fixHold) await untilStopped(session, '[lead:fix-hold]')
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         await commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        await untilStopped(session, '[lead:wait]')
         return 'Stopped working.'
       }
       return undefined
@@ -1343,7 +1359,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             _meta: { steering: { supported: true } },
           }
     })
-    .onRequest(acp.methods.agent.session.new, async ({ params }) => {
+    .onRequest(acp.methods.agent.session.new, async ({ params, client }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
       await options.beforeNewSession?.()
       created += 1
@@ -1353,6 +1369,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         model: 'small',
         effort: variants ? '' : 'medium',
         cancelled: false,
+        closed: false,
         stubborn: false,
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
@@ -1380,6 +1397,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         leftForGood: false,
       }
       sessions.set(sessionId, session)
+      // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
+      connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
       return {
         sessionId,
         configOptions: configOptions(session),
@@ -1417,6 +1436,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       return { configOptions: configOptions(session) }
     })
     .onRequest(acp.methods.agent.session.close, ({ params }) => {
+      const closing = sessions.get(params.sessionId)
+      if (closing !== undefined) closing.closed = true
       sessions.delete(params.sessionId)
       options.closed?.(params.sessionId)
       return {}
@@ -1513,11 +1534,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
       // nothing. Cancelled, it stops. The last one said is the one it goes by: what the person said in a turn that failed comes
-      // again ahead of what they say next, and it answers the newest, as an agent would once its API is back.
+      // again ahead of what they say next, and it answers the newest, as an agent would once its API is back. Where the test
+      // holds it (`holds`), each wait lasts until the test opens the marker as written (`[answers-after:5s]`) instead.
       const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
+        const held = session.holds
         const waitOut = async (ms: number) => {
-          for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
+          if (ms > 0 && held !== undefined) while (!session.cancelled && !session.closed && !held.opened(slowly[0])) await pause(10)
+          else for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
         }
         await waitOut(Number(slowly[2]) * 1000)
         if (session.cancelled) return { stopReason: 'cancelled' }
@@ -2038,7 +2062,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.slow:
           await say('Starting')
-          for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+          await untilStopped(session, scenarios.slow)
           return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }
         case scenarios.usageLimit:
           throw new acp.RequestError(-32603, USAGE_LIMIT_MESSAGE)

@@ -1,10 +1,10 @@
-import { mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { adapterNode, type AgentDefinition, signOut } from '@althar/provider-adapters'
+import { adapterNode, type AgentDefinition, removeFully, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -217,7 +217,9 @@ export class Accounts extends Context.Service<
        * Signs the account out with its agent's own tool, in its home, then
        * deletes the folder. Where the agent didn't sign it out, the folder
        * stays, so no sign-in is left with nothing pointing at it: Claude
-       * Code's Keychain item is named after the folder's path.
+       * Code's Keychain item is named after the folder's path. Deleting it is
+       * the work, which the record says was done, so a folder that stays, after
+       * a moment's tries where the sign-out tool still holds it, fails it.
        */
       const forget = (account: Account, folder: string) =>
         Effect.gen(function* () {
@@ -227,8 +229,11 @@ export class Accounts extends Context.Service<
             return yield* new SignOutFailed({
               line: `${definition.home.variable}=${quoted(folder)} ${logout.line}`,
             })
-          yield* Effect.sync(() => rmSync(folder, { recursive: true, force: true }))
+          yield* deleted(folder)
         })
+
+      /** Deletes an account's folder, or dies saying it couldn't, as removing the account can't be said to have happened. */
+      const deleted = (folder: string) => Effect.orDie(removeFully(folder))
 
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
@@ -364,9 +369,7 @@ export class Accounts extends Context.Service<
               // Anyway, as when the agent's tool is gone: the folder goes even where its sign-out didn't happen.
               if (made !== undefined)
                 yield* forget(account, made).pipe(
-                  Effect.catchTag('SignOutFailed', (failed) =>
-                    options.anyway === true ? Effect.sync(() => rmSync(made, { recursive: true, force: true })) : Effect.fail(failed),
-                  ),
+                  Effect.catchTag('SignOutFailed', (failed) => (options.anyway === true ? deleted(made) : Effect.fail(failed))),
                 )
               yield* sql.withTransaction(
                 Effect.gen(function* () {

@@ -44,7 +44,7 @@ Test valuable behavior: invariants, boundaries, invalid input, failures, recover
 
 Use strict TypeScript, type-aware linting, formatting, dependency and import-boundary rules, and build checks. Keep warnings and suppressions visible and justified.
 
-CI must block merge and release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
+CI must block release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. It blocks merge on those it runs before merge, and one that runs only after merge still gates every release ([ADR-074](docs/decisions/074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md)). A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
 
 ### Reproducibility
 
@@ -65,6 +65,8 @@ Consider performance in every design. Avoid unnecessary work, blocking operation
 Make failures diagnosable without leaking private data. Use actionable errors and, where appropriate, structured diagnostics with enough context to trace an operation across boundaries. Handle empty, slow, offline, partial, and interrupted states deliberately.
 
 Keep each failure to the smallest thing it belongs to. Where work covers independent things, one that fails says so on its own and the rest carry on; a loop survives the round or item it couldn't handle; fail a whole operation only when its parts can't stand apart. Combinators that run many things, such as Effect's `forEach` and `all`, stop at the first failure, so catch each item where its failure is its own. A failure kept this way still leaves a trace: log it, and report what the person didn't cause and can't put right where it is kept, at the edge, never what they did ([ADR-047](docs/decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+
+Removing what was there only for a while, such as a temporary folder or the folder a process ran in, is best effort: it never fails, or loses, the work it followed. A folder can stay held for a moment after the process that used it has gone, so try again briefly, then log what still stays and leave it. Where the removal is itself the work, it says when something stayed.
 
 ## Documentation and decisions
 

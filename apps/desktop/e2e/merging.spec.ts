@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,28 +10,27 @@ import { connectGitHub, launch, openFirstProject, say } from './support'
 
 /*
  * Merged in its task, and Back pressed at once, a task's card is out of
- * Needs you on the board, saying Merging, while GitHub merges it (three
- * seconds here, as the real one takes), and in Settled once GitHub says it
- * merged. That GitHub's answer settles it, not Althar listening to the pull
+ * Needs you on the board, saying Merging, while GitHub merges it (held
+ * here until the board has shown it, as the real one takes a few seconds),
+ * and in Settled once GitHub says it merged. That GitHub's answer settles it, not Althar listening to the pull
  * request again, is the runtime's to show, where a test says when a read
  * comes (changes.test.ts: though reading it back still says open); here the
  * window shows what the runtime says. The screenshots are this change's
  * evidence (test-results/merging-*.png).
  */
 
-/** How long the fake GitHub takes to merge, as the real one does: time for the board to show it merging. */
-const MERGE_TAKES = 3_000
-
 test('a task merged in its task view settles on the board as soon as GitHub merges it, merging meanwhile', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const remote = join(home, 'api.git')
+  // The fake GitHub's merge waits for this file, which the spec writes once the board has shown it merging.
+  const merged = join(home, 'merge-goes-on')
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
   execFileSync('git', ['remote', 'add', 'origin', 'https://github.test/meridian/api.git'], { cwd: repo })
   execFileSync('git', ['push', '-q', remote, 'main'], { cwd: repo })
   const { electronApp, page } = await launch(home, {
     ALTHAR_FAKE_REMOTE: remote,
-    ALTHAR_FAKE_LATENCY: JSON.stringify({ merge: MERGE_TAKES }),
+    ALTHAR_FAKE_HELD: JSON.stringify({ merge: merged }),
   })
   const title = 'Cap parallel agents per machine'
   try {
@@ -55,6 +54,7 @@ test('a task merged in its task view settles on the board as soon as GitHub merg
     await expect(merging.getByText('Merging')).toBeVisible()
     await expect(lane('Needs you').getByText(title)).toHaveCount(0)
     await merging.screenshot({ path: 'test-results/merging-card.png', animations: 'disabled', scale: 'css' })
+    writeFileSync(merged, '')
 
     // Put in Settled, it travels there from Running and shows when it lands (ADR-068): it is there when placed.
     await expect(lane('Settled').getByText(title)).toBeAttached()

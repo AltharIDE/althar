@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
-import { spawnOwned } from '@althar/provider-adapters'
+import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
 import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -253,13 +253,11 @@ export class Launches extends Context.Service<
         }),
       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not close the cards of earlier runs', cause)))
       // A branch's copy an earlier launch left goes with its run: none outlives Althar.
-      yield* Effect.ignore(
-        Effect.try(() => {
-          if (!existsSync(config.worktreeRoot)) return
-          for (const project of readdirSync(config.worktreeRoot))
-            rmSync(join(config.worktreeRoot, project, BRANCH_COPIES), { recursive: true, force: true })
-        }),
+      const projects = yield* Effect.try(() => (existsSync(config.worktreeRoot) ? readdirSync(config.worktreeRoot) : [])).pipe(
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
       )
+      for (const project of projects)
+        yield* cleanUp(join(config.worktreeRoot, project, BRANCH_COPIES), 'copies of branches earlier runs ran from')
 
       const shown = (launch: Launch): ShownLaunch => ({
         id: launch.id,
@@ -585,13 +583,17 @@ export class Launches extends Context.Service<
               ),
             )
 
-      /** Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried again. */
+      /**
+       * Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried
+       * again, and one that stays is logged and left (`cleanUp`).
+       */
       const removeCopy = (copy: string) =>
         Effect.gen(function* () {
-          for (let tries = 0; tries < 3 && existsSync(copy); tries += 1) {
-            yield* Effect.ignore(Effect.try(() => rmSync(copy, { recursive: true, force: true })))
+          for (let tries = 0; tries < 2 && existsSync(copy); tries += 1) {
+            yield* Effect.ignore(removeFully(copy))
             if (existsSync(copy)) yield* Effect.sleep(Duration.millis(300))
           }
+          yield* cleanUp(copy, 'a copy of a branch a run ran from')
         })
 
       /**

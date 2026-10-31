@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
+import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -30,7 +31,7 @@ import { callTool, repository, runtime, until } from './support'
  * writing to its lead opens it again.
  */
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+const withQueries = (agents: FakeAgentOptions = {}) => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agents)))
 
 const open = Effect.gen(function* () {
   const projects = yield* Projects
@@ -466,8 +467,9 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled', () =>
-    Effect.gen(function* () {
+  it.live('ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled', () => {
+    const lead = holds()
+    return Effect.gen(function* () {
       const tasks = yield* Tasks
       const sessions = yield* Sessions
       const sql = yield* SqlClient.SqlClient
@@ -502,6 +504,12 @@ describe('settling a task that isn’t a change', () => {
         (gone) => gone.length === 1,
       )
       yield* write('And the v2 ones? [lead:slowly]')
+      // At work on it, as a round: then it goes on, and the round ends.
+      yield* until(
+        sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state = 'running'`,
+        (rows) => (rows[0]?.n ?? 0) === 1,
+      )
+      lead.open('[lead:slowly]')
       yield* roundsEnded(1)
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
       assert.deepInclude(yield* row(question.taskId), { state: 'open', settledAt: null })
@@ -514,6 +522,6 @@ describe('settling a task that isn’t a change', () => {
       const back = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
       assert.isUndefined(back.keptAt)
       assert.strictEqual((yield* row(question.taskId)).state, 'open')
-    }).pipe(Effect.provide(withQueries())),
-  )
+    }).pipe(Effect.provide(withQueries({ holds: lead })))
+  })
 })

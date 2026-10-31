@@ -20,6 +20,7 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
+    "test:performance": "vp test bench --run",
     "verify": "bun run check && bun run test:coverage && bun run build"
   },
   "dependencies": {
