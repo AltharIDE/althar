@@ -44,7 +44,7 @@ Test valuable behavior: invariants, boundaries, invalid input, failures, recover
 
 Use strict TypeScript, type-aware linting, formatting, dependency and import-boundary rules, and build checks. Keep warnings and suppressions visible and justified.
 
-CI must block merge and release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
+CI must block release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. It blocks merge on those it runs before merge, and one that runs only after merge still gates every release ([ADR-074](docs/decisions/074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md)). A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
 
 ### Reproducibility
 
