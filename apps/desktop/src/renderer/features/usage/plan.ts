@@ -92,11 +92,12 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAcco
 export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[] } => {
   const agents: PlanAgent[] = []
   const byAgent = new Map<string, AccountUsage[]>()
-  // The accounts that had windows when they were read, though every one may have reset since.
+  // The accounts that had windows when they were read, though every one may have reset since: by the runtime's clock, which
+  // then sends none, or by the window's own, which leaves out what has reset since it was sent.
   const wasRead = new Set<string>()
   for (const read of usage?.accounts ?? []) {
     const account = current(read, now)
-    if (read.windows.length > 0) wasRead.add(account.accountId)
+    if (read.resetSince || read.windows.length > 0) wasRead.add(account.accountId)
     byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
   }
   for (const [agentId, accounts] of byAgent) {

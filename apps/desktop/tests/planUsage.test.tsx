@@ -271,6 +271,13 @@ describe('what the window says of a plan', () => {
         ['Claude Code', 'Not read since reset', [message]],
       ])
     }
+    // As the runtime sends it once every window has reset by its own clock: none of them, and that they reset.
+    const sent = planUsage([
+      { ...claudeBoth, windows: [], resetSince: true, fault: { kind: 'expired', message: 'Its sign-in has expired.' } },
+    ])
+    expect(
+      planOf(sent, after).agents.map((agent) => [agent.unread, agent.accounts.map((account) => [account.age, account.fault])]),
+    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Its sign-in has expired.']]]])
     // Signed out as well, it can't run: said as it is, not as unread.
     const [out] = planOf(planUsage([{ ...claudeBoth, fault: { kind: 'sign_in_again', message: 'Sign in.' } }]), after).agents
     expect([out?.stopped, out?.unread]).toEqual(['Signed out', undefined])

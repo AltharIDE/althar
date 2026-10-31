@@ -383,14 +383,15 @@ export class PlanUsage extends Context.Service<
             if (definition.id === 'claude-code') {
               if (check.paidBy === 'key') return yield* keep(account.id, key)
               // A session said its windows lately: fresher than the endpoint, which limits how often it is asked. Unless it holds
-              // a window no session has said as lately, as a model's own week only the endpoint says: that is read again.
+              // a window no session has said as lately, or one whose reset has passed, as a model's own week only the endpoint
+              // says: that is read again, no more often than the reader asks, and waiting as long as the endpoint says.
               const now = yield* Clock.currentTimeMillis
               const lately = now - Duration.toMillis(HEARD_LATELY)
-              const current = (before?.windows ?? []).filter((window) => !past(window.resetsAt, now))
+              const windows = before?.windows ?? []
               if (
                 before?.source === 'acp_extension' &&
-                current.length > 0 &&
-                current.every((window) => Date.parse(window.observedAt) > lately)
+                windows.length > 0 &&
+                windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
               )
                 return
               return yield* fromEndpoint('claude-oauth', 'anthropic', unfound)
@@ -460,6 +461,7 @@ export class PlanUsage extends Context.Service<
               const paidBy = mine?.paidBy ?? check.paidBy
               const key = paidBy === 'key'
               const noReading = mine?.noReading ?? null
+              const windows = shown(key ? [] : (mine?.windows ?? []), now)
               // No window and no fault yet, where there is a reading to have, is a fault too: the agent has not been read yet.
               const fault =
                 mine?.fault ??
@@ -475,9 +477,11 @@ export class PlanUsage extends Context.Service<
                 source: mine?.source ?? null,
                 observedAt: mine === undefined ? null : readAt(mine, now),
                 plan: mine?.plan ?? null,
-                windows: shown(key ? [] : (mine?.windows ?? []), now),
+                windows,
                 fault,
                 noReading,
+                // Read with windows, every one of which has reset since: said so, as no window shown isn't the same as none read.
+                resetSince: !key && (mine?.windows.length ?? 0) > 0 && windows.length === 0,
               })
             }
           }

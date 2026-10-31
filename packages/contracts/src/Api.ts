@@ -116,6 +116,11 @@ export const AccountUsage = Schema.Struct({
   fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
   /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
   noReading: Schema.NullOr(Schema.String),
+  /**
+   * Every window last read of it has reset since, so none is in `windows`: how much is used is unknown until it is read
+   * again. `observedAt` and `fault` still say how old the last reading is and why there is no newer one.
+   */
+  resetSince: Schema.Boolean,
 })
 export type AccountUsage = typeof AccountUsage.Type
 
