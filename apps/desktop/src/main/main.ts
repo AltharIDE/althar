@@ -19,6 +19,7 @@ import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
+import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
@@ -109,6 +110,12 @@ const FOCUS_SETTLE = 120
 
 let runtime: UtilityProcess | undefined
 let quitting = false
+/* The person has said Quit, or nothing is at work: the runtime may be asked to stop. */
+let quitConfirmed = false
+/* Quit asked what it stops and is waiting on the person: another Quit meanwhile is their yes. */
+let quitAsking: { readonly settle: (answer: QuitAnswer) => void } | undefined
+/* The person chose to keep working in the background: closing the last window doesn't quit, until a window opens again. */
+let keepingOn = false
 let dictation: ReturnType<typeof startDictation> | undefined
 
 /*
@@ -133,6 +140,11 @@ if (fakeMicrophone) {
  * them puts its own catcher in.
  */
 const quiet = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIET === '1'
+/*
+ * The end-to-end tests close the app with work still running, which Quit would ask about and wait on: they quit without
+ * asking, unless a spec of Quit's own says otherwise (ALTHAR_QUIT_WITHOUT_ASKING=0).
+ */
+const quitWithoutAsking = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIT_WITHOUT_ASKING === '1'
 if (quiet) Notification.isSupported = () => false
 /* The end-to-end tests' PostHog, on this computer (ALTHAR_FAKE_POSTHOG): usage data goes there, under a key of its own. Packaged builds leave this out. */
 const fakePostHog = __ALTHAR_TEST_HOOKS__ ? (process.env.ALTHAR_FAKE_POSTHOG ?? '') : ''
@@ -316,6 +328,8 @@ const recordUsage = (said: unknown) => void usage.then((sender) => sender.record
 
 /* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
 const names = factsAsker('names')
+/* What Quit would stop, asked of the runtime as the person quits. */
+const works = factsAsker('work')
 let namesKnown: HiddenNames = { projects: [], repositories: [] }
 const namesNow = async () => {
   let read: Pick<RuntimeFacts, 'projects' | 'repositories'> | null = null
@@ -529,6 +543,7 @@ const startRuntime = () => {
     if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
+    if (message.type === 'work') return works.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
@@ -555,6 +570,7 @@ const startRuntime = () => {
     awake.working(false)
     facts.gone()
     names.gone()
+    works.gone()
     updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
@@ -665,13 +681,14 @@ const openWindow = () => {
     window.setIgnoreMouseEvents(true)
   }
   windows.add(window)
+  keepingOn = false
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
   window.on('closed', () => {
     windows.delete(window)
-    // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open.
-    if (windows.size === 0 && process.platform !== 'darwin') app.quit()
+    // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
+    if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) app.quit()
   })
   window.webContents.on('did-finish-load', () => connect(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
@@ -963,12 +980,83 @@ app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && !keepingOn) app.quit()
 })
+
+/*
+ * Quitting with work under way says what it will stop and asks (DEV-118): the
+ * runtime counts the leads and reviews in a turn, the runs going and what
+ * agents left running, and the window asks the person to quit, to keep it all
+ * working in the background (where the edge keeps Althar in reach), or to
+ * carry on. A Quit asked again while the question is open is their yes. With
+ * nothing at work it quits as it always did.
+ */
+const QUIT_ASK_WAIT = 2_000
+
+const askRuntimeWork = () =>
+  Promise.race([works.ask(runtime, null), new Promise<null>((resolve) => setTimeout(() => resolve(null), QUIT_ASK_WAIT))])
+
+/** Asks in the window, and waits for the answer: the window closing is a Cancel. */
+const askInWindow = (question: QuitQuestion, settle: Promise<QuitAnswer>) => {
+  const { window, fresh } = bringForward()
+  const send = () => window.webContents.send('althar:quit-ask', question)
+  if (fresh || window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+  else send()
+  return new Promise<QuitAnswer>((resolve) => {
+    const gone = () => resolve('cancel')
+    window.once('closed', gone)
+    ipcMain.once('althar:quit-answer', (_event, answer: unknown) => resolve(isQuitAnswer(answer) ? answer : 'cancel'))
+    void settle.then((answer) => {
+      window.removeListener('closed', gone)
+      resolve(answer)
+    })
+  }).finally(() => {
+    ipcMain.removeAllListeners('althar:quit-answer')
+    if (!window.isDestroyed()) window.webContents.send('althar:quit-ask', null)
+  })
+}
+
+const askToQuit = async () => {
+  if (quitAsking !== undefined) return quitAsking.settle('quit')
+  let settle: (answer: QuitAnswer) => void = () => undefined
+  let early: QuitAnswer | undefined
+  const asked = new Promise<QuitAnswer>((resolve) => {
+    settle = (answer) => {
+      early ??= answer
+      resolve(answer)
+    }
+  })
+  quitAsking = { settle }
+  try {
+    const work = workIn(await askRuntimeWork())
+    let answer: QuitAnswer
+    if (early !== undefined) answer = early
+    else if (work === null || idle(work)) answer = 'quit'
+    else {
+      const place = await edge?.state()
+      const background = place !== undefined && (place.place === 'island' || place.tray)
+      answer = await askInWindow({ work, background, update: updates?.glance().ready ?? null }, asked)
+    }
+    if (answer === 'quit') {
+      quitConfirmed = true
+      app.quit()
+    } else if (answer === 'background') {
+      keepingOn = true
+      for (const window of windows) window.close()
+    }
+  } finally {
+    quitAsking = undefined
+  }
+}
 
 // Quitting asks the runtime to stop every session and record it, then waits for it, within a limit.
 app.on('before-quit', (event) => {
   if (quitting || runtime === undefined) return
+  if (!quitConfirmed && !quitWithoutAsking) {
+    event.preventDefault()
+    void askToQuit()
+    return
+  }
   event.preventDefault()
   quitting = true
   dictation?.stop()

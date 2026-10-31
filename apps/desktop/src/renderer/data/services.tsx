@@ -71,6 +71,13 @@ export interface UpdateHost {
   readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
 
+/** Quit with work under way (DEV-118): the main process asks what to do, and hears the answer. */
+export interface QuitHost {
+  /** Calls `listener` with what quitting would stop, or null once it is answered, until the returned function is called. */
+  readonly onAsk: (listener: (question: unknown) => void) => () => void
+  readonly answer: (answer: 'quit' | 'background' | 'cancel') => void
+}
+
 /**
  * What the window's own buttons ask the main process to do where the system draws none (window-chrome).
  */
@@ -229,6 +236,8 @@ export interface Host {
   readonly reportProblem?: (about: ProblemAbout) => void
   /** How the dialog reaches the main process; absent with `reportProblem`. */
   readonly report?: ReportHost
+  /** Quit with work under way asks the person; absent where the page can't be asked, as the edge's. */
+  readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
 }
