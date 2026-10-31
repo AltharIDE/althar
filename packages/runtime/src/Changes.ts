@@ -3281,7 +3281,8 @@ export class Changes extends Context.Service<
        */
       const bringTogether = (link: LinkRow, head: string | null, url: string) =>
         Effect.gen(function* () {
-          if (head === null || head === (yield* sentTo(link.projectId, url))) return
+          // Only a commit, as the card tells one moved: a head that is none can't be fetched to merge.
+          if (head === null || !/^[0-9a-f]{40,64}$/.test(head) || head === (yield* sentTo(link.projectId, url))) return
           const workspace = yield* worktreeOf(link.taskId, url)
           if (workspace === undefined || (yield* onHead(workspace.path, head)) || (yield* roundUnderWay(link.taskId))) return
           const sql = yield* SqlClient.SqlClient
