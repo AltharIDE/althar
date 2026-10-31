@@ -4,12 +4,14 @@ import { Schema } from 'effect'
  * A git command failed: what git wrote to stderr, never the command line in
  * its place. Where it wrote nothing, how it ended says why: its exit code, the
  * signal that stopped it, or that it ran past its time and Althar stopped it
- * (`timedOut`, after `timeout` milliseconds).
+ * (`timedOut`, after `timeout` milliseconds). `reason` is for a process or
+ * output limit Althar itself stopped, never something git wrote.
  */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   args: Schema.Array(Schema.String),
   cwd: Schema.String,
   stderr: Schema.String,
+  reason: Schema.optional(Schema.String),
   code: Schema.optional(Schema.Number),
   signal: Schema.optional(Schema.String),
   timedOut: Schema.optional(Schema.Boolean),

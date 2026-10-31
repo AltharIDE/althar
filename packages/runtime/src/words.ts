@@ -218,6 +218,8 @@ export const words = (
         const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
         const said = lastLine(text(error, 'stderr'))
         if (said !== '') return sentence(`${command} didn't work: ${said}`)
+        const reason = text(error, 'reason')
+        if (reason !== '') return sentence(`${command} couldn't complete: ${reason}`)
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')

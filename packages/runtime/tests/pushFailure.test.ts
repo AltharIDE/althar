@@ -17,7 +17,7 @@ import { words } from '../src/words'
  * command line in its place.
  */
 
-const failed = (stderr: string, ended: Partial<Pick<GitFailed, 'code' | 'signal' | 'timedOut' | 'timeout'>> = { code: 128 }) =>
+const failed = (stderr: string, ended: Partial<Pick<GitFailed, 'reason' | 'code' | 'signal' | 'timedOut' | 'timeout'>> = { code: 128 }) =>
   new GitFailed({ args: ['push', '--', 'origin', `${'8ac5a185'.repeat(5)}:refs/heads/fix-it`], cwd: '/repo', stderr, ...ended })
 
 /** What the person reads for a push that failed so: its reason, its sentence, and the Details under it. */
@@ -136,6 +136,12 @@ describe('a push that failed', () => {
       detail: 'Enumerating objects: 5, done.\nerror: unexpected disconnect\nStopped by SIGKILL.',
     })
     assert.deepInclude(pushed(failed('', { timedOut: true, timeout: 10_000 })), { why: 'unanswered' })
+  })
+
+  it('keeps Althar’s own stop reason separate from git’s stderr', () => {
+    assert.deepInclude(pushed(failed('', { reason: 'git said more than Althar reads.' })), {
+      detail: 'git said more than Althar reads.',
+    })
   })
 })
 

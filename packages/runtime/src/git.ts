@@ -92,6 +92,7 @@ type GitProcessResult = {
   readonly error: (Error & { readonly code?: unknown }) | null
   readonly stdout: string
   readonly stderr: string
+  readonly reason?: string
   readonly code?: number
   readonly signal?: string
   readonly timedOut?: true
@@ -148,11 +149,15 @@ const spawnGit = (
     if (ended) return
     ended = true
     const stderr = Buffer.concat(err).toString()
-    // What it said before it was stopped, then why it was.
+    const reason =
+      timeoutMilliseconds !== undefined
+        ? undefined
+        : (why ?? (error !== null && typeof error.code === 'string' ? error.message : undefined))
     resolveResult({
       error,
       stdout: Buffer.concat(out).toString(),
-      stderr: why === null ? stderr : `${stderr.trim()}\n${why}`.trim(),
+      stderr,
+      ...(reason === undefined ? {} : { reason }),
       ...(code === undefined ? {} : { code }),
       ...(signal == null ? {} : { signal }),
       ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
@@ -227,7 +232,8 @@ const run = (
             new GitFailed({
               args: [...args],
               cwd,
-              stderr: result.stderr.trim() || result.error.message,
+              stderr: result.stderr.trim(),
+              ...(result.reason === undefined ? {} : { reason: result.reason }),
               ...(result.code === undefined ? {} : { code: result.code }),
               ...(result.signal === undefined ? {} : { signal: result.signal }),
               ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
