@@ -1,13 +1,14 @@
 name: stress
 
-# A pull request's new and changed tests, run many times over with no retry: twenty times each on Linux and ten on
-# Windows for a few, fewer for many (packages/testing/src/stress.ts), and its changed end-to-end specs up to five times.
-# A race that shows one run in ten fails here, on the pull request that brought it, rather than on main later, where
-# the retry would only hide it. In the merge queue (queue.yml) it gates the merge.
+# A pull request's new and changed tests, run many times over with no retry, on Linux: twenty times each for a few,
+# fewer for many (packages/testing/src/stress.ts), and its changed end-to-end specs up to five times. A race that shows
+# one run in ten fails here, on the pull request that brought it, rather than on main later, where the retry would only
+# hide it. Not on a draft, which runs it once it is ready for review; and not in the merge queue, since the pull
+# request ran it on the same tests. On Windows, nightly.yml runs the tests main changed that day many times over.
 on:
-  # From queue.yml, for a pull request in the merge queue.
-  workflow_call:
   pull_request:
+    # And when a draft is ready for review.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       [
         'packages/*/tests/**',
@@ -27,23 +28,22 @@ concurrency:
 
 jobs:
   plan:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       linux: ${{ steps.plan.outputs.linux }}
-      windows: ${{ steps.plan.outputs.windows }}
       specs: ${{ steps.plan.outputs.specs }}
       any-linux: ${{ steps.plan.outputs.any-linux }}
-      any-windows: ${{ steps.plan.outputs.any-windows }}
       any-specs: ${{ steps.plan.outputs.any-specs }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      # What the pull request changes: against its base, or in the queue against the entry ahead of it, or main.
+      # What the pull request changes, against its base.
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE"
           git diff --name-only --diff-filter=AMR "$BASE" HEAD > "$RUNNER_TEMP/changed"
@@ -68,43 +68,6 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - env:
           PLAN: ${{ needs.plan.outputs.linux }}
-        run: bun packages/testing/src/stress.ts run
-
-  windows:
-    needs: plan
-    if: needs.plan.outputs.any-windows == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 40
-    defaults:
-      run:
-        shell: bash
-    env:
-      # As in desktop.yml: the repositories the tests make write LF and compare it.
-      GIT_CONFIG_COUNT: '1'
-      GIT_CONFIG_KEY_0: core.autocrlf
-      GIT_CONFIG_VALUE_0: 'false'
-    steps:
-      # As in desktop.yml: a temporary folder with no short name.
-      - run: |
-          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            ~/AppData/Local/electron/Cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
-      - run: bun install --frozen-lockfile
-      - env:
-          PLAN: ${{ needs.plan.outputs.windows }}
         run: bun packages/testing/src/stress.ts run
 
   e2e:

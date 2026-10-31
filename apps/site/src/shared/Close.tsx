@@ -5,8 +5,10 @@ import { INSTALL, LINKS } from '../content/facts'
 import { useDownload } from '../lib/download'
 import { OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
-import { SHIFTS } from './Bar'
 import s from './Close.module.css'
+
+/** Where the shifts list lives. */
+const SHIFTS = '/shifts'
 
 /**
  * The download and the repository, as both developer pages end. The download

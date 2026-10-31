@@ -2,10 +2,12 @@ import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
+import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
+import { pushDetailOf, secondsOf } from './pushFailure'
 import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
@@ -60,7 +62,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on this computer's PATH.`
+        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
         : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
@@ -206,8 +208,18 @@ export const words = (
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
+        const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
         const said = lastLine(text(error, 'stderr'))
-        return sentence(`git ${Array.isArray(args) ? String(args[0] ?? '') : ''} didn't work${said === '' ? '' : `: ${said}`}`)
+        if (said !== '') return sentence(`${command} didn't work: ${said}`)
+        // git said nothing: what Althar knows of how it ended.
+        if (fieldOf(error, 'timedOut') === true) {
+          const timeout = fieldOf(error, 'timeout')
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+        }
+        const signal = text(error, 'signal')
+        if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
+        const code = fieldOf(error, 'code')
+        return typeof code === 'number' ? `${command} failed with code ${code}, without saying why.` : `${command} didn't work.`
       }
       case 'CommandIdReused':
         return 'That request was already used for something else. Try again.'
@@ -223,11 +235,32 @@ export const words = (
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
+        const host = text(error, 'host')
+        const where = host === '' ? remote : host
+        if (why === 'forbidden')
+          return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`
+        if (why === 'protected')
+          return `${host === '' ? `The branch is protected, so ${remote} didn’t take the push.` : `The branch is protected on ${host}, so it didn’t take the push.`} Push to another branch or a fork, or ask its owners to let you push to it.`
+        if (why === 'unreachable')
+          return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
+        if (why === 'unanswered')
+          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+        if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
+        // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
+        if (host !== '')
+          return `${host} didn’t accept your sign-in, so nothing was pushed. Sign git in to ${host} from a terminal, then try again.`
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }
       case 'CantMerge': {
         const detail = text(error, 'detail')
-        return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
+        const files = fieldOf(error, 'files')
+        const said = {
+          detail,
+          into: text(error, 'into') === '' ? 'the default branch' : text(error, 'into'),
+          files: Array.isArray(files) ? files.filter((file): file is string => typeof file === 'string') : [],
+        }
+        return cantMerge[text(error, 'why') as CantMerge['why']]?.(said) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
@@ -240,7 +273,7 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -273,7 +306,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'CliSignedOut':
-        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this computer.`
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
       case 'CliUnanswered':
         return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
@@ -287,7 +320,24 @@ export const words = (
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
-  if (reason === 'PushRefused') return { reason, message, why: text(error, 'why') }
+  if (reason === 'PushRefused')
+    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+  // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
+  if (reason === 'GitFailed') {
+    const code = fieldOf(error, 'code')
+    const timeout = fieldOf(error, 'timeout')
+    const detail =
+      text(error, 'stderr').trim() === ''
+        ? ''
+        : pushDetailOf({
+            stderr: text(error, 'stderr'),
+            ...(typeof code === 'number' ? { code } : {}),
+            ...(text(error, 'signal') === '' ? {} : { signal: text(error, 'signal') }),
+            ...(fieldOf(error, 'timedOut') === true ? { timedOut: true } : {}),
+            ...(typeof timeout === 'number' ? { timeout } : {}),
+          })
+    return { reason, message, ...(detail === '' ? {} : { detail }) }
+  }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
@@ -323,25 +373,40 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
-/** Why Althar won't merge a task here, by reason. */
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
+
+/** What a refused merge says of itself: the branch, and the files in the way. */
+interface MergeSaid {
+  readonly detail: string
+  readonly into: string
+  readonly files: ReadonlyArray<string>
+}
+
+/** Why Althar won't merge a task here, by reason: in a few words, a couple of files by name. */
 const cantMerge = {
   pull_request: () => 'The task has a pull request: merge it there.',
   settled: () => 'The task is settled, so its branch stays as it is.',
   changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
-  conflicts: (files: string) =>
-    `It conflicts with the default branch, in ${files}. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.`,
-  resolving: (files: string) =>
-    `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
-  busy: (where: string) =>
-    `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
-  submodule: (where: string) =>
-    `The merge moves the submodule at ${where}, which has changes not committed or isn’t at the commit the default branch has for it. Commit or put them away, or bring it along (git submodule update), then merge again.`,
-  unreadable: (detail: string) =>
+  conflicts: ({ into, files, detail }) => `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}.`,
+  resolving: ({ into, files, detail }) =>
+    `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}. The lead is resolving it.`,
+  busy: ({ into, files }) =>
+    files.length > 0
+      ? `Your ${into} checkout has uncommitted changes to ${fewOf(files)}.`
+      : `Your ${into} checkout has changes in the way.`,
+  submodule: ({ files, detail }) => `Submodule ${files[0] ?? detail} has uncommitted changes, or isn’t at the commit recorded for it.`,
+  unreadable: ({ detail }) =>
     `Althar couldn’t read the default branch’s checkout, or a submodule the merge moves, so nothing was merged. Where, and what git said:\n${detail}`,
-  untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
-  moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
-  missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
-} as const satisfies Record<CantMerge['why'], (detail: string) => string>
+  untracked: ({ into, files }) =>
+    `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
+  moved: ({ detail }) => `${detail} moved while Althar was merging, so nothing was merged. Merge again.`,
+  missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+} as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {

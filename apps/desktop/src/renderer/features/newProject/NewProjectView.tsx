@@ -1,8 +1,9 @@
 import { useState } from 'react'
 
+import { keys, modKey } from '@althar/ui'
 import { NewProject } from '@althar/ui/screens'
 
-import { device, platform } from '../../shared/device'
+import { device } from '../../shared/device'
 import { codeHostOf } from '../../shared/remotes'
 import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
@@ -23,7 +24,7 @@ export const text = {
     found: `On ${device.this}`,
     foundLike: (name: string) => `On ${device.this}, named like ${name}`,
     more: (count: number) => `${count} more on ${device.this}`,
-    createKbd: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter',
+    createKbd: modKey(keys.enter),
   }),
 }
 

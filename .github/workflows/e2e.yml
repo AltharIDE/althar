@@ -1,8 +1,9 @@
 name: e2e
 
 # The desktop app's end-to-end run: the built app, with the fake agent, in four parts by file, each on a machine of its
-# own (about seven minutes each, against twenty-five as one). The merge queue runs it for a change to the app or what it
-# builds on, so a change that breaks a spec doesn't reach main; post-merge.yml runs it again, for the release.
+# own (about seven minutes each, against twenty-five as one). desktop.yml runs it for a change that reaches the app, on
+# the pull request, so a change that breaks a spec fails there, and again in the merge queue, on main as it will be;
+# post-merge.yml once more, for the release.
 on:
   workflow_call:
   workflow_dispatch:
@@ -44,6 +45,8 @@ jobs:
       # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
       # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
       - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
       - env:
           SHARD: ${{ matrix.shard }}
         run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard="$SHARD"'

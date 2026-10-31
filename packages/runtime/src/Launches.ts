@@ -10,6 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { RuntimeConfig } from './Config'
 import { copyAt, freshCopy } from './coordinatorFolder'
 import { bringBackThen } from './bringBack'
+import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
@@ -504,7 +505,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'The project has no repository on this computer to run.'
+                            ? `The project has no repository on ${thisDevice()} to run.`
                             : 'The task has no worktree here to run.',
                       })
                     const kept = yield* keptOf(input.projectId)
@@ -516,7 +517,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'Its repository has no copy on this computer to run it in.'
+                            ? `Its repository has no copy on ${thisDevice()} to run it in.`
                             : 'The task has no worktree of its repository here to run it in.',
                       })
                     // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
@@ -739,7 +740,7 @@ export class Launches extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const places = yield* placesOf(input.projectId, null, input.repository)
             if (places.length === 0)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'The project has no repository on this computer to run.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run.` })
             const kept = yield* keptOf(input.projectId)
             const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
             if (input.runnableId !== undefined && asked === undefined)
@@ -751,7 +752,7 @@ export class Launches extends Context.Service<
                 : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
                   places[0])
             if (place === undefined)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` })
             const { binding } = place
             const key = input.ref.kind === 'branch' ? `branch:${input.ref.name.trim()}` : `pull:${input.ref.which.trim()}`
             return yield* startLocks.withLock(
@@ -894,7 +895,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this computer to keep a way to run.',
+                message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
@@ -955,7 +956,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused(
                 places.length === 0
-                  ? { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' }
+                  ? { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` }
                   : {
                       why: 'which',
                       message: `Say which repository it runs in, as repository: ${places.map((place) => place.binding.name).join(', ')}.`,
