@@ -722,6 +722,34 @@ describe('the board', () => {
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
+  it('says in Up next, on a board with nothing on it, that work comes from the coordinator, and puts the person in its composer', async () => {
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: [], calls: [], settledTotal: 0 })) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const next = within(await screen.findByRole('region', { name: 'Up next' }))
+    expect(next.getByText('Nothing lined up yet')).toBeTruthy()
+    expect(next.getByText('Tell the coordinator what you want done. The tasks it plans line up here.')).toBeTruthy()
+    // Only Up next says so; the other lanes stay empty boxes.
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
+    await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
+    // The conversation comes in beside the board, with the composer ready to write in.
+    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
+    expect(screen.getByRole('region', { name: 'The project’s work' })).toBeTruthy()
+  })
+
+  it('says nothing in an empty Up next while there is other work on the board', async () => {
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () =>
+        board({ tasks: [task({ taskId: 't2', threadId: 'th2', title: 'Mine', slug: 'mine', phase: 'running' })], calls: [] }),
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const next = within(await screen.findByRole('region', { name: 'Up next' }))
+    expect(next.queryByText('Nothing lined up yet')).toBeNull()
+  })
+
   it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {
     const from = { id: 'auto1', name: 'Morning review' }
     const { client } = fakeClient({
@@ -1942,7 +1970,7 @@ describe('a ready card’s next step, done from the card', () => {
     const model = useBoard('p1')
     return (
       <BoardView
-        lanes={lanesOf(model.board ?? board({ tasks: [], calls: [] }))}
+        lanes={lanesOf(model.board ?? board({ tasks: [], calls: [], settledTotal: 0 }))}
         agents={agents}
         now={NOW}
         onOpen={onOpen}
