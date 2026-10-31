@@ -261,6 +261,21 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
   })
 
+  it('posts a task’s screenshots to its pull request by itself once switched on, off until then', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const post = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Post screenshots to pull requests automatically',
+    })
+    expect(post.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(post)).toBe(
+      'A task’s Outputs screenshots go in one comment on its pull request, updated as they change. Off, you post them from Outputs.',
+    )
+    await userEvent.click(post)
+    expect(post.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', postScreenshots: true }))
+  })
+
   it('lets changes to issues apply without a card once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()

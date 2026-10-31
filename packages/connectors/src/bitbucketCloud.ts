@@ -438,7 +438,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {

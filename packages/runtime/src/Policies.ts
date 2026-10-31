@@ -74,6 +74,12 @@ export const ProjectRules = Schema.Struct({
    */
   pushCommits: Schema.optional(Schema.Boolean),
   /**
+   * Whether a task's screenshots go up to its open pull request on their
+   * own, in one comment kept as its Outputs show them (ADR-077), rather than
+   * as the person posts them. Off without it.
+   */
+  postScreenshots: Schema.optional(Schema.Boolean),
+  /**
    * How a task's branch and its pull request's title are named, by a pattern
    * (`@althar/contracts`' names): the person's own, over what each
    * repository's docs say. Without one, the docs', else Althar's own.
@@ -189,6 +195,9 @@ export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolve
 
 /** Whether a revision's rules push a lead's commits on their own (ADR-072): they do unless the person turned it off. */
 export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits ?? true
+
+/** Whether a revision's rules post a task's screenshots to its pull request on their own (ADR-077): not unless the person turned it on. */
+export const postsScreenshots = (rules: ProjectRules): boolean => rules.postScreenshots === true
 
 /** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
 export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>

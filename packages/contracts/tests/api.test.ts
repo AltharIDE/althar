@@ -616,6 +616,7 @@ describe('the API', () => {
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
+              PostScreenshots: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
               GetProjectNotes: () => Effect.succeed([]),

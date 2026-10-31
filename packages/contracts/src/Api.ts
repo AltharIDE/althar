@@ -707,6 +707,8 @@ export const ProjectRulesView = Schema.Struct({
   resolveConflicts: Schema.Boolean,
   /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-072). */
   pushCommits: Schema.Boolean,
+  /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
+  postScreenshots: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
@@ -997,6 +999,24 @@ export const ChecksSummary = Schema.Struct({
 export type ChecksSummary = typeof ChecksSummary.Type
 
 /** A task's pull request (GitLab's merge request), as last seen, in its host's words. */
+/**
+ * Where a task's screenshots stand on one of its pull requests (ADR-077):
+ * none posted yet; posted, and as Outputs shows them now; or posted, with so
+ * many changed since, or gone or new. `synced` where the project's rules
+ * post them on their own as they change. The views the person left out of
+ * it, by key (`screenshotsNow`), stay out whoever posts. The comment, once
+ * there is one, and why the last try failed, where it did.
+ */
+export const ScreenshotsOnChange = Schema.Struct({
+  standing: Schema.Literals(['unposted', 'posted', 'changed']),
+  changed: Schema.Number,
+  synced: Schema.Boolean,
+  leftOut: Schema.Array(Schema.String),
+  commentUrl: Schema.NullOr(Schema.String),
+  failed: Schema.NullOr(Schema.String),
+})
+export type ScreenshotsOnChange = typeof ScreenshotsOnChange.Type
+
 export const ChangeSummary = Schema.Struct({
   product: Product,
   number: Schema.Number,
@@ -1054,6 +1074,12 @@ export const ChangeSummary = Schema.Struct({
       onPullRequest: Schema.NullOr(Schema.Number),
     }),
   ),
+  /**
+   * Where the task's screenshots stand on it (ADR-077): the one comment that
+   * shows them, as Outputs does. Absent where its host takes no pictures, or
+   * it isn't open.
+   */
+  screenshots: Schema.optional(ScreenshotsOnChange),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -3542,6 +3568,13 @@ export const Api = RpcGroup.make(
   /** Marks the task's draft pull request ready for review. */
   command('MarkReady', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /**
+   * Puts the task's screenshots, as its Outputs show them now, in one comment
+   * on its pull request at `url`, or writes that comment anew (ADR-077):
+   * without the views `leftOut` names, which stay out of it from then on,
+   * whoever posts. Fails, saying why, where its host takes no pictures.
+   */
+  command('PostScreenshots', { taskId: Schema.String, url: Schema.String, leftOut: Schema.Array(Schema.String) }, Schema.Void),
+  /**
    * Adds an account to an agent: the folder a grant names, as another tool
    * made it, or, without one, a folder Althar makes, to sign in to.
    */
@@ -3599,6 +3632,8 @@ export const Api = RpcGroup.make(
       resolveConflicts: Schema.optional(Schema.Boolean),
       /** Turned on, what each open task's lead committed and left waiting goes up now, not at its next turn's end. */
       pushCommits: Schema.optional(Schema.Boolean),
+      /** Turned on, each open task's screenshots go up to its pull request now, not when they next change. */
+      postScreenshots: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
