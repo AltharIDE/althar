@@ -1316,3 +1316,18 @@ CREATE TABLE "projects" (
   tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL),
   tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))
 ) STRICT;
+
+CREATE TABLE pull_request_pictures (
+  link_id TEXT PRIMARY KEY NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  comment_id TEXT,
+  comment_url TEXT,
+  shown TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(shown)),
+  earlier TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(earlier)),
+  left_out TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(left_out)),
+  uploads TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(uploads)),
+  posted_at TEXT CHECK (posted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  failed TEXT,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  FOREIGN KEY (link_id, project_id) REFERENCES external_links (id, project_id)
+) STRICT;

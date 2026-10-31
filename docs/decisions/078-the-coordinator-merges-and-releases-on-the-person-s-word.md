@@ -1,4 +1,4 @@
-# ADR-077: The coordinator merges and releases on the person's word, and does what can be undone itself
+# ADR-078: The coordinator merges and releases on the person's word, and does what can be undone itself
 
 - **Status:** Accepted, to build for 0.7.0 ([Build](#build-for-070))
 - **Date:** 2026-10-31
@@ -61,7 +61,7 @@
     ([On the code host](#on-the-code-host)). This amends ADR-011 and
     ADR-058.
   - **On every code host Althar supports,** GitHub, GitLab, Bitbucket Cloud
-    and Bitbucket Data Center, as ADR-078 asks. Where a host lacks
+    and Bitbucket Data Center, as ADR-079 asks. Where a host lacks
     something, Althar stands in with what the host has, and where neither
     can, the tool says so and links the host's own button
     ([On every code host](#on-every-code-host)).
@@ -80,7 +80,7 @@
   - **Edge cases are settled by rule,** and what nobody foresaw ends in a
     line in the chat, not in something done ([Edge cases](#edge-cases)).
   - **The build is fourteen tasks, for 0.7.0** ([Build](#build-for-070)),
-    beside ADR-078's six.
+    beside ADR-079's six.
 - **Alternatives considered:**
   - **A standing release task's lead,** compared
     [below](#the-coordinator-not-a-standing-task).
@@ -104,7 +104,7 @@
     writes, each a commit to a branch, showed how easily one path is missed.
     Families of paths, and a test against the host's published description
     of its API, catch the next one.
-  - **GitHub first, the other hosts later:** ADR-078 settles that a feature
+  - **GitHub first, the other hosts later:** ADR-079 settles that a feature
     ships for every host that can have it.
 - **Trade-off:**
   - **Steering.** In a turn the person started, what the coordinator reads
@@ -360,7 +360,7 @@ whoever opened it.
 ## On every code host
 
 What this ADR builds, it builds for GitHub, GitLab, Bitbucket Cloud and
-Bitbucket Data Center (ADR-078). Where a host lacks something, Althar stands
+Bitbucket Data Center (ADR-079). Where a host lacks something, Althar stands
 in with what the host has. Where neither can, the tool says so in the host's
 words and links the host's own button, which is the person's press.
 
@@ -435,7 +435,7 @@ words and links the host's own button, which is the person's press.
   Althar's record, so all of this works whichever of the ten agents runs
   the coordinator (doc 03). Only Claude Code's sandbox holds its commands
   (ADR-071); on another agent every command meets Althar's rules, as now,
-  until ADR-078's task 4.
+  until ADR-079's task 4.
 
 ### The gated call's lists on the other hosts
 
@@ -616,7 +616,7 @@ comes:
 | Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Althar's tools are the one way to the host, which is what lets the gate hold |
 | A rerun reaches the host's own CI only: Actions' jobs, GitLab's jobs, and now Bitbucket Pipelines', whole | `connectors/src/github.ts:867-872`, `gitlab.ts:719-724`, `bitbucketCloud.ts:598` | Kept | No host can run another service's; Bitbucket Data Center's builds are all another's |
 | *New:* the gated call can't change the repository's content, make a status or a check run, submit or dismiss a review, or start a workflow off the default branch | [On the code host](#on-the-code-host) | Added | A change is always a task, and CI's and a review's gates stay as they are |
-| *New:* what a host lacks is stood in for, or said with a link to the host's own button; never a no-op that looks done | [On every code host](#on-every-code-host) | Added | ADR-078 |
+| *New:* what a host lacks is stood in for, or said with a link to the host's own button; never a no-op that looks done | [On every code host](#on-every-code-host) | Added | ADR-079 |
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | News brings what it would have fetched for |
 | Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The record and the review |
@@ -674,6 +674,6 @@ In order:
 1. **First, side by side:** 1, 2, 3 and 4. None waits on another.
 2. **Then:** 5, 6, 7 and 8.
 3. **Then:** 10, 11, 12 and 13.
-4. **Then:** 14, beside ADR-078's tasks 1, 2 and 4.
-5. **Then:** ADR-078's tasks 3, 5 and 6.
+4. **Then:** 14, beside ADR-079's tasks 1, 2 and 4.
+5. **Then:** ADR-079's tasks 3, 5 and 6.
 6. **Last:** 9, which is 0.7.0's own release.

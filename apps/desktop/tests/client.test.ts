@@ -327,6 +327,7 @@ describe('the client', () => {
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
+          PostScreenshots: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
           GetProjectNotes: () => Effect.die('unused'),

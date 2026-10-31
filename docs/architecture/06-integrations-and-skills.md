@@ -186,24 +186,24 @@ service's model.
 A feature built for one code host or tracker is built for every one that can
 have it, in the same release. Where a service lacks it, Althar stands in with
 what the service has, and where neither can, it says so and why
-([ADR-078](../decisions/078-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+([ADR-079](../decisions/079-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
 The feature is written against the model, adds its clause to the contract
 suite, and is turned off in the adapter's capabilities where it can't be had.
 What isn't alike, as read on 31 October 2026:
 
 | What | Where it's missing | Why | What follows |
 | --- | --- | --- | --- |
-| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-078, task 1 |
-| Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-077, task 1 |
+| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-079, task 1 |
+| Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-078, task 1 |
 | Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
-| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-077, task 5, with an errand standing in, one merge at a time into each branch |
+| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-078, task 5, with an errand standing in, one merge at a time into each branch |
 | Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
-| A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-077, task 8, publishing as each host does |
+| A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-078, task 8, publishing as each host does |
 | Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
-| The gated call's writes | GitLab, Bitbucket Cloud and Data Center | Not built | ADR-077, task 14 |
-| Moving an issue to started (`starts`) | GitHub's and GitLab's issues | Not built: GitLab's statuses where the server has them, GitHub's project Status field, or a label the project's notes name | ADR-078, task 2 |
-| Priority | GitHub's and GitLab's issues, Trello | No field of their own: a label the project's notes name, or GitHub's organization issue fields | ADR-078, task 3 |
-| Project or milestone | Jira, Trello | Not built: Jira Cloud moves an issue to another project, Trello a card to another board | ADR-078, task 3 |
+| The gated call's writes | GitLab, Bitbucket Cloud and Data Center | Not built | ADR-078, task 14 |
+| Moving an issue to started (`starts`) | GitHub's and GitLab's issues | Not built: GitLab's statuses where the server has them, GitHub's project Status field, or a label the project's notes name | ADR-079, task 2 |
+| Priority | GitHub's and GitLab's issues, Trello | No field of their own: a label the project's notes name, or GitHub's organization issue fields | ADR-079, task 3 |
+| Project or milestone | Jira, Trello | Not built: Jira Cloud moves an issue to another project, Trello a card to another board | ADR-079, task 3 |
 
 Linking a pull request to GitHub's and GitLab's issues isn't a gap: a pull
 request that names the issue links it.

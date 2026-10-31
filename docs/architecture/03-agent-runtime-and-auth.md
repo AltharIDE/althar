@@ -804,15 +804,15 @@ to the adapter/protocol version with which they began.
 A feature built for one agent is built for every one that can have it, in
 the same release, and where one can't, its registry entry and this table say
 why
-([ADR-078](../decisions/078-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+([ADR-079](../decisions/079-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
 What isn't alike, as read on 31 October 2026:
 
 | What | Which agents have it | Why the others don't | What follows |
 | --- | --- | --- | --- |
-| A sandbox that holds the coordinator's and readers' commands (`contains`, `holds`) | Claude Code | Not read for the others yet. Codex has a sandbox of its own | ADR-078, task 4 |
-| A lead's sandbox exceptions worked out from the start (`upFront`) | Claude Code | As above | ADR-078, task 4 |
-| The coordinator judging permissions (`permissionJudge`) | Claude Code | Not read: it needs session settings that drop the agent's built-in tools, hooks and own MCP servers. Without it the person is asked | ADR-078, task 5 |
-| Reviewing a pull request from outside (`reviewing.outside`) | Claude Code, OpenCode | Codex's entry holds it off; the rest aren't read yet | ADR-078, task 6 |
+| A sandbox that holds the coordinator's and readers' commands (`contains`, `holds`) | Claude Code | Not read for the others yet. Codex has a sandbox of its own | ADR-079, task 4 |
+| A lead's sandbox exceptions worked out from the start (`upFront`) | Claude Code | As above | ADR-079, task 4 |
+| The coordinator judging permissions (`permissionJudge`) | Claude Code | Not read: it needs session settings that drop the agent's built-in tools, hooks and own MCP servers. Without it the person is asked | ADR-079, task 5 |
+| Reviewing a pull request from outside (`reviewing.outside`) | Claude Code, OpenCode | Codex's entry holds it off; the rest aren't read yet | ADR-079, task 6 |
 
 ## Permission routing
 

@@ -481,7 +481,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {

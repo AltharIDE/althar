@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-10-19
-- **Amended:** 2026-10-31 ([ADR-077](077-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): a message the person writes to the coordinator, in the window or on a paired device, is their word for merging and releasing what the coordinator works out from it, in the turn it started; a message over the socket never is.
+- **Amended:** 2026-10-31 ([ADR-078](078-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): a message the person writes to the coordinator, in the window or on a paired device, is their word for merging and releasing what the coordinator works out from it, in the turn it started; a message over the socket never is.
 - **Owner:** Repository maintainers
 - **Context:** ADR-003 put the runtime in a utility process, to revisit "when
   work must outlive the app and a daemon is needed". The command line,
