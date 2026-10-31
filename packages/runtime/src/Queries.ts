@@ -56,7 +56,7 @@ import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverified
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
-import { betweenAgents, byItself } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -1731,6 +1731,9 @@ export class Queries extends Context.Service<
        */
       const settledKinds = new Map<string, { readonly as: string; readonly kind: TaskCard['kind'] }>()
 
+      /** How long a task is between agents, or its lead's commits on their way up, before it is the person's (`betweenAgents`). */
+      const betweenMs = config.betweenAgents === undefined ? BETWEEN_AGENTS_MS : Duration.toMillis(config.betweenAgents)
+
       /** Whether the checks on a task's pull request's head have run longer than Althar waits for them, or it gave up on them so. */
       const ranTooLong = (taskId: string, head: string | null) =>
         Effect.gen(function* () {
@@ -1833,6 +1836,7 @@ export class Queries extends Context.Service<
             leadEffort: string | null
             firstSession: string | null
             lastEnded: string | null
+            lastTurn: string | null
             turns: number
             settingUp: number | null
             starting: number
@@ -1872,6 +1876,8 @@ export class Queries extends Context.Service<
               -- When its last agent went: for a moment after, with nothing that says why, the next is on its way (DEV-173).
               (SELECT max(s.ended_at) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = k.id)
                 AS last_ended,
+              -- When its lead's last turn ended: what it committed goes up then, a moment after (ADR-072).
+              (SELECT max(d.ended_at) FROM turn_deliveries d WHERE d.thread_id = t.id) AS last_turn,
               -- Whether its lead has had a turn yet: before its first, no agent has worked on it.
               (SELECT count(*) FROM turn_deliveries d WHERE d.thread_id = t.id) AS turns,
               -- Its folder being set up (Setups.ts): whether by the setup kept for its repository (1), else the install its
@@ -1951,8 +1957,16 @@ export class Queries extends Context.Service<
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
           const going = task.runState === 'succeeded' ? byItself(shown) : null
-          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's.
-          const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
+          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's. Nor commits going up
+          // long after its lead's last turn ended, as ones made outside a turn, which nothing pushes: those are the person's too.
+          const goes =
+            going === 'checks_running'
+              ? (yield* ranTooLong(taskId, shown?.head ?? null))
+                ? null
+                : going
+              : going === 'pushing' && !betweenAgents(task.lastTurn, yield* Clock.currentTimeMillis, betweenMs)
+                ? null
+                : going
           // Its last agent gone a moment ago, no turn of its cut short and nothing that says why: the next is on its way, as a step
           // is started again or the call that says why comes, not stopped. Sessions reads its card again once the moment is over.
           const between =
@@ -1960,7 +1974,7 @@ export class Queries extends Context.Service<
             !queued &&
             Option.isNone(lead) &&
             (task.runState === null || task.runState === 'running') &&
-            betweenAgents(task.lastEnded, yield* Clock.currentTimeMillis) &&
+            betweenAgents(task.lastEnded, yield* Clock.currentTimeMillis, betweenMs) &&
             (yield* sql<{ state: string }>`
               SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`)[0]
               ?.state !== 'interrupted'

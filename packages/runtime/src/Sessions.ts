@@ -816,6 +816,8 @@ export class Sessions extends Context.Service<
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      // How long a task is under way after its last agent went or its lead's turn ended, before its card is read again (DEV-173).
+      const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
@@ -1651,7 +1653,11 @@ export class Sessions extends Context.Service<
               },
             )
           // A step can report mid-turn, so its task is ready only once the turn is over: its card is read again.
-          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
+          // Its commits go up a moment after (ADR-072), under way meanwhile: once that moment is over, it is read again (DEV-173).
+          if (thread.role !== 'coordinator') {
+            yield* touchCard(thread.taskId)
+            yield* Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(thread.taskId), betweenAgents))), sessionsScope)
+          }
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
@@ -1934,10 +1940,7 @@ export class Sessions extends Context.Service<
                         // Its task is between agents a moment (`betweenAgents`), under way: once that is over, its card is read again.
                         running.thread.role === 'coordinator'
                           ? Effect.void
-                          : Effect.forkIn(
-                              run(Effect.ignore(Effect.delay(touchCard(running.thread.taskId), Duration.millis(BETWEEN_AGENTS_MS)))),
-                              sessionsScope,
-                            ),
+                          : Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(running.thread.taskId), betweenAgents))), sessionsScope),
                       ),
                 ),
                 Deferred.succeed(running.ended, undefined),

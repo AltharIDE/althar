@@ -34,5 +34,6 @@ export const byItself = (change: ChangeSummary | null): ByItself | null => {
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */
 export const BETWEEN_AGENTS_MS = 30_000
 
-/** Whether a task its last agent left at `since`, with nothing that says why, is still between agents at `now`. */
-export const betweenAgents = (since: string | null, now: number): boolean => since !== null && now - Date.parse(since) < BETWEEN_AGENTS_MS
+/** Whether a task its last agent left at `since`, with nothing that says why, is still between agents at `now`, for `within` ms. */
+export const betweenAgents = (since: string | null, now: number, within: number = BETWEEN_AGENTS_MS): boolean =>
+  since !== null && now - Date.parse(since) < within

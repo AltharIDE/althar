@@ -105,6 +105,11 @@ export interface RuntimeOptions {
    * connection) waits before Althar tries it once more by itself: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly publishAgain?: Duration.Duration
+  /**
+   * How long a task its last agent left, with nothing that says why, or whose lead's commits go up as its turn ended, is
+   * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly betweenAgents?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */

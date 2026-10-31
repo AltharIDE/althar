@@ -281,6 +281,8 @@ export const runtime = (
     readonly checksStuck?: Duration.Duration
     /** How long a publish step that may pass waits before it is tried again; none at all unless a test says. */
     readonly publishAgain?: Duration.Duration
+    /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
+    readonly betweenAgents?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan: by id, or by an account's home. */
     readonly perUse?: ReadonlyArray<string>
@@ -341,6 +343,7 @@ export const runtime = (
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     publishAgain: more.publishAgain ?? Duration.zero,
+    betweenAgents: more.betweenAgents ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
