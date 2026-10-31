@@ -611,7 +611,7 @@ const playStall = async (
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round: never ending
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
- * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
+ * `[lead:settle-quietly]` settles without reporting; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -958,9 +958,23 @@ const playRole = async (
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         if (!aside) await commitIn(session.cwd, 'settled.txt', 'Settle the review')
-        // What became of each finding, by the ids Althar gave them.
+        // `[lead:fix-elsewhere]` names a commit from before the round, which made none of the fix.
+        const fix = aside
+          ? null
+          : (
+              await gitIn(
+                session.cwd,
+                'rev-list',
+                '-1',
+                session.markers.has('[lead:fix-elsewhere]') ? '--max-parents=0' : '--max-count=1',
+                'HEAD',
+              )
+            ).trim()
+        // What became of each finding, by the ids Althar gave them: a fix with what changed and the commit that made it.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
-          aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
+          aside
+            ? { id, outcome: 'set_aside', reason: 'It reads as intended.' }
+            : { id, outcome: 'fixed', reason: 'The heading names the retry.', commit: fix },
         )
         // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
         const shown = session.markers.has('[lead:evidence]')
