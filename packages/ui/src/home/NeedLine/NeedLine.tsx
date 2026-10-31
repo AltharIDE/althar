@@ -147,7 +147,7 @@ export function NeedLine({
             title
           )}
         </Heading>
-        {command !== undefined ? <Glance command={command} /> : brief !== undefined && <p className={s.brief}>{brief}</p>}
+        {command !== undefined ? <Glance command={command} /> : brief !== undefined && <p className={cx(s.brief, s.body)}>{brief}</p>}
       </div>
       <span className={s.whose}>
         {lines.whose && <ProjectWord project={project} />}

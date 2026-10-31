@@ -18,6 +18,13 @@
   line-height: 1.45;
   color: var(--t-2);
   text-wrap: pretty;
+  overflow-wrap: anywhere;
+  /* as much as two lines; the whole question is in its task */
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .options {
   display: flex;

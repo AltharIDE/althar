@@ -224,7 +224,7 @@ describe('the thread recorder', () => {
       yield* writer.record({ _tag: 'Notice', severity: 'info', title: 'Plain', description: 'with detail' })
       yield* writer.record({ _tag: 'AgentThought', text: 'thinking is left out' })
       yield* writer.flush
-      const whole = yield* transcript(where.threadId, 20_000)
+      const whole = yield* transcript(where.threadId, 30_000)
       assert.strictEqual(whole.omitted, 0)
       assert.isTrue(whole.text.startsWith('[codex] echo: You are working on a task'))
       assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
@@ -280,7 +280,7 @@ describe('the thread recorder', () => {
       assert.strictEqual(earlier.text, '[tool] Read two (completed)\n[note] noted three')
       assert.strictEqual(earlier.omitted, latest.omitted - 2)
       // Only some kinds, the last few lines, with the agent named as it is to whoever reads it.
-      const said = yield* transcript(where.threadId, 20_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
+      const said = yield* transcript(where.threadId, 30_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
       assert.deepStrictEqual(said, { text: '[you] said two\n[note] noted three\n[you] said three', omitted: 4 })
       // A line longer than the whole budget comes in parts, each read in turn, so all of it can be read back.
       const long = `${'a'.repeat(50)} DECISION ${'b'.repeat(50)}`

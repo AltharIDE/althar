@@ -132,7 +132,11 @@ export function BoardCard({
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {why !== undefined && why !== '' && <p className={s.why}>{why}</p>}
+      {why !== undefined && why !== '' && (
+        <p className={s.why} title={why}>
+          {why}
+        </p>
+      )}
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
