@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react'
+import { memo, type ReactNode, useMemo, useState } from 'react'
 
 import { DiffLineKind, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -162,15 +162,47 @@ export const sidesOf = (lines: readonly DiffLine[]): Sides => {
   return { old: old.join('\n'), new: next.join('\n'), oldAt, newAt }
 }
 
-/** A line's tokens from its side: a removed line's from the old, the rest from the new; none where they don't spell the line. */
-const tokensOf = (line: DiffLine, at: number, sides: Sides, old: TokenLines | null, next: TokenLines | null) => {
-  const tokens = line.kind === DiffLineKind.Removed ? old?.[sides.oldAt[at] ?? -1] : next?.[sides.newAt[at] ?? -1]
-  return tokens !== undefined && tokens.map((token) => token.content).join('') === line.text ? tokens : undefined
-}
+/** A line's tokens from its side: a removed line's from the old, the rest from the new. */
+const tokensOf = (line: DiffLine, at: number, sides: Sides, old: TokenLines | null, next: TokenLines | null) =>
+  line.kind === DiffLineKind.Removed ? old?.[sides.oldAt[at] ?? -1] : next?.[sides.newAt[at] ?? -1]
+
+/**
+ * One line, drawn again only when it or its colours change: as each side's
+ * colours land only its own lines are, and opening a fold draws only the
+ * lines it shows.
+ */
+const Line = memo(function Line({
+  line,
+  tokens,
+  oldNumbers,
+  t,
+}: {
+  line: DiffLine
+  tokens: ReadonlyArray<Token> | undefined
+  oldNumbers: boolean
+  t: DiffText
+}) {
+  const l = look(line, t)
+  // tokens that don't spell the line, as a side cut short would give, leave it plain
+  const spelt = tokens !== undefined && tokens.map((token) => token.content).join('') === line.text ? tokens : undefined
+  return (
+    <div className={cx(s.line, l.className)}>
+      {oldNumbers && <span className={s.n}>{l.old}</span>}
+      {/* a removed line has no new number; in the one-column form it shows its old one */}
+      <span className={s.n}>{oldNumbers ? l.new : (l.new ?? l.old)}</span>
+      <span className={s.sign}>
+        {l.sign}
+        {l.said && <VisuallyHidden> {l.said}</VisuallyHidden>}
+      </span>
+      <span>{paint(line.text, spelt, l.changed)}</span>
+    </div>
+  )
+})
 
 /** The file's own lines in their colours, with the changed words inside a line marked more strongly, so the eye lands on what moved. */
 export function Diff({ lines, label, path, oldNumbers = false, fold, text, className, ...rest }: DiffProps) {
-  const t = { ...diffText, ...text }
+  // the same words while the text given is, so the lines needn't be drawn again for them
+  const t = useMemo(() => ({ ...diffText, ...text }), [text])
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
   const rows: readonly Row[] = useMemo(
     () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened)),
@@ -202,21 +234,9 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, text, class
               {t.unchanged(row.count)}
             </button>
           )
-        const { line, at: i } = row
-        const l = look(line, t)
-        const tokens = sides === null || line.kind === DiffLineKind.Hunk ? undefined : tokensOf(line, i, sides, old, next)
-        return (
-          <div key={i} className={cx(s.line, l.className)}>
-            {oldNumbers && <span className={s.n}>{l.old}</span>}
-            {/* a removed line has no new number; in the one-column form it shows its old one */}
-            <span className={s.n}>{oldNumbers ? l.new : (l.new ?? l.old)}</span>
-            <span className={s.sign}>
-              {l.sign}
-              {l.said && <VisuallyHidden> {l.said}</VisuallyHidden>}
-            </span>
-            <span>{paint(line.text, tokens, l.changed)}</span>
-          </div>
-        )
+        const { line, at } = row
+        const tokens = sides === null || line.kind === DiffLineKind.Hunk ? undefined : tokensOf(line, at, sides, old, next)
+        return <Line key={at} line={line} tokens={tokens} oldNumbers={oldNumbers} t={t} />
       })}
     </div>
   )

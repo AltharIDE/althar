@@ -239,6 +239,20 @@ const tokenOf = (token: ThemedToken): Token => {
   return Object.keys(style).length === 0 ? { content: token.content } : { content: token.content, style }
 }
 
+const sameInk = (a: Token, b: Token) =>
+  a.style?.color === b.style?.color && a.style?.fontStyle === b.style?.fontStyle && a.style?.fontWeight === b.style?.fontWeight
+
+/** A line's tokens with each run of the same ink as one: fewer spans for a long file or diff to draw. */
+const merged = (line: readonly Token[]): Token[] => {
+  const out: Token[] = []
+  for (const token of line) {
+    const last = out.at(-1)
+    if (last !== undefined && sameInk(last, token)) out[out.length - 1] = { ...last, content: last.content + token.content }
+    else out.push(token)
+  }
+  return out
+}
+
 /**
  * How many lines are coloured at a time, and how long colouring holds the
  * window before it lets it draw and answer: a long file, or both sides of a
@@ -275,7 +289,7 @@ const tokenize = async (key: string, text: string, lang: string, job: Job): Prom
       ...(state === undefined ? {} : { grammarState: state }),
     })
     state = slice.grammarState
-    for (const line of slice.tokens) tokens.push(line.map(tokenOf))
+    for (const line of slice.tokens) tokens.push(merged(line.map(tokenOf)))
     if (performance.now() - since > SLICE.ms) {
       await pause()
       since = performance.now()

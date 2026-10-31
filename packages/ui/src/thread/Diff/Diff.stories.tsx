@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { DiffLineKind } from '../../foundations/vocabulary'
-import { COMMENT_DIFF, CSS_DIFF, JSON_DIFF, MARKDOWN_DIFF, TSX_DIFF } from '../../fixtures/diffs'
+import { COMMENT_DIFF, CSS_DIFF, JSON_DIFF, LONG_DIFF, MARKDOWN_DIFF, TSX_DIFF } from '../../fixtures/diffs'
 import { ROUTER_DIFF } from '../../fixtures/meridian'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Diff } from './Diff'
@@ -30,6 +30,12 @@ export const Markdown: Story = { args: { lines: MARKDOWN_DIFF, label: 'README.md
 export const CommentAcrossTheChange: Story = { args: { lines: COMMENT_DIFF, label: 'src/charges/limit.ts', path: 'src/charges/limit.ts' } }
 /* A file whose name says no language: plain, as before. */
 export const Plain: Story = { args: { lines: ROUTER_DIFF, label: 'NOTES', path: 'NOTES' } }
+/* A long file's whole diff, folded as the Outputs show it: colouring it takes a while, a slice at a time, and the diff scrolls meanwhile. */
+export const Long: Story = {
+  args: { lines: LONG_DIFF, label: 'src/refunds/RefundForms.tsx', path: 'src/refunds/RefundForms.tsx', fold: 3, oldNumbers: true },
+}
+/* The same, plain, as before diffs were coloured: what Long is measured against. */
+export const LongPlain: Story = { args: { ...Long.args, path: undefined } }
 export const Dark: Story = {
   globals: { theme: 'dark' },
   render: (args) => (

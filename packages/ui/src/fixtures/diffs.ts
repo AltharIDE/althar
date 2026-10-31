@@ -147,3 +147,13 @@ export const COMMENT_DIFF = diffOf(`
    \${limit.windowSeconds / 3600} hours.
  \`
 `)
+
+/** A long file's whole diff, a few thousand lines with a change every forty or so: for how fast a diff opens and scrolls. */
+export const LONG_DIFF: DiffLine[] = diffOf(
+  Array.from({ length: 160 }, (_, i) =>
+    TSX_DIFF.map((line) => {
+      const text = line.text.replaceAll('RefundForm', `RefundForm${i}`)
+      return line.kind === DiffLineKind.Added ? `+${text}` : line.kind === DiffLineKind.Removed ? `-${text}` : ` ${text}`
+    }).join('\n'),
+  ).join('\n'),
+)
