@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
-import { DESCRIBED } from '@althar/provider-adapters/testing'
+import { DESCRIBED, type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -35,8 +35,10 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, run
  * go in a new pull request on a new branch once the last one merged.
  */
 
-const runtimeWith = (github: FakeService, file = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })))
+const runtimeWith = (github: FakeService, file = ':memory:', agents: FakeAgentOptions = {}) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+  )
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
@@ -132,6 +134,7 @@ const onGitHub = () => {
 describe('a task that goes back to work', () => {
   it.live('runs again when the person writes to a merged task’s lead, and ships what it did as a second pull request', () => {
     const { working, bare, github, pushes } = onGitHub()
+    const slow = holds()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
@@ -145,6 +148,7 @@ describe('a task that goes back to work', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running' && all[0].followUp === true)
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+      slow.open('[lead:slowly]')
 
       // The lead finishes the round with its summary, the review the plan has looks at what is new, and the task is ready, with
       // a commit that is in no pull request yet.
@@ -235,16 +239,18 @@ describe('a task that goes back to work', () => {
       yield* (yield* Changes).refresh(task.taskId)
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
   it.live('goes back where it was when its lead makes nothing new: settled, at the time it first settled', () => {
     const { working, bare, github } = onGitHub()
+    const slow = holds()
     return Effect.gen(function* () {
       const task = yield* merged(working, bare, github)
       const before = yield* taskRow(task.taskId)
       yield* say(task.threadId, 'What did you change? [lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
+      slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
       assert.deepStrictEqual(yield* taskRow(task.taskId), before)
       const [, round] = yield* runsOf(task.taskId)
@@ -272,11 +278,12 @@ describe('a task that goes back to work', () => {
         Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
         (gone) => gone.length === 1,
       )
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
   it.live('counts an edit to a file left uncommitted before the round as new work', () => {
     const { working, bare, github } = onGitHub()
+    const slow = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const task = yield* merged(working, bare, github)
@@ -285,11 +292,12 @@ describe('a task that goes back to work', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       // The lead changes the file it had left uncommitted, and its turn ends without a report: not nothing new.
       appendFileSync(join(task.path, 'notes.txt'), 'and after\n')
+      slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'waiting')
       const [call] = yield* sql<{ payload: string }>`
           SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`
       assert.include(call?.payload, '"why":"no_report"')
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
   it.live('is ready on the home as on the board when a merged task has commits after its pull request', () => {
@@ -365,6 +373,7 @@ describe('a task that goes back to work', () => {
 
   it.live('lets the person skip a round’s review', () => {
     const { working, bare, github } = onGitHub()
+    const slow = holds()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const queries = yield* Queries
@@ -374,6 +383,7 @@ describe('a task that goes back to work', () => {
       assert.isTrue((yield* queries.thread(task.threadId)).task.skipReview)
       yield* runs.skipReview({ envelope: yield* Runtime.envelope('task.skip_review', {}), taskId: task.taskId })
       assert.isFalse((yield* queries.thread(task.threadId)).task.skipReview)
+      slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       // No review of the round: the plan's, then the round's own report.
       assert.deepStrictEqual(
@@ -386,7 +396,7 @@ describe('a task that goes back to work', () => {
           (step) => step.key === 'review',
         )?.skipped
       assert.deepStrictEqual([reviewOf(plan?.parameters), reviewOf(round?.parameters)], [false, true])
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
   it.live('withdraws what the reviewer asked when its review is skipped, so the task doesn’t wait on it', () => {

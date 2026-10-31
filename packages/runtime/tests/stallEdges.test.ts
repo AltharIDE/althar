@@ -1,3 +1,4 @@
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 
@@ -42,7 +43,8 @@ describe('outside a step', () => {
         (stalls) => stalls.length > 0,
       )
       assert.match(said?.title ?? '', /^Fake codex went quiet for .+\. Told it to carry on/)
-    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: FAST }))),
+      // Held, it reads on until the stall stops it, however long noticing that takes.
+    }).pipe(Effect.provide(withQueries(undefined, { holds: holds() }, { stalls: FAST }))),
   )
 
   it.live('holds Althar’s own words to a lead to no budget of turns either', () =>

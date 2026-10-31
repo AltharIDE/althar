@@ -100,7 +100,8 @@ jobs:
     needs: [changes, desktop, harness, ui, site, brand, report]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Long enough to wait out a stress run still going, whose own jobs take 30 minutes at most.
+    timeout-minutes: 40
     permissions:
       actions: read
       checks: read
@@ -118,7 +119,8 @@ jobs:
               ;;
           esac
       # Stress and Windows' smoke test run on the pull request alone, so one that failed on a pull request's own head
-      # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine.
+      # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine; a
+      # stress run still going is waited for, read again every 30 s, as its failure would come after the group merged.
       - if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,7 +129,11 @@ jobs:
           prs="$(gh api "repos/$GH_REPO/compare/main...$GITHUB_SHA" --jq '.commits[].commit.message | split("\n")[0] | capture("\\(#(?<n>[0-9]+)\\)$").n')"
           for pr in $prs; do
             head="$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha)"
-            stress="$(gh api "repos/$GH_REPO/actions/workflows/stress.yml/runs?head_sha=$head&per_page=1" --jq '.workflow_runs[0].conclusion // ""')"
+            until read -r status stress < <(gh api "repos/$GH_REPO/actions/workflows/stress.yml/runs?head_sha=$head&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.status // "none") \(.conclusion // "")"') && [[ $status == completed || $status == none ]]; do
+              echo "#$pr's stress run is ${status:-unread}: waiting for it"
+              sleep 30
+            done
             smoke="$(gh api "repos/$GH_REPO/commits/$head/check-runs?check_name=windows-e2e" --jq '.check_runs[0].conclusion // ""')"
             echo "#$pr at ${head::8}: stress ${stress:-not run}, smoke test ${smoke:-not run}"
             if [ "$stress" = failure ] || [ "$smoke" = failure ]; then

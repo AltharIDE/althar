@@ -1,4 +1,5 @@
 import type { ActorId, ProjectId } from '@althar/domain'
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Clock, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -185,6 +186,8 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
 describe('a step whose usage limit resets while every place is taken', () => {
   it.effect('waits for a place, then carries on, on the agent it was held for', () => {
     const back = later()
+    // OpenCode's lead keeps the place until the test lets its turn end.
+    const place = holds()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const policies = yield* Policies
@@ -201,18 +204,24 @@ describe('a step whose usage limit resets while every place is taken', () => {
       yield* waitingStep(task.taskId)
       // The place frees: it carries on, on Claude Code.
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
+      place.open('[lead:wait]')
       yield* readyIs(projectId, task.taskId)
       const sql = yield* SqlClient.SqlClient
       const ran = yield* sql<{ agentId: string }>`
         SELECT agent_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at, rowid`
       assert.deepStrictEqual([...new Set(ran.map((row) => row.agentId))], ['claude-code'])
-    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })), onTestClock)
+    }).pipe(
+      Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } }, opencode: { holds: place } } })),
+      onTestClock,
+    )
   })
 })
 
 describe('a review that waited for a place while its reviewer fell nearly out', () => {
   it.effect('goes by the project’s rule, as a review starting at once would: held until the reset, where it waits', () => {
     const back = later()
+    // OpenCode's lead keeps the place until the test lets its turn end.
+    const place = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -241,6 +250,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
       })}`
       // The other task finishes: the place frees, and the review is held for Codex's reset, as the project waits.
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
+      place.open('[lead:wait]')
       const held = (yield* until(
         attempts(task.taskId),
         (rows) =>
@@ -253,6 +263,6 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
         notices.map((row) => row.title),
         `Fake codex has 3% of its five-hour limit left. The review waits until ${whenWords(resetsAt, yield* Clock.currentTimeMillis)}.`,
       )
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } }, opencode: { holds: place } } })), onTestClock)
   })
 })
