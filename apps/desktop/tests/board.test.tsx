@@ -166,6 +166,16 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps a task under way, out of Needs you, until the call it waits on is read (DEV-173)', () => {
+    const lanes = lanesOf(board({ calls: [] }))
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => [work.taskId, work.phase])).toEqual([
+      ['t2', 'running'],
+      ['t3', 'running'],
+    ])
+    expect(yoursOf(lanes)).toBe(2)
+  })
+
   describe('a task whose lead stopped, with no agent on it', () => {
     const NOW = '2026-10-01T10:00:00.000Z'
     const at = '2026-09-30T14:00:00.000Z'
@@ -448,7 +458,7 @@ describe('the board’s lanes', () => {
     })
   })
 
-  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
+  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet under way', () => {
     const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
     const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
     const lanes = lanesOf(
@@ -461,13 +471,13 @@ describe('the board’s lanes', () => {
       }),
     )
     expect(lanes.calls.map((call) => call.id)).toEqual(['q1', 'a2'])
-    expect(lanes.waiting.map(({ task: work, call }) => [work.taskId, call])).toEqual([['t9', null]])
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['t9'])
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
-      ['Waiting on you', 'Asks soon'],
       ['Question', 'Run make deploy'],
       ['Permission', 'Run make deploy'],
     ])
-    expect(yoursOf(lanes)).toBe(3)
+    expect(yoursOf(lanes)).toBe(2)
   })
 
   it('keeps a plain task that finished in Needs you, counted, until the person keeps it for later, the latest kept first', () => {
@@ -2150,16 +2160,19 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
-  it('offers Resolve now where the lead couldn’t resolve a conflict, though neither branch moved', async () => {
+  it('says why the lead couldn’t resolve a conflict, and opens its task rather than asking the lead again (DEV-173)', async () => {
     const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
     tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={vi.fn()} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
     const card = await cardOf('Handed back')
     expect(card.getByText('Merge conflict')).toBeTruthy()
     expect(card.getByText(why)).toBeTruthy()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Handed back' }))
+    expect(onOpen).toHaveBeenCalledWith('th-s10')
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
   })
 
   it('shows only what fails where its lead brought its failing checks to the person', async () => {
