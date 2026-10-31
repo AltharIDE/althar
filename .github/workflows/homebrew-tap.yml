@@ -1,9 +1,9 @@
 name: homebrew-tap
 
 # Keeps the Homebrew cask in AltharIDE/homebrew-tap (`brew install --cask altharide/tap/althar`) at the latest published
-# release (Linear DEV-72). It runs when a release is PUBLISHED, never when one is drafted, takes the sha256 of the
-# published arm64 dmg itself, fills packaging/homebrew/althar.rb in with it and pushes Casks/althar.rb to the tap, making
-# the file the first time. Prereleases, and releases that aren't the latest, are skipped. A run for a version the tap
+# release (Linear DEV-72). It runs when a release is PUBLISHED, never when one is drafted, takes the sha256 of each of
+# the published dmgs itself, Apple silicon's (arm64) and Intel's (x64), fills packaging/homebrew/althar.rb in with them
+# and pushes Casks/althar.rb to the tap, making the file the first time. Prereleases, and releases that aren't the latest, are skipped. A run for a version the tap
 # has already changes nothing.
 #
 # It creates and publishes no release: releases come from release.yml alone. Its one secret, HOMEBREW_TAP_TOKEN (Contents
@@ -67,31 +67,37 @@ jobs:
             exit 0
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
-      # The file people download, as published, not one built again. GitHub's own digest of the asset, where it has one,
-      # has to agree.
+      # The files people download, as published, not ones built again. GitHub's own digest of each asset, where it has
+      # one, has to agree. A release made before the Intel build (0.6.0 and earlier) has no x64 dmg, and stops here.
       - id: dmg
         if: steps.release.outputs.skip == 'false'
-        name: The published dmg's sha256
+        name: The published dmgs' sha256
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          name="Althar-$VERSION-arm64.dmg"
           dir="$RUNNER_TEMP/dmg"
           mkdir -p "$dir"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$dir"
-          sha256="$(sha256sum "$dir/$name" | cut -d' ' -f1)"
-          digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$name\") | .digest // \"\"")"
-          if [ -n "$digest" ] && [ "$digest" != "sha256:$sha256" ]; then
-            echo "::error::The downloaded $name is sha256:$sha256, but the release lists $digest."
-            exit 1
-          fi
+          for arch in arm64 x64; do
+            name="Althar-$VERSION-$arch.dmg"
+            if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$dir"; then
+              echo "::error::$TAG has no $name: the cask needs both Apple silicon's and Intel's dmg."
+              exit 1
+            fi
+            sha256="$(sha256sum "$dir/$name" | cut -d' ' -f1)"
+            digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$name\") | .digest // \"\"")"
+            if [ -n "$digest" ] && [ "$digest" != "sha256:$sha256" ]; then
+              echo "::error::The downloaded $name is sha256:$sha256, but the release lists $digest."
+              exit 1
+            fi
+            echo "$arch=$sha256" >> "$GITHUB_OUTPUT"
+          done
           rm -rf "$dir"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
       - name: The cask in the tap
         if: steps.release.outputs.skip == 'false'
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          SHA256: ${{ steps.dmg.outputs.sha256 }}
+          ARM: ${{ steps.dmg.outputs.arm64 }}
+          INTEL: ${{ steps.dmg.outputs.x64 }}
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -z "$TAP_TOKEN" ]; then
@@ -105,7 +111,7 @@ jobs:
           git clone "https://github.com/$TAP.git" "$RUNNER_TEMP/tap"
           cd "$RUNNER_TEMP/tap"
           mkdir -p Casks
-          "$GITHUB_WORKSPACE/packaging/homebrew/fill.sh" "$VERSION" "$SHA256" "$GITHUB_WORKSPACE/packaging/homebrew/althar.rb" > Casks/althar.rb
+          "$GITHUB_WORKSPACE/packaging/homebrew/fill.sh" "$VERSION" "$ARM" "$INTEL" "$GITHUB_WORKSPACE/packaging/homebrew/althar.rb" > Casks/althar.rb
           if [ -z "$(command git status --porcelain Casks/althar.rb)" ]; then
             echo "The tap already has althar $VERSION: nothing to change."
             echo "### Homebrew tap" >> "$GITHUB_STEP_SUMMARY"
@@ -119,4 +125,4 @@ jobs:
           # A new, empty tap has no branch yet: main is made by this push.
           git push origin HEAD:main
           echo "### Homebrew tap" >> "$GITHUB_STEP_SUMMARY"
-          echo "$TAP now has althar $VERSION (sha256 $SHA256)." >> "$GITHUB_STEP_SUMMARY"
+          echo "$TAP now has althar $VERSION (arm64 sha256 $ARM, x64 sha256 $INTEL)." >> "$GITHUB_STEP_SUMMARY"

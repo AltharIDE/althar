@@ -81,3 +81,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md) | The sandbox is the boundary: what it holds runs unread, what crosses meets the rules, and git stops what can't be undone |
 | [072](072-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
 | [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
+| [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
