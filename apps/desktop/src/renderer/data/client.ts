@@ -14,6 +14,7 @@ import {
   type ProjectNote,
   type ProjectRulesView,
   type SandboxEdits,
+  type SealStyle,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -201,6 +202,10 @@ export interface Client {
   readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
+  readonly setReviewSeal: (on: boolean) => Promise<void>
+  /** How the review seal looks. */
+  readonly setReviewSealStyle: (style: SealStyle) => Promise<void>
   /** A project's automations, for its Automations tab. */
   readonly getAutomations: (projectId: string) => Promise<AutomationsSnapshot>
   /** One automation, for its own page: its definition, its limits and its runs. */
@@ -639,6 +644,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
+    setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),
     getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
     getAutomation: (automationId) => settle(api.GetAutomation({ automationId })),
     makeAutomation: ({ projectId, definition, on }) =>

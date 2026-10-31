@@ -276,10 +276,16 @@ export type AgentsAtOnce = typeof AgentsAtOnce.Type
 export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
 export type FolderWait = typeof FolderWait.Type
 
+/** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
+export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
+export type SealStyle = typeof SealStyle.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+  /** A pull request Althar opens says how its change was reviewed, on unless turned off: a seal in its corner, in `style`, and what the review changed and kept. */
+  reviewSeal: Schema.Struct({ on: Schema.Boolean, style: SealStyle }),
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
@@ -2032,7 +2038,7 @@ export const SetupItem = Schema.Struct({
      * How it ended: its exit code, 0 for done, null where it didn't end by
      * itself; out of time; stopped because Althar quit; what it copied and
      * the end of what it printed; and the files a recorded setup names that
-     * it couldn't copy, which fail it too (ADR-076). Null while it runs.
+     * it couldn't copy, which fail it too (ADR-077). Null while it runs.
      */
     ended: Schema.NullOr(
       Schema.Struct({
@@ -3225,6 +3231,10 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
+  command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
+  /** How the review seal looks. */
+  command('SetReviewSealStyle', { style: SealStyle }, Schema.Void),
   /** A project's automations, for its Automations tab. */
   call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
   /** One automation, for its own page: its definition, its limits and its runs. */

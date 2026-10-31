@@ -1,4 +1,4 @@
-import { chord, type CoAuthorCommit, keys, modKey } from '@althar/ui'
+import { chord, type CoAuthorCommit, keys, modKey, type ReviewSealSample } from '@althar/ui'
 
 import { device, platform } from '../../shared/device'
 
@@ -60,6 +60,15 @@ export const text = {
     sha: '4e1c07a',
     when: 'committed 12 minutes ago',
   } satisfies CoAuthorCommit,
+  reviewSealTitle: 'Review seal on pull requests',
+  reviewSealNote: 'Which model reviewed the change before it opened, in how many passes, and what changed after.',
+  /** The pull request that commit went up in, to show the seal on, as GitHub would. */
+  pullRequest: {
+    title: 'Retry the checkout call with backoff',
+    number: '#212',
+    text: 'The checkout call failed the whole order on one dropped connection. It now retries with jittered backoff, three tries at most, and only for 502, 503 and timeouts.',
+    facts: { model: 'GPT-6.1 Sol', sha: '4e1c07a', passes: 2, date: '2026-10-31' },
+  } satisfies ReviewSealSample,
   /* Notifications. */
   badge: `Count them on ${device.count ?? 'the icon'}`,
   /* Appearance. */

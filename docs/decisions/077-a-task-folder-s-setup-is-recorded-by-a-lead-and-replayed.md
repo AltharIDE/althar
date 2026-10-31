@@ -1,4 +1,4 @@
-# ADR-076: A task folder's setup is recorded by a lead, and replayed by Althar
+# ADR-077: A task folder's setup is recorded by a lead, and replayed by Althar
 
 - **Status:** Accepted; amends [ADR-023](023-althar-runs-the-project.md)
 - **Date:** 2026-10-31
