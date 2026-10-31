@@ -26,7 +26,8 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
 
     // Proposed on a card, off until the person turns it on.
     const card = page.locator('[data-rhythm="card"]').filter({ has: page.getByRole('button', { name: 'Turn on' }) })
-    await expect(card.getByText('Off', { exact: true })).toBeVisible()
+    // Its foot reads "Off", then the way to its limits.
+    await expect(card.getByText(/^Off\b/)).toBeVisible()
     await card.screenshot({ path: 'test-results/automations-1-proposed.png', animations: 'disabled', scale: 'css' })
     await card.getByRole('button', { name: 'Turn on' }).click()
     // Once on, the card folds to a line, with the way to its page.
