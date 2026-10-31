@@ -369,15 +369,13 @@ export const Permission: Story = {
   },
 }
 export const Question: Story = { args: CHANGE_QUESTION }
-/** A free-form question with no options: its headline and Answer. */
+/** A lead's free-form question as the board gives it: the headline as the card's line, and Answer. The paragraph it came with is in the task. */
 export const QuestionNoOptions: Story = {
   args: { ...CHANGE_QUESTION, why: QUESTION_LONG.title, next: <NextStep signal>Answer</NextStep> },
-}
-/** A lead that sent a paragraph: whatever runs past two lines is cut; the whole of it is in the task. */
-export const QuestionLong: Story = {
-  args: { ...CHANGE_QUESTION, why: QUESTION_LONG.background, next: <NextStep signal>Answer</NextStep> },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText(/^ADR-070 says/)).toBeInTheDocument()
+    const card = within(canvasElement)
+    await expect(card.getByText(QUESTION_LONG.title)).toBeInTheDocument()
+    await expect(card.queryByText(/^ADR-070 says/)).not.toBeInTheDocument()
   },
 }
 export const Stuck: Story = { args: CHANGE_STUCK }
