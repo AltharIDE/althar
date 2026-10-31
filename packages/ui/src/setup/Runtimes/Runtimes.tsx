@@ -80,6 +80,15 @@ export type RuntimeEntry = RuntimeBase &
         needs: string
       }
     | {
+        state: RuntimeState.Unsupported
+        /** Why no session starts on the version it has, and what to do instead. */
+        why: string
+        /** The copy is Althar's own, and Althar can download one it runs in its place, about this big. */
+        download?: string
+        /** Why the last download didn't finish, in a sentence. */
+        failed?: string
+      }
+    | {
         state: RuntimeState.Unchecked
         /** Why Althar couldn't check it, in a sentence. */
         why: string
@@ -96,6 +105,9 @@ export interface RuntimesText {
   waits: string
   missing: string
   outdated: (version: string, needs: string) => string
+  unsupported: string
+  replace: string
+  replaceNote: (name: string, size: string) => string
   signIn: string
   cancel: string
   check: string
@@ -119,6 +131,10 @@ export const runtimesText: RuntimesText = {
   waits: 'its work waits for the reset',
   missing: `Not installed on ${device.this}`,
   outdated: (version, needs) => `Version ${version} · Althar needs ${needs} or later`,
+  unsupported: 'Not supported yet',
+  replace: 'Replace it',
+  replaceNote: (name, size) =>
+    `This is Althar’s own copy of ${name}: Althar can replace it with the newest release it runs, about ${size}, checked against the release.`,
   signIn: 'Sign in',
   cancel: 'Cancel',
   check: 'Check again',
@@ -300,6 +316,28 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers): Parts {
           </>
         ),
       }
+    case RuntimeState.Unsupported: {
+      // Where the copy is Althar's own, one it runs can take its place; the person's own is theirs to change.
+      const replace = r.download !== undefined && h.onInstall && (
+        <Button onClick={() => h.onInstall?.(r.id)}>{r.failed === undefined ? t.replace : t.tryAgain}</Button>
+      )
+      return {
+        line:
+          r.failed === undefined ? (
+            [t.unsupported, r.version && `v${r.version}`].filter(Boolean).join(' · ')
+          ) : (
+            <span role="alert">{r.failed}</span>
+          ),
+        note: replace && r.download !== undefined ? `${r.why} ${t.replaceNote(r.name, r.download)}` : r.why,
+        calls: true,
+        actions: (replace || check) && (
+          <>
+            {replace}
+            {check}
+          </>
+        ),
+      }
+    }
     // Only this one; the rest of the list stands as it is.
     case RuntimeState.Unchecked:
       return { line: <span role="alert">{r.why}</span>, actions: check }

@@ -21,7 +21,9 @@ import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import { anyOf, SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
+import { definition, fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
+
+const windows = process.platform === 'win32'
 
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
@@ -288,7 +290,7 @@ describe('accounts', () => {
       assert.isTrue(lstatSync(join(home, 'mise')).isSymbolicLink())
       assert.isFalse(existsSync(join(home, 'auth.json')))
       // What came to the usual folder since is linked as a session starts.
-      mkdirSync(join(usualFolder, 'pnpm'))
+      mkdirSync(join(usualFolder, 'pnpm'), { recursive: true })
       yield* accounts.prepare(own)
       yield* accounts.prepare(own)
       assert.strictEqual(readlinkSync(join(home, 'pnpm')), join(usualFolder, 'pnpm'))
@@ -392,6 +394,85 @@ describe('accounts', () => {
       assert.isTrue((yield* limits.out('codex'))._tag === 'None')
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
+
+  // Not on Windows: the fake agent's version and status are shell commands, writing to a path sh is given.
+  it.effect.skipIf(windows)('never run the sign-in status of an agent at a version no session starts on, or one that can’t be told', () => {
+    /* The fake `too-new`, its version as given, its status command leaving a trace in a file of its own when it runs. */
+    const at = (version: string) => {
+      const asked = join(mkdtempSync(join(tmpdir(), 'althar-asked-')), 'asked')
+      const plain = definition('too-new')
+      const entry = {
+        definition: {
+          ...plain,
+          version: () => ({ command: 'sh', args: ['-c', `echo ${version}`] }),
+          signIn: { ...plain.signIn, status: () => ({ command: 'sh', args: ['-c', `echo "$FAKE_HOME" >> ${asked}`] }) },
+        },
+        transport: () => {
+          throw new Error('Not started here')
+        },
+      }
+      const agents = Layer.succeed(Agents, Agents.of({ list: [entry], get: () => Effect.succeed(entry) }))
+      return { asked, layer: Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents }))) }
+    }
+    const check = Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const signIns = yield* SignIns
+      const [usual] = yield* accounts.of('too-new')
+      return { account: yield* signIns.account(usual!, true), agent: yield* signIns.of('too-new', true) }
+    })
+    return Effect.gen(function* () {
+      // OpenCode 2's status could answer for another account: it isn't asked, and says it can't tell.
+      for (const said of ['opencode v2.0.29', 'opencode dev build']) {
+        const { asked, layer } = at(said)
+        assert.deepStrictEqual(yield* Effect.provide(check, layer), { account: { status: 'unknown', paidBy: 'unknown' }, agent: 'unknown' })
+        assert.isFalse(existsSync(asked), said)
+      }
+      // The version it runs at is asked as before.
+      const { asked, layer } = at('1.19.0')
+      assert.strictEqual((yield* Effect.provide(check, layer)).agent, 'signed_in')
+      assert.isTrue(existsSync(asked))
+    })
+  })
+
+  // Not on Windows: the fake agent's version is a shell command, counting its runs in a file sh is given.
+  it.effect.skipIf(windows)(
+    'read an agent’s version once for all its accounts checked together, which Settings reads too, and give no sign-in line on 2.x',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'althar-versions-'))
+      const said = join(dir, 'version')
+      const versions = join(dir, 'asked')
+      const plain = definition('too-new')
+      /* The fake `too-new` at the version in a file, each time it is asked leaving a line in another. */
+      const entry = {
+        definition: { ...plain, version: () => ({ command: 'sh', args: ['-c', `echo >> ${versions}; cat ${said}`] }) },
+        transport: () => {
+          throw new Error('Not started here')
+        },
+      }
+      const agents = Layer.succeed(Agents, Agents.of({ list: [entry], get: () => Effect.succeed(entry) }))
+      const asked = () => (existsSync(versions) ? readFileSync(versions, 'utf8').split('\n').length - 1 : 0)
+      writeFileSync(said, '1.19.0')
+      return Effect.gen(function* () {
+        const accounts = yield* Accounts
+        const signIns = yield* SignIns
+        yield* accounts.add({ agentId: 'too-new', name: 'Work' })
+        yield* accounts.add({ agentId: 'too-new', name: 'Side' })
+        assert.strictEqual(yield* signIns.of('too-new', true), 'signed_in')
+        assert.strictEqual(asked(), 1)
+        // Settings reads the same reading within the minute; asked again, it is read again.
+        assert.strictEqual(yield* signIns.version('too-new'), '1.19.0')
+        assert.strictEqual(asked(), 1)
+        writeFileSync(said, 'opencode v2.0.29')
+        assert.strictEqual(yield* signIns.version('too-new', true), '2.0.29')
+        assert.strictEqual(asked(), 2)
+        // On 2.x no account is signed in from a terminal: its login could keep the sign-in in another account's home.
+        const [usual] = yield* accounts.of('too-new')
+        assert.deepInclude(yield* Effect.flip(accounts.login(usual!.id)), { _tag: 'AccountRefused', reason: 'unsupported' })
+        writeFileSync(said, '1.19.0')
+        assert.strictEqual(yield* accounts.login(usual!.id), 'fake-login too-new')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents })))))
+    },
+  )
 
   it.live('offer no model of an agent whose only account a project allows is signed out', () => {
     const away = folder('away')

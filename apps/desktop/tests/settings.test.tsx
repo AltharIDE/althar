@@ -14,7 +14,7 @@ import { isSection, type Section, SECTIONS } from '../src/renderer/features/sett
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
+import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, openCode2, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -354,6 +354,35 @@ describe('the Settings tab', () => {
     const install = screen.getByRole('region', { name: 'OpenCode isn’t on this Mac' })
     expect(within(install).getByText(/from GitHub, about 45 MB/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('opens on an agent at a version no session starts on, and says why above its accounts', async () => {
+    const atTwo = agents.map((agent) => (agent.id === 'opencode' ? openCode2 : agent))
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: atTwo })) })
+    withServices(<Settings />, client)
+    // Signed in, yet the person's to put right.
+    expect((await screen.findByRole('tab', { name: 'OpenCode, needs you' })).getAttribute('aria-selected')).toBe('true')
+    expect(await alert()).toBe(openCode2.unsupported)
+    expect(screen.getByRole('list', { name: 'OpenCode accounts' })).toBeTruthy()
+    // Its accounts stay, but none is signed in or added from here: OpenCode 2's login can keep it in another account.
+    expect(screen.queryByRole('button', { name: /Sign in|Add/ })).toBeNull()
+    // The person's own copy is theirs to change: nothing replaces it.
+    expect(screen.queryByRole('button', { name: 'Replace OpenCode' })).toBeNull()
+  })
+
+  it('replaces Althar’s own copy of an agent at a version no session starts on with one it runs', async () => {
+    const kept = { ...openCode2, kept: true, download: { size: '45 MB', installing: false, pinned: null } }
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: agents.map((agent) => (agent.id === 'opencode' ? kept : agent)),
+      })),
+    })
+    withServices(<Settings />, client, fakeHost())
+    expect(await screen.findByText('Althar’s copy of OpenCode is one it doesn’t run')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 

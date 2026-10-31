@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { adapterNode, type AgentDefinition, removeFully, signOut } from '@althar/provider-adapters'
+import { adapterNode, type AgentDefinition, removeFully, signOut, unsupportedNow } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -50,7 +50,7 @@ export const USUAL = 'main'
 export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
-  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal']),
+  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal', 'unsupported']),
 }) {}
 
 /**
@@ -409,6 +409,8 @@ export class Accounts extends Context.Service<
               if (definition === undefined) return yield* new UnknownAgent({ agentId: account.agentId })
               // One that signs in only inside Althar (Antigravity, over ACP) has nothing to run in a terminal.
               if (definition.signIn.login === '') return yield* new AccountRefused({ reason: 'no_terminal' })
+              // Nor at a version no session starts on: OpenCode 2's login, without --standalone, can keep it in another account's home.
+              if ((yield* unsupportedNow(definition)) !== null) return yield* new AccountRefused({ reason: 'unsupported' })
               // The home a session gets (`env`), not the folder: the usual
               // Claude account in a Flatpak signs in where its sessions read.
               const home = env(account)[definition.home.variable]

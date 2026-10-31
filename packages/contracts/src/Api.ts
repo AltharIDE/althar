@@ -163,6 +163,8 @@ export const AgentStatus = Schema.Struct({
   login: Schema.String,
   /** Its own version, as its CLI says it; null where it doesn't. */
   version: Schema.NullOr(Schema.String),
+  /** Why no session starts on it: a version Althar doesn't run yet, or one it can't tell; null where it runs, or isn't here. */
+  unsupported: Schema.NullOr(Schema.String),
   /** The ways Althar signs it in itself, without a terminal: in the browser, with a one-time code. */
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */

@@ -561,4 +561,6 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  unsupported:
+    "Althar doesn't sign in to this version of the agent: it could keep the sign-in in another account. Use a version Althar runs, then sign in.",
 } as const satisfies Record<AccountRefused['reason'], string>
