@@ -272,7 +272,8 @@ export const runtime = (
   more: {
     readonly signedOut?: ReadonlyArray<string>
     readonly agents?: Layer.Layer<Agents>
-    readonly countdown?: Duration.Duration
+    /** A plan's countdown; null leaves it to the person's setting (longRuns.ts). */
+    readonly countdown?: Duration.Duration | null
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
     /** How long a pull request may show no checks before it counts as having none; none at all unless a test says. */
@@ -332,7 +333,7 @@ export const runtime = (
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
-    countdown: more.countdown ?? Duration.millis(300),
+    ...(more.countdown === null ? {} : { countdown: more.countdown ?? Duration.millis(300) }),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),

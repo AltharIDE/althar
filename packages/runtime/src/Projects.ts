@@ -37,6 +37,7 @@ import {
   topLevel,
 } from './git'
 import { Instance } from './Instance'
+import { seedRules } from './Policies'
 import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
@@ -528,6 +529,8 @@ export class Projects extends Context.Service<
               }
               const coordinatorThreadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: coordinatorThreadId, projectId, kind: 'coordinator', ownerActorId: instance.personId, createdAt })}`
+              // Its rules start from what the person chose for new projects; a project made earlier keeps its own.
+              yield* seedRules(projectId)
               yield* fact({
                 projectId,
                 aggregateType: 'project',

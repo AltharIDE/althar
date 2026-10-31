@@ -6,12 +6,24 @@ import { device } from '../../shared/device'
  * Althar's settings, by what each is about, as the Settings tab lists them
  * down its side and its address names them: the agents and the code hosts
  * Althar works with; then its own ways (work on this computer, reviews and
+ * how long it goes on alone, what a new project starts with, reviews and
  * pull requests, notifications, how it looks, the editor); then which
  * Althar this is. A setting to come goes in the section it is about, and a
  * section to come between those it sits among.
  */
 
-export const SECTIONS = ['agents', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'] as const
+export const SECTIONS = [
+  'agents',
+  'code-hosts',
+  'this-mac',
+  'long-runs',
+  'new-projects',
+  'reviews',
+  'notifications',
+  'appearance',
+  'editor',
+  'about',
+] as const
 
 export type Section = (typeof SECTIONS)[number]
 
@@ -24,7 +36,7 @@ export const FIRST_SECTION: Section = 'agents'
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
   ['agents', 'code-hosts'],
-  ['this-mac', 'reviews', 'notifications', 'appearance', 'editor'],
+  ['this-mac', 'long-runs', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor'],
   ['about'],
 ]
 
@@ -32,6 +44,8 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   agents: { title: 'Agents', icon: 'agents' },
   'code-hosts': { title: 'Code hosts and trackers', icon: 'plug' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },
+  'long-runs': { title: 'Long runs', icon: 'clock' },
+  'new-projects': { title: 'New projects', icon: 'plus' },
   reviews: { title: 'Reviews and pull requests', icon: 'pr' },
   notifications: { title: 'Notifications', icon: 'bell' },
   appearance: { title: 'Appearance', icon: 'image' },

@@ -1,4 +1,4 @@
-import { commandStartOf, hostOf } from '@althar/contracts'
+import { commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -6,6 +6,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
+import { newProjectDefaultsOf } from './longRuns'
 import { fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
@@ -214,6 +215,53 @@ export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
 
+/** Writes a revision of a project's rules, recorded as a fact by whoever made it. */
+export const insertRevision = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const id = yield* newId(Ids.policy)
+    yield* sql`INSERT INTO policies ${sql.insert({
+      id,
+      projectId,
+      revision,
+      rules: JSON.stringify(rules),
+      createdByActorId: actorId,
+      createdAt: yield* timestamp,
+    })}`
+    yield* fact({
+      projectId,
+      aggregateType: 'policy',
+      aggregateId: id,
+      revision: 1,
+      type: 'policy.revised',
+      payload: { revision, rules },
+      actorId,
+    })
+    return { id, revision, rules }
+  })
+
+/**
+ * The rules a project is made with: the first revision's, with what the person chose for new projects (longRuns.ts) over the
+ * built-in. Only what differs from the built-in is written, so a profile that chose nothing makes the same rules as always.
+ */
+export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
+  const chosen: Partial<ProjectRules> = {
+    ...(defaults.permissions === NEW_PROJECT_DEFAULTS.permissions ? {} : { permissions: defaults.permissions }),
+    ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
+    ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
+    ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
+  }
+  return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
+}
+
+/** A new project's first rules, from what the person chose for new projects; later changes are the project's own. */
+export const seedRules = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    const defaults = yield* newProjectDefaultsOf
+    yield* insertRevision(projectId, 1, startingRules(defaults), instance.systemId)
+  })
+
 export class Policies extends Context.Service<
   Policies,
   {
@@ -263,30 +311,6 @@ export class Policies extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decode = (rules: string) => Schema.decodeUnknownSync(Schema.fromJsonString(ProjectRules))(rules)
 
-      const insert = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const id = yield* newId(Ids.policy)
-          yield* sql`INSERT INTO policies ${sql.insert({
-            id,
-            projectId,
-            revision,
-            rules: JSON.stringify(rules),
-            createdByActorId: actorId,
-            createdAt: yield* timestamp,
-          })}`
-          yield* fact({
-            projectId,
-            aggregateType: 'policy',
-            aggregateId: id,
-            revision: 1,
-            type: 'policy.revised',
-            payload: { revision, rules },
-            actorId,
-          })
-          return { id, revision, rules }
-        })
-
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -300,7 +324,7 @@ export class Policies extends Context.Service<
           // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
           return yield* sql.withTransaction(
             Effect.flatMap(latest, (again) =>
-              again === undefined ? insert(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
+              again === undefined ? insertRevision(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
             ),
           )
         })
@@ -322,7 +346,7 @@ export class Policies extends Context.Service<
               const changed = change(now.rules, now.revision)
               const next = Effect.isEffect(changed) ? yield* changed : changed
               if (next === undefined) return
-              yield* insert(project.id, now.revision + 1, next, actorId)
+              yield* insertRevision(project.id, now.revision + 1, next, actorId)
             }),
           )
         })

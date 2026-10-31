@@ -34,6 +34,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { longRunsOf, newProjectDefaultsOf, setLongRuns, setNewProjectDefaults } from './longRuns'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -826,6 +827,8 @@ export const handlers = Api.toLayer(
             const on = yield* coAuthorOn
             const atOnce = yield* busy.atOnce
             return {
+              longRuns: yield* longRunsOf,
+              newProjects: yield* newProjectDefaultsOf,
               coAuthor: { on, line: coAuthorLine },
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
@@ -841,6 +844,10 @@ export const handlers = Api.toLayer(
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
+      SetLongRuns: ({ commandId, ...change }) =>
+        once(commandId, api(setLongRuns(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetNewProjectDefaults: ({ commandId, ...change }) =>
+        once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),

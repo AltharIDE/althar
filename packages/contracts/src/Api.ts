@@ -276,8 +276,60 @@ export type AgentsAtOnce = typeof AgentsAtOnce.Type
 export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
 export type FolderWait = typeof FolderWait.Type
 
+/**
+ * How long work goes on alone. Each is a choice from a few; the first of each list but the check-in is today's value, kept
+ * until the person changes it, and applies from the next plan, round or look at a running turn.
+ */
+export const COUNTDOWNS = [0, 10, 25, 60] as const
+export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
+export const QUIET_MINUTES = [5, 10, 20] as const
+/** Hours of work before the agents check in; 0 is never. */
+export const CHECK_INS = [2, 6, 12, 0] as const
+
+export const LongRuns = Schema.Struct({
+  /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
+  countdown: Schema.Literals(COUNTDOWNS),
+  /** Review rounds before a task is left to the person with findings open. */
+  rounds: Schema.Literals(REVIEW_ROUNDS),
+  /** Minutes a turn may show no sign of life before it is stopped and told to carry on; twice as long while a command runs. */
+  quiet: Schema.Literals(QUIET_MINUTES),
+  /** Hours of work, or 40 turns, since the person last wrote in a thread before its agent is stopped to check in; 0 never. */
+  checkIn: Schema.Literals(CHECK_INS),
+})
+export type LongRuns = typeof LongRuns.Type
+
+/** What of them is changed: the rest stays. */
+export type LongRunsChange = { readonly [Key in keyof LongRuns]?: LongRuns[Key] | undefined }
+
+/** Today's values, which a setting keeps until the person changes it. */
+export const LONG_RUNS: LongRuns = { countdown: 25, rounds: 3, quiet: 10, checkIn: 6 }
+
+/**
+ * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
+ * project afterwards on its rules screen.
+ */
+export const NewProjectDefaults = Schema.Struct({
+  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
+  /** What happens to the work when an agent's account runs out. */
+  usageLimit: Schema.Literals(['move', 'wait', 'ask']),
+  /** Whether work goes on with an agent's next account before the limit applies. */
+  rotateAccounts: Schema.Boolean,
+  /** How a task ends when its plan doesn't say. */
+  end: Schema.Literals(['draft', 'ready', 'none']),
+})
+export type NewProjectDefaults = typeof NewProjectDefaults.Type
+
+/** What of them is changed: the rest stays. */
+export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
+
+/** What a project's rules are made with when the person has chosen nothing. */
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
+  longRuns: LongRuns,
+  newProjects: NewProjectDefaults,
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
   agentsAtOnce: AgentsAtOnce,
@@ -1625,6 +1677,8 @@ export const TaskCard = Schema.Struct({
       steps: Schema.Array(PlanStep),
       /** When it starts on its own; null once held or started. */
       startsAt: Schema.NullOr(Schema.String),
+      /** How many seconds it waited from being proposed to starting on its own: the whole countdown, as the person's setting had it then. */
+      startsAfter: Schema.optional(Schema.Number),
       /** Why the coordinator chose the lead. */
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
@@ -3217,6 +3271,28 @@ export const Api = RpcGroup.make(
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   /** When finished tasks' folders go from now on; a sweep runs at once by it. */
   command('SetFolderWait', { wait: FolderWait }, Schema.Void),
+  /** Changes how long work goes on alone, from the next plan, round or look at a running turn; what isn't given stays. */
+  command(
+    'SetLongRuns',
+    {
+      countdown: Schema.optional(LongRuns.fields.countdown),
+      rounds: Schema.optional(LongRuns.fields.rounds),
+      quiet: Schema.optional(LongRuns.fields.quiet),
+      checkIn: Schema.optional(LongRuns.fields.checkIn),
+    },
+    Schema.Void,
+  ),
+  /** Changes what the rules of projects made from now on start with; a project made earlier keeps its own. What isn't given stays. */
+  command(
+    'SetNewProjectDefaults',
+    {
+      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
+      usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
+      rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
+      end: Schema.optional(NewProjectDefaults.fields.end),
+    },
+    Schema.Void,
+  ),
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */

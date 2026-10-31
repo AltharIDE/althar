@@ -2,10 +2,13 @@ import type { ProjectId } from '@althar/domain'
 import { Cause, Clock, Duration, Effect, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, RuntimeConfig } from './Config'
+import type { LongRuns } from '@althar/contracts'
+
+import { Agents, RuntimeConfig, type StallOptions } from './Config'
 import { envelope } from './envelope'
 import { Instance } from './Instance'
 import { Live } from './Live'
+import { longRunsOf } from './longRuns'
 import { treeCpus } from './processTree'
 import { Sessions } from './Sessions'
 import { makeStallWatch, spanOf, type StallAction } from './stallWatch'
@@ -24,6 +27,20 @@ import { addItem } from './threads'
  * such as the coordinator's thread, the agent is stopped and the thread says
  * why; there is no budget there, since nothing there runs on its own for long.
  */
+
+/** How many turns agents may take on a thread since the person last said anything there, as long as a check-in isn't never. */
+const TURNS = 40
+
+/**
+ * The limits for running turns the person's settings give (longRuns.ts), unless a test names its own: a quiet turn waits
+ * twice as long while a tool runs, and a check-in of never is no limit of time or turns.
+ */
+export const limitsOf = (kept: LongRuns, options: StallOptions = {}) => ({
+  quiet: Duration.toMillis(options.quiet ?? Duration.minutes(kept.quiet)),
+  quietInTool: Duration.toMillis(options.quietInTool ?? Duration.minutes(kept.quiet * 2)),
+  work: Duration.toMillis(options.work ?? (kept.checkIn === 0 ? Duration.infinity : Duration.hours(kept.checkIn))),
+  turns: options.turns ?? (kept.checkIn === 0 ? Number.POSITIVE_INFINITY : TURNS),
+})
 
 export type GiveUp = Extract<StallAction, { _tag: 'GiveUp' }>
 
@@ -63,15 +80,22 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
     const options = (yield* RuntimeConfig).stalls ?? {}
     const every = options.every ?? Duration.seconds(30)
     const cancelGrace = options.cancelGrace ?? Duration.minutes(1)
-    const watch = makeStallWatch({
-      quiet: Duration.toMillis(options.quiet ?? Duration.minutes(10)),
-      quietInTool: Duration.toMillis(options.quietInTool ?? Duration.minutes(20)),
+    const context = yield* Effect.context<SqlClient.SqlClient>()
+    const limits = {
+      quiet: 0,
+      quietInTool: 0,
       cancelGrace: Duration.toMillis(cancelGrace),
       asleepAfter: Duration.toMillis(options.asleepAfter ?? Duration.sum(every, Duration.minutes(1))),
-      work: Duration.toMillis(options.work ?? Duration.hours(6)),
-      turns: options.turns ?? 40,
+      work: 0,
+      turns: 0,
       busyShare: 0.05,
-    })
+    }
+    /** The limits the person's settings give, read again at each look: a change holds for the turns running now too, within a look. */
+    const refresh = Effect.gen(function* () {
+      Object.assign(limits, limitsOf(yield* longRunsOf.pipe(Effect.provideContext(context)), options))
+    }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read the limits for running turns', Cause.pretty(cause))))
+    yield* refresh
+    const watch = makeStallWatch(limits)
     const cpuOf = options.cpuOf ?? treeCpus
 
     const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -199,6 +223,7 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
       Effect.forever(
         Effect.gen(function* () {
           yield* Effect.sleep(every)
+          yield* refresh
           // Each turn's agent process, and what they've all used, from one listing.
           const pids = new Map<string, number>()
           for (const threadId of watch.turning()) {
