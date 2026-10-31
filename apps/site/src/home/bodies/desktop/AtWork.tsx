@@ -1,11 +1,12 @@
 import { ChromeButton, Room, RoomSwitch, WorkStatus } from '@althar/ui'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-import { askedSecond } from '../../../lib/browser'
+import { askedSecond, useStill } from '../../../lib/browser'
+import { cx } from '../../../lib/cx'
 import { BoardAtWork, Tabs } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
 import { useInView } from '../kit/seen'
-import { type Region, Shot } from '../kit/Shot'
+import { Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
 import s from './AtWork.module.css'
 
@@ -13,10 +14,11 @@ import s from './AtWork.module.css'
  * Tally's board, in Althar's light on the dark of the panel: four tasks
  * running at once, each led by another lab. While it is watched the work
  * goes on: a beat every couple of seconds, a minute on each task's clock
- * and, at its own pace, a step on. Still with motion reduced or a moment
- * held (`?t=`). On a phone, the lanes side by side, a lane to a screen:
- * it opens on the running one, the lanes either side peeking in at the
- * edges, and swipes from lane to lane.
+ * and, at its own pace, a step on. On a phone, a lane at a time, its foot
+ * fading out, and the view moving along the lanes as the work does, from
+ * left to right: from Running to what needs you and what has settled,
+ * then fading back to what is next. Still, on Running, with motion reduced
+ * or a moment held (`?t=`).
  */
 
 const none = () => {}
@@ -30,11 +32,14 @@ const LABEL =
 /** The board's design size, in px. */
 const W = 1440
 const H = 780
-/** On a phone, how much of the screen's width a lane takes: the rest is its neighbours' edges. */
-const SHARE = 0.84
-/** On a phone, the lanes from under the window's tabs, this tall. */
+/** On a phone, a lane from its head under the window's tabs, this tall, with this much room either side. */
 const TOP = 56
-const TALL = 640
+const TALL = 480
+const SIDE = 8
+/** On a phone, how long the view rests on a lane, how long it takes to glide to the next, and to fade at the last and come back at the first, in ms. */
+const REST = 2800
+const GLIDE = 900
+const TURN = 320
 
 export function AtWork() {
   const box = useRef<HTMLDivElement>(null)
@@ -67,7 +72,7 @@ export function AtWork() {
   return (
     <div ref={box} className={s.wrap}>
       {phone ? (
-        <Lanes>{board}</Lanes>
+        <Lanes watched={watched}>{board}</Lanes>
       ) : (
         <Shot w={W} h={H} label={LABEL} frame={s.frame}>
           {board}
@@ -93,50 +98,60 @@ function lanesOf(stage: HTMLElement): Lane[] {
   return [...stage.querySelectorAll<HTMLElement>('[data-lane]')].map((lane) => ({ left: leftOf(lane), width: lane.offsetWidth }))
 }
 
-/** The board on a phone: a strip of its lanes as wide as the panel, scrolling from one to the next. */
-function Lanes({ children }: { children: ReactNode }) {
-  const strip = useRef<HTMLDivElement>(null)
-  // The strip's width, and where the lanes are in the board's design px, each time the strip changes size; first before it is painted.
-  const [{ view, lanes }, setRoom] = useState<{ view: number; lanes: Lane[] }>({ view: 0, lanes: [] })
+/** The board on a phone: a lane at a time, the view moving on to the next while it is `watched`. */
+function Lanes({ watched, children }: { watched: boolean; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  const [lanes, setLanes] = useState<Lane[]>([])
   useLayoutEffect(() => {
-    const el = strip.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      const stage = el.querySelector<HTMLElement>('[data-picture]')
-      if (stage) setRoom({ view: el.clientWidth, lanes: lanesOf(stage) })
-    })
-    ro.observe(el)
+    const stage = box.current?.querySelector<HTMLElement>('[data-picture]')
+    if (!stage) return
+    // Read once it is laid out, before it is painted.
+    const ro = new ResizeObserver(() => setLanes(lanesOf(stage)))
+    ro.observe(stage)
     return () => ro.disconnect()
   }, [])
-  const first = lanes[0]
-  const last = lanes.at(-1)
-  const ready = first !== undefined && last !== undefined && view > 0
-  // A lane takes SHARE of the screen; the room either side lets the first and the last come to the middle too.
-  const scale = ready ? (view * SHARE) / first.width : 0
-  const side = ready ? (view * (1 - SHARE)) / 2 / scale : 0
-  const region: Region = ready
-    ? { x: first.left - side, y: TOP, w: last.left + last.width - first.left + 2 * side, h: TALL }
-    : { x: 0, y: TOP, w: W, h: TALL }
-  // It opens on Running, the second lane, with Up next and Needs you at its edges.
-  const opened = useRef(false)
-  const running = lanes[1]
-  useLayoutEffect(() => {
-    const el = strip.current
-    if (!el || !ready || !running || opened.current) return
-    opened.current = true
-    el.scrollLeft = (running.left - region.x) * scale - (view * (1 - SHARE)) / 2
-  })
+  const still = useStill()
+  // Which lane is in view: Running, the second, to begin with and when still.
+  const [at, setAt] = useState(1)
+  // At the last lane it fades (turning), comes back to the first unseen (cut, with no glide), and fades in. It
+  // starts cut too, so it doesn't glide from where it is drawn before the lanes are read.
+  const [turning, setTurning] = useState(false)
+  const [cut, setCut] = useState(true)
+  const moving = watched && !still && lanes.length > 1
+  useEffect(() => {
+    if (!moving || turning) return
+    const id = window.setTimeout(() => (at < lanes.length - 1 ? setAt(at + 1) : setTurning(true)), REST + GLIDE)
+    return () => clearTimeout(id)
+  }, [moving, turning, at, lanes.length])
+  useEffect(() => {
+    if (!turning) return
+    const id = window.setTimeout(() => {
+      setCut(true)
+      setAt(0)
+    }, TURN)
+    return () => clearTimeout(id)
+  }, [turning])
+  useEffect(() => {
+    if (!cut || lanes.length === 0) return
+    // Once the lane is drawn without a glide, it glides again, and fades in.
+    let id = requestAnimationFrame(() => {
+      id = requestAnimationFrame(() => {
+        setCut(false)
+        setTurning(false)
+      })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [cut, lanes.length])
+  const lane = lanes[still ? 1 : at] ?? { left: 378, width: 346 }
   return (
-    <div ref={strip} className={s.strip}>
-      <div className={s.track} style={ready ? { width: region.w * scale } : undefined}>
-        <Shot w={W} h={H} phone={region} maxScale={4} label={LABEL} frame={s.lanes}>
-          {children}
-        </Shot>
-        {ready &&
-          lanes.map((lane) => (
-            <span key={lane.left} className={s.snap} style={{ left: (lane.left - region.x) * scale, width: lane.width * scale }} />
-          ))}
-      </div>
+    <div
+      ref={box}
+      className={cx(s.lanes, turning && s.turning, cut && s.cut)}
+      style={{ '--glide': `${GLIDE}ms`, '--turn': `${TURN}ms` } as CSSProperties}
+    >
+      <Shot w={W} h={H} phone={{ x: lane.left - SIDE, y: TOP, w: lane.width + 2 * SIDE, h: TALL }} label={LABEL} frame={s.lane}>
+        {children}
+      </Shot>
     </div>
   )
 }
