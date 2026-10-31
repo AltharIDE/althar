@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { Get } from '../../../shared/Close'
+import { Get, OtherMac } from '../../../shared/Close'
 import { LightUnder } from '../../../shared/lightUnder'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
@@ -135,7 +135,10 @@ export function DesktopBody() {
             The craft of a paid app. <br className={s.phoneBreak} />
             <b>The freedom of open source.</b>
           </p>
-          <Get tone="paper" />
+          <div className={s.endGet}>
+            <Get tone="paper" />
+            <OtherMac tone="paper" />
+          </div>
         </div>
       </section>
     </main>

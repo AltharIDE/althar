@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
+import { macBuild } from './archs.ts'
 import { mismatches } from './feed.ts'
 
 /*
@@ -11,10 +12,12 @@ import { mismatches } from './feed.ts'
  * version tag, with the certificate and Apple's credentials from the release
  * environment, then makes the draft GitHub Release itself.
  *
- *   bun run release   packages, signs, notarizes and staples where the
- *                     credentials are given, makes the dmg, the zip and
- *                     latest-mac.yml in out/dist, and checks them: the feed
- *                     against the packages, and the app inside the zip.
+ *   bun run release   packages Althar for Apple silicon and for Intel,
+ *                     each on its own, signs, notarizes and staples them
+ *                     where the credentials are given, makes each one's dmg
+ *                     and zip, and one latest-mac.yml for both, in out/dist,
+ *                     and checks them: the feed against the packages, and
+ *                     each app inside its zip.
  *
  * On a Mac it is for trying a release before tagging it. In CI (CI=true) it
  * is strict: anything but an app signed with a Developer ID, notarized, with
@@ -27,11 +30,15 @@ const { productName, version } = JSON.parse(readFileSync(join(desktop, 'package.
   readonly productName: string
   readonly version: string
 }
-const app = join(dist, 'mac-arm64', `${productName}.app`)
-const dmg = join(dist, `${productName}-${version}-arm64.dmg`)
-const zip = join(dist, `${productName}-${version}-arm64-mac.zip`)
+/** Apple silicon's and Intel's builds, each with its app, its dmg and its zip, the files the draft release carries. */
+const ARCHES = ['arm64', 'x64'] as const
+const builds = ARCHES.map((arch) => {
+  const made = macBuild(productName, version, arch)
+  return { arch, app: join(dist, made.folder, `${productName}.app`), dmg: join(dist, made.dmg), zip: join(dist, made.zip) }
+})
+type Build = (typeof builds)[number]
 const feed = join(dist, 'latest-mac.yml')
-const assets = [dmg, `${dmg}.blockmap`, zip, `${zip}.blockmap`, feed]
+const assets = [...builds.flatMap(({ dmg, zip }) => [dmg, `${dmg}.blockmap`, zip, `${zip}.blockmap`]), feed]
 
 const ci = process.env.CI === 'true'
 const say = (line: string) => process.stdout.write(`${line}\n`)
@@ -46,17 +53,17 @@ const run = (command: string, list: ReadonlyArray<string>) => {
 }
 const git = (...list: ReadonlyArray<string>) => execFileSync('git', list, { cwd: desktop, encoding: 'utf8' }).trim()
 
-/** Who signed the app: its Developer ID, or ad hoc. */
-const signer = () => /^Authority=(.+)$/m.exec(run('codesign', ['-dvv', app]).said)?.[1] ?? 'nobody (ad hoc)'
-/** Whether a ticket is stapled to the dmg. */
-const stapled = () => run('xcrun', ['stapler', 'validate', dmg]).ok
+/** Who signed an app: its Developer ID, or ad hoc. */
+const signer = (app: string) => /^Authority=(.+)$/m.exec(run('codesign', ['-dvv', app]).said)?.[1] ?? 'nobody (ad hoc)'
+/** Whether a ticket is stapled to a dmg. */
+const stapled = (dmg: string) => run('xcrun', ['stapler', 'validate', dmg]).ok
 
 /**
  * The app inside the zip, which is what the updater installs: unpacked, it
  * must hold its signature, be Althar at this version, and, where the release
  * is notarized, carry its ticket.
  */
-const checkZipped = (notarized: boolean) => {
+const checkZipped = ({ zip }: Build, notarized: boolean) => {
   const into = mkdtempSync(join(tmpdir(), 'althar-zip-'))
   try {
     execFileSync('ditto', ['-x', '-k', zip, into])
@@ -76,35 +83,45 @@ const checkZipped = (notarized: boolean) => {
 
 /** Checks what was made, and says how it stands. */
 const check = () => {
-  for (const path of [app, ...assets]) if (!existsSync(path)) fail(`${path} is missing. Run \`bun run release\` first.`)
+  for (const path of [...builds.map(({ app }) => app), ...assets])
+    if (!existsSync(path)) fail(`${path} is missing. Run \`bun run release\` first.`)
   const fed = readFileSync(feed, 'utf8')
   if (!fed.startsWith(`version: ${version}\n`)) fail(`latest-mac.yml isn't for ${version}:\n${fed}`)
-  const wrong = mismatches(fed, dist, [basename(zip), basename(dmg)])
+  const wrong = mismatches(
+    fed,
+    dist,
+    builds.flatMap(({ zip, dmg }) => [basename(zip), basename(dmg)]),
+  )
   if (wrong.length > 0) fail(`latest-mac.yml doesn't match the packages:\n${wrong.join('\n')}`)
-  checkZipped(stapled())
-  const verified = run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
-  if (!verified.ok) fail(`The app's signature doesn't hold:\n${verified.said}`)
-  say(`\nSigned by ${signer()}; codesign --verify --deep --strict passes.`)
-  say(`Gatekeeper on the app: ${run('spctl', ['-a', '-vvv', '-t', 'exec', app]).said}`)
-  say(`Gatekeeper on the dmg: ${run('spctl', ['-a', '-vvv', '-t', 'open', '--context', 'context:primary-signature', dmg]).said}`)
-  say(stapled() ? 'The dmg has its notarization ticket.' : 'The dmg is not notarized.')
+  for (const build of builds) {
+    const { arch, app, dmg } = build
+    checkZipped(build, stapled(dmg))
+    const verified = run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
+    if (!verified.ok) fail(`The ${arch} app's signature doesn't hold:\n${verified.said}`)
+    say(`\n${arch}: signed by ${signer(app)}; codesign --verify --deep --strict passes.`)
+    say(`Gatekeeper on the app: ${run('spctl', ['-a', '-vvv', '-t', 'exec', app]).said}`)
+    say(`Gatekeeper on the dmg: ${run('spctl', ['-a', '-vvv', '-t', 'open', '--context', 'context:primary-signature', dmg]).said}`)
+    say(stapled(dmg) ? 'The dmg has its notarization ticket.' : 'The dmg is not notarized.')
+  }
   for (const path of assets) say(`  ${path}`)
 }
 
 const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
 const dirty = git('status', '--porcelain') !== ''
 if (!ci && (branch !== 'main' || dirty)) say(`Packaging ${version} from ${branch}${dirty ? ', with changes not committed' : ''}, to try.`)
-const packaged = spawnSync('bun', ['run', 'package'], { cwd: desktop, stdio: 'inherit' })
+const packaged = spawnSync('bun', ['run', 'package', `--arch=${ARCHES.join(',')}`], { cwd: desktop, stdio: 'inherit' })
 if (packaged.status !== 0) fail('Packaging failed; see above.')
 check()
 if (ci) {
-  const signedBy = signer()
-  if (!signedBy.startsWith('Developer ID Application:')) fail(`The app is signed by ${signedBy}, not a Developer ID.`)
-  if (!stapled()) fail('The dmg has no notarization ticket stapled to it.')
-  for (const [what, list] of [
-    ['app', ['-a', '-t', 'exec', app]],
-    ['dmg', ['-a', '-t', 'open', '--context', 'context:primary-signature', dmg]],
-  ] as const)
-    if (!run('spctl', list).ok) fail(`Gatekeeper refuses the ${what}.`)
-  say(`\nAlthar ${version}: signed by ${signedBy}, notarized, and accepted by Gatekeeper.`)
-} else say(`\nOpen the dmg and try Althar ${version}. Releases are published from CI: tag v${version} on main (see the README).`)
+  for (const { arch, app, dmg } of builds) {
+    const signedBy = signer(app)
+    if (!signedBy.startsWith('Developer ID Application:')) fail(`The ${arch} app is signed by ${signedBy}, not a Developer ID.`)
+    if (!stapled(dmg)) fail(`The ${arch} dmg has no notarization ticket stapled to it.`)
+    for (const [what, list] of [
+      ['app', ['-a', '-t', 'exec', app]],
+      ['dmg', ['-a', '-t', 'open', '--context', 'context:primary-signature', dmg]],
+    ] as const)
+      if (!run('spctl', list).ok) fail(`Gatekeeper refuses the ${arch} ${what}.`)
+    say(`\nAlthar ${version} for ${arch}: signed by ${signedBy}, notarized, and accepted by Gatekeeper.`)
+  }
+} else say(`\nOpen a dmg and try Althar ${version}. Releases are published from CI: tag v${version} on main (see the README).`)

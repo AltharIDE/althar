@@ -7,9 +7,10 @@ import { pathToFileURL } from 'node:url'
 import { build } from 'electron-builder'
 
 import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
+import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
 import { binariesFor, speechPackage } from './binaries.ts'
 import { entitlementsFor } from './entitlements.ts'
-import { refresh } from './feed.ts'
+import { joinFeeds, refresh } from './feed.ts'
 import { fetchNode, NODE_IN_APP, nodeProgram } from './node.ts'
 import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
 
@@ -32,6 +33,14 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * resources (ADR-033, scripts/node.ts), as Althar's binary doesn't run as
  * Node: its `runAsNode` fuse is off.
  *
+ * A Mac build is for one processor, this Mac's unless `--arch=arm64,x64`
+ * names others: each is staged, packaged and checked on its own, with its
+ * own Electron, Node, agents and speech engine, and every Mach-O file in it
+ * is read with lipo, so a build with a program for the other processor
+ * fails. Two builds' latest-mac.yml are joined into one, which the updater
+ * picks its own Mac's packages from. One universal app would hold every
+ * binary twice, about double the size.
+ *
  * Signing: every executable in the app is signed on its own, deepest first,
  * with the hardened runtime and a secure timestamp, and given only the
  * entitlements it needs (scripts/entitlements.ts). The identity is ALTHAR_MAC_IDENTITY;
@@ -51,7 +60,6 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
 
 const desktop = join(import.meta.dirname, '..')
 const out = join(desktop, 'out')
-const stage = join(out, 'stage')
 const mac = process.platform === 'darwin'
 const windows = process.platform === 'win32'
 // Each system's packages are built on it: electron-builder has no deb, rpm or AppImage off Linux, and left to it the three-package check below would fail without saying why.
@@ -59,6 +67,17 @@ if (!mac && !windows && process.platform !== 'linux')
   throw new Error(`Althar is packaged on macOS, Windows or Linux, not on ${process.platform}.`)
 // Windows is x64 alone for now, which Windows on ARM runs emulated.
 if (windows && process.arch !== 'x64') throw new Error(`The Windows installer is built for x64, not ${process.arch}.`)
+// Windows and Linux are packaged for the machine's processor; a Mac for those --arch names, this one's by default. Apple silicon cross-builds the Intel app.
+const asked = process.argv
+  .slice(2)
+  .find((arg) => arg.startsWith('--arch='))
+  ?.slice('--arch='.length)
+const arches = asked === undefined ? [process.arch] : asked.split(',')
+if (!mac && asked !== undefined && asked !== process.arch)
+  throw new Error(`Only a Mac build can be for another processor than this machine's.`)
+for (const arch of arches) if (mac && LIPO_ARCH[arch] === undefined) throw new Error(`A Mac build is for arm64 or x64, not ${arch}.`)
+/** The processors a Mac build is for, as electron-builder names them; checked below, before anything is packaged. */
+type MacArch = 'arm64' | 'x64'
 const dist = join(out, 'dist')
 const resources = join(desktop, 'resources')
 const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
@@ -147,71 +166,78 @@ const installed = (name: string, adapter: string) => {
   if (found === undefined) throw new Error(`The workspace has no ${name} for ${adapter}`)
   return versionAt(found)
 }
-const pinned = {
+const pinnedFor = (arch: string) => ({
   ...Object.fromEntries(Object.entries(BINARIES).map(([name, adapter]) => [name, installed(name, adapter)])),
   // The speech engine's binaries for this platform, at the version of the engine itself, which names them only as ^ ranges.
-  [speechPackage(process.platform, process.arch)]: own.dependencies['sherpa-onnx-node'] ?? '',
-}
-
-rmSync(out, { recursive: true, force: true })
-mkdirSync(stage, { recursive: true })
-cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
-cpSync(join(resources, 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
-cpSync(join(resources, 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
-writeFileSync(
-  join(stage, 'package.json'),
-  `${JSON.stringify(
-    {
-      name: 'althar',
-      productName: own.productName,
-      version: own.version,
-      description: own.description,
-      homepage: 'https://althar.ai',
-      // Electron uses this as the window's app_id/WM_CLASS on Linux; kept the .desktop file's name, so windows associate with the entry.
-      desktopName: 'althar.desktop',
-      type: 'module',
-      main: 'dist/main/main.js',
-      dependencies: Object.fromEntries([...ADAPTERS, ...NATIVE].map((name) => [name, own.dependencies[name]])),
-      overrides: pinned,
-    },
-    null,
-    2,
-  )}\n`,
-)
-// npm, for a flat node_modules the adapters' own lookups find their way through. On Windows npm is npm.cmd, which only a shell runs.
-execFileSync(windows ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], {
-  cwd: stage,
-  stdio: 'inherit',
-  shell: windows,
+  [speechPackage(process.platform, arch)]: own.dependencies['sherpa-onnx-node'] ?? '',
 })
-// This install is npm's, which skips bun's patches: the Claude adapter's is applied here, or the app would not get plan usage before a turn's first figure.
-const CLAUDE_ADAPTER = join('node_modules', '@agentclientprotocol', 'claude-agent-acp')
-applyAdapterPatch(
-  join(stage, CLAUDE_ADAPTER),
-  adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
-)
-for (const [name, version] of Object.entries(pinned)) {
-  const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
-  if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
-}
 
 /** Where a package is, found from the package.json at `from` as Node would: by the folders Node looks in. */
-const folderOf = (from: string, name: string) => {
+const folderOf = (stage: string, from: string, name: string) => {
   const found = (createRequire(from).resolve.paths(name) ?? [])
     .map((folder) => join(folder, name))
     .find((path) => existsSync(join(path, 'package.json')))
   if (found === undefined) throw new Error(`The package has no ${name}, found from ${relative(stage, from)}`)
   return found
 }
-// Codex, Claude Code and the speech engine for this platform, where the runtime looks for them (scripts/binaries.ts).
-for (const binary of binariesFor(process.platform, process.arch)) {
-  const parent = folderOf(join(stage, 'package.json'), binary.parent)
-  const program = join(folderOf(join(parent, 'package.json'), binary.name), binary.file)
-  if (!existsSync(program)) throw new Error(`The package is missing ${relative(stage, program)}`)
-}
 
-// Kept beside the workspace's packages, so it is fetched once, not for every package.
-const node = await fetchNode(join(desktop, 'node_modules', '.cache', 'althar-node'))
+/** The Claude adapter, in the staged and the packaged app. */
+const CLAUDE_ADAPTER = join('node_modules', '@agentclientprotocol', 'claude-agent-acp')
+
+rmSync(out, { recursive: true, force: true })
+
+/** The app, staged for a processor in out/stage/<arch>: the bundles, the pictures, and the adapters, speech engine and updater with that processor's binaries. */
+const stageFor = (arch: string) => {
+  const stage = join(out, 'stage', arch)
+  const pinned = pinnedFor(arch)
+  mkdirSync(stage, { recursive: true })
+  cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
+  cpSync(join(resources, 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
+  cpSync(join(resources, 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
+  writeFileSync(
+    join(stage, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'althar',
+        productName: own.productName,
+        version: own.version,
+        description: own.description,
+        homepage: 'https://althar.ai',
+        // Electron uses this as the window's app_id/WM_CLASS on Linux; kept the .desktop file's name, so windows associate with the entry.
+        desktopName: 'althar.desktop',
+        type: 'module',
+        main: 'dist/main/main.js',
+        dependencies: Object.fromEntries([...ADAPTERS, ...NATIVE].map((name) => [name, own.dependencies[name]])),
+        overrides: pinned,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  // npm, for a flat node_modules the adapters' own lookups find their way through, with the optional packages of the processor asked for. On Windows npm is npm.cmd, which only a shell runs.
+  execFileSync(
+    windows ? 'npm.cmd' : 'npm',
+    ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', `--os=${process.platform}`, `--cpu=${arch}`],
+    { cwd: stage, stdio: 'inherit', shell: windows },
+  )
+  // This install is npm's, which skips bun's patches: the Claude adapter's is applied here, or the app would not get plan usage before a turn's first figure.
+  applyAdapterPatch(
+    join(stage, CLAUDE_ADAPTER),
+    adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
+  )
+  for (const [name, version] of Object.entries(pinned)) {
+    const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
+    if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
+  }
+
+  // Codex, Claude Code and the speech engine for this platform and processor, where the runtime looks for them (scripts/binaries.ts).
+  for (const binary of binariesFor(process.platform, arch)) {
+    const parent = folderOf(stage, join(stage, 'package.json'), binary.parent)
+    const program = join(folderOf(stage, join(parent, 'package.json'), binary.name), binary.file)
+    if (!existsSync(program)) throw new Error(`The package is missing ${relative(stage, program)}`)
+  }
+  return stage
+}
 
 /*
  * electron-builder gives every executable but Althar's own binary the same
@@ -220,13 +246,13 @@ const node = await fetchNode(join(desktop, 'node_modules', '.cache', 'althar-nod
  */
 const osxSign = createRequire(createRequire(require.resolve('electron-builder')).resolve('app-builder-lib')).resolve('@electron/osx-sign')
 type SignOptions = { readonly app: string; readonly optionsForFile?: (file: string) => Record<string, unknown> }
-const signEach = async (options: SignOptions) => {
+const signEach = (arch: string) => async (options: SignOptions) => {
   const { signAsync } = (await import(pathToFileURL(osxSign).href)) as { signAsync: (options: SignOptions) => Promise<void> }
   await signAsync({
     ...options,
     optionsForFile: (file) => ({
       ...options.optionsForFile?.(file),
-      entitlements: [...entitlementsFor(relative(options.app, file), adHoc)],
+      entitlements: [...entitlementsFor(relative(options.app, file), adHoc, arch)],
     }),
   })
 }
@@ -236,105 +262,134 @@ const electron = dirname(require.resolve('electron/package.json'))
 execFileSync(process.execPath, ['install.js'], { cwd: electron, stdio: 'inherit' })
 const electronVersion = readFileSync(join(electron, 'dist', 'version'), 'utf8').trim()
 
-await build({
-  projectDir: stage,
-  // Packages are made here; they reach GitHub only through the release workflow, as a draft.
-  publish: 'never',
-  config: {
-    appId: 'dev.althar.app',
-    productName: own.productName,
-    copyright: 'Althar',
-    directories: { output: dist },
-    electronVersion,
-    electronDist: join(electron, 'dist'),
-    // Plain files: the adapters run their own binaries, which can't be started from inside an archive.
-    asar: false,
-    npmRebuild: false,
-    nodeGypRebuild: false,
-    /*
-     * Nothing may run Althar's binary as Node, or steer it through
-     * NODE_OPTIONS or the inspector (ADR-033): the adapters run on the Node
-     * the app ships, and need none of these.
-     */
-    electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
-    files: ['**/*'],
-    // The Node the adapters run on, with its license: `resources/node/bin/node` (node.exe on Windows), where the window's process names it to the runtime.
-    extraResources: [{ from: node, to: NODE_IN_APP, filter: [`bin/${nodeProgram(process.platform)}`, 'LICENSE'] }],
-    // The provider written into app-update.yml and the platform's latest*.yml feed; publication itself stays in the release workflow.
-    publish: [RELEASES],
-    ...(mac
-      ? {
-          mac: {
-            target: [
-              { target: 'dmg', arch: ['arm64'] },
-              { target: 'zip', arch: ['arm64'] },
-            ],
-            icon: join(resources, 'icon.icns'),
-            category: 'public.app-category.developer-tools',
-            ...(identity === undefined ? {} : { identity }),
-            hardenedRuntime: true,
-            gatekeeperAssess: false,
-            sign: signEach,
-            notarize: false,
-            extendInfo: {
-              NSMicrophoneUsageDescription:
-                'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
-              ElectronSquirrelPreventDowngrades: true,
-            },
-          },
-          dmg: { sign: !adHoc },
-          afterSign: (context) => {
-            if (auth !== null)
-              notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
-          },
-        }
-      : windows
+/** The installed Electron for this machine's processor; for the other, none, and electron-builder fetches the same version's build for it, checked against Electron's digests. */
+const electronFor = (arch: string): { readonly electronDist?: string } =>
+  arch === process.arch ? { electronDist: join(electron, 'dist') } : {}
+
+/** Each Mac build's latest-mac.yml, as electron-builder wrote it and stapling refreshed it, joined into one once all are made. */
+const macFeeds: Array<string> = []
+
+for (const arch of arches) {
+  const stage = stageFor(arch)
+  // Kept beside the workspace's packages, so it is fetched once, not for every package.
+  const node = await fetchNode(join(desktop, 'node_modules', '.cache', 'althar-node'), process.platform, arch)
+  const made = macBuild(own.productName, own.version, arch)
+
+  await build({
+    projectDir: stage,
+    // Packages are made here; they reach GitHub only through the release workflow, as a draft.
+    publish: 'never',
+    config: {
+      appId: 'dev.althar.app',
+      productName: own.productName,
+      copyright: 'Althar',
+      directories: { output: dist },
+      electronVersion,
+      ...electronFor(arch),
+      // Plain files: the adapters run their own binaries, which can't be started from inside an archive.
+      asar: false,
+      npmRebuild: false,
+      nodeGypRebuild: false,
+      /*
+       * Nothing may run Althar's binary as Node, or steer it through
+       * NODE_OPTIONS or the inspector (ADR-033): the adapters run on the Node
+       * the app ships, and need none of these.
+       */
+      electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
+      files: ['**/*'],
+      // The Node the adapters run on, with its license: `resources/node/bin/node` (node.exe on Windows), where the window's process names it to the runtime.
+      extraResources: [{ from: node, to: NODE_IN_APP, filter: [`bin/${nodeProgram(process.platform)}`, 'LICENSE'] }],
+      // The provider written into app-update.yml and the platform's latest*.yml feed; publication itself stays in the release workflow.
+      publish: [RELEASES],
+      ...(mac
         ? {
-            win: {
-              target: [{ target: 'nsis', arch: ['x64'] }],
-              icon: join(resources, 'icons', 'cobalt.png'),
-              // WINDOWS_SIGNING: `azureSignOptions` or `signtoolOptions` go here (see above).
+            mac: {
+              target: [
+                { target: 'dmg', arch: [arch as MacArch] },
+                { target: 'zip', arch: [arch as MacArch] },
+              ],
+              // With the processor in every name, x64's too, which electron-builder would leave out: the updater tells its Mac's from them.
+              artifactName: '${productName}-${version}-${arch}-mac.${ext}',
+              icon: join(resources, 'icon.icns'),
+              category: 'public.app-category.developer-tools',
+              ...(identity === undefined ? {} : { identity }),
+              hardenedRuntime: true,
+              gatekeeperAssess: false,
+              sign: signEach(arch),
+              notarize: false,
+              extendInfo: {
+                NSMicrophoneUsageDescription:
+                  'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
+                ElectronSquirrelPreventDowngrades: true,
+              },
             },
-            nsis: {
-              // One click, for the person alone, in %LOCALAPPDATA%\Programs\althar: no administrator's prompt, and no choices to make.
-              oneClick: true,
-              perMachine: false,
-              allowElevation: false,
-              createStartMenuShortcut: true,
-              shortcutName: own.productName,
-              // A name with no spaces, which GitHub would turn into dots on upload, away from the name latest.yml gives it.
-              artifactName: '${productName}-${version}-x64-setup.${ext}',
+            dmg: { sign: !adHoc, artifactName: '${productName}-${version}-${arch}.${ext}' },
+            afterSign: (context) => {
+              if (auth !== null)
+                notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
             },
           }
-        : {
-            linux: {
-              target: ['AppImage', 'deb', 'rpm'],
-              icon: join(resources, 'icons', 'cobalt.png'),
-              category: 'Development',
-              maintainer: 'Althar <hello@althar.ai>',
-              synopsis: 'Run software projects with AI coding agents',
-              description: 'Althar is an environment for running software projects with AI coding agents.',
-              syncDesktopName: true,
-            },
-            deb: { recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'] },
-            rpm: { fpm: ['--rpm-tag', 'Recommends: gnome-keyring'] },
-          }),
-  },
-})
+        : windows
+          ? {
+              win: {
+                target: [{ target: 'nsis', arch: ['x64'] }],
+                icon: join(resources, 'icons', 'cobalt.png'),
+                // WINDOWS_SIGNING: `azureSignOptions` or `signtoolOptions` go here (see above).
+              },
+              nsis: {
+                // One click, for the person alone, in %LOCALAPPDATA%\Programs\althar: no administrator's prompt, and no choices to make.
+                oneClick: true,
+                perMachine: false,
+                allowElevation: false,
+                createStartMenuShortcut: true,
+                shortcutName: own.productName,
+                // A name with no spaces, which GitHub would turn into dots on upload, away from the name latest.yml gives it.
+                artifactName: '${productName}-${version}-x64-setup.${ext}',
+              },
+            }
+          : {
+              linux: {
+                target: ['AppImage', 'deb', 'rpm'],
+                icon: join(resources, 'icons', 'cobalt.png'),
+                category: 'Development',
+                maintainer: 'Althar <hello@althar.ai>',
+                synopsis: 'Run software projects with AI coding agents',
+                description: 'Althar is an environment for running software projects with AI coding agents.',
+                syncDesktopName: true,
+              },
+              deb: { recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'] },
+              rpm: { fpm: ['--rpm-tag', 'Recommends: gnome-keyring'] },
+            }),
+    },
+  })
+
+  if (mac) {
+    const dmg = join(dist, made.dmg)
+    const feed = join(dist, 'latest-mac.yml')
+    if (auth !== null) {
+      notarize(dmg, auth, join(out, 'notary'))
+      refresh(feed, dmg)
+    }
+    const app = join(dist, made.folder, `${own.productName}.app`)
+    for (const path of [app, dmg, join(dist, made.zip), feed]) if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+    // What ships, not only what was staged.
+    assertAdapterPatched(join(app, 'Contents', 'Resources', 'app', CLAUDE_ADAPTER))
+    const { read, wrong } = wrongArchs(app, arch)
+    if (wrong.length > 0)
+      throw new Error(
+        `The ${arch} app holds programs for another processor:\n${wrong.map(({ path, archs }) => `  ${path}: ${archs.join(' ')}`).join('\n')}`,
+      )
+    process.stdout.write(`\nEvery one of the ${read} Mach-O files in the ${arch} app has ${LIPO_ARCH[arch]}.\n`)
+    // The next build writes a feed of its own over this one.
+    macFeeds.push(readFileSync(feed, 'utf8'))
+    process.stdout.write(`${app}\n${dmg}\n${join(dist, made.zip)}\n`)
+  }
+}
 
 if (mac) {
-  const made = (suffix: string) => join(dist, `${own.productName}-${own.version}-arm64${suffix}`)
-  const dmg = made('.dmg')
-  if (auth !== null) {
-    notarize(dmg, auth, join(out, 'notary'))
-    refresh(join(dist, 'latest-mac.yml'), dmg)
-  }
-  const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
-  for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
-    if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
-  // What ships, not only what was staged.
-  assertAdapterPatched(join(app, 'Contents', 'Resources', 'app', CLAUDE_ADAPTER))
-  process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
+  const feed = join(dist, 'latest-mac.yml')
+  writeFileSync(feed, joinFeeds(macFeeds))
+  process.stdout.write(`${feed}\n`)
 } else if (windows) {
   const installer = join(dist, `${own.productName}-${own.version}-x64-setup.exe`)
   const node = join(dist, 'win-unpacked', 'resources', NODE_IN_APP, 'bin', nodeProgram('win32'))

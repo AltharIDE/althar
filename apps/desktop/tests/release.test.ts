@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { mismatches, withFile } from '../scripts/feed'
+import { joinFeeds, mismatches, withFile } from '../scripts/feed'
 import { notaryArgs, notaryAuth } from '../scripts/notarize'
 
 const FEED = `version: 0.1.0
@@ -80,5 +81,88 @@ describe('the release', () => {
     } finally {
       rmSync(folder, { recursive: true, force: true })
     }
+  })
+})
+
+/** The feed electron-builder writes for the Intel build, packaged on its own. */
+const INTEL = `version: 0.1.0
+files:
+  - url: Althar-0.1.0-x64-mac.zip
+    sha512: intelzip==
+    size: 401000000
+  - url: Althar-0.1.0-x64.dmg
+    sha512: inteldmg==
+    size: 402000000
+path: Althar-0.1.0-x64-mac.zip
+sha512: intelzip==
+releaseDate: '2026-10-11T15:40:02.112Z'
+`
+
+/*
+ * What the updater in the app makes of the joined feed: electron-updater's
+ * own MacUpdater, which keeps on an Apple silicon Mac (or one running the
+ * Intel app under Rosetta) the files with arm64 in their names, and on an
+ * Intel Mac the others, then takes the zip among them.
+ */
+const updater = createRequire(createRequire(import.meta.url).resolve('electron-updater/package.json'))
+const { MacUpdater } = updater('./out/MacUpdater.js') as {
+  MacUpdater: { filterFilesForArch: (files: ReadonlyArray<unknown>, isArm64Mac: boolean) => ReadonlyArray<unknown> }
+}
+const { findFile, resolveFiles } = updater('./out/providers/Provider.js') as {
+  resolveFiles: (info: unknown, base: URL) => ReadonlyArray<unknown>
+  findFile: (files: ReadonlyArray<unknown>, extension: string, not: ReadonlyArray<string>) => { url: URL } | undefined
+}
+const { load } = updater('js-yaml') as { load: (text: string) => unknown }
+const zipFor = (feed: string, isArm64Mac: boolean) =>
+  findFile(
+    MacUpdater.filterFilesForArch(
+      resolveFiles(load(feed), new URL('https://github.com/AltharIDE/althar/releases/download/v0.1.0/')),
+      isArm64Mac,
+    ),
+    'zip',
+    ['pkg', 'dmg'],
+  )
+    ?.url.pathname.split('/')
+    .pop()
+
+describe('one feed for both Macs', () => {
+  const joined = joinFeeds([FEED, INTEL])
+
+  it('lists both builds’ packages, and keeps Apple silicon’s as its path', () => {
+    expect(joined).toBe(`version: 0.1.0
+files:
+  - url: Althar-0.1.0-arm64-mac.zip
+    sha512: zipdigest==
+    size: 373254965
+  - url: Althar-0.1.0-arm64.dmg
+    sha512: dmgdigest==
+    size: 373000535
+  - url: Althar-0.1.0-x64-mac.zip
+    sha512: intelzip==
+    size: 401000000
+  - url: Althar-0.1.0-x64.dmg
+    sha512: inteldmg==
+    size: 402000000
+path: Althar-0.1.0-arm64-mac.zip
+sha512: zipdigest==
+releaseDate: '2026-10-11T15:21:15.055Z'
+`)
+    expect(joinFeeds([FEED])).toBe(FEED)
+  })
+
+  it('refuses feeds for two versions, or none', () => {
+    expect(() => joinFeeds([FEED, INTEL.replace('version: 0.1.0', 'version: 0.1.1')])).toThrow(/0.1.0 and 0.1.1/)
+    expect(() => joinFeeds([])).toThrow(/No feed/)
+  })
+
+  it('gives each Mac its own processor’s zip to update to', () => {
+    expect(zipFor(joined, true)).toBe('Althar-0.1.0-arm64-mac.zip')
+    expect(zipFor(joined, false)).toBe('Althar-0.1.0-x64-mac.zip')
+  })
+
+  it('never gives an Intel Mac the Apple silicon build, even from a feed without its own', () => {
+    // An arm64-only feed, as releases made before the Intel build have, leaves an Intel Mac nothing: its update check fails rather than installs it.
+    expect(() => zipFor(FEED, false)).toThrow(/No files provided/)
+    expect(zipFor(FEED, true)).toBe('Althar-0.1.0-arm64-mac.zip')
   })
 })

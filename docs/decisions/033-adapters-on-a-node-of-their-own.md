@@ -71,7 +71,7 @@
     | Althar | JIT, microphone |
     | Althar Helper (utility processes: the runtime, dictation, the audio service) | JIT, microphone |
     | Althar Helper (Renderer), (GPU), (Plugin) | JIT |
-    | `node` | JIT |
+    | `node` | JIT; on Intel, unsigned executable memory too ([ADR-071](071-an-intel-mac-build-beside-apple-silicon.md)) |
     | Claude Code (`claude`) | JIT, unsigned executable memory, any library |
     | Codex, and its code-mode host | JIT, unsigned executable memory |
     | Everything else: ShipIt, crashpad, `rg`, `zsh`, Codex's voice host, the speech engine's libraries | none |
