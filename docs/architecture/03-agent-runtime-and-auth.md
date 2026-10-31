@@ -918,7 +918,11 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   (`~/.bun/install/cache`). One list (`toolPlaces.ts`) holds each tool's
   caches on a Mac and on Linux and the hosts it downloads from, by the
   files or packages that say a project uses it. None is where keys and
-  sign-ins are kept, nor holds one (`writesOf` drops it all the same). A
+  sign-ins are kept, nor holds one (`writesOf` drops it all the same).
+  A sandboxed command reaches the network only through the proxy the
+  sandbox names in `HTTPS_PROXY`, which Node's own `fetch` ignores, so
+  Claude Code starts with `NODE_USE_ENV_PROXY=1`: without it Electron's
+  download (`@electron/get`) fails in the sandbox even to a host it allows. A
   cache is shared with the person's own installs, so a lead could leave
   something there that a later install of theirs picks up: the trade made
   so a task's folder gets ready without anyone.

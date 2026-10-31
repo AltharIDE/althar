@@ -814,9 +814,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     name: 'Claude Code',
     service: { name: 'Anthropic', url: 'https://api.anthropic.com' },
     source: 'bundled',
+    /*
+     * `NODE_USE_ENV_PROXY`: a sandboxed command reaches the network only
+     * through the proxy its sandbox names in `HTTPS_PROXY`, which Node's own
+     * `fetch` ignores without it, so a Node tool's download (Electron's
+     * build, through `@electron/get`) fails inside the sandbox even to a host
+     * it allows. Where no proxy is named it changes nothing.
+     */
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
+      env: { NODE_USE_ENV_PROXY: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },

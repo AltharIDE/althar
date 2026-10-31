@@ -44,6 +44,8 @@ describe('the agent registry', () => {
     })
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // Node's fetch takes the proxy a Claude Code sandbox names, so a Node tool's download reaches a host it allows.
+    assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { NODE_USE_ENV_PROXY: '1' })
     // Antigravity's mode is held where it asks, as its others approve without asking.
     assert.deepStrictEqual(agents.antigravity.options.held, { mode: 'default' })
     // None is launched with a flag that approves.

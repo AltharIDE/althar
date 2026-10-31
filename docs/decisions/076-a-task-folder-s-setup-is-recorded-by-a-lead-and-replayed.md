@@ -24,7 +24,8 @@
     files or packages that say a project uses it. A Claude Code lead's
     sandbox takes them from the start (`sandbox.filesystem.allowWrite`,
     `sandbox.network.allowedDomains`), never where keys and sign-ins are
-    kept. A network request is read as a host, never as a command, so
+    kept, and Node's `fetch` takes the sandbox's proxy
+    (`NODE_USE_ENV_PROXY=1`), which Electron's download goes through. A network request is read as a host, never as a command, so
     GitHub's release downloads are no release script.
   - **The first lead works the setup out.** Where a repository has no setup
     recorded, the lead's brief asks it to get the folder ready first (its
