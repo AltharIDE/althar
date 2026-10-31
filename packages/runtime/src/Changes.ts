@@ -3271,6 +3271,30 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * Someone else pushed to the pull request, such as with the host's
+       * "Update branch": its head is neither what Althar last pushed nor on
+       * the task's branch, so the two have parted and a plain push would be
+       * refused. Its lead is told once a head to merge it in (`mergeNote`),
+       * started again if it must be, rather than leaving it to the person
+       * (DEV-173). Not while a conflict round is under way: the round brings
+       * the branches together itself.
+       */
+      const bringTogether = (link: LinkRow, head: string | null, url: string) =>
+        Effect.gen(function* () {
+          if (head === null || head === (yield* sentTo(link.projectId, url))) return
+          const workspace = yield* worktreeOf(link.taskId, url)
+          if (workspace === undefined || (yield* onHead(workspace.path, head)) || (yield* roundUnderWay(link.taskId))) return
+          const sql = yield* SqlClient.SqlClient
+          const [told] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'parted' AND json_extract(payload, '$.sha') = ${head} LIMIT 1`
+          if (told !== undefined) return
+          // Fetched first, so the lead has the commits to merge; a fetch that fails is tried again on the next turn.
+          const { note } = yield* mergeNote(link.taskId, url)
+          if (yield* heard(link, 'parted', `parted:${head}`, { sha: head })) yield* tellLead(link, [note], true)
+        })
+
+      /**
        * A pull request's head as its host says, unless the host hasn't read
        * Althar's last push to it yet: for a moment after a push, GitHub still
        * answers with the head before, behind what was pushed. Where the
@@ -3523,6 +3547,12 @@ export class Changes extends Context.Service<
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
           yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
+          if (now.state === 'open' && !held)
+            yield* bringTogether(link, now.headSha, now.url).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning('Could not have the lead bring in what was pushed to its pull request', cause),
+              ),
+            )
           // Not worked out yet by its host, whether it conflicts is asked again next turn, a few turns running, not taken for a no.
           const unknown = now.state === 'open' && now.conflicts === undefined ? (unknownFor.get(link.id) ?? 0) + 1 : 0
           if (unknown === 0) unknownFor.delete(link.id)
@@ -6105,6 +6135,7 @@ export class Changes extends Context.Service<
                 : {
                     open: all.some((one) => one.open),
                     running: all.some((one) => one.running),
+                    withLead: all.some((one) => one.open && one.failing),
                     why: all.find((one) => one.why !== null)?.why ?? null,
                   },
             ),
@@ -6133,7 +6164,6 @@ export class Changes extends Context.Service<
         mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
         pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
         // Once at a time for a task, whoever looks.
-                    withLead: all.some((one) => one.open && one.failing),
         askRemotes: (taskId) =>
           Effect.suspend(() => {
             if (asking.has(taskId)) return Effect.void

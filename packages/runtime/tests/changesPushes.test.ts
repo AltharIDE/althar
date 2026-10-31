@@ -698,6 +698,39 @@ describe('what a lead commits after the person has looked', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('have its lead bring in what someone else pushed to the pull request, told once', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      // Someone updates the pull request's branch on the host: a commit this Mac hasn't got, so branch and pull request part.
+      const head = git(bare, 'rev-parse', task.branch)
+      const theirs = git(
+        bare,
+        '-c',
+        'user.name=Dana',
+        '-c',
+        'user.email=dana@althar.test',
+        'commit-tree',
+        `${head}^{tree}`,
+        '-p',
+        head,
+        '-m',
+        'Update branch',
+      )
+      git(bare, 'update-ref', `refs/heads/${task.branch}`, theirs)
+      const told = sql<{ body: string }>`
+        SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE ${`%git merge ${theirs}%`}`
+      yield* until(told, (rows) => rows.length === 1)
+      // Fetched here for it to merge, and said once however often Althar looks again.
+      assert.strictEqual(git(task.path, 'rev-parse', `refs/althar/pull-request/${task.branch}`), theirs)
+      yield* Effect.sleep(Duration.seconds(1))
+      assert.lengthOf(yield* told, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('wait for the person, saying why, where its host can’t be reached as the turn ends, until they push', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

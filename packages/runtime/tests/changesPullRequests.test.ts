@@ -508,15 +508,17 @@ describe('a branch that parted from its pull request', () => {
         .trim()
       at(bare, 'update-ref', `refs/heads/${branch}`, theirs)
       at(here, 'commit', '-q', '--allow-empty', '-m', 'Mine')
-      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved')
-      assert.deepStrictEqual(moved?.change?.diverged, { kind: 'moved', local: 0, onPullRequest: null })
-      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, moved?.change?.localHead ?? ''))), 'PushRefused:behind')
-      // Bringing its commits in: fetched here, and the lead merges them.
+      // Bringing its commits in is the lead's: Althar fetches them here and tells it, once, to merge them (DEV-173).
+      const told = sql<{ body: string }>`SELECT body FROM user_inputs WHERE body LIKE ${`%git merge ${theirs}%`}`
+      yield* until(told, (rows) => rows.length === 1)
+      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
+      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, counted?.change?.localHead ?? ''))), 'PushRefused:behind')
+      // The task's own button says the same.
       const bringing = yield* changes.mergeNote(taskId)
       assert.strictEqual(bringing.head, theirs)
       assert.include(bringing.note, `git merge ${theirs}`)
-      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
-      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      assert.lengthOf(yield* told, 1)
       at(here, 'merge', '-q', '--no-edit', theirs)
       const [merged] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 2)
       yield* changes.push(taskId, merged?.change?.localHead ?? '')
