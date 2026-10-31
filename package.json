@@ -23,8 +23,8 @@
     "vite-plus": "1.4.0"
   },
   "overrides": {
-    "@posthog/core": "1.57.4",
-    "@posthog/types": "1.415.2",
+    "@posthog/core": "1.62.0",
+    "@posthog/types": "1.419.0",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
     "vitest": "5.0.5",
     "zod": "4.6.7"
