@@ -306,6 +306,89 @@ describe('a new project’s id', () => {
   })
 })
 
+describe('a new project that starts from nothing', () => {
+  it('asks for its name first, places a new repository named after it where the person chooses, and makes it as the project is', async () => {
+    const made = { ...project, id: 'proj_fresh', name: 'Northwind Ops' }
+    const placeRepository = vi.fn(async () => ({ name: 'northwind-ops', path: '/Users/me/code/northwind-ops' }))
+    const makeRepository = vi.fn(async () => ({ grant: 'grant_made', path: '/Users/me/code/northwind-ops' }))
+    const openProject = vi.fn(async () => made)
+    const pickPlace = vi.fn(async () => 'grant_code')
+    const { draft, onCreated } = opened({ placeRepository, makeRepository, openProject }, { pickPlace })
+
+    // Unnamed, it can't be named after the project yet.
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    expect(screen.getByRole('alert').textContent).toBe('Name the project first.')
+    expect(pickPlace).not.toHaveBeenCalled()
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Northwind Ops')
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    expect(pickPlace).toHaveBeenCalledWith('Northwind Ops')
+    expect(placeRepository).toHaveBeenCalledWith('grant_code', 'Northwind Ops')
+    await waitFor(() => expect(within(folders()).getByText('new repository')).toBeTruthy())
+    expect(within(folders()).getByText('northwind-ops')).toBeTruthy()
+    // One new repository: it is named after the project.
+    expect(screen.queryByRole('button', { name: 'New repository…' })).toBeNull()
+    // Nothing is made until the project is.
+    expect(makeRepository).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole('button', { name: /Create Northwind Ops/ }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('proj_fresh'))
+    expect(makeRepository).toHaveBeenCalledWith('grant_code', 'northwind-ops')
+    expect(openProject).toHaveBeenCalledWith('grant_made', {
+      name: 'Northwind Ops',
+      projectId: draft.id,
+      ink: inkFor(draft.id, [project.ink]),
+      repositories: [{ grant: 'grant_made', path: '/Users/me/code/northwind-ops' }],
+    })
+  })
+
+  it('says why it can’t go where the person chose, and makes it once only when the project then can’t be', async () => {
+    const placeRepository = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiError({
+          reason: 'RepositoryRefused',
+          message: 'There’s a folder named halyard in code already. Choose another place, or rename the project.',
+        }),
+      )
+      .mockResolvedValue({ name: 'halyard', path: '/Users/me/work/halyard' })
+    const makeRepository = vi.fn(async () => ({ grant: 'grant_made', path: '/Users/me/work/halyard' }))
+    const openProject = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'GitFailed', message: 'The store is busy.' }))
+      .mockResolvedValue({ ...project, id: 'proj_halyard' })
+    const { onCreated } = opened({ placeRepository, makeRepository, openProject }, { pickPlace: vi.fn(async () => 'grant_code') })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Halyard')
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    expect(await screen.findByText(/There’s a folder named halyard in code already/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    await waitFor(() => expect(within(folders()).getByText('~/work/halyard')).toBeTruthy())
+
+    await userEvent.click(screen.getByRole('button', { name: /Create Halyard/ }))
+    expect(await screen.findByText('The store is busy.')).toBeTruthy()
+    // Made, it is a folder like any other: trying again opens it, and doesn't make it again.
+    expect(within(folders()).getByText('no remote')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Create Halyard/ }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('proj_halyard'))
+    expect(makeRepository).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks nothing when the person cancels the picker, and leaves a new repository out like any folder', async () => {
+    const placeRepository = vi.fn(async () => ({ name: 'tessera', path: '/Users/me/code/tessera' }))
+    const pickPlace = vi.fn().mockResolvedValueOnce(null).mockResolvedValue('grant_code')
+    opened({ placeRepository }, { pickPlace })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Tessera')
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    await waitFor(() => expect(pickPlace).toHaveBeenCalledTimes(1))
+    expect(placeRepository).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    await userEvent.click(await within(folders()).findByRole('button', { name: 'Leave out tessera' }))
+    expect(await screen.findByRole('button', { name: 'New repository…' })).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Its folders' })).toBeNull()
+  })
+})
+
 describe('where code is hosted', () => {
   it('reads a remote, by its host and its path there', () => {
     expect(remoteOf('git@github.com:northwind-co/app.git')).toEqual({ host: 'github.com', path: 'northwind-co/app' })

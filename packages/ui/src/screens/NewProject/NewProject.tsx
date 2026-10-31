@@ -29,7 +29,9 @@ import s from './NewProject.module.css'
  * one press away. Each folder is shown as it was read, as a repository with
  * where it is and where its code is hosted, and what reading them found is
  * said under them. Folders come from the system's picker, several at once,
- * or dropped anywhere on the page.
+ * or dropped anywhere on the page. A project that starts from nothing has
+ * a new repository instead, or beside them: named after the project, in a
+ * folder the person chooses, and made only as the project is.
  */
 
 /** A folder added, as it was read: its repository, where it is, and where its remote is. */
@@ -43,6 +45,15 @@ export type NewProjectFolder =
   | {
       readonly id: string
       readonly reading?: false
+      /** A new repository, made as the project is: where it will be, with no host and no remote yet. */
+      readonly fresh: true
+      readonly name: string
+      readonly where: string
+    }
+  | {
+      readonly id: string
+      readonly reading?: false
+      readonly fresh?: false
       readonly name: string
       /** Where it is, as the person knows the place: ~/code/northwind/app. */
       readonly where: string
@@ -109,6 +120,10 @@ export interface NewProjectText {
   leaveOut: (name: string) => string
   choose: string
   chooseNote: string
+  /** Starts a project from nothing: a new git repository, named after it. */
+  fresh: string
+  /** Said of a new repository in its row, where a read one says its remote. */
+  freshFact: string
   found: string
   foundLike: (name: string) => string
   add: string
@@ -126,6 +141,8 @@ export interface NewProjectText {
   /** Said when Create is pressed without a name, or without a folder. */
   needsName: string
   needsFolder: string
+  /** The same, where a new repository can be started here too. */
+  needsFolderOrFresh: string
   swatches: Partial<InkSwatchesText>
 }
 
@@ -141,6 +158,8 @@ export const newProjectText: NewProjectText = {
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
   chooseNote: 'or drop them here',
+  fresh: 'New repository…',
+  freshFact: 'new repository',
   found: `On ${device.this}`,
   foundLike: (name) => `On ${device.this}, named like ${name}`,
   add: 'Add',
@@ -169,6 +188,7 @@ export const newProjectText: NewProjectText = {
   createKbd: modKey(keys.enter),
   needsName: 'Name the project first.',
   needsFolder: 'Add a folder first.',
+  needsFolderOrFresh: 'Add a folder, or start a new repository.',
   swatches: {},
 }
 
@@ -187,6 +207,11 @@ export type NewProjectProps = RootProps<
     onRemove: (id: string) => void
     /** Opens the system's folder picker. */
     onChoose: () => void
+    /**
+     * Asks where a new repository named after the project goes. Without it,
+     * or with one in the folders already, there is no way to from here.
+     */
+    onStartFresh?: () => void
     /** Folders dropped on the page. Without it, a drop does nothing. */
     onDrop?: (files: readonly File[]) => void
     /** What is on this computer to add; null while it is still being looked for. */
@@ -227,6 +252,7 @@ export function NewProject({
   folders,
   onRemove,
   onChoose,
+  onStartFresh,
   onDrop,
   found,
   onAdd,
@@ -252,6 +278,18 @@ export function NewProject({
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
   const reading = read.length < folders.length
+  const fresh = onStartFresh !== undefined && !folders.some((folder) => folder.reading !== true && folder.fresh === true)
+
+  // A new repository is named after the project, so it asks for the name first.
+  const startFresh = () => {
+    if (named === '') {
+      setMissing('name')
+      nameField.current?.focus()
+      return
+    }
+    if (missing === 'folder') setMissing(null)
+    onStartFresh?.()
+  }
 
   const create = () => {
     if (creating || reading) return
@@ -354,7 +392,7 @@ export function NewProject({
               <p className={s.made}>
                 {read.map((folder) => (
                   <span key={folder.id} className={s.repo}>
-                    <HostMark host={folder.host} size={12} />
+                    <HostMark host={folder.fresh === true ? null : folder.host} size={12} />
                     {folder.name}
                   </span>
                 ))}
@@ -395,9 +433,14 @@ export function NewProject({
             >
               {t.choose}
             </Button>
+            {fresh && (
+              <Button size="small" icon="plus" onClick={startFresh}>
+                {t.fresh}
+              </Button>
+            )}
             {missing === 'folder' ? (
               <span id={ids.missing} className={s.missing} role="alert">
-                {t.needsFolder}
+                {fresh ? t.needsFolderOrFresh : t.needsFolder}
               </span>
             ) : (
               <span className={s.note}>{t.chooseNote}</span>
@@ -449,6 +492,22 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
           <Spinner size="small" />
         </span>
         <span className={s.folderMain}>{folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}</span>
+      </li>
+    )
+  if (folder.fresh === true)
+    return (
+      <li className={s.folder}>
+        <span className={s.folderIcon}>
+          <Icon name="branch" size={14} />
+        </span>
+        <span className={s.folderMain}>
+          <span className={s.folderName}>{folder.name}</span>
+          <span className={s.facts}>
+            <span className={s.mono}>{folder.where}</span>
+            <span className={s.fact}>{t.freshFact}</span>
+          </span>
+        </span>
+        <IconButton icon="close" size="small" label={t.leaveOut(folder.name)} data-refocus="folders" onClick={() => onRemove(folder.id)} />
       </li>
     )
   return (

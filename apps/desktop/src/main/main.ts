@@ -729,6 +729,21 @@ ipcMain.handle('althar:pick-folders', async (event) => {
   return grants.filter((grant) => grant !== null)
 })
 
+// Where a new project's new repository goes: the folder it is made in, named after the project, and a grant for that folder.
+ipcMain.handle('althar:pick-place', async (event, name: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where to make the repository',
+    message: typeof name === 'string' && name !== '' ? `Choose the folder ${name} goes in` : 'Choose the folder the repository goes in',
+    buttonLabel: 'Make it here',
+    defaultPath: homedir(),
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const path = result.canceled ? undefined : result.filePaths[0]
+  return path === undefined ? null : allowFolder(path)
+})
+
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
 ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null

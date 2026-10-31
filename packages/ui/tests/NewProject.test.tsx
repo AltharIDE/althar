@@ -103,3 +103,29 @@ describe('what it is made of, and what reading it found', () => {
     expect(screen.getByRole('button', { name: 'Add dotfiles' })).toBeInTheDocument()
   })
 })
+
+describe('starting from nothing', () => {
+  it('offers a new repository until one is in its folders, counts it as a folder, and lists it with where it will be', () => {
+    const onStartFresh = vi.fn()
+    const { onCreate, again } = tab({ folders: [], onStartFresh })
+    fireEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
+    expect(screen.getByRole('alert').textContent).toBe('Add a folder, or start a new repository.')
+    fireEvent.click(screen.getByRole('button', { name: 'New repository…' }))
+    expect(onStartFresh).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    again({ folders: [{ id: 'fresh', fresh: true, name: 'northwind', where: '~/code/northwind' }], onStartFresh })
+    expect(screen.queryByRole('button', { name: 'New repository…' })).toBeNull()
+    expect(screen.getByText('new repository')).toBeTruthy()
+    expect(screen.getByText('~/code/northwind')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
+    expect(onCreate).toHaveBeenCalledOnce()
+  })
+
+  it('has no way to start one without a way to, and asks for a folder alone', () => {
+    tab({ folders: [] })
+    expect(screen.queryByRole('button', { name: 'New repository…' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
+    expect(screen.getByRole('alert').textContent).toBe('Add a folder first.')
+  })
+})
