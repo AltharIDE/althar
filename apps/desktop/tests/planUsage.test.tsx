@@ -250,8 +250,39 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'claude-code:' }, rooms, usage, after)).toEqual({ left: 60, until: clock(WEEK, after), account: null })
     // With none of its windows still known, it has no figure, and a model's room is no reading, never all of its plan.
     const fiveHours = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(0, 1) }])
-    expect(planOf(fiveHours, after).agents).toEqual([])
+    expect(planOf(fiveHours, after).agents).toMatchObject([
+      { id: 'claude-code', unread: 'Not read since reset', accounts: [{ windows: [] }] },
+    ])
     expect(roomOf({ id: 'claude-code:sonnet' }, rooms, fiveHours, after)).toBeNull()
+    expect(roomOf({ id: 'claude-code:' }, rooms, fiveHours, after)).toBeNull()
+  })
+
+  it('keeps an agent whose windows have all reset in the peek, with why it wasn’t read again, after every one with a figure', () => {
+    const after = new Date('2026-10-20T00:00:00.000Z')
+    const codex = usageAccount({ windows: [{ kind: 'weekly', label: null, usedPercent: 30, resetsAt: '2026-10-25T00:00:00.000Z' }] })
+    for (const [fault, message] of [
+      [{ kind: 'expired', message: 'Its sign-in has expired.' }, 'Its sign-in has expired.'],
+      // Even one that passes on its own: with no numbers to keep to, it's all there is to say.
+      [{ kind: 'unreachable', message: 'The provider could not be reached.' }, 'The provider could not be reached.'],
+    ] as const) {
+      const { agents } = planOf(planUsage([{ ...claudeBoth, fault }, codex]), after)
+      expect(agents.map((agent) => [agent.name, agent.unread, agent.accounts.map((account) => account.fault)])).toEqual([
+        [codex.agentName, undefined, [null]],
+        ['Claude Code', 'Not read since reset', [message]],
+      ])
+    }
+    // As the runtime sends it once every window has reset by its own clock: none of them, and that they reset.
+    const sent = planUsage([
+      { ...claudeBoth, windows: [], resetSince: true, fault: { kind: 'expired', message: 'Its sign-in has expired.' } },
+    ])
+    expect(
+      planOf(sent, after).agents.map((agent) => [agent.unread, agent.accounts.map((account) => [account.age, account.fault])]),
+    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Its sign-in has expired.']]]])
+    // Signed out as well, it can't run: said as it is, not as unread.
+    const [out] = planOf(planUsage([{ ...claudeBoth, fault: { kind: 'sign_in_again', message: 'Sign in.' } }]), after).agents
+    expect([out?.stopped, out?.unread]).toEqual(['Signed out', undefined])
+    // One never read with windows has nothing to say there yet, as before.
+    expect(planOf(planUsage([{ ...claudeBoth, windows: [] }]), after).agents).toEqual([])
   })
 })
 

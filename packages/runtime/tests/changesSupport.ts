@@ -7,6 +7,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Policies, type RulesChange } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -35,16 +36,20 @@ export const connect = (product: 'github' | 'linear', webUrl?: string) =>
     return yield* connections.connectToken({ product, token: 't', actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) })
   })
 
-/** Opens the repository as a project, and asks its coordinator for a change. */
-export const ask = (working: string, body: string) =>
+/** Opens the repository as a project, with `rules` where given, and asks its coordinator for a change. */
+export const ask = (working: string, body: string, rules?: RulesChange) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+    if (rules !== undefined) yield* (yield* Policies).set(project.projectId, rules, (yield* Instance).personId)
     const threadId = yield* coordinator.thread(project.projectId)
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     return project.projectId
   })
+
+/** Rules where every push is the person's, as before a lead's commits went up on their own (ADR-072). */
+export const pushByHand: RulesChange = { pushCommits: false }
 
 export const cards = (projectId: string) =>
   Effect.gen(function* () {
