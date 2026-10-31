@@ -102,8 +102,8 @@ test('Quit twice in a row quits without asking again', async () => {
 
 test('Quit asks even when the runtime has not said what is at work, and says it may stop some', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
-  // The runtime is given no time to answer, as when it is too busy to.
-  const { electronApp, page } = await launch(home, { ...ASKS, ALTHAR_QUIT_ASK_WAIT: '1' })
+  // The runtime gives no answer to what is at work, as when it is too busy to.
+  const { electronApp, page } = await launch(home, { ...ASKS, ALTHAR_QUIT_UNANSWERED: '1' })
   try {
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
@@ -169,9 +169,15 @@ test('Closing the last window with work running asks once, and quits only when t
     const asked = await mainWindow(electronApp)
     const dialog = asked.getByRole('dialog', { name: 'Quit Althar?' })
     await expect(dialog).toContainText('Quitting stops 1 lead at work.')
-    // Not answered by the window closing twice over: it stays until the person answers.
-    await asked.waitForTimeout(1500)
-    await expect(dialog).toBeVisible()
+    // The window closing asks to quit twice over (it closing, and none being left), both before the runtime answers what is at
+    // work: had either counted as the person's yes, Althar would be gone, not asking.
+    expect(electronApp.process().exitCode).toBeNull()
+
+    // The window that asks is closed: a Cancel. None is left, so one comes back rather than Althar running unseen.
+    await asked.close()
+    const back = await mainWindow(electronApp)
+    await expect(back.getByRole('navigation', { name: 'Projects' })).toBeVisible()
+    await expect(back.getByRole('dialog')).toHaveCount(0)
     expect(electronApp.process().exitCode).toBeNull()
   } finally {
     await quitAnyway(electronApp)

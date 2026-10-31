@@ -992,11 +992,15 @@ app.on('window-all-closed', () => {
  * nothing at work it quits as it always did.
  */
 const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0 }
-const QUIT_ASK_WAIT = (__ALTHAR_TEST_HOOKS__ && Number(process.env.ALTHAR_QUIT_ASK_WAIT)) || 4_000
+const QUIT_ASK_WAIT = 4_000
+/** A spec of Quit's own makes the runtime give no answer (ALTHAR_QUIT_UNANSWERED=1), which waiting out the time would only make slow. */
+const quitUnanswered = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIT_UNANSWERED === '1'
 
 /** The runtime's answer, or nothing for it, if it doesn't give one in time. */
 const askRuntimeWork = () =>
-  Promise.race([works.ask(runtime, null), new Promise<null>((resolve) => setTimeout(() => resolve(null), QUIT_ASK_WAIT))])
+  quitUnanswered
+    ? Promise.resolve(null)
+    : Promise.race([works.ask(runtime, null), new Promise<null>((resolve) => setTimeout(() => resolve(null), QUIT_ASK_WAIT))])
 
 /**
  * The last window closing quits off a Mac, and so does the last of the app's
