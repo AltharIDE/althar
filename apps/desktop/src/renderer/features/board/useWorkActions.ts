@@ -2,7 +2,7 @@ import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } fr
 
 import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 
-import { messageOf, type StuckAnswer } from '../../data/client'
+import { messageOf, type OnePress, type StuckAnswer } from '../../data/client'
 import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
 import { headsOf } from '../../shared/mergeHere'
@@ -13,6 +13,8 @@ import { headsOf } from '../../shared/mergeHere'
  * work that ended on its branch here, open its pull request, send the work
  * back to its lead with a note, or settle a finished task that isn't a
  * change (Done) or keep it for later. Each says what went wrong, if it did.
+ * Each that settles a card in one press is kept on this computer as so
+ * (DEV-173), to count what Needs you held that wasn't a decision.
  */
 
 /** What went wrong with a task's last push or merge. */
@@ -49,8 +51,8 @@ export interface WorkActions {
   readonly mergeHere: (task: BoardTask) => Promise<boolean>
   /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<boolean>
-  /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. */
-  readonly sendBack: (task: BoardTask, note: string) => Promise<boolean>
+  /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. `onePress` where the note is the card's own, as Carry on's. */
+  readonly sendBack: (task: BoardTask, note: string, onePress?: boolean) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: (taskId: string) => Promise<boolean>
   /** Answers a call; with `always`, kept in the project's rules by that scope. Whether it went through. */
@@ -87,6 +89,14 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
   const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
   const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
+  // Kept by the way: what fails to keep it changes nothing the person sees.
+  const pressed = useCallback(
+    (through: boolean, press: OnePress) => {
+      if (through) void client.settledWithOnePress(press).catch(() => {})
+      return through
+    },
+    [client],
+  )
 
   /** Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it went through. */
   const busy = useCallback(
@@ -129,14 +139,27 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     pushing,
     settling,
     resolving,
-    resolveNow: useCallback((taskId) => busy(setResolving, taskId, () => client.resolveConflictsNow(taskId)), [busy, client]),
-    markDone: useCallback((taskId) => busy(setSettling, taskId, () => client.markTaskDone(taskId)), [busy, client]),
-    keep: useCallback((taskId) => busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), [busy, client]),
+    resolveNow: useCallback(
+      async (taskId) => pressed(await busy(setResolving, taskId, () => client.resolveConflictsNow(taskId)), { taskId, action: 'resolve' }),
+      [busy, client, pressed],
+    ),
+    markDone: useCallback(
+      async (taskId) => pressed(await busy(setSettling, taskId, () => client.markTaskDone(taskId)), { taskId, action: 'done' }),
+      [busy, client, pressed],
+    ),
+    keep: useCallback(
+      async (taskId) => pressed(await busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), { taskId, action: 'keep' }),
+      [busy, client, pressed],
+    ),
     mergeHere: useCallback(
       (task) => busy(setMerging, task.taskId, () => client.mergeHere(task.taskId, headsOf(task.here))),
       [busy, client],
     ),
-    push: useCallback((taskId, head, url) => busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), [busy, client]),
+    push: useCallback(
+      async (taskId, head, url) =>
+        pressed(await busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), { taskId, action: 'push' }),
+      [busy, client, pressed],
+    ),
     // Its card says why it didn't merge (`failures`), as the window keeps it.
     merge: useCallback(
       async (taskId, head, url) => {
@@ -144,17 +167,17 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
         setFailed(({ [taskId]: _, ...rest }) => rest)
         try {
           await merge({ taskId, head, url })
-          return true
+          return pressed(true, { taskId, action: 'merge' })
         } catch (failure) {
           fail(failure)
           return false
         }
       },
-      [merge, fail],
+      [merge, fail, pressed],
     ),
     sendBack: useCallback(
-      (task, note) =>
-        busy(setSending, task.taskId, async () => {
+      async (task, note, onePress = false) => {
+        const through = await busy(setSending, task.taskId, async () => {
           const head = await client.getThread(task.threadId, { limit: 0 })
           const restarting = head.session === null || !head.session.held
           // The lead as the thread has it now, not as the card was read: it may have changed since.
@@ -177,8 +200,10 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
               // The note stays queued: say so, and why the lead didn't start.
               setError(`Queued, but the lead didn't start. ${messageOf(failure)}`)
             })
-        }),
-      [busy, client],
+        })
+        return onePress ? pressed(through, { taskId: task.taskId, action: 'carry_on' }) : through
+      },
+      [busy, client, pressed],
     ),
     openChange: useCallback((taskId) => busy(setOpening, taskId, () => client.openChange(taskId)), [busy, client]),
     answer: useCallback(
@@ -186,13 +211,14 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
         client
           .answer({ attentionId, decision, ...(reason === undefined ? {} : { reason }), ...(always === undefined ? {} : { always }) })
           .then(
-            () => true,
+            // Answered as it stands, with nothing written: one press.
+            () => (reason === undefined ? pressed(true, { attentionId, action: decision }) : true),
             (failure: unknown) => {
               fail(failure)
               return false
             },
           ),
-      [client, fail],
+      [client, fail, pressed],
     ),
     answerStuck: useCallback((attentionId, answer) => client.answerStuck({ attentionId, answer }).catch(fail), [client, fail]),
     fail,

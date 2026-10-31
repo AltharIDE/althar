@@ -1312,3 +1312,14 @@ CREATE TABLE task_request_inputs (
 ) STRICT;
 
 CREATE INDEX thread_items_by_user_input ON thread_items (user_input_id) WHERE user_input_id IS NOT NULL;
+
+CREATE TABLE one_press_settles (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject')),
+    unopened INTEGER NOT NULL CHECK (unopened IN (0, 1)),
+    pressed_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX one_press_settles_by_time ON one_press_settles (pressed_at);

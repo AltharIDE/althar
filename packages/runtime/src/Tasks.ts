@@ -1,6 +1,17 @@
 import { existsSync } from 'node:fs'
 
-import { type CommandEnvelope, type ProjectId, RunState, runLifecycle, TaskState, taskLifecycle, transition } from '@althar/domain'
+import {
+  type CommandEnvelope,
+  Ids,
+  newId,
+  type ProjectId,
+  RunState,
+  runLifecycle,
+  TaskState,
+  taskLifecycle,
+  transition,
+} from '@althar/domain'
+import type { OnePressAction } from '@althar/contracts'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -184,6 +195,17 @@ export class Tasks extends Context.Service<
      * takes it out of Needs you (`keep`).
      */
     see(input: { readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * The person settled a card in Needs you with one press where it shows
+     * (DEV-173): kept, with whether its task went unopened since the card
+     * came in, by its call where it is a call's. A call no task waits on
+     * isn't kept.
+     */
+    pressed(input: {
+      readonly taskId?: string
+      readonly attentionId?: string
+      readonly action: OnePressAction
+    }): Effect.Effect<void, unknown>
     /**
      * Settles a finished task that isn't a change as Done, as the person
      * said, on its card or to its lead: a quick task whose latest run passed,
@@ -569,6 +591,33 @@ export class Tasks extends Context.Service<
           yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
         })
 
+      const pressed = (input: { readonly taskId?: string; readonly attentionId?: string; readonly action: OnePressAction }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          // The card came in when its call did, or else when its lead last ended a turn or its run ended, whichever came last.
+          const [card] =
+            input.attentionId === undefined
+              ? yield* sql<{ taskId: string; projectId: ProjectId; seenAt: string | null; since: string | null }>`
+                  SELECT k.id AS task_id, k.project_id, k.seen_at,
+                    max(coalesce((SELECT max(ended_at) FROM runs WHERE task_id = k.id), ''),
+                      coalesce((SELECT max(d.ended_at) FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id WHERE h.task_id = k.id), '')) AS since
+                  FROM tasks k WHERE k.id = ${input.taskId ?? ''}`
+              : yield* sql<{ taskId: string; projectId: ProjectId; seenAt: string | null; since: string | null }>`
+                  SELECT k.id AS task_id, k.project_id, k.seen_at, x.created_at AS since
+                  FROM attention_requests x JOIN tasks k ON k.id = x.task_id WHERE x.id = ${input.attentionId}`
+          if (card === undefined) return
+          const unopened = card.seenAt === null || (card.since !== null && card.since !== '' && card.seenAt < card.since)
+          yield* sql`INSERT INTO one_press_settles ${sql.insert({
+            id: yield* newId(Ids.onePress),
+            projectId: card.projectId,
+            taskId: card.taskId,
+            action: input.action,
+            unopened: unopened ? 1 : 0,
+            pressedAt: at,
+          })}`
+        })
+
       /**
        * Whether it can be settled as Done now: open, finished or its lead at work on it as the person told it, nothing waiting on
        * the person, and not a change. A quick task, or a review whose review was posted and that its lead answered since.
@@ -692,6 +741,7 @@ export class Tasks extends Context.Service<
 
       return Tasks.of({
         see: (input) => provide(see(input)),
+        pressed: (input) => provide(pressed(input)),
         markDone: (input) => oneAtATime(input.taskId, markDone(input)),
         keep: (input) => oneAtATime(input.taskId, keep(input)),
         bringBack: (taskId) => provide(bringBack(taskId)),

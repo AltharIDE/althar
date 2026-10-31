@@ -387,7 +387,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                     signal
                     busy={actions?.sending?.has(work.taskId) ?? false}
                     doing={text.carryingOn}
-                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote)}
+                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
                   >
                     {text.carryOn}
                   </NextStep>

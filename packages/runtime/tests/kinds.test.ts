@@ -367,6 +367,29 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('keeps each card settled with one press, and whether its task went unopened since it came in (DEV-173)', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* open
+      const unseen = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      const seen = yield* plain(project.projectId, 'Which partners still call v2?', '[lead:finish]')
+      yield* cardOnce(unseen.taskId, (card) => card.phase === 'ready')
+      yield* cardOnce(seen.taskId, (card) => card.phase === 'ready')
+      yield* tasks.see({ taskId: seen.taskId })
+      yield* tasks.pressed({ taskId: unseen.taskId, action: 'done' })
+      yield* tasks.pressed({ taskId: seen.taskId, action: 'keep' })
+      // A call no task waits on, or one gone, isn't kept.
+      yield* tasks.pressed({ attentionId: 'attn_none', action: 'allow' })
+      const kept = yield* sql<{ taskId: string; projectId: string; action: string; unopened: number }>`
+        SELECT task_id, project_id, action, unopened FROM one_press_settles ORDER BY pressed_at, rowid`
+      assert.deepStrictEqual(kept, [
+        { taskId: unseen.taskId, projectId: project.projectId, action: 'done', unopened: 1 },
+        { taskId: seen.taskId, projectId: project.projectId, action: 'keep', unopened: 0 },
+      ])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live(
     'stops what a finished task left running once it is done, and its agent: one that won’t is said, and it is done all the same',
     () => {

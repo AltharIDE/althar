@@ -1979,11 +1979,13 @@ describe('a ready card’s next step, done from the card', () => {
       snapshot({ session: null, task: { ...base.task, lead: { agentId: 'claude-code', model: null, account: null } } }),
     )
     const onOpen = vi.fn()
-    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Stopped d')
     await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledWith({ taskId: 'sd', action: 'carry_on' }))
     expect(onOpen).not.toHaveBeenCalled()
   })
 
@@ -1991,7 +1993,8 @@ describe('a ready card’s next step, done from the card', () => {
     const onOpen = vi.fn()
     let finish = () => {}
     const push = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
-    withServices(<Board onOpen={onOpen} />, fakeClient({ push, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ push, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Commits to push')
     // A button of its own, named for what it does and to which pull request.
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
@@ -2003,9 +2006,12 @@ describe('a ready card’s next step, done from the card', () => {
     expect(busy.textContent).toBe('Pushing 3 commits')
     await userEvent.click(busy)
     expect(push).toHaveBeenCalledTimes(1)
+    expect(settledWithOnePress).not.toHaveBeenCalled()
     finish()
     await waitFor(() => expect(card.getByRole('button', { name: 'Push 3 commits to #12' }).getAttribute('aria-busy')).toBeNull())
     expect(onOpen).not.toHaveBeenCalled()
+    // Kept on this computer as settled with one press, once it went through (DEV-173).
+    expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 's5', action: 'push' })
     // The rest of the card still opens its task.
     await userEvent.click(screen.getByRole('button', { name: 'Commits to push' }))
     expect(onOpen).toHaveBeenCalledWith('th-s5')

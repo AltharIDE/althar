@@ -53,4 +53,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0047_task_request_inputs': 'f05c01684d01672c630b2f4bb735e04e3aa3d74599e63a3d1f2c25e9106aaa7c',
   '0048_thread_items_by_input': 'ea476993c94801e56a0893274cf7a0a8890a14d031d3da64bc5757861c6ce382',
   '0049_decision_kind': 'ecd245040b7d5b9082718019f28c905e26023db96114535fbb4a82076bb42d5c',
+  '0050_one_press_settles': 'c92d648953c29dccbb49a2838fa0510a9ab5432d7663698fa237994e57c13aac',
 }
