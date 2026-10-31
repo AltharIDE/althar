@@ -238,7 +238,7 @@ describe('opening a task’s pull request', () => {
     }).pipe(Effect.provide(runtimeWith(refusing, { stopGrace: Duration.millis(300) })))
   })
 
-  it.live('says a round of work after its pull request was closed isn’t in one yet', () => {
+  it.live('opens a round of work after its pull request was closed in a new one by itself, a draft (ADR-078)', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -251,18 +251,21 @@ describe('opening a task’s pull request', () => {
         Effect.map(items(task.threadId), (all) => all.filter((item) => item.kind === 'arrival' && item.content.kind === 'closed')),
         (closed) => closed.length === 1,
       )
-      // The person asks its lead for more, which it commits: a round of work of its own, which ends on the branch.
+      // The person asks its lead for more, which it commits: a round of work of its own, whose commits open the next pull request.
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', {}),
         threadId: task.threadId,
         body: 'Retry twice. [lead:finish] [lead:edit]',
       })
       yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
-      assert.include(
+      yield* until(published(task.threadId), (said) => said.length === 2)
+      assert.lengthOf(github.changes, 2)
+      assert.isTrue(github.changes[1]?.draft)
+      // Opened, nothing says it isn't in one.
+      assert.notInclude(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         "What the follow-up committed isn't in a pull request yet.",
       )
-      assert.lengthOf(github.changes, 1)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

@@ -82,3 +82,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [072](072-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
 | [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
+| [078](078-a-round-s-commits-open-the-next-pull-request-by-themselves.md) | A round's commits after a merged or closed pull request open the next one by themselves, a draft, where the first would have opened |

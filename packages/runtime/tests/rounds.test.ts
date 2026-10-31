@@ -148,10 +148,15 @@ describe('a task that goes back to work', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running' && all[0].followUp === true)
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+      // The host can't be reached as the round ends, so the next pull request it opens by itself can't open (ADR-078).
+      pushes.to = join(bare, 'nowhere')
       slow.open('[lead:slowly]')
 
       // The lead finishes the round with its summary, the review the plan has looks at what is new, and the task is ready, with
-      // a commit that is in no pull request yet.
+      // a commit that is in no pull request yet, and says so.
+      yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      )
       const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
       assert.deepStrictEqual([ready?.change?.number, ready?.change?.state], [1, 'merged'])
@@ -172,12 +177,8 @@ describe('a task that goes back to work', () => {
         SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review%'`
       assert.include(told?.body, `git diff ${mergedHead.slice(0, 12)}`)
-      assert.isTrue(
-        (yield* notices(task.threadId)).some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
-      )
 
       // Where main can't be fetched, nothing moves: as this Mac last saw it, main hasn't what merged.
-      pushes.to = join(bare, 'nowhere')
       yield* Effect.flip(runs.publish(task.taskId))
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
       pushes.to = bare
@@ -738,7 +739,6 @@ describe('a task’s first pull request in a repository, and a reported round wi
         git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
       }
       return Effect.gen(function* () {
-        const runs = yield* Runs
         const sql = yield* SqlClient.SqlClient
         const instance = yield* Instance
         yield* connect()
@@ -794,14 +794,13 @@ describe('a task’s first pull request in a repository, and a reported round wi
           descriptions: [{ repository: 'web', text: 'Web gave up on the first failed call too. It now retries once, as api does.' }],
         })
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
-        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
-        assert.isTrue(
-          (yield* notices(task.threadId)).some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+        // Web's first opens by itself as the round ends (ADR-078), from the task's branch, as a first one does; api's merged one
+        // stays as it is.
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length === 2,
         )
-        // Web's first opens, from the task's branch, as a first one does; api's merged one stays as it is.
-        yield* runs.publish(task.taskId)
-        assert.lengthOf(github.changes, 2)
+        yield* until(cards(project.projectId), (all) => all[0]?.change?.number === 2)
         assert.include(github.changes[1]?.url, '/meridian/web/')
         assert.strictEqual(github.changes[1]?.source, task.branch)
         assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
@@ -831,8 +830,10 @@ describe('a task’s first pull request in a repository, and a reported round wi
           }),
           'Althar has your summary. The task is ready for the person.',
         )
-        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped?.commits === 2)
-        yield* runs.publish(task.taskId)
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length === 4,
+        )
         assert.deepStrictEqual(
           github.changes.slice(2).map((change) => change.body.split('\n\n')[0]),
           ['Api retries twice now.', 'Web retries twice now.'],

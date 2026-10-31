@@ -1,6 +1,6 @@
 # ADR-034: A task goes back to work whenever its lead does, and ships again
 
-- **Status:** Accepted
+- **Status:** Accepted; its rule that a round never publishes by itself is superseded by [ADR-078](078-a-round-s-commits-open-the-next-pull-request-by-themselves.md)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** A task is a long-lived piece of work the person keeps talking
@@ -68,7 +68,10 @@
       pushes what the round committed, as it pushed any commit before. With
       its last pull request merged or closed, the card offers **Open a new
       pull request**. With none ever opened, it offers to open one, as it
-      did.
+      did. Superseded by ADR-078: with its last pull request merged or
+      closed, the round opens the next by itself, where the project's rules
+      would have opened the first; the card offers it only where that
+      fails.
   - **The person can skip a round's review,** from the task's menu: the
     round no longer has one, a review under way stops, and a round whose
     lead is done concludes. Rounds follow the plan by default: the next one
@@ -235,6 +238,7 @@
   - **Publish a round's work by itself, as a plan's ending does.** A second
     pull request on a merged task is a bigger step than the first, and the
     person asked to be offered it. Easy to change once people want it.
+    Chosen after all, by ADR-078.
   - **A new pull request from the merged branch.** After a squash merge its
     old commits aren't in the default branch, so they would show again, and
     pushing to a merged branch is what this must never do. Merging the

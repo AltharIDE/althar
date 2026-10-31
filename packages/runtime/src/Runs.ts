@@ -1063,28 +1063,41 @@ export class Runs extends Context.Service<
           // A quick task whose lead changed nothing in the repository has no branch, and nothing to send anywhere: it is done.
           if (yield* unbranched(run.taskId)) return yield* finish(run, 'succeeded')
           const ending = yield* stepsOf(run)
-          // A round of work never publishes by itself (ADR-034): what it committed goes to the task's open pull request from its
-          // card, or in a new one the person opens there once the last merged or closed. But for the round a quick task was made a
-          // change in, which ends as the person asked.
+          // A round of work's commits go to the task's open pull request as its lead's turn ends (ADR-072); after its last merged
+          // or closed, they open the next by themselves, a draft, as a plan's ending opens the first, where the project's rules
+          // would have (ADR-078). But for the round a quick task was made a change in, which ends as the person asked.
           if (run.planId === null && !ending.publishes) {
-            // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to offer.
+            // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to open.
             const after = ending.here ? [] : yield* changes.unshipped(run.taskId).pipe(Effect.orElseSucceed(() => []))
-            // Each repository with what it has: its last pull request merged or closed, or none yet.
-            const said = after.map((one) =>
-              one.change === null
-                ? `${one.name} has no pull request`
-                : `${one.change.words.short} ${one.change.words.prefix}${one.change.number}${after.length > 1 ? ` in ${one.name}` : ''} ${
-                    one.change.state === 'merged' ? 'is merged' : 'was closed'
-                  }`,
-            )
-            if (said.length > 0)
-              yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
-                source: 'runtime',
-                severity: 'info',
-                title: "What the follow-up committed isn't in a pull request yet.",
-              })
             yield* finish(run, 'succeeded')
-            return yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+            yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+            if (after.length === 0) return
+            const unsaid = addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: "What the follow-up committed isn't in a pull request yet.",
+            })
+            // Only a task that had a pull request, in any of its repositories: one whose project leaves its work on its branch, or
+            // on no host, stays so.
+            const had = (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
+            const end = had ? yield* changes.endFor(run.projectId, run.taskId).pipe(Effect.orElseSucceed(() => null)) : null
+            if (end !== 'draft' && end !== 'ready') {
+              yield* unsaid
+              return
+            }
+            // Apart: publishing takes the task's lock, which what ends the round may hold. Where it can't, the card offers it.
+            return yield* Effect.forkIn(
+              provide(
+                publish(run.taskId).pipe(
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.interrupt
+                      : Effect.andThen(Effect.logWarning('Could not open the next pull request', cause), unsaid),
+                  ),
+                ),
+              ),
+              scope,
+            ).pipe(Effect.asVoid)
           }
           // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
           // A quick task's stays on this Mac, and says nothing of a host.
