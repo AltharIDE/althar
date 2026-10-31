@@ -8,6 +8,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from './Instance'
 import { installIn, managerIn, manifestsIn, runOf, scriptsIn } from './runCommand'
+import { cachesOf, TOOL_PLACES } from './toolPlaces'
 
 /*
  * What a lead's sandbox lets through from the start (docs/architecture/03):
@@ -22,15 +23,22 @@ import { installIn, managerIn, manifestsIn, runOf, scriptsIn } from './runComman
  * Both are worked out from the project: the tools its repositories' packages
  * name and their test scripts, what is kept for how it runs and is set up,
  * the code hosts its repositories are on, the registries its package
- * managers fetch from, and the trackers Althar is connected to. The person
+ * managers fetch from, and the trackers Althar is connected to. Beside
+ * them, the caches the tools it installs with write to, and the hosts they
+ * download from, which `toolPlaces.ts` lists. The person
  * adds to them and takes from them in the project's rules, and what they
  * changed holds over what is worked out later.
  */
 
-/** What a lead's sandbox lets through from the start: commands it runs outside it, and hosts it reaches without asking. */
+/**
+ * What a lead's sandbox lets through from the start: commands it runs
+ * outside it, hosts it reaches without asking, and the tools' caches it
+ * writes to (`toolPlaces.ts`).
+ */
 export interface Reach {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  readonly writes: ReadonlyArray<string>
 }
 
 /** What the person added to a list Althar works out, and took from it. */
@@ -170,37 +178,20 @@ export const hostsOfTracker = (product: Product, webUrl: string, apiUrl: string)
   return [...new Set([hostnameOf(webUrl), hostnameOf(apiUrl), ...(TRACKER_HOSTS[product] ?? [])])].filter((host) => host !== null)
 }
 
-/** The registries each kind of project fetches its packages from, by the files that say it is one. */
-const REGISTRIES: ReadonlyArray<{ readonly files: ReadonlyArray<string>; readonly hosts: ReadonlyArray<string> }> = [
-  { files: ['package.json'], hosts: ['registry.npmjs.org'] },
-  { files: ['yarn.lock', '.yarnrc.yml'], hosts: ['registry.yarnpkg.com', 'repo.yarnpkg.com'] },
-  {
-    files: ['pyproject.toml', 'requirements.txt', 'uv.lock', 'poetry.lock', 'Pipfile', 'setup.py'],
-    hosts: ['pypi.org', 'files.pythonhosted.org'],
-  },
-  { files: ['Cargo.toml'], hosts: ['crates.io', 'index.crates.io', 'static.crates.io'] },
-  { files: ['go.mod'], hosts: ['proxy.golang.org', 'sum.golang.org'] },
-  { files: ['Gemfile'], hosts: ['rubygems.org', 'index.rubygems.org'] },
-]
-
-/** Where packages that download more as they install fetch it from: Playwright its browsers, Electron its build. */
-const DOWNLOADS: ReadonlyArray<{ readonly packages: ReadonlyArray<string>; readonly hosts: ReadonlyArray<string> }> = [
-  {
-    packages: ['@playwright/test', 'playwright', 'playwright-core'],
-    hosts: ['cdn.playwright.dev', 'playwright.download.prss.microsoft.com', 'playwright.azureedge.net'],
-  },
-  { packages: ['electron'], hosts: ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'] },
-]
-
-/** The hosts the repository in `folder` installs from: its package managers' registries, and what its packages download. */
-export const hostsIn = (folder: string, root: string = folder): ReadonlyArray<string> => {
+/** The tools the repository in `folder` uses, as `TOOL_PLACES` tells them: a package manager by its files, a tool by its packages. */
+const toolsIn = (folder: string, root: string = folder) => {
   const here = (file: string) => existsSync(join(folder, file)) || existsSync(join(root, file))
   const packages = packagesIn(folder)
-  return [
-    ...REGISTRIES.filter((registry) => registry.files.some(here)).flatMap((registry) => registry.hosts),
-    ...DOWNLOADS.filter((download) => download.packages.some((name) => packages.has(name))).flatMap((download) => download.hosts),
-  ]
+  return TOOL_PLACES.filter((tool) => (tool.files ?? []).some(here) || (tool.packages ?? []).some((name) => packages.has(name)))
 }
+
+/** The hosts the repository in `folder` installs from: its package managers' registries, and what its packages download. */
+export const hostsIn = (folder: string, root: string = folder): ReadonlyArray<string> =>
+  toolsIn(folder, root).flatMap((tool) => tool.hosts ?? [])
+
+/** The caches its tools write to, from the home folder as `~/…`, on this platform. */
+export const writesIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): ReadonlyArray<string> =>
+  toolsIn(folder, root).flatMap((tool) => cachesOf(tool, platform))
 
 /** What is worked out with what the person changed: what they took out goes, what they added comes after; each once. */
 export const withEdits = (workedOut: ReadonlyArray<string>, edits: Edits | undefined): ReadonlyArray<string> => {
@@ -278,5 +269,6 @@ export const workedOutReach = (projectId: string, taskId: string | null) =>
         ...places.map(({ folder, root }) => hostsIn(folder, root)),
         ...trackers.map((tracker) => hostsOfTracker(tracker.product, tracker.webUrl, tracker.apiUrl)),
       ]),
+      writes: once(places.map(({ folder, root }) => writesIn(folder, root))),
     } satisfies Reach
   })

@@ -906,18 +906,33 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   person or the coordinator decides it, none the project never allows. A
   host is named on its own, never `*.` for every host under one: the rules
   judge a request by the host it names, and a wildcard would let through
-  hosts under it that they ask about or refuse.
+  hosts under it that they ask about or refuse. A request is read as a
+  host, never as a command: `release-assets.githubusercontent.com`, where
+  Electron's build downloads from, is no release script;
+- the caches of the tools the project installs with, which its sandboxed
+  commands write to without asking (`sandbox.filesystem.allowWrite`): what
+  fails in a fresh task folder is rarely the install, but a tool that
+  downloads outside it, as Electron does its build
+  (`~/Library/Caches/electron`), Playwright its browsers
+  (`~/Library/Caches/ms-playwright`) and Bun every package
+  (`~/.bun/install/cache`). One list (`toolPlaces.ts`) holds each tool's
+  caches on a Mac and on Linux and the hosts it downloads from, by the
+  files or packages that say a project uses it. None is where keys and
+  sign-ins are kept, nor holds one (`writesOf` drops it all the same). A
+  cache is shared with the person's own installs, so a lead could leave
+  something there that a later install of theirs picks up: the trade made
+  so a task's folder gets ready without anyone.
 
-Both are worked out from the project: the tools its packages bring, its
+All three are worked out from the project: the tools its packages bring, its
 test and end-to-end scripts, what is kept for how it runs and is set up,
 its repositories' code hosts, its package managers' registries and what
 its packages download, and the trackers Althar is connected to (Linear's
-hosts, for one). The person adds to them and takes from them in the
-project's rules, under Sandbox, and those edits hold over what is worked
-out later. A change applies from a lead's next session. Codex's
+hosts, for one). The person adds to the commands and hosts and takes from
+them in the project's rules, under Sandbox, and those edits hold over what
+is worked out later; the caches follow the tools. A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
-modes don't use, so its leads are given neither; OpenCode has no sandbox.
+modes don't use, so its leads are given none of them; OpenCode has no sandbox.
 Every network request keeps its host on the record.
 
 Installing a worktree's dependencies would have to leave it, and needn't:

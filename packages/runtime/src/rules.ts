@@ -2007,13 +2007,18 @@ const RUNNERS = ['make', 'just', 'task', 'rake', 'mage']
 
 const DEPLOY_WORD = /^(deploy|publish|release)([:._-]|$)/
 
+/** A word that reads as a host's name, as a sandbox's network request gives it, not a script's: `release-assets.githubusercontent.com`. */
+const hostName = (word: string) =>
+  /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(word) && !/\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|ps1)$/i.test(word)
+
 /** Whether a command deploys or publishes, as its program and subcommand say. */
 const deploys = (words: ReadonlyArray<string>): boolean => {
   const [first = '', ...rest] = words
   const program = first.slice(first.lastIndexOf('/') + 1)
   const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
-  // A script named for it: `./deploy.sh`, `scripts/release`.
-  if (DEPLOY_WORD.test(program) && program !== 'release') return true
+  // A script named for it: `./deploy.sh`, `scripts/release`. Not a host a network request is for, alone, which is no
+  // script: `release-assets.githubusercontent.com`, where Electron downloads its build from.
+  if (DEPLOY_WORD.test(program) && program !== 'release' && !(rest.length === 0 && hostName(first))) return true
   if (DEPLOYERS[program]?.test(sub) === true) return true
   if (program === 'vercel' && rest.includes('--prod')) return true
   if (program === 'gh' && sub === 'release' && next === 'create') return true

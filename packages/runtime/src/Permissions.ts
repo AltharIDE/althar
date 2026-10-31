@@ -791,6 +791,7 @@ export class Permissions extends Context.Service<
           return {
             commands: withEdits(reach.commands, edits?.commands),
             hosts: withEdits(reach.hosts, edits?.hosts).filter(reached),
+            writes: reach.writes,
           } satisfies Reach
         })
 
