@@ -11,6 +11,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { REFUSAL_META } from '../registry'
 import { recorded } from './recorded'
 
 /** A program run to its end, as `git` is, without stopping whatever else runs in this process meanwhile. */
@@ -377,6 +378,8 @@ interface SessionState {
   coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
+  /** Why Althar refused the last call, where its answer said so (`REFUSAL_META`), as Claude Code's adapter hands it the model. */
+  told?: string | undefined
   /** What it left running, by its task's id. */
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
@@ -1608,6 +1611,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         asking -= 1
         if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
+        const told = answer._meta?.[REFUSAL_META]
+        if (typeof told === 'string') session.told = told
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
@@ -1810,6 +1815,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)
+          if (session.told !== undefined) {
+            await say(` told=${session.told}`)
+            session.told = undefined
+          }
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
@@ -2015,7 +2024,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         }
         case scenarios.planUsage: {
-          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          // As the CLI sends them (SDK 0.3.312): each window it tracks, and its own window with no use of its own until one nears its limit.
+          // Resets ahead of now: one that has passed is unknown.
           const inSeconds = (seconds: number) => Math.floor(now() / 1000) + seconds
           await update({
             sessionUpdate: 'usage_update',
@@ -2023,19 +2033,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             size: 100,
             _meta: {
               '_claude/rateLimit': {
-                status: 'allowed_warning',
+                status: 'allowed',
                 rateLimitType: 'five_hour',
-                utilization: 0.82,
                 resetsAt: inSeconds(3 * 3600),
+                unifiedWindows: {
+                  five_hour: { utilization: 0.82, resetsAt: inSeconds(3 * 3600), status: 'allowed_warning' },
+                  seven_day: { utilization: 0.4, resetsAt: inSeconds(5 * 86_400), status: 'allowed' },
+                },
               },
-            },
-          })
-          await update({
-            sessionUpdate: 'usage_update',
-            used: 20,
-            size: 100,
-            _meta: {
-              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
             },
           })
           return ended()

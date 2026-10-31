@@ -282,30 +282,50 @@ const CLAUDE_WINDOWS: Readonly<
   overage: { kind: 'other', label: 'Extra usage', spend: true },
 }
 
-/**
- * The window one `rate_limit_event` describes (SDK 0.3.296, `SDKRateLimitInfo`):
- * each event is one window, named by `rateLimitType`. `utilization` is a
- * fraction of 1 (the CLI rounds `utilization * 100` to show it, 0.3.293) and
- * `resetsAt` is epoch seconds. An event without a type or a use, such as one
- * that only says the limit is fine, carries no window: null.
- */
-export const claudeRateLimitWindow = (info: unknown): UsageWindow | null => {
-  const event = record(info)
-  if (event === null || typeof event.rateLimitType !== 'string') return null
-  const named = CLAUDE_WINDOWS[event.rateLimitType]
-  if (named === undefined || typeof event.utilization !== 'number' || !Number.isFinite(event.utilization)) return null
-  let resetsAt: string | undefined
+/** One of Claude's windows as an event gives it: its use a fraction of 1, its reset in epoch seconds; null where it isn't one Althar knows. */
+const claudeEventWindow = (type: string, utilization: unknown, resetsAt: unknown): UsageWindow | null => {
+  const named = CLAUDE_WINDOWS[type]
+  if (named === undefined || typeof utilization !== 'number' || !Number.isFinite(utilization)) return null
+  let reset: string | undefined
   try {
-    resetsAt = isoSeconds(event.resetsAt)
+    reset = isoSeconds(resetsAt)
   } catch {
     return null
   }
   return {
     kind: named.kind,
     ...(named.label === undefined ? {} : { label: named.label }),
-    usedPercent: Math.min(100, Math.max(0, Math.round(event.utilization * 1000) / 10)),
-    ...(resetsAt === undefined ? {} : { resetsAt }),
+    usedPercent: Math.min(100, Math.max(0, Math.round(utilization * 1000) / 10)),
+    ...(reset === undefined ? {} : { resetsAt: reset }),
     ...(named.model === undefined ? {} : { model: named.model }),
     ...(named.spend === true ? { spend: true } : {}),
   }
+}
+
+/**
+ * The windows one `rate_limit_event` describes (SDK 0.3.312, `SDKRateLimitInfo`).
+ * Its own `rateLimitType` names the window nearest its limit, with a
+ * `utilization` only once that is past a warning threshold: an event on a plan
+ * with room, as most are, has none. The CLI also sends each window it tracks in
+ * `unifiedWindows`, an internal field read from every response's
+ * `anthropic-ratelimit-unified-*` headers, whenever one's rounded percentage,
+ * reset or status moves: those are the windows, and the event's own adds one
+ * they don't carry, such as a model's week. `utilization` is a fraction of 1,
+ * past 1 where use runs over, and `resetsAt` epoch seconds. A Max plan's, seen
+ * on 30 October 2026: `{status: 'allowed', rateLimitType: 'five_hour', resetsAt,
+ * unifiedWindows: {five_hour: {utilization: 0.3, resetsAt, status},
+ * seven_day: {utilization: 0.62, resetsAt, status}}}`. None where it names none.
+ */
+export const claudeRateLimitWindows = (info: unknown): ReadonlyArray<UsageWindow> => {
+  const event = record(info)
+  if (event === null) return []
+  const windows: UsageWindow[] = []
+  for (const [type, raw] of Object.entries(record(event.unifiedWindows) ?? {})) {
+    const window = record(raw)
+    const found = window === null ? null : claudeEventWindow(type, window.utilization, window.resetsAt)
+    if (found !== null) windows.push(found)
+  }
+  const own = typeof event.rateLimitType === 'string' ? claudeEventWindow(event.rateLimitType, event.utilization, event.resetsAt) : null
+  if (own !== null && !windows.some((window) => window.kind === own.kind && window.label === own.label)) windows.push(own)
+  return windows
 }

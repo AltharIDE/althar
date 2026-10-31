@@ -168,6 +168,8 @@ export interface FakeControls {
    * `dequeue` takes it out.
    */
   mergeQueue(): void
+  /** Someone puts a change in the merge queue outside Althar, as on the host's site. */
+  enqueueByHand(number: number): void
   /** The merge queue takes a change out unmerged, saying why. */
   dequeue(number: number, why: NonNullable<ChangeRequest['leftQueue']>): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
@@ -846,6 +848,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     catchUp: () => void (lagged = null),
     landLater: () => void (landsLater = true),
     mergeQueue: () => void (queues = true),
+    enqueueByHand: (number) => void inQueue.add(number),
     dequeue: (number, why) => {
       inQueue.delete(number)
       leftQueue.set(number, why)

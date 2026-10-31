@@ -195,9 +195,10 @@ const Snapshot = Schema.Struct({
    */
   attached: Schema.optional(Schema.Boolean),
   /**
-   * In its target branch's merge queue, as Althar put it there and its host
-   * says since: the host merges it once the queue's checks pass. Asked about
-   * on each listening turn while it is; absent once it isn't, or never was.
+   * In its target branch's merge queue, as Althar put it there or its host
+   * says it is, however it got there: the host merges it once the queue's
+   * checks pass. Asked about on each listening turn where the branch has a
+   * queue; absent once it isn't in it, or never was.
    */
   queued: Schema.optional(Schema.Boolean),
   /** How many times the merge queue took it out unmerged: a merge after each is another, at the same head too. */
@@ -2185,8 +2186,13 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
-          const read = yield* host.change(repository, snapshot.number)
-          if (read.state === 'open') {
+          const read = yield* host.change(repository, snapshot.number, { queue: true })
+          // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
+          // in it, and its thread says so where it hasn't.
+          if (read.state === 'open' && read.queued === true) {
+            yield* seenNow(link, snapshot, read)
+            if (snapshot.queued !== true) yield* sayOn(link, queuedNote(nameOf(snapshot), snapshot.target))
+          } else if (read.state === 'open') {
             if (read.headSha !== head) return yield* new ChangedSinceSeen({ taskId })
             if (read.draft) yield* markReady(taskId)
             const merged = yield* outward({
@@ -3265,8 +3271,9 @@ export class Changes extends Context.Service<
           const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
-          // In its merge queue, it is asked about the queue too: whether it is in it still, and why the queue took it out.
-          const answer = yield* host.change(repository, before.number, before.queued === true ? { queue: true } : undefined)
+          // Asked about its merge queue too, where its branch has one: whether it is in it, however it got there (the host's site,
+          // its command line, another tool), and why the queue took it out.
+          const answer = yield* host.change(repository, before.number, { queue: true })
           // Merged, it stays so: for a moment after a merge, a host can still answer it as it was.
           const read: ChangeRequest = before.state === 'merged' ? { ...answer, state: 'merged' } : answer
           const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
@@ -3426,18 +3433,22 @@ export class Changes extends Context.Service<
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
           // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
-          // otherwise, open, the queue took it out unmerged: it is the person's to merge again.
+          // otherwise, open, the queue took it out unmerged: it is the person's to merge again. Where the host didn't say, it is
+          // where it was. Put in from outside Althar, it is in it as one Althar put there, said once.
           const lands = before.queued === true && now.state === 'open' && now.queued === false && now.leftQueue === 'merged'
-          const leftQueue = before.queued === true && now.state === 'open' && now.queued !== true && !lands
+          const leftQueue = before.queued === true && now.state === 'open' && now.queued === false && !lands
+          const unsaid = before.queued === true && now.state === 'open' && now.queued === undefined
+          const entered = before.queued !== true && now.state === 'open' && now.queued === true
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
             ...(before.attached === true ? { attached: true } : {}),
-            ...(lands ? { queued: true } : {}),
+            ...(lands || unsaid ? { queued: true } : {}),
             ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
           }
           // While it is in the queue, it is worth asking about often: it lands, or comes back, as soon as the queue's checks end.
           if (after.queued === true) happened = true
+          if (entered) yield* sayOn(link, queuedNote(name, now.target))
           if (leftQueue) {
             happened = true
             yield* sayOn(link, leftQueueNote(name, now.leftQueue))

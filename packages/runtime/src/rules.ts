@@ -496,6 +496,8 @@ export const essentials = (
     } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
     // The host a network request is for (Claude Code's sandbox asks by it): a name, never a secret.
     else if (key === 'host' && typeof value === 'string') input.host = value.slice(0, 253)
+    // Whether a command asked to run outside its sandbox (ADR-071): what was counted as crossing it.
+    else if (key === 'dangerouslyDisableSandbox' && typeof value === 'boolean') input[key] = value
     else if (key === 'changes' && typeof value === 'object' && value !== null) {
       // A patch's files, without their contents.
       input.changes = Array.isArray(value)
@@ -2428,13 +2430,7 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const where = places(context)
   const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
-  const following: Following = {
-    resolve: (from, path) => locate(where, from ?? context.worktree, path),
-    paths: where.system.paths,
-    folder: where.folder,
-    unknown: where.system.paths.parse(where.system.home).root,
-    unsettled: (word) => unsettled(word, where),
-  }
+  const following = followingOf(where, context)
   for (const line of lines)
     walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
@@ -2459,6 +2455,15 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     })
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
+
+/** How to follow a line's `cd`s from the task's worktree. */
+const followingOf = (where: Places, context: RuleContext): Following => ({
+  resolve: (from, path) => locate(where, from ?? context.worktree, path),
+  paths: where.system.paths,
+  folder: where.folder,
+  unknown: where.system.paths.parse(where.system.home).root,
+  unsettled: (word) => unsettled(word, where),
+})
 
 /** Where a `cd` goes, as its words say, past its options (`cd -P x`, cmd's `cd /d D:\\x`); none for home. */
 const cdTarget = (words: ReadonlyArray<string>): string | undefined => {
@@ -3005,6 +3010,236 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (asked === undefined && project.mode === 'coordinator') return { verdict: 'judge', reason }
   return ask(reason, false)
 }
+
+// ---- Inside a sandbox ------------------------------------------------------
+
+/*
+ * Where a session's sandbox holds its shell commands (ADR-071), it is the
+ * boundary, not these words: a command it holds runs without the rules
+ * reading what it does, whatever the line is, a loop, `$(…)`, a heredoc or a
+ * script. What it can't do there it can't do at all: write outside the task's
+ * worktree or the coordinator's folder, read where the person keeps keys,
+ * reach a host it isn't given, push without a sign-in. What crosses (a
+ * command that runs outside it, an edit outside, a host it asks for) still
+ * meets the rules as it did.
+ */
+
+/** How a session's sandbox holds its shell commands: what runs outside it from the start, and whether a command may ask to. */
+export interface Hold {
+  /** The commands that run outside it from the start, by how they start (Claude Code's `excludedCommands`). */
+  readonly outside: ReadonlyArray<string>
+  /** Whether a request may ask to run outside it (`dangerouslyDisableSandbox`); the coordinator's never may. */
+  readonly unsandboxed: boolean
+}
+
+/**
+ * Whether a request is a shell command its session's sandbox holds: one that
+ * doesn't ask to run outside it, where it may, and of whose commands none
+ * starts as one that runs outside from the start. A line runs outside only
+ * where every command in it does, but one is enough to read it.
+ */
+export const runsInside = (request: PermissionRequest, hold: Hold): boolean => {
+  if (request.kind !== 'execute') return false
+  const command = commandIn(request.rawInput)
+  if (command === undefined || command.trim() === '') return false
+  if (hold.unsandboxed && field(request.rawInput, 'dangerouslyDisableSandbox') === true) return false
+  const parts = command.split(/&&|\|\||[;|\n()]/).map((part) => part.trim().replace(/\s+/g, ' '))
+  return !hold.outside.some((start) => parts.some((part) => part === start || part.startsWith(`${start} `)))
+}
+
+/**
+ * Decides a shell command its session's sandbox holds (ADR-071). Nothing is
+ * read for what it does but what the project said itself: a command it never
+ * allows, or a kind it never allows that the line plainly is, is refused; a
+ * command it asks about asks. And no one reads the keychain or git's stored
+ * passwords, which the sandbox reaches on a Mac. The rest runs.
+ */
+export const decideInside = (request: PermissionRequest, context?: RuleContext): Verdict => {
+  const system = systemOf(context)
+  const command = commandOf(request)
+  const credentials = lineReadings(command, system)
+    .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+    .map(credentialReason)
+    .find((reason) => reason !== undefined)
+  if (credentials !== undefined) return { verdict: 'deny', reason: credentials }
+  const project = context?.project
+  if (context === undefined || project === undefined) return ALLOW
+  const named = commandRule(command, project.commands, system)
+  if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
+  const kinds = project.never.length > 0 || project.commands.length > 0 ? commandKinds(command, context) : []
+  const never = kinds.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
+  if (never !== undefined && never.rule !== 'unclear')
+    return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
+  // What it can't read could be what the project never allows, where nothing at the boundary stops that: a deploy, a command it named.
+  const unheld = project.never.some((rule) => !HELD_INSIDE.includes(rule)) || project.commands.some((rule) => rule.decision === 'never')
+  const unread = unheld ? unreadOf(command, kinds) : undefined
+  if (unread !== undefined)
+    return {
+      verdict: 'deny',
+      reason: `${unread} The project's rules never allow some things that could be in it, so it's refused: run its commands written out, where Althar can read them.`,
+    }
+  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+  return ALLOW
+}
+
+/** Where a program named by its path is one installed, not a script of the task's: the system's, a package manager's. */
+const INSTALLED =
+  /^\/(usr\/(local\/)?s?bin|s?bin|opt\/homebrew\/s?bin|nix\/store)\/|(^|\/)node_modules\/\.bin\/|\/\.(bun|cargo|deno|local)\/bin\//
+
+/** What runs a package's program, the word after it naming what it runs (`bunx tsx fix.ts`). */
+const PACKAGE_RUNNERS = /^(bunx|npx|pnpx)$/
+
+/** Programs that run a script in another language, beyond the languages themselves. */
+const SCRIPT_RUNNERS = /^(tsx|ts-node|esno|vite-node)$/
+
+/** Bun's and Deno's ways of running code of the line's or a file's, not one of the project's scripts (`bun run test`) or tools. */
+const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
+  const [first = '', second = ''] = after.filter((word) => !/^--?(watch|hot|smol|bun|silent|quiet|allow-\S+|A)$/.test(word))
+  if (/^(-e|--eval|-p|--print)$/.test(first)) return true
+  const file = (word: string) => /\.(m?[jt]sx?|c[jt]s)$/.test(word) || word.includes('/')
+  if (name === 'deno') return ['run', 'eval', 'repl'].includes(first) || file(first)
+  return (first === 'run' && file(second)) || file(first)
+}
+
+/**
+ * Why Althar can't read what a line does, where it can't: a part the shell
+ * works out as it runs (`$(…)`, backticks, `eval`), a script in another
+ * language (`python3 - <<'EOF'`, `node fix.js`, `bun -e '…'`, `bunx tsx
+ * fix.ts`), a shell given a file or its input, a program run from a file
+ * (`./fix.sh`, `/tmp/fix.sh`) rather than one installed, or what the rules
+ * themselves can't tell.
+ */
+const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
+  const parsed = parseCommandLine(command)
+  if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
+  for (const words of parsed.commands) {
+    const start = words.findIndex((word) => !assignment.test(word))
+    const wrapped = PACKAGE_RUNNERS.test((words[start] ?? '').slice((words[start] ?? '').lastIndexOf('/') + 1))
+    const at = wrapped ? words.findIndex((word, index) => index > start && !word.startsWith('-')) : start
+    const program = at < 0 ? '' : (words[at] ?? '')
+    const name = program.slice(program.lastIndexOf('/') + 1)
+    const after = words.slice(at + 1)
+    if (
+      (SCRIPT_LANGUAGES.test(name) && name !== 'bun' && name !== 'deno') ||
+      SCRIPT_RUNNERS.test(name) ||
+      (/^(bun|deno)$/.test(name) && runsCode(name, after))
+    )
+      return `Althar can't read what this runs: a \`${name}\` script does what its code says, not its words.`
+    // A shell given a script to run, from a file or its input, rather than one on the line (`sh -c '…'`, which the rules read).
+    if (SHELLS.test(name) && !after.some((word) => /^-\w*c\w*$/.test(word)))
+      return `Althar can't read what this runs: \`${name}\` runs a script from a file or its input.`
+    if (program.includes('/') && !INSTALLED.test(program))
+      return `Althar can't read what this runs: \`${program}\` does what its file says.`
+  }
+  const unclear = kinds.find((each) => each.rule === 'unclear')
+  return unclear?.reason.replace(/,? so it asks\.$/, '.')
+}
+
+/**
+ * The kinds the boundary itself stops, whatever a command hides: the
+ * sandbox a write outside the task's worktree, git's guard a push to the
+ * default branch, a force push and deleting another branch (pushGuard.ts).
+ * A project that never allows only these needn't read what runs inside.
+ */
+const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-push', 'delete-branch']
+
+/**
+ * Decides a shell command that leaves the sandbox its session has (ADR-071):
+ * as the rules decide any request, but with everything allowed, what they
+ * can't read is refused, with how to run it, rather than let through. Outside
+ * the sandbox nothing would stop a script changing the person's checkout or
+ * another branch, and inside it, it runs without asking.
+ */
+export const decideLeaving = (request: PermissionRequest, context: RuleContext): Verdict => {
+  const verdict = decide(request, context)
+  if (verdict.verdict !== 'allow' || (context.project ?? MVP_RULES).mode !== 'allow') return verdict
+  // Only what the agent asked to run outside: what the project runs outside from the start (its tests, its build) goes as it said.
+  if (request.kind !== 'execute' || field(request.rawInput, 'dangerouslyDisableSandbox') !== true) return verdict
+  const unread = unreadOf(commandOf(request), keptOf(request, context))
+  if (unread === undefined) return verdict
+  return {
+    verdict: 'deny',
+    reason: `${unread} Outside your sandbox nothing would stop it changing another checkout or a branch that isn't the task's, so it's refused. Run it inside your sandbox, where it runs without asking; or, if it has to run outside, as plain commands Althar can read.`,
+  }
+}
+
+/** A git command of a line: what a pass from the person lets past git's guard, and no other (pushGuard.ts). */
+export interface GitRun {
+  /** Git's own words, as `ps` shows them: its program by name, its words unquoted, one space between. */
+  readonly words: string
+  /** The folder it runs in, after the line's `cd`s and its `-C`; none where Althar can't tell. */
+  readonly folder: string | undefined
+  /** For a push, the remote it names (`origin`, a URL), or none where it names none. */
+  readonly push?: { readonly remote: string | undefined }
+}
+
+/** The git commands of a line, from the task's worktree, where the agent's shell starts. */
+export const gitRunsOf = (command: string, context: RuleContext): ReadonlyArray<GitRun> => {
+  const where = places(context)
+  const runs: Array<GitRun> = []
+  walkFolders(parseCommandLine(command), context.worktree, followingOf(where, context), (written, folders) => {
+    const words = written.filter((word, at) => !written.slice(0, at + 1).every((each) => assignment.test(each)))
+    if (words.length === 0 || words[0]!.slice(words[0]!.lastIndexOf('/') + 1) !== 'git') return
+    // Its redirects, which the parse puts last, are the shell's, not git's.
+    const own = ['git', ...words.slice(1, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0)]
+    const known = folders.length === 1 && folders[0]!.blind !== true ? folders[0]!.at : undefined
+    const call = known === undefined ? undefined : gitCall(own, known, where.system.paths)
+    runs.push({
+      words: own.join(' ').replace(/\s+/g, ' ').trim(),
+      folder: call !== undefined && call.elsewhere.length === 0 ? call.cwd : undefined,
+      ...(call?.subcommand === 'push' ? { push: { remote: pushRemoteOf(call.args) } } : {}),
+    })
+  })
+  return runs
+}
+
+/** The remote a push names: `--repo`'s, or its first word that isn't an option. */
+const pushRemoteOf = (args: ReadonlyArray<string>): string | undefined => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    if (arg.startsWith('--repo=')) return arg.slice('--repo='.length)
+    if (arg === '--repo') return args[index + 1]
+    if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
+    else if (!arg.startsWith('-')) return arg
+  }
+  return undefined
+}
+
+// ---- What each ask and refusal is counted as ------------------------------
+
+/**
+ * The kinds an ask or a refusal is counted as (ADR-071), so the person sees
+ * which mostly get worked around: one of the project's kinds, what the rules
+ * can't read, a command the project named, what no project can change
+ * (credentials and keys, the code host), what a role that only reads may not
+ * do, and the rest (a project that asks about everything).
+ */
+export const TALLY_KINDS = [...RULES, 'unclear', 'command', 'credentials', 'code-host', 'reader', 'other'] as const
+export type TallyKind = (typeof TALLY_KINDS)[number]
+
+/**
+ * What an ask or a refusal of a task's request is counted as: what decided
+ * it, in the order `decide` meets them, the firmest of the kinds it is.
+ */
+export const tallyKindOf = (request: PermissionRequest, context: RuleContext): TallyKind => {
+  const system = systemOf(context)
+  const runs = request.kind === 'execute' || request.kind === 'other'
+  if (runs) {
+    const words = lineReadings(commandOf(request), system).flatMap((line) => line.commands.flatMap((each) => readings(unwrap(each))))
+    if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
+    if (words.some((each) => hostReason(each) !== undefined)) return 'code-host'
+  }
+  if (secretReason(request, context.worktree, system) !== undefined) return 'credentials'
+  const project = context.project ?? MVP_RULES
+  if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
+  const found = keptOf(request, context)
+  const firmest = found.find((each) => each.irreversible === true) ?? found.find((each) => each.floor === true) ?? found[0]
+  return firmest?.rule ?? 'other'
+}
+
+/** Whether a request is, as the rules read it, one of what can't be undone from the task (ADR-067): what a lead's git guard stops. */
+export const lasting = (request: PermissionRequest, context: RuleContext): boolean =>
+  keptOf(request, context).some((each) => each.irreversible === true)
 
 /** How far an "always" answer reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export type AlwaysScope = 'exact' | 'prefix' | 'kind'
