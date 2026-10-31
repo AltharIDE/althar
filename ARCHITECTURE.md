@@ -66,6 +66,8 @@ Make failures diagnosable without leaking private data. Use actionable errors an
 
 Keep each failure to the smallest thing it belongs to. Where work covers independent things, one that fails says so on its own and the rest carry on; a loop survives the round or item it couldn't handle; fail a whole operation only when its parts can't stand apart. Combinators that run many things, such as Effect's `forEach` and `all`, stop at the first failure, so catch each item where its failure is its own. A failure kept this way still leaves a trace: log it, and report what the person didn't cause and can't put right where it is kept, at the edge, never what they did ([ADR-047](docs/decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
 
+Removing what was there only for a while, such as a temporary folder or the folder a process ran in, is best effort: it never fails, or loses, the work it followed. A folder can stay held for a moment after the process that used it has gone, so try again briefly, then log what still stays and leave it. Where the removal is itself the work, it says when something stayed.
+
 ## Documentation and decisions
 
 ### The repository's README

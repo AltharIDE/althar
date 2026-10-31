@@ -175,7 +175,15 @@ export const copyTo = async (dropped: string, target: string, budget: Budget = M
     }
     return { ok: true, kind: 'folder', bytes, entries }
   }
-  const gone = () => (made ? rm(target, { recursive: true, force: true }) : Promise.resolve())
+  // What was copied for one refused goes as best it can, tried again over a moment as cleanUp is, and the refusal stands.
+  // Not cleanUp itself: this is plain Node, shared with the app's main process, which takes no Effect.
+  const gone = () =>
+    made
+      ? // oxlint-disable-next-line althar/one-removal
+        rm(target, { recursive: true, force: true, maxRetries: 5 }).catch((error: unknown) =>
+          console.warn(`Could not remove ${target}, what was copied of a file refused; it is left there`, error),
+        )
+      : Promise.resolve()
   try {
     const done = await copied()
     if (!done.ok) await gone()
