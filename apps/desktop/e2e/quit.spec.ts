@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, still, startTask } from './support'
+import { launch, mainWindow, openFirstProject, still, startTask } from './support'
 
 /** Quit asks, as it does for a person: the other specs' apps quit without asking (support.ts). */
 const ASKS = { ALTHAR_QUIT_WITHOUT_ASKING: '0' }
@@ -97,5 +97,83 @@ test('Quit twice in a row quits without asking again', async () => {
     await exited
   } finally {
     await electronApp.close().catch(() => undefined)
+  }
+})
+
+test('Quit asks even when the runtime has not said what is at work, and says it may stop some', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  // The runtime is given no time to answer, as when it is too busy to.
+  const { electronApp, page } = await launch(home, { ...ASKS, ALTHAR_QUIT_ASK_WAIT: '1' })
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+
+    await electronApp.evaluate(({ app }) => app.quit())
+    const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toContainText('Quitting may stop work that is under way.')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+  } finally {
+    await quitAnyway(electronApp)
+  }
+})
+
+test('Keep working in the background closes the windows and leaves the lead working', async () => {
+  test.skip(
+    process.platform !== 'darwin',
+    'closing the last window quits elsewhere unless it is chosen; run on the Mac, where the menu bar or the island is always there',
+  )
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const { electronApp, page } = await launch(home, ASKS)
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+
+    await electronApp.evaluate(({ app }) => app.quit())
+    const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog.getByRole('button', { name: 'Keep working in the background' })).toBeVisible()
+    await still(page)
+    await dialog.screenshot({ path: 'test-results/quit-background.png', scale: 'css' })
+    await dialog.getByRole('button', { name: 'Keep working in the background' }).click()
+
+    // Every window of Althar's own closes, and the app stays.
+    await expect.poll(() => page.isClosed()).toBe(true)
+    expect(electronApp.process().exitCode).toBeNull()
+
+    // Opened again, as from the dock, the lead is still at work: nothing was stopped.
+    await electronApp.evaluate(({ app }) => app.emit('activate'))
+    const again = await mainWindow(electronApp)
+    await expect(again.getByText('1 task moving in 1 project.')).toBeVisible()
+    await expect(again.getByRole('dialog')).toHaveCount(0)
+  } finally {
+    await quitAnyway(electronApp)
+  }
+})
+
+test('Closing the last window with work running asks once, and quits only when the person says so', async () => {
+  test.skip(process.platform === 'darwin', 'closing the last window quits only off a Mac')
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const { electronApp, page } = await launch(home, ASKS)
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+
+    await page.close()
+    const asked = await mainWindow(electronApp)
+    const dialog = asked.getByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toContainText('Quitting stops 1 lead at work.')
+    // Not answered by the window closing twice over: it stays until the person answers.
+    await asked.waitForTimeout(1500)
+    await expect(dialog).toBeVisible()
+    expect(electronApp.process().exitCode).toBeNull()
+  } finally {
+    await quitAnyway(electronApp)
   }
 })

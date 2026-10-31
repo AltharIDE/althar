@@ -19,7 +19,7 @@ import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
-import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, workIn } from './quitWork'
+import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
@@ -688,7 +688,7 @@ const openWindow = () => {
   window.on('closed', () => {
     windows.delete(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
-    if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) app.quit()
+    if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
   })
   window.webContents.on('did-finish-load', () => connect(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
@@ -980,7 +980,7 @@ app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin' && !keepingOn) app.quit()
+  if (process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
 })
 
 /*
@@ -991,10 +991,21 @@ app.on('window-all-closed', () => {
  * carry on. A Quit asked again while the question is open is their yes. With
  * nothing at work it quits as it always did.
  */
-const QUIT_ASK_WAIT = 2_000
+const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0 }
+const QUIT_ASK_WAIT = (__ALTHAR_TEST_HOOKS__ && Number(process.env.ALTHAR_QUIT_ASK_WAIT)) || 4_000
 
+/** The runtime's answer, or nothing for it, if it doesn't give one in time. */
 const askRuntimeWork = () =>
   Promise.race([works.ask(runtime, null), new Promise<null>((resolve) => setTimeout(() => resolve(null), QUIT_ASK_WAIT))])
+
+/**
+ * The last window closing quits off a Mac, and so does the last of the app's
+ * windows when no edge page is left: two requests for one quit, which is not
+ * the person saying yes to the question the first one asks.
+ */
+function quitWhenNoneLeft() {
+  if (quitAsking === undefined) app.quit()
+}
 
 /** Asks in the window, and waits for the answer: the window closing is a Cancel. */
 const askInWindow = (question: QuitQuestion, settle: Promise<QuitAnswer>) => {
@@ -1029,13 +1040,15 @@ const askToQuit = async () => {
   quitAsking = { settle }
   try {
     const work = workIn(await askRuntimeWork())
+    // A runtime that is gone has nothing at work; one that doesn't answer may have, so the question is asked without counts.
+    const unknown = work === null && runtime !== undefined
     let answer: QuitAnswer
     if (early !== undefined) answer = early
-    else if (work === null || idle(work)) answer = 'quit'
+    else if (!unknown && (work === null || idle(work))) answer = 'quit'
     else {
       const place = await edge?.state()
       const background = place !== undefined && (place.place === 'island' || place.tray)
-      answer = await askInWindow({ work, background, update: updates?.glance().ready ?? null }, asked)
+      answer = await askInWindow({ work: work ?? NOT_COUNTED, background, update: updates?.glance().ready ?? null }, asked)
     }
     if (answer === 'quit') {
       quitConfirmed = true
@@ -1043,6 +1056,9 @@ const askToQuit = async () => {
     } else if (answer === 'background') {
       keepingOn = true
       for (const window of windows) window.close()
+    } else if (windows.size === 0 && process.platform !== 'darwin') {
+      // The window that asked was closed, which is a Cancel; with no edge page either, Althar would be left with nothing to see.
+      bringForward()
     }
   } finally {
     quitAsking = undefined

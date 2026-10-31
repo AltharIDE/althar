@@ -27,6 +27,8 @@ export interface QuitWorkText {
   title: string
   /** What quitting stops: the parts, in a sentence. */
   stops: (parts: ReadonlyArray<string>) => string
+  /** What quitting says where nothing could be counted: the runtime didn't answer. */
+  mayStop: string
   leads: (count: number) => string
   reviews: (count: number) => string
   runs: (count: number) => string
@@ -44,6 +46,7 @@ export const quitWorkText: QuitWorkText = {
   title: 'Quit Althar?',
   stops: (parts) =>
     `Quitting stops ${parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`}.`,
+  mayStop: 'Quitting may stop work that is under way.',
   leads: (count) => many(count, 'lead at work', 'leads at work'),
   reviews: (count) => many(count, 'review', 'reviews'),
   runs: (count) => many(count, 'run', 'runs'),
@@ -78,10 +81,11 @@ export const stoppingParts = (work: QuitWorkCounts, t: QuitWorkText = quitWorkTe
 
 export function QuitWork({ work, background = false, update, onQuit, onBackground, onCancel, text }: QuitWorkProps) {
   const t = { ...quitWorkText, ...text }
+  const parts = stoppingParts(work, t)
   return (
     <Dialog
       title={t.title}
-      description={t.stops(stoppingParts(work, t))}
+      description={parts.length === 0 ? t.mayStop : t.stops(parts)}
       onClose={onCancel}
       width={background ? 520 : 440}
       actions={

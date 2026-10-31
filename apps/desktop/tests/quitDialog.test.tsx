@@ -58,6 +58,13 @@ describe('quit with work under way', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('says it may stop work where the runtime could not count it', () => {
+    const { host, ask } = asked()
+    render(<QuitDialog host={host} />)
+    ask({ ...question, work: { leads: 0, reviews: 0, runs: 0, left: 0 } })
+    screen.getByText('Quitting may stop work that is under way.')
+  })
+
   it('closes when main says it is answered', () => {
     const { host, ask } = asked()
     render(<QuitDialog host={host} />)

@@ -40,6 +40,15 @@ export const OneLead: Story = {
   },
 }
 
+/** The runtime didn't say what is at work: Quit still asks, and says it may stop some. */
+export const NotCounted: Story = {
+  args: { work: {} },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toHaveTextContent('Quitting may stop work that is under way.')
+  },
+}
+
 /** Runs and what agents left running count too. */
 export const RunsAndLeftRunning: Story = {
   args: { work: { leads: 2, reviews: 1, runs: 2, left: 1 } },
