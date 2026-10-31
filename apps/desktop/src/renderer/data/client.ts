@@ -1,5 +1,10 @@
 import {
   type AccountSignInState,
+  type InstalledSkill,
+  type SkillList,
+  type SkillReviewCard,
+  type SkillsFound,
+  type SkillUpdate,
   type AccountStatus,
   type AgentModels,
   type AlwaysScope,
@@ -221,6 +226,18 @@ export interface Client {
   readonly setAutomationPostsReviews: (automationId: string, on: boolean) => Promise<void>
   /** Pauses every automation, or lets them run again. Runs under way finish. */
   readonly setAutomationsPaused: (paused: boolean) => Promise<void>
+  /** The skills a task's lead is given: the catalog Althar ships and what the person installed. */
+  readonly listSkills: () => Promise<SkillList>
+  /** The skill folders in a GitHub repository, at the commit its ref names now. */
+  readonly findSkills: (input: { readonly source: string; readonly ref?: string }) => Promise<SkillsFound>
+  /** One skill from GitHub, fetched and kept for review; nothing is installed. */
+  readonly stageSkill: (input: { readonly repo: string; readonly ref: string; readonly subpath: string }) => Promise<SkillReviewCard>
+  /** Installs the version on a card the person read. */
+  readonly approveSkill: (card: SkillReviewCard, replace: boolean) => Promise<InstalledSkill>
+  readonly checkSkillUpdates: () => Promise<ReadonlyArray<SkillUpdate>>
+  readonly rollBackSkill: (id: string) => Promise<InstalledSkill>
+  readonly setSkillActive: (id: string, active: boolean) => Promise<InstalledSkill>
+  readonly uninstallSkill: (id: string) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Tries the thread's last turn again, where it failed: what the person said in it goes again. */
   readonly tryAgain: (threadId: string) => Promise<void>
@@ -647,6 +664,18 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
+    listSkills: () => settle(api.ListSkills({})),
+    findSkills: (input) => settle(api.FindSkills(input)),
+    stageSkill: (input) => settle(api.StageSkill(input)),
+    approveSkill: (card, replace) =>
+      command((commandId) => {
+        const { repo, ref, sha, subpath } = card.source
+        return api.ApproveSkill({ commandId, id: card.id, repo, ref, sha, subpath, treeHash: card.treeHash, replace })
+      }),
+    checkSkillUpdates: () => settle(api.CheckSkillUpdates({})),
+    rollBackSkill: (id) => command((commandId) => api.RollBackSkill({ commandId, id })),
+    setSkillActive: (id, active) => command((commandId) => api.SetSkillActive({ commandId, id, active })),
+    uninstallSkill: (id) => command((commandId) => api.UninstallSkill({ commandId, id })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),

@@ -17,6 +17,10 @@
   writing outside the worktree. What could lose work asks the person even
   with everything allowed ([ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)),
   and is never the coordinator's to judge.
+  2026-10-18: the rules keep the project's Repository files switches
+  ([ADR-072](072-skill-and-openspec-files-stay-off-the-repository.md)):
+  whether skill and OpenSpec files may be in its repository and be pushed.
+  Each off unless the person turns it on.
 - **Owner:** Repository maintainers
 - **Context:** Every permission request reaches Althar
   ([ADR-007](007-permission-requests-reach-althar.md)), which answers it

@@ -934,6 +934,16 @@ external observation, not Althar's run authority.
 
 ## Skills
 
+What is built so far is narrower than this section: one store on the
+computer, a curated default catalog and each lead's set fixed and recorded
+for its session ([ADR-071](../decisions/071-skills-one-store-a-curated-catalog.md)),
+and skill and OpenSpec files held off the repository unless the project says
+so ([ADR-072](../decisions/072-skill-and-openspec-files-stay-off-the-repository.md)).
+Bindings by scope, precedence and conflicts are not built; every lead gets
+the same active set, and the catalog's skills are off until the person turns
+them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)
+keeps what is done and what is not.
+
 Althar should adopt the open Agent Skills package shape:
 
 ```text

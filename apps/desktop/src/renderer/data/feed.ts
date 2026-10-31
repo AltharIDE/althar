@@ -10,9 +10,10 @@ import { keys } from './reads'
  * ends the reads it touches, so the cache never shows what the runtime has
  * moved past:
  *
- * - a whole read (the projects, the home, a board, the connections) is read
- *   again, gathered a moment so a burst of changes reads once; on screen or
- *   not, so whichever the person goes to next is already right. Only a
+ * - a whole read (the projects, the home, a board, the connections, the
+ *   skills) is read again, gathered a moment so a burst of changes reads
+ *   once; on screen or not, so whichever the person goes to next is already
+ *   right. Only a
  *   permission the rules answered, which moves nothing but the home's count
  *   of them and comes with every edit an agent makes, reads the home again
  *   only while it shows; off screen it is marked, for its next visit;
@@ -67,6 +68,9 @@ export const REPOSITORIES = new Set(['project', 'task'])
 /** What changes the connections as listed: a connection, and a project, by whose repositories and name they say where its code is. */
 export const CONNECTIONS = new Set(['connection', 'project'])
 
+/** What changes the skills as listed: a skill installed, updated, rolled back, switched or removed, from any window. */
+export const SKILLS = new Set(['skill'])
+
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
@@ -106,6 +110,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   ...(event.projectId !== null && BOARD.has(event.aggregateType) ? [{ key: keys.board(event.projectId), offScreen: true }] : []),
   // The connections, which say where each project's code is: a connection, or a project's repositories, name or removal.
   ...(CONNECTIONS.has(event.aggregateType) ? [{ key: keys.connections, offScreen: true }] : []),
+  // The skills each lead is given, as a window changes them: so every other window shows them too.
+  ...(SKILLS.has(event.aggregateType) ? [{ key: keys.skills, offScreen: true }] : []),
   // Its repositories, and how many tasks under way change each, only while they show.
   ...(event.projectId !== null && REPOSITORIES.has(event.aggregateType)
     ? [{ key: keys.repositories(event.projectId), offScreen: false }]

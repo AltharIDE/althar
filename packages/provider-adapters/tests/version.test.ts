@@ -2,14 +2,24 @@ import { describe, expect, it } from 'vitest'
 import { Effect } from 'effect'
 
 import { agents } from '../src/registry'
-import { agentVersion, versionIn } from '../src/version'
+import { agentVersion, atLeastVersion, versionIn } from '../src/version'
 
 describe('an agent’s version', () => {
   it('reads the number each CLI prints', () => {
     expect(versionIn('2.1.263 (Claude Code)')).toBe('2.1.263')
     expect(versionIn('codex-cli 0.159.3')).toBe('0.159.3')
+    expect(versionIn('codex-cli 0.164.0-beta.1')).toBe('0.164.0-beta.1')
     expect(versionIn('1.18')).toBe('1.18')
     expect(versionIn('no version here')).toBeNull()
+  })
+
+  it('checks a minimum version and rejects unknown or incomplete versions', () => {
+    expect(atLeastVersion('0.164.0', '0.164.0')).toBe(true)
+    expect(atLeastVersion('0.165.0', '0.164.0')).toBe(true)
+    expect(atLeastVersion('0.163.9', '0.164.0')).toBe(false)
+    expect(atLeastVersion('0.164', '0.164.0')).toBe(false)
+    expect(atLeastVersion(versionIn('codex-cli 0.164.0-beta.1'), '0.164.0')).toBe(false)
+    expect(atLeastVersion(null, '0.164.0')).toBe(false)
   })
 
   it('asks the agent, and has none where it can’t say or has no way to', async () => {

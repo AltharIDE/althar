@@ -15,6 +15,7 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  InstalledSkill,
   Load,
   PlanUsage,
   Picture,
@@ -25,6 +26,7 @@ import type {
   ProjectRepository,
   ProjectSummary,
   RepositoryScript,
+  SkillReviewCard,
   Runnable,
   Status,
   TaskSummary,
@@ -74,6 +76,7 @@ export const projectRules: ProjectRulesView = {
   titlePattern: null,
   moveIssues: true,
   changeIssues: false,
+  repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
     commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
@@ -957,6 +960,38 @@ export const githubCheck: ConnectionCheck = {
   settings: 'https://github.com/settings/personal-access-tokens',
 }
 
+/** A skill the catalog ships, and one from GitHub to review. */
+export const installedSkill: InstalledSkill = {
+  id: 'brainstorming',
+  source: 'althar-default',
+  description: 'Use before building a new feature or change whose intent or design is not settled yet.',
+  license: 'MIT',
+  repo: null,
+  subpath: null,
+  ref: null,
+  sha: null,
+  treeHash: 'b'.repeat(64),
+  review: 'default',
+  active: true,
+  needs: [],
+  canRollBack: false,
+}
+
+export const skillCard: SkillReviewCard = {
+  id: 'release-notes',
+  source: { kind: 'github', repo: 'acme/agent-skills', ref: 'HEAD', sha: 'a'.repeat(40), subpath: 'skills/release-notes' },
+  treeHash: 'c'.repeat(64),
+  name: 'release-notes',
+  description: 'Use when writing the notes for a release.',
+  license: 'MIT',
+  instructions: '---\nname: release-notes\n---\nWrite the notes.\n',
+  files: [{ path: 'SKILL.md', bytes: 48, sha256: 'd'.repeat(64), executable: false }],
+  findings: [],
+  installable: true,
+  installed: null,
+  changes: [],
+}
+
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
@@ -1044,6 +1079,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     undoAutomationChange: vi.fn(async () => {}),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
+    listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
+    findSkills: vi.fn(async ({ source }) => ({ repo: source, ref: 'HEAD', sha: 'a'.repeat(40), paths: ['skills/release-notes'] })),
+    stageSkill: vi.fn(async () => skillCard),
+    approveSkill: vi.fn(async () => ({ ...installedSkill, id: skillCard.id, source: 'github' as const, repo: skillCard.source.repo })),
+    checkSkillUpdates: vi.fn(async () => []),
+    rollBackSkill: vi.fn(async () => installedSkill),
+    setSkillActive: vi.fn(async (_id: string, active: boolean) => ({ ...installedSkill, active })),
+    uninstallSkill: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),

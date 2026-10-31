@@ -8,6 +8,7 @@ import { build } from 'electron-builder'
 
 import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
 import { binariesFor, speechPackage } from './binaries.ts'
+import { stageSkillsCatalog } from './catalog.ts'
 import { entitlementsFor } from './entitlements.ts'
 import { refresh } from './feed.ts'
 import { fetchNode, NODE_IN_APP, nodeProgram } from './node.ts'
@@ -158,6 +159,7 @@ mkdirSync(stage, { recursive: true })
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
 cpSync(join(resources, 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
 cpSync(join(resources, 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
+stageSkillsCatalog(join(desktop, '..', '..', 'packages', 'skills', 'catalog'), stage)
 writeFileSync(
   join(stage, 'package.json'),
   `${JSON.stringify(

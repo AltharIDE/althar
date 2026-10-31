@@ -21,6 +21,9 @@ const FILES: Record<string, string> = {
   'docs/plans/tests-that-hold.md': '# A plan',
   'packages/testing/package.json': json({ name: '@althar/testing', exports: { '.': './src/index.ts' } }),
   'packages/testing/src/index.ts': 'export const waitFor = () => {}',
+  'packages/skills/package.json': json({ name: '@althar/skills', exports: { '.': './src/index.ts' } }),
+  'packages/skills/src/index.ts': 'export const skills = []',
+  'packages/skills/tests/catalog.test.ts': "import { skills } from '../src/index'",
   'packages/domain/package.json': json({ name: '@althar/domain', exports: { '.': './src/index.ts' } }),
   'packages/domain/src/index.ts': "export * from './ids'",
   'packages/domain/src/ids.ts': 'export const id = 1',
@@ -133,6 +136,12 @@ describe('the selection', () => {
     })
   })
 
+  it('runs the shared skills package test in the harness workflow', () => {
+    expect(runs(plan(['packages/skills/tests/catalog.test.ts'], REPO, 'harness').jobs)).toEqual({
+      packages: ['packages/skills checked: all'],
+    })
+  })
+
   it('runs a change to the main process in its tests, and the smoke test on Windows', () => {
     const desktop = plan(['apps/desktop/src/main/keyring.ts'], REPO, 'desktop')
     expect(runs(desktop.jobs)).toEqual({ 'apps/desktop': ['apps/desktop checked: tests/keyring.test.ts'] })
@@ -156,7 +165,12 @@ describe('the selection', () => {
       expect(plan(changed, REPO, 'desktop')).toMatchObject({ e2e: true, windowsE2e: true })
       expect(runs(plan(changed, REPO, 'desktop').jobs)).toEqual({ 'apps/desktop': ['apps/desktop checked: all'] })
       expect(runs(plan(changed, REPO, 'harness').jobs)).toEqual({
-        packages: ['packages/domain checked: all', 'packages/provider-adapters checked: all', 'packages/testing checked: '],
+        packages: [
+          'packages/domain checked: all',
+          'packages/provider-adapters checked: all',
+          'packages/skills checked: all',
+          'packages/testing checked: ',
+        ],
         ...Object.fromEntries(RUNTIME_PARTS.map((name, index) => [name, [`packages/runtime${index === 0 ? ' checked' : ''}: all`]])),
       })
     }
@@ -260,7 +274,7 @@ describe('this repository', () => {
    * and this file's own small repository.
    */
   const sample = (one: string) =>
-    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
+    /^(?:packages\/skills\/catalog\/|packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
       one,
     )
 

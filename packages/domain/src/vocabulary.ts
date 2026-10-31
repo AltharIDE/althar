@@ -350,5 +350,6 @@ export const AggregateType = Schema.Literals([
   'issue_change',
   'automation',
   'automation_occurrence',
+  'skill',
 ])
 export type AggregateType = typeof AggregateType.Type

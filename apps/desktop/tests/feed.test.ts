@@ -220,6 +220,18 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('reads the skills again when one changes, on screen or not, so another window shows it too', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.skills())
+    emit(changed('skill', 'brainstorming', null, null))
+    await settle()
+    expect(client.listSkills).toHaveBeenCalledTimes(2)
+    // Nothing else reads them again.
+    emit(changed('task', 't1', 'th1', 'p1'))
+    await settle()
+    expect(client.listSkills).toHaveBeenCalledTimes(2)
+  })
+
   it('reads a project’s rules again when they change, as an answer kept as a rule changes them, only while they show', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.rules('p1'))

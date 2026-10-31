@@ -655,6 +655,48 @@ export function CrashReportsLine({ on, onChange, doNotTrack = false, text, class
   )
 }
 
+/* ---- agent skills ---------------------------------------------------------------- */
+
+export interface SkillsLineText {
+  title: string
+  note: string
+}
+
+export const skillsLineText: SkillsLineText = {
+  title: 'Agent skills',
+  note: 'from Althar give each task’s lead ways to work, such as debugging, planning and review. Choose which in Settings, under Skills, any time.',
+}
+
+export interface SkillsLineProps {
+  /** Whether any skill is on. */
+  on: boolean
+  /** Turns every skill on, or every one off. */
+  onChange: (on: boolean) => void
+  text?: Partial<SkillsLineText>
+  className?: string
+}
+
+/**
+ * Whether the leads are given Althar's skills, asked once as one quiet line
+ * with its switch at the end, as crash reports are, for a first screen to
+ * carry at its foot. It says where to choose them one by one later: Settings.
+ */
+export function SkillsLine({ on, onChange, text, className }: SkillsLineProps) {
+  const t = { ...skillsLineText, ...text }
+  const id = useId()
+  return (
+    <p className={cx(s.line, className)}>
+      <span className={s.lineWords}>
+        <span id={`${id}-t`} className={s.lineTitle}>
+          {t.title}
+        </span>{' '}
+        <span id={`${id}-n`}>{t.note}</span>
+      </span>
+      <Switch checked={on} onChange={onChange} labelledBy={`${id}-t`} describedBy={`${id}-n`} />
+    </p>
+  )
+}
+
 /* ---- where Althar shows in another app ------------------------------------------- */
 
 export interface EdgeSceneProps {

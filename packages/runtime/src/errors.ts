@@ -193,8 +193,10 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'failed', 'moved', 'never']),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
-  /** What the remote said, for one it refused: its one line. */
+  /** What the remote said, for one it refused: its one line, or paths held back for `protected`. */
   said: Schema.optional(Schema.String),
+  /** For `protected`, the project's Repository files switches that are off and would let them go. */
+  needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
   /** The code host the remote is on, by name, where Althar knows it: GitLab. */
   host: Schema.optional(Schema.String),
   /** All git said, for a quiet Details: never the sentence itself. */
@@ -288,3 +290,6 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   tool: Schema.String,
   message: Schema.String,
 }) {}
+
+/** A skills store operation that couldn't be done, in words for the person, is `@althar/skills`' own `SkillRefused`. */
+export { SkillRefused } from '@althar/skills'
