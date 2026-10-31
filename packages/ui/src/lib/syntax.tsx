@@ -1,5 +1,5 @@
-import type { HighlighterCore, ThemeRegistration } from 'shiki/core'
-import { type ReactNode, useEffect, useState } from 'react'
+import type { GrammarState, HighlighterCore, ThemedToken, ThemeRegistration } from 'shiki/core'
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from 'react'
 
 /*
  * A file's colours, by Shiki: the grammars editors use, read with its
@@ -119,7 +119,8 @@ export const isProse = (path: string) => {
   return /\.(md|mdx|markdown|txt|text)$/i.test(name) || (!name.startsWith('.') && !/.\.[^.]+$/.test(name))
 }
 
-const ink = (name: string) => `var(--syn-${name})`
+/** An ink, which a place drawing code on a colour of its own may tint by setting `--code-<name>`: a diff's green and red. */
+const ink = (name: string) => `var(--code-${name}, var(--syn-${name}))`
 
 /** The kit's own theme: TextMate's scopes, each kind in its ink. */
 const THEME: ThemeRegistration = {
@@ -213,59 +214,136 @@ const highlighter = () => {
 /** Past this, a file shows plain: colouring it would hold the window up for little. */
 const MOST_COLOURED = { lines: 20_000, bytes: 1024 * 1024 }
 
-/** What was coloured last, by its language and text: a peek and the panel show the same file. */
-const coloured = new Map<string, ReadonlyArray<ReactNode>>()
+/** A stretch of a line in one ink: its text, and its colour and weight where it has one. */
+export interface Token {
+  readonly content: string
+  readonly style?: CSSProperties
+}
+
+/** A text's lines, each as its tokens. */
+export type TokenLines = ReadonlyArray<ReadonlyArray<Token>>
+
+/** What was coloured last, by its language and text: a peek and the panel show the same file, a diff its two sides. */
+const coloured = new Map<string, TokenLines>()
 const KEPT = 12
 
 const FONT_ITALIC = 1
 const FONT_BOLD = 2
 
-/** A text's lines as spans in their inks, by its language: one array of nodes per line. */
-const colour = async (text: string, lang: string): Promise<ReadonlyArray<ReactNode>> => {
-  const key = `${lang}\u0000${text}`
-  const kept = coloured.get(key)
-  if (kept !== undefined) return kept
+const tokenOf = (token: ThemedToken): Token => {
+  const style = {
+    ...(token.color === undefined || token.color === 'var(--t-1)' ? {} : { color: token.color }),
+    ...((token.fontStyle ?? 0) & FONT_ITALIC ? { fontStyle: 'italic' } : {}),
+    ...((token.fontStyle ?? 0) & FONT_BOLD ? { fontWeight: 650 } : {}),
+  }
+  return Object.keys(style).length === 0 ? { content: token.content } : { content: token.content, style }
+}
+
+/**
+ * How many lines are coloured at a time, and how long colouring holds the
+ * window before it lets it draw and answer: a long file, or both sides of a
+ * long diff, takes seconds to colour, and the window scrolls meanwhile.
+ */
+const SLICE = { lines: 25, ms: 12 }
+
+const pause = () => new Promise<void>((done) => setTimeout(done, 0))
+
+/** A text being coloured: those waiting for it, and whether they all stopped, so it stops too. */
+interface Job {
+  done: Promise<TokenLines>
+  waiting: number
+  dropped: boolean
+}
+const colouring = new Map<string, Job>()
+
+/** A text's lines as tokens in their inks, by its language, a slice at a time, each slice taking up where the last one left the grammar. */
+const tokenize = async (key: string, text: string, lang: string, job: Job): Promise<TokenLines> => {
   const shown = await highlighter()
   const grammar = GRAMMARS[lang]
   if (grammar === undefined) throw new Error(`No grammar for ${lang}`)
   if (!shown.getLoadedLanguages().includes(lang)) await shown.loadLanguage((await grammar()) as never)
-  const lines = shown.codeToTokensBase(text, { lang, theme: 'althar', tokenizeMaxLineLength: 2000 })
-  const nodes = lines.map((tokens) =>
-    tokens.map((token, i) => {
-      const style = {
-        ...(token.color === undefined || token.color === 'var(--t-1)' ? {} : { color: token.color }),
-        ...((token.fontStyle ?? 0) & FONT_ITALIC ? { fontStyle: 'italic' } : {}),
-        ...((token.fontStyle ?? 0) & FONT_BOLD ? { fontWeight: 650 } : {}),
-      }
-      return Object.keys(style).length === 0 ? (
-        token.content
-      ) : (
-        <span key={i} style={style}>
-          {token.content}
-        </span>
-      )
-    }),
-  )
-  coloured.set(key, nodes)
+  const rows = text.split('\n')
+  const tokens: Token[][] = []
+  let state: GrammarState | undefined
+  let since = performance.now()
+  for (let at = 0; at < rows.length; at += SLICE.lines) {
+    if (job.dropped) throw new Error('No one is waiting for it')
+    const slice = shown.codeToTokens(rows.slice(at, at + SLICE.lines).join('\n'), {
+      lang,
+      theme: 'althar',
+      tokenizeMaxLineLength: 2000,
+      ...(state === undefined ? {} : { grammarState: state }),
+    })
+    state = slice.grammarState
+    for (const line of slice.tokens) tokens.push(line.map(tokenOf))
+    if (performance.now() - since > SLICE.ms) {
+      await pause()
+      since = performance.now()
+    }
+  }
+  coloured.set(key, tokens)
   if (coloured.size > KEPT) coloured.delete(coloured.keys().next().value ?? '')
-  return nodes
+  return tokens
 }
 
+/** A text's tokens, coloured once however many show it at a time; dropped by all of them, it stops. */
+const colour = (text: string, lang: string): { readonly done: Promise<TokenLines>; readonly drop: () => void } => {
+  const key = `${lang}\u0000${text}`
+  const kept = coloured.get(key)
+  if (kept !== undefined) return { done: Promise.resolve(kept), drop: () => undefined }
+  let job = colouring.get(key)
+  if (job === undefined) {
+    const made: Job = { done: Promise.resolve([]), waiting: 0, dropped: false }
+    made.done = tokenize(key, text, lang, made).finally(() => {
+      if (colouring.get(key) === made) colouring.delete(key)
+    })
+    colouring.set(key, made)
+    job = made
+  }
+  const mine = job
+  mine.waiting += 1
+  let gone = false
+  return {
+    done: mine.done,
+    drop: () => {
+      if (gone) return
+      gone = true
+      mine.waiting -= 1
+      if (mine.waiting > 0) return
+      mine.dropped = true
+      if (colouring.get(key) === mine) colouring.delete(key)
+    },
+  }
+}
+
+/** Tokens as nodes: plain text where a token has no ink, a span in its ink where it has. */
+export const inked = (tokens: ReadonlyArray<Token>, key = ''): ReactNode[] =>
+  tokens.map((token, i) =>
+    token.style === undefined ? (
+      token.content
+    ) : (
+      <span key={`${key}${i}`} style={token.style}>
+        {token.content}
+      </span>
+    ),
+  )
+
 /**
- * A file's lines in their colours: null while they are coloured, and for a
+ * A file's lines as their tokens: null while they are coloured, and for a
  * language not coloured or a file too long to colour, which shows plain.
  */
-export function useColoured(text: string | null, path: string): ReadonlyArray<ReactNode> | null {
+export function useTokens(text: string | null, path: string): TokenLines | null {
   const lang = languageOf(path)
   const key = text === null || lang === null ? null : `${lang}\u0000${text}`
-  const [shown, setShown] = useState<{ readonly key: string; readonly lines: ReadonlyArray<ReactNode> } | null>(() =>
+  const [shown, setShown] = useState<{ readonly key: string; readonly lines: TokenLines } | null>(() =>
     key === null ? null : { key, lines: coloured.get(key) ?? [] },
   )
   useEffect(() => {
     if (text === null || lang === null || key === null) return
     if (text.length > MOST_COLOURED.bytes || text.split('\n', MOST_COLOURED.lines + 1).length > MOST_COLOURED.lines) return
     let on = true
-    colour(text, lang).then(
+    const job = colour(text, lang)
+    job.done.then(
       (lines) => {
         if (on) setShown({ key, lines })
       },
@@ -274,7 +352,17 @@ export function useColoured(text: string | null, path: string): ReadonlyArray<Re
     )
     return () => {
       on = false
+      job.drop()
     }
   }, [key, text, lang])
   return shown !== null && shown.key === key && shown.lines.length > 0 ? shown.lines : null
+}
+
+/**
+ * A file's lines in their colours: null while they are coloured, and for a
+ * language not coloured or a file too long to colour, which shows plain.
+ */
+export function useColoured(text: string | null, path: string): ReadonlyArray<ReactNode> | null {
+  const tokens = useTokens(text, path)
+  return useMemo(() => (tokens === null ? null : tokens.map((line) => inked(line))), [tokens])
 }
