@@ -459,6 +459,8 @@ describe('the API', () => {
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
+              PlaceRepository: () => Effect.die('unused'),
+              MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
@@ -518,6 +520,8 @@ describe('the API', () => {
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
               SetPostTeamReviews: () => Effect.die('unused'),
+              SetReviewSeal: () => Effect.die('unused'),
+              SetReviewSealStyle: () => Effect.die('unused'),
               GetAutomations: () => Effect.die('unused'),
               GetAutomation: () => Effect.die('unused'),
               MakeAutomation: () => Effect.die('unused'),

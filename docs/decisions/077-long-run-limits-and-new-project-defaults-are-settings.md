@@ -1,4 +1,4 @@
-# ADR-076: Long-run limits and new-project defaults are settings
+# ADR-077: Long-run limits and new-project defaults are settings
 
 - **Status:** Accepted
 - **Date:** 2026-10-31

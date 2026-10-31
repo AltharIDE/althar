@@ -615,6 +615,44 @@ describe('the Settings tab', () => {
     expect(credit.getAttribute('aria-checked')).toBe('true')
   })
 
+  it('puts the review seal on pull requests until the person turns it off, with its look to pick while it is on', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings at="reviews" />, client)
+    const seal = await screen.findByRole('switch', { name: 'Review seal on pull requests' })
+    expect(seal.getAttribute('aria-checked')).toBe('true')
+    // A pull request as GitHub shows it: the ring in its corner, the review folded under it; never how many findings.
+    const pr = screen.getByRole('figure', { name: 'A pull request as GitHub shows it' })
+    expect(within(pr).getByRole('img', { name: 'Reviewed by GPT-6.1 Sol in 2 passes, at 4e1c07a' })).toBeTruthy()
+    expect(pr.textContent).not.toMatch(/finding/i)
+    expect(screen.getByRole('radio', { name: 'Ring' }).getAttribute('aria-checked')).toBe('true')
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Colophon' }))
+    expect(client.setReviewSealStyle).toHaveBeenCalledWith('colophon')
+    expect(screen.getByRole('radio', { name: 'Colophon' }).getAttribute('aria-checked')).toBe('true')
+
+    // Off: no seal and no looks, and what goes out instead.
+    await userEvent.click(seal)
+    expect(client.setReviewSeal).toHaveBeenCalledWith(false)
+    expect(within(screen.getByRole('figure', { name: 'A pull request as GitHub shows it' })).queryByRole('img')).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'Colophon' })).toBeNull()
+    expect(screen.getByText('Pull requests go out with only their description.')).toBeTruthy()
+
+    // On again, as it was picked.
+    await userEvent.click(seal)
+    expect(client.setReviewSeal).toHaveBeenLastCalledWith(true)
+    expect(screen.getByRole('radio', { name: 'Colophon' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('turns the review seal back when the change can’t be kept, and says so', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.setReviewSeal).mockRejectedValue(new Error('disk full'))
+    withServices(<Settings at="reviews" />, client)
+    const seal = await screen.findByRole('switch', { name: 'Review seal on pull requests' })
+    await userEvent.click(seal)
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(seal.getAttribute('aria-checked')).toBe('true'))
+  })
+
   it('turns each kind of notification on and off, with the count and a sound heard as it is chosen', async () => {
     const host = fakeHost()
     withServices(<Settings at="notifications" />, fakeClient().client, host)

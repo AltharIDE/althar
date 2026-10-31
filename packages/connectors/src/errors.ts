@@ -17,6 +17,8 @@ export class ConnectorFailed extends Schema.TaggedError<ConnectorFailed>()('Conn
   product: Schema.String,
   reason: Schema.Literals(['unauthorized', 'forbidden', 'not_found', 'rate_limited', 'unreachable', 'rejected', 'invalid_response']),
   message: Schema.String,
+  /** A bounded response exceeded this byte limit; retrying cannot help. */
+  sizeLimit: Schema.optional(Schema.Number),
   /** The HTTP status, when there was one. */
   status: Schema.optional(Schema.Number),
   /** When a rate-limited call may be tried again. */

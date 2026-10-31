@@ -326,12 +326,18 @@ export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaul
 /** What a project's rules are made with when the person has chosen nothing. */
 export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
 
+/** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
+export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
+export type SealStyle = typeof SealStyle.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   longRuns: LongRuns,
   newProjects: NewProjectDefaults,
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+  /** A pull request Althar opens says how its change was reviewed, on unless turned off: a seal in its corner, in `style`, and what the review changed and kept. */
+  reviewSeal: Schema.Struct({ on: Schema.Boolean, style: SealStyle }),
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
@@ -403,7 +409,20 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 
 /** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
-export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
+export const ProjectInk = Schema.Literals([
+  'clay',
+  'ochre',
+  'sand',
+  'olive',
+  'moss',
+  'teal',
+  'slate',
+  'indigo',
+  'plum',
+  'rose',
+  'brick',
+  'umber',
+])
 export type ProjectInk = typeof ProjectInk.Type
 
 export const ProjectSummary = Schema.Struct({
@@ -531,6 +550,21 @@ export const FoundRepository = Schema.Struct({
   remote: Schema.NullOr(Schema.String),
 })
 export type FoundRepository = typeof FoundRepository.Type
+
+/** A repository not made yet, in a folder the person chose: its folder's name, and its path on this computer. */
+export const PlacedRepository = Schema.Struct({
+  /** Its folder's name, from the project's: northwind-ops. */
+  name: Schema.String,
+  path: Schema.String,
+})
+export type PlacedRepository = typeof PlacedRepository.Type
+
+/** A repository just made: its root, and the grant a project is opened with it by. */
+export const MadeRepository = Schema.Struct({
+  grant: Schema.String,
+  path: Schema.String,
+})
+export type MadeRepository = typeof MadeRepository.Type
 
 /**
  * What opening a folder would make, read before anything is: a repository, a
@@ -2977,6 +3011,18 @@ export const Api = RpcGroup.make(
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
   /**
+   * Where a new repository named after `name` would go, in the folder the
+   * person chose by `grant`, read without making anything: refused where a
+   * folder of its name has something in it already.
+   */
+  call('PlaceRepository', { grant: Schema.String, name: Schema.String }, PlacedRepository),
+  /**
+   * Makes that repository: its folder, `git init` on main, and a first
+   * commit with nothing in it, so a task has a commit to branch from. Its
+   * grant comes back, for OpenProject.
+   */
+  call('MakeRepository', { grant: Schema.String, name: Schema.String }, MadeRepository),
+  /**
    * Opens the folder the person chose, by the grant the app gave for it: the
    * window never names a path. A folder holding several repositories opens
    * with `repositories`, the ones the person kept, each by the grant of the
@@ -3237,6 +3283,10 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
+  command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
+  /** How the review seal looks. */
+  command('SetReviewSealStyle', { style: SealStyle }, Schema.Void),
   /** A project's automations, for its Automations tab. */
   call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
   /** One automation, for its own page: its definition, its limits and its runs. */

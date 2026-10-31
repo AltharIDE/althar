@@ -178,6 +178,66 @@ describe('schema', () => {
     ),
   )
 
+  it.effect('keeps every project, its ink and what points at it when the inks grow from eight to twelve, and saves a new ink', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0050_more_inks')
+        const actor = `act_${'0'.repeat(32)}`
+        const id = (n: number) => `proj_${String(n).padStart(32, '0')}`
+        const old = ['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber']
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.unsafe(
+            `INSERT INTO actors (id, kind, display_name, created_at) VALUES ('${actor}', 'person', 'You', '2026-09-28T20:34:23.123Z')`,
+          )
+          for (const [n, ink] of old.entries())
+            yield* sql.unsafe(
+              `INSERT INTO projects (id, name, slug, created_by_actor_id, created_at, archived_at, revision, ink) VALUES ('${id(n)}', 'P${n}', 'p${n}', '${actor}', '2026-09-28T20:34:2${n}.000Z', ${n === 3 ? "'2026-09-29T00:00:00.000Z'" : 'NULL'}, ${n + 1}, '${ink}')`,
+            )
+          yield* sql.unsafe(
+            `INSERT INTO project_settings (project_id, setup_command, updated_at) VALUES ('${id(7)}', 'make', '2026-09-28T20:34:23.123Z')`,
+          )
+          // Before the migration a new ink is refused.
+          const refused = yield* sql.unsafe(`UPDATE projects SET ink = 'plum' WHERE id = '${id(0)}'`).pipe(Effect.flip)
+          assert.strictEqual(refused._tag, 'SqlError')
+        })
+        yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const after = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            ink: string
+            slug: string
+            archivedAt: string | null
+            revision: number
+          }>`SELECT id, ink, slug, archived_at, revision FROM projects ORDER BY id`
+          assert.deepStrictEqual(
+            rows.map((row) => [row.id, row.ink, row.slug, row.archivedAt, row.revision]),
+            old.map((ink, n) => [id(n), ink, `p${n}`, n === 3 ? '2026-09-29T00:00:00.000Z' : null, n + 1]),
+          )
+          const settings = yield* sql<{ projectId: string }>`SELECT project_id FROM project_settings`
+          assert.deepStrictEqual(
+            settings.map((row) => row.projectId),
+            [id(7)],
+          )
+          // Every ink the kit offers is saved; one it doesn't is still refused.
+          for (const [n, ink] of ['sand', 'indigo', 'plum', 'brick'].entries())
+            yield* sql.unsafe(`UPDATE projects SET ink = '${ink}' WHERE id = '${id(n)}'`)
+          const saved = yield* sql<{ ink: string }>`SELECT ink FROM projects ORDER BY id LIMIT 4`
+          assert.deepStrictEqual(
+            saved.map((row) => row.ink),
+            ['sand', 'indigo', 'plum', 'brick'],
+          )
+          const refused = yield* sql.unsafe(`UPDATE projects SET ink = 'mauve' WHERE id = '${id(0)}'`).pipe(Effect.flip)
+          assert.strictEqual(refused._tag, 'SqlError')
+          const violations = yield* sql`SELECT * FROM pragma_foreign_key_check`
+          assert.deepStrictEqual(violations, [])
+        })
+        yield* Effect.provide(after, Layer.fresh(Database.layer({ filename })))
+      }),
+    ),
+  )
+
   it.effect('marks the worktrees of tasks that had a lead as set up already, leaving the rest to be set up', () =>
     withFile((filename) =>
       Effect.gen(function* () {

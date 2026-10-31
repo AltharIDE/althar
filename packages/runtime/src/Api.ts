@@ -35,6 +35,7 @@ import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { longRunsOf, newProjectDefaultsOf, setLongRuns, setNewProjectDefaults } from './longRuns'
+import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -87,6 +88,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
@@ -551,6 +553,14 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      MakeRepository: ({ grant, name }) =>
+        api(
+          Effect.gen(function* () {
+            const made = yield* makeRepository(yield* folders.path(grant), name)
+            return { grant: yield* folders.allow(made.path), path: made.path }
+          }),
+        ),
       OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
@@ -830,6 +840,7 @@ export const handlers = Api.toLayer(
               longRuns: yield* longRunsOf,
               newProjects: yield* newProjectDefaultsOf,
               coAuthor: { on, line: coAuthorLine },
+              reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
@@ -842,6 +853,9 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSealStyle: ({ commandId, style }) =>
+        once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       SetLongRuns: ({ commandId, ...change }) =>
