@@ -494,15 +494,23 @@ describe('the CPU an agent uses', () => {
       const runner = start('while kill -0 $PPID 2>/dev/null; do sleep 0.05; done')
       try {
         const pids = [idle, busy, runner].map((child) => child.pid ?? 0)
-        yield* Effect.sleep('300 millis')
-        const first = yield* treeMembers(pids)
-        yield* Effect.sleep('1500 millis')
-        const second = yield* treeMembers(pids)
-        const worked = pids.map((pid) => {
-          const was = first.get(pid)
-          const now = second.get(pid)
-          return was != null && now != null && workedBetween(was, now, 1_500, 0.05)
-        })
+        let before = yield* treeMembers(pids)
+        let beforeAt = Date.now()
+        const worked = pids.map(() => false)
+        // Keep sampling at an interval that isn't a multiple of the worker's 50 ms sleep. Two reads 1.5 seconds apart
+        // can land on the same phase of its loop and miss every short-lived worker when the machine is busy.
+        for (let sample = 0; sample < 10; sample++) {
+          yield* Effect.sleep('137 millis')
+          const after = yield* treeMembers(pids)
+          const afterAt = Date.now()
+          pids.forEach((pid, index) => {
+            const was = before.get(pid)
+            const now = after.get(pid)
+            if (was != null && now != null && workedBetween(was, now, afterAt - beforeAt, 0.05)) worked[index] = true
+          })
+          before = after
+          beforeAt = afterAt
+        }
         assert.deepStrictEqual(worked, [false, true, true])
       } finally {
         for (const child of [idle, busy, runner]) child.kill('SIGKILL')

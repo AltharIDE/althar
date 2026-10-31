@@ -1201,6 +1201,7 @@ describe('the agents', () => {
     writeFileSync(join(home, '.gitconfig'), '[credential]\n\thelper = "!f() { echo username=dana; echo password=leaked; }; f"\n')
     const fill = (env: Readonly<Record<string, string>>) =>
       spawnSync('git', ['credential', 'fill'], {
+        cwd: home,
         input: 'protocol=https\nhost=github.com\n\n',
         env: { PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', ...env },
       }).stdout.toString()

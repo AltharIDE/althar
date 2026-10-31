@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, parse, relative, resolve } from 'node:path'
+import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
@@ -40,6 +40,18 @@ const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'alt
  * which a path in reads as thrown away.
  */
 const furnished = join(import.meta.dirname, 'fixtures', 'home')
+
+/** Ignore a .git folder above a temporary test fixture: some developers' /tmp itself is a checkout. */
+const realPathInFixture = (root: string) => {
+  const fixture = realpathSync(root)
+  return (path: string) => {
+    const resolved = realpathSync(path)
+    const fromFixture = relative(fixture, resolved)
+    if (parse(path).base === '.git' && (fromFixture === '..' || fromFixture.startsWith(`..${sep}`) || isAbsolute(fromFixture)))
+      throw new Error('A .git folder above the temporary test fixture is not part of it.')
+    return resolved
+  }
+}
 
 const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
   sessionId: 's',
@@ -2044,7 +2056,7 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
     mkdirSync(join(root, 'notes'))
     writeFileSync(join(app, 'main.ts'), 'work\n')
     writeFileSync(join(root, 'notes', 'list.txt'), 'notes\n')
-    const here = rules(allow, { scratch: [] })
+    const here = rules(allow, { scratch: [], realPath: realPathInFixture(root) })
     const main = join(app, 'main.ts')
     for (const command of [`cp empty.ts ${main}`, `echo > ${main}`, `sed -i s/a/b/ ${main}`, `tee ${main} < x`, `truncate -s 0 ${main}`])
       assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
@@ -2456,7 +2468,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     writeFileSync(join(root, 'notes.md'), 'mine')
     mkdirSync(join(root, '.evidence'))
     for (const name of ['1-log.txt', '7-log.txt']) writeFileSync(join(root, '.evidence', name), 'mine')
-    const here = rules(allow, { worktree: tree, scratch: [] })
+    const here = rules(allow, { worktree: tree, scratch: [], realPath: realPathInFixture(root) })
     // The shell kept `packages/ui` from the command before: read from the worktree's top, these name nothing that is there.
     for (const command of [
       'cd ../.. && rm -f sb.log',
@@ -2521,7 +2533,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     const tree = join(root, 'tree')
     mkdirSync(tree)
     writeFileSync(join(root, 'kept.log'), 'mine')
-    const here = rules(allow, { worktree: tree, scratch: [] })
+    const here = rules(allow, { worktree: tree, scratch: [], realPath: realPathInFixture(root) })
     for (const command of [`rm -f ${join(root, 'gone.log')}`, `git -C ${root} checkout HEAD -- src`])
       assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
     mkdirSync(join(root, '.git'))
