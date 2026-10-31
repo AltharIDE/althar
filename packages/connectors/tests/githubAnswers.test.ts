@@ -289,19 +289,97 @@ describe('GitHub answers that leave things out', () => {
         ],
       ])
       const asked = () => sent.filter((request) => request.method === 'POST').length
-      // Learned once, for main: no queue, so the read says nothing of one.
-      assert.notProperty(yield* host.change(repository, 12, { queue: true }), 'queued')
+      // Learned once, for main: no queue, so it is in none.
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: false, leftQueue: null })
       assert.strictEqual(asked(), 1)
       // Every pull request to main after, for the while it's kept, costs nothing more.
       yield* host.change(repository, 12, { queue: true })
       yield* host.change(repository, 13, { queue: true })
       yield* TestClock.adjust(Duration.millis(NO_QUEUE_KEPT_MS - 1))
-      yield* host.change(repository, 12, { queue: true })
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: false, leftQueue: null })
       assert.strictEqual(asked(), 1)
       // Past it, it is asked again, in case the queue was turned on since.
       yield* TestClock.adjust(Duration.millis(1))
       yield* host.change(repository, 12, { queue: true })
       assert.strictEqual(asked(), 2)
+    }),
+  )
+
+  it.effect('asks again on the next read where GitHub failed to say, keeping no answer it didn’t give', () =>
+    Effect.gen(function* () {
+      let calls = 0
+      const { host, sent } = github([
+        ['GET', /\/pulls\/12$/, { json: pull() }],
+        [
+          'POST',
+          `${API}/graphql`,
+          () =>
+            ++calls === 1
+              ? { status: 502, json: { message: 'Server Error' } }
+              : {
+                  json: {
+                    data: {
+                      repository: { pullRequest: { isMergeQueueEnabled: true, isInMergeQueue: true, timelineItems: { nodes: [] } } },
+                    },
+                  },
+                },
+        ],
+      ])
+      const asked = () => sent.filter((request) => request.method === 'POST').length
+      // A 502 leaves it unknown: the read stands, saying nothing of a queue.
+      assert.notProperty(yield* host.change(repository, 12, { queue: true }), 'queued')
+      // The next read asks again at once, and hears it is queued.
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: true })
+      assert.strictEqual(asked(), 2)
+    }),
+  )
+
+  it.effect('stops asking a while where GitHub refuses the question, as a GitHub Enterprise without merge queues does', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', /\/pulls\/12$/, { json: pull() }],
+        [
+          'POST',
+          `${API}/graphql`,
+          {
+            json: {
+              errors: [
+                { message: "Field 'isMergeQueueEnabled' doesn't exist on type 'PullRequest'", extensions: { code: 'undefinedField' } },
+              ],
+            },
+          },
+        ],
+      ])
+      const asked = () => sent.filter((request) => request.method === 'POST').length
+      assert.notProperty(yield* host.change(repository, 12, { queue: true }), 'queued')
+      yield* host.change(repository, 12, { queue: true })
+      assert.strictEqual(asked(), 1)
+    }),
+  )
+
+  it.effect('reads a queued pull request whose branch has no queue now as out of it', () =>
+    Effect.gen(function* () {
+      let enabled = true
+      const { host } = github([
+        ['GET', /\/pulls\/12$/, { json: pull() }],
+        [
+          'POST',
+          `${API}/graphql`,
+          () => ({
+            json: {
+              data: {
+                repository: { pullRequest: { isMergeQueueEnabled: enabled, isInMergeQueue: enabled, timelineItems: { nodes: [] } } },
+              },
+            },
+          }),
+        ],
+      ])
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: true })
+      // Its queue turned off, or it retargeted to a branch without one: GitHub says so, and it is out.
+      enabled = false
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: false, leftQueue: null })
+      // And stays out while that is kept, without asking.
+      assert.deepInclude(yield* host.change(repository, 12, { queue: true }), { queued: false, leftQueue: null })
     }),
   )
 })

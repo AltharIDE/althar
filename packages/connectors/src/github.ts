@@ -705,22 +705,28 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const change = changeOf(yield* http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`))
         if (ask?.queue !== true || change.state !== 'open') return change
+        // Its branch known to have no queue, it is in none: out of one it was in, retargeted, or since the queue was turned off.
+        const outside: ChangeRequest = { ...change, queued: false, leftQueue: null }
         // Asked only where its branch has a queue, or may: one found without, a while ago, isn't asked again until it's due.
         const known = queues.get(queueKey(repository, change.target))
-        if (known !== undefined && !known.enabled && (yield* Clock.currentTimeMillis) - known.at < NO_QUEUE_KEPT_MS) return change
+        if (known !== undefined && !known.enabled && (yield* Clock.currentTimeMillis) - known.at < NO_QUEUE_KEPT_MS) return outside
         const queue = yield* queueOf(repository, number, change.target).pipe(
-          // Where GitHub won't say on a branch not known to have a queue, as a GitHub Enterprise without queues may not, it
-          // isn't asked again for a while, and the read stands without: listening isn't stopped by a question it didn't need.
           Effect.catch((error) =>
             known?.enabled === true
               ? Effect.fail(error)
-              : Effect.map(Clock.currentTimeMillis, (at) => {
-                  queues.set(queueKey(repository, change.target), { at, enabled: false })
-                  return null
-                }),
+              : // Where GitHub refuses the question itself, as a GitHub Enterprise without queues does, it isn't asked again for a
+                // while. Failing otherwise (unreachable, rate limited), the next turn asks again. Either way the read stands
+                // without, saying nothing of a queue: listening isn't stopped by a question it didn't need.
+                error.reason === 'rejected' || error.reason === 'forbidden'
+                ? Effect.map(Clock.currentTimeMillis, (at) => {
+                    queues.set(queueKey(repository, change.target), { at, enabled: false })
+                    return null
+                  })
+                : Effect.succeed(null),
           ),
         )
-        if (queue === null || !queue.isMergeQueueEnabled) return change
+        if (queue === null) return change
+        if (!queue.isMergeQueueEnabled) return outside
         return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
       }),
     listChanges: (repository, query) =>

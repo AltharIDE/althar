@@ -193,7 +193,7 @@ describe('GitHub as a code host', () => {
       yield* unfound.host.change(repository, 12, { queue: true })
       found = false
       assert.strictEqual((yield* Effect.flip(unfound.host.change(repository, 12, { queue: true }))).reason, 'not_found')
-      // On a branch not known to have one, where GitHub won't say, the read stands without, and isn't asked again soon.
+      // On a branch not known to have one, where GitHub fails to say, the read stands without, and the next read asks again.
       const unsaid = github([
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
         ['POST', `${API}/graphql`, { status: 502, json: {} }],
@@ -202,7 +202,7 @@ describe('GitHub as a code host', () => {
       assert.notProperty(yield* unsaid.host.change(repository, 12, { queue: true }), 'queued')
       assert.lengthOf(
         unsaid.sent.filter((request) => request.method === 'POST'),
-        1,
+        2,
       )
       // Merged, there is no queue to ask about.
       const merged = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-28T12:00:00Z' }) }]])
