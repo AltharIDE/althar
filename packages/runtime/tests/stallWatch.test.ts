@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@althar/provider-adapters'
+import { until } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
 
 import type { LiveEvent } from '../src/Live'
@@ -499,18 +500,22 @@ describe('the CPU an agent uses', () => {
         const worked = pids.map(() => false)
         // Keep sampling at an interval that isn't a multiple of the worker's 50 ms sleep. Two reads 1.5 seconds apart
         // can land on the same phase of its loop and miss every short-lived worker when the machine is busy.
-        for (let sample = 0; sample < 10; sample++) {
-          yield* Effect.sleep('137 millis')
-          const after = yield* treeMembers(pids)
-          const afterAt = Date.now()
-          pids.forEach((pid, index) => {
-            const was = before.get(pid)
-            const now = after.get(pid)
-            if (was != null && now != null && workedBetween(was, now, afterAt - beforeAt, 0.05)) worked[index] = true
-          })
-          before = after
-          beforeAt = afterAt
-        }
+        yield* until(
+          Effect.gen(function* () {
+            yield* Effect.sleep('137 millis')
+            const after = yield* treeMembers(pids)
+            const afterAt = Date.now()
+            pids.forEach((pid, index) => {
+              const was = before.get(pid)
+              const now = after.get(pid)
+              if (was != null && now != null && workedBetween(was, now, afterAt - beforeAt, 0.05)) worked[index] = true
+            })
+            before = after
+            beforeAt = afterAt
+            return worked
+          }),
+          (seen) => seen[1] === true && seen[2] === true,
+        )
         assert.deepStrictEqual(worked, [false, true, true])
       } finally {
         for (const child of [idle, busy, runner]) child.kill('SIGKILL')

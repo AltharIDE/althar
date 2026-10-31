@@ -242,16 +242,18 @@ export const words = (
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
         if (why === 'protected') {
-          const held = text(error, 'said')
-          const many = held.includes(',')
           const needs = fieldOf(error, 'needs')
-          const named = (Array.isArray(needs) ? needs : [])
-            .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
-            .filter((name) => name !== undefined)
-            .map((name) => `“${name}”`)
-          const turnOn =
-            named.length === 0 ? 'what it needs' : named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
-          return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
+          if (Array.isArray(needs)) {
+            const held = text(error, 'said')
+            const many = held.includes(',')
+            const named = needs
+              .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
+              .filter((name) => name !== undefined)
+              .map((name) => `“${name}”`)
+            const turnOn =
+              named.length === 0 ? 'what it needs' : named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+            return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
+          }
         }
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
