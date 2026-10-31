@@ -190,7 +190,7 @@ export const backToWork = async (page: Page) => {
     .click()
 }
 
-/** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-071); then back to the conversation. */
+/** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
 export const pushByHand = async (page: Page) => {
   await projectSettings(page, 'General')
   const pushes = page.getByRole('switch', { name: 'Push the lead’s commits automatically' })

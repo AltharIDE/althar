@@ -48,7 +48,7 @@ export const ask = (working: string, body: string, rules?: RulesChange) =>
     return project.projectId
   })
 
-/** Rules where every push is the person's, as before a lead's commits went up on their own (ADR-071). */
+/** Rules where every push is the person's, as before a lead's commits went up on their own (ADR-072). */
 export const pushByHand: RulesChange = { pushCommits: false }
 
 export const cards = (projectId: string) =>

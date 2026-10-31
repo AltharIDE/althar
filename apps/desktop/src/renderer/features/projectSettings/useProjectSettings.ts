@@ -44,7 +44,7 @@ export interface ProjectSettingsModel {
   readonly noteFailed: string | null
   /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
-  /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-071). */
+  /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
   readonly setPushCommits: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void

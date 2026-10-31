@@ -63,7 +63,7 @@ export const Unpushed: Story = {
   },
 }
 
-/** The lead's later commits go up on their own (ADR-071): nothing to press, and nothing accepted until they're on it. */
+/** The lead's later commits go up on their own (ADR-072): nothing to press, and nothing accepted until they're on it. */
 export const Going: Story = {
   args: { going: 1 },
   play: async ({ canvasElement }) => {

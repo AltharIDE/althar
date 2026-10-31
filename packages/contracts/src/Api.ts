@@ -553,6 +553,46 @@ export const SandboxReachView = Schema.Struct({
 })
 export type SandboxReachView = typeof SandboxReachView.Type
 
+/**
+ * What an ask or a refusal is counted as (ADR-071): one of the project's
+ * kinds, what the rules can't read (`unclear`), a command the project named,
+ * credentials and keys, the code host, what a role that only reads may not
+ * do, and the rest.
+ */
+export const TallyKind = Schema.Literals([
+  'default-branch',
+  'force-push',
+  'many-branches',
+  'delete-branch',
+  'deploy',
+  'outside',
+  'unclear',
+  'command',
+  'credentials',
+  'code-host',
+  'reader',
+  'other',
+])
+export type TallyKind = typeof TallyKind.Type
+
+/**
+ * How one kind went over the last 14 days, for leads and the coordinator:
+ * how often it asked the person and how often they allowed it, how often it
+ * was refused, and how often the agent carried on in the same turn after
+ * one it wasn't allowed (`workedAround`), which says it found another way.
+ */
+export const KindTally = Schema.Struct({
+  kind: TallyKind,
+  asked: Schema.Number,
+  allowed: Schema.Number,
+  refused: Schema.Number,
+  workedAround: Schema.Number,
+})
+export type KindTally = typeof KindTally.Type
+
+/** How far back a project's tally of asks and refusals goes. */
+export const TALLY_DAYS = 14
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -574,7 +614,7 @@ export const ProjectRulesView = Schema.Struct({
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
   resolveConflicts: Schema.Boolean,
-  /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-071). */
+  /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-072). */
   pushCommits: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
@@ -590,6 +630,8 @@ export const ProjectRulesView = Schema.Struct({
   conventions: Schema.Array(RepositoryConventions),
   /** What its leads' sandboxes let through from the start. */
   sandbox: SandboxReachView,
+  /** Each kind that asked or was refused in the last `TALLY_DAYS` days, the most first (ADR-071). */
+  tally: Schema.Array(KindTally),
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 
@@ -901,7 +943,7 @@ export const ChangeSummary = Schema.Struct({
   /** Commits on the task's branch here that aren't on it yet: the person pushes them once they've looked. */
   unpushed: Schema.Number,
   /**
-   * Where its project's rules push the lead's commits on their own (ADR-071):
+   * Where its project's rules push the lead's commits on their own (ADR-072):
    * `held` null while those here go up as its lead's turn ends, so they are
    * nothing for the person to push; else why they wait for the person's push,
    * in a few words. Absent where every push is the person's.

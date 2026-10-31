@@ -270,7 +270,7 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = ready && state === ChangeState.Ready && pushes.length === 0
           const actions: ReactNode[] = [
-            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-071).
+            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
             ...pushes.filter(personPushes).map((one) => (
               <Button
                 key={`push-${one.url}`}

@@ -214,7 +214,7 @@ describe('a task attached to a pull request it didn’t open', () => {
     const { bare, github, pull, working } = forked()
     return Effect.gen(function* () {
       const { projectId, task, personId } = yield* project(working)
-      // Pushes are the person's here, as before a lead's commits went up on their own (ADR-071).
+      // Pushes are the person's here, as before a lead's commits went up on their own (ADR-072).
       yield* (yield* Policies).set(projectId, { pushCommits: false }, personId)
       const changes = yield* Changes
       yield* changes.attach({ taskId: task.taskId, pullRequest: linkTo(pull.number), start: true, actorId: personId })

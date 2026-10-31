@@ -287,7 +287,7 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('leaves a fix to the person, saying why, where someone else pushed what failed (ADR-071)', () => {
+  it.live('leaves a fix to the person, saying why, where someone else pushed what failed (ADR-072)', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({
       pushUrl: () => bare,

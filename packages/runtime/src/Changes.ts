@@ -735,7 +735,7 @@ export class Changes extends Context.Service<
     conflictStanding(taskId: string): Effect.Effect<ConflictStanding | null>
     /**
      * Where the project's rules push its leads' commits on their own
-     * (ADR-071), how each of the task's pull requests stands, by its address:
+     * (ADR-072), how each of the task's pull requests stands, by its address:
      * `held` null while what its lead committed goes up as its turn ends, else
      * why it waits for the person's push. Null where every push is the
      * person's, or the task is settled.
@@ -743,7 +743,7 @@ export class Changes extends Context.Service<
     pushing(taskId: string): Effect.Effect<ReadonlyMap<string, { readonly held: string | null }> | null>
     /**
      * Pushes what each open task's lead committed and left waiting, of one
-     * project, or of all, where their rules push it on its own (ADR-071): as
+     * project, or of all, where their rules push it on its own (ADR-072): as
      * the rules are newly turned so, and at launch, for what a turn that
      * ended meanwhile left. Done apart: this returns before any is pushed.
      */
@@ -1997,7 +1997,7 @@ export class Changes extends Context.Service<
           for (const asked of yield* askedOf(link.taskId, url)) {
             if (!(yield* behindAny(path, yield* asCredited(asked.content.head), pushed))) continue
             yield* settleAsked(asked, 'pushed')
-            // Pushed as the lead's turn ended (ADR-071): it isn't woken to hear it, and reads it on the pull request.
+            // Pushed as the lead's turn ended (ADR-072): it isn't woken to hear it, and reads it on the pull request.
             if (by === 'althar') continue
             told.push(
               asked.content.count === 1
@@ -5006,7 +5006,7 @@ export class Changes extends Context.Service<
           )
         })
 
-      /** Whether the project's rules push a task's lead's commits on their own (ADR-071): an open task's, of a project that says so. */
+      /** Whether the project's rules push a task's lead's commits on their own (ADR-072): an open task's, of a project that says so. */
       const pushesFor = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -5017,7 +5017,7 @@ export class Changes extends Context.Service<
       /**
        * Why what the lead committed waits for the person's push to one of its
        * task's pull requests, though the project's rules push it on its own
-       * (ADR-071), in a few words for its card; null where it can go up. Never
+       * (ADR-072), in a few words for its card; null where it can go up. Never
        * over commits someone else pushed: the pull request's branch anywhere
        * but where Althar last pushed it, they are on it, and the person sees
        * the lead's go on top of them. Never where it would need forcing, nor
@@ -5058,7 +5058,7 @@ export class Changes extends Context.Service<
           return null
         })
 
-      /** Keeps why what the lead committed waits for the person (ADR-071), for its card, until anything next goes up. */
+      /** Keeps why what the lead committed waits for the person (ADR-072), for its card, until anything next goes up. */
       const holdPush = (link: LinkRow, head: string | null, why: string) =>
         Effect.gen(function* () {
           yield* heard(link, 'push_held', `held:${head ?? ''}:${yield* timestamp}`, { head, why })
@@ -5067,7 +5067,7 @@ export class Changes extends Context.Service<
 
       /**
        * Pushes what the lead committed to one of its task's open pull
-       * requests, as the project's rules have it (ADR-071), saying so in the
+       * requests, as the project's rules have it (ADR-072), saying so in the
        * thread; or keeps why it waits for the person. What the branch has
        * here is looked at first, so a pull request with nothing new asks
        * nothing of its host.
@@ -5124,7 +5124,7 @@ export class Changes extends Context.Service<
           yield* holdPush(link, ahead.head, pushFailed(pushed.cause))
         })
 
-      /** Why a push Althar made on its own didn't go through, for the card beside the person's Push (ADR-071). */
+      /** Why a push Althar made on its own didn't go through, for the card beside the person's Push (ADR-072). */
       const pushFailed = (cause: Cause.Cause<unknown>) => {
         const failed = Option.getOrUndefined(Cause.findErrorOption(cause))
         if (failed instanceof ChangedSinceSeen) return 'The branch moved as Althar pushed'
@@ -5138,7 +5138,7 @@ export class Changes extends Context.Service<
 
       /**
        * Pushes what a task's lead committed to each of its open pull
-       * requests, where the project's rules push it on its own (ADR-071),
+       * requests, where the project's rules push it on its own (ADR-072),
        * once its turn has ended: not while it is in one, nor while its plan
        * publishes or a conflict round is under way, which push themselves.
        */
@@ -5190,7 +5190,7 @@ export class Changes extends Context.Service<
           )
         })
 
-      /** What each open task's lead left waiting, of a project or of all, goes up where their rules push it on its own (ADR-071). */
+      /** What each open task's lead left waiting, of a project or of all, goes up where their rules push it on its own (ADR-072). */
       const pushNow = (where: { readonly projectId?: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -5206,7 +5206,7 @@ export class Changes extends Context.Service<
 
       /**
        * How each of a task's pull requests stands for its lead's commits
-       * (ADR-071), read from the record: going up as its turn ends while its
+       * (ADR-072), read from the record: going up as its turn ends while its
        * lead is in one, else held where Althar kept why since anything last
        * went up. Null where the rules leave every push to the person.
        */
@@ -5271,7 +5271,7 @@ export class Changes extends Context.Service<
 
       yield* busy.queue(provide(roundsWaiting))
 
-      // What a lead committed as an earlier launch ended goes up now, where its project's rules push it on its own (ADR-071).
+      // What a lead committed as an earlier launch ended goes up now, where its project's rules push it on its own (ADR-072).
       yield* Effect.forkScoped(provide(pushNow({})))
 
       /*
@@ -6013,7 +6013,7 @@ export class Changes extends Context.Service<
                 }
                 const { link, snapshot, where, ahead, left, path, branch } = chosen
                 const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
-                // Where the project's rules push the lead's commits on their own, they go up now, as at the end of its turn (ADR-071),
+                // Where the project's rules push the lead's commits on their own, they go up now, as at the end of its turn (ADR-072),
                 // unless something holds them for the person: then they are asked, with why.
                 // What holds them is the last word: the fix for failing checks below doesn't go up past it.
                 const pushes = yield* pushesFor(taskId)

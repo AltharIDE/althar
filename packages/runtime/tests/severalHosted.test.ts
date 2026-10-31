@@ -208,7 +208,7 @@ describe('a project of two repositories on one connected host', () => {
   })
 
   it.live(
-    'pushes what the lead commits to each repository’s pull request on its own, leaving alone the one someone else pushed to (ADR-071)',
+    'pushes what the lead commits to each repository’s pull request on its own, leaving alone the one someone else pushed to (ADR-072)',
     () => {
       const { api, web, github } = twoRepositories()
       return Effect.gen(function* () {

@@ -1556,7 +1556,7 @@ export class Queries extends Context.Service<
               container: text(kept, 'container') || null,
             }
           })()
-          // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-071).
+          // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
           const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
           const changes = yield* Effect.forEach(
             links.flatMap((link) => {

@@ -15,7 +15,7 @@ import { kindWords } from './calls'
  * its button. Both say them in the same words, and both do the person's own
  * (push, merge) right there; the lead's (resolve, fix) the card leaves to its
  * task. Where the project's rules push the lead's commits on their own
- * (ADR-071), commits here are the person's to push only where Althar held
+ * (ADR-072), commits here are the person's to push only where Althar held
  * them, and the card says why; the others are on their way, and nothing is
  * accepted until they're on it.
  */
@@ -25,7 +25,7 @@ export type Blocker =
   | { readonly kind: 'parted' }
   /** `held`: why they didn't go up on their own, where the project's rules push them so. */
   | { readonly kind: 'unpushed'; readonly commits: number; readonly held: string | null }
-  /** Going up on their own as the lead's turn ends (ADR-071): not the person's to push, but not on it to accept yet either. */
+  /** Going up on their own as the lead's turn ends (ADR-072): not the person's to push, but not on it to accept yet either. */
   | { readonly kind: 'going'; readonly commits: number }
   | { readonly kind: 'conflict'; readonly target: string | null }
   | { readonly kind: 'failed'; readonly failing: ReadonlyArray<string>; readonly failed: number }
@@ -90,7 +90,7 @@ export const standingText = {
 
 /**
  * Whether the commits here are the person's to push: always, unless the
- * project's rules push them on their own and nothing held them (ADR-071).
+ * project's rules push them on their own and nothing held them (ADR-072).
  */
 export const personPushes = (change: Pick<ChangeSummary, 'pushing'>): boolean =>
   change.pushing === undefined || change.pushing.held !== null
@@ -195,7 +195,7 @@ const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, fai
  * checks running, or, where nothing is in the way, how its checks went.
  * Commits to push aren't a fact of their own, as the button that pushes them
  * says their count, unless Althar held them where it pushes a lead's commits
- * on its own: then why (ADR-071). Only that pushing clears a conflict is said,
+ * on its own: then why (ADR-072). Only that pushing clears a conflict is said,
  * in place of it. Where they were all that was in the way, how the checks
  * went stands.
  */

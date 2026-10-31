@@ -1,4 +1,4 @@
-# ADR-071: A lead's commits push as its turn ends, unless the project says otherwise
+# ADR-072: A lead's commits push as its turn ends, unless the project says otherwise
 
 - **Status:** Accepted
 - **Date:** 2026-10-29

@@ -50,7 +50,7 @@ describe('what stands in a change’s way', () => {
     expect(standingOf(change({ localHead: 'def456', unpushed: 4, checks: checks() })).next).toEqual({ kind: 'push', commits: 4 })
   })
 
-  it('offers no Push for commits that go up on their own, and says why where Althar held them (ADR-071)', () => {
+  it('offers no Push for commits that go up on their own, and says why where Althar held them (ADR-072)', () => {
     // Going up as the lead's turn ends: nothing for the person to push, and nothing accepted until they're on it.
     const going = change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: checks() })
     expect(standingOf(going)).toEqual({ blockers: [{ kind: 'going', commits: 1 }], next: null })

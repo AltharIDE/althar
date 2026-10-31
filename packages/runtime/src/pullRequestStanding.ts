@@ -75,7 +75,7 @@ const staleWords = (seen: SeenChange) => {
   return null
 }
 
-/** Who pushes the commits not on it yet: Althar as its lead's turn ends, where the project says so and nothing held them (ADR-071). */
+/** Who pushes the commits not on it yet: Althar as its lead's turn ends, where the project says so and nothing held them (ADR-072). */
 const pushedWords = (change: SeenChange['change']): string =>
   change.pushing === undefined
     ? 'the person pushes them.'

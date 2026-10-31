@@ -254,7 +254,7 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **After the first push, a lead's commits go up as its turn ends** (ADR-071),
+- **After the first push, a lead's commits go up as its turn ends** (ADR-072),
   where the project's rules say so (`pushCommits`, "Push the lead's commits
   automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead

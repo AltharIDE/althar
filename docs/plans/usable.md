@@ -103,7 +103,7 @@ One pull request each:
      dock's note goes into that same chat.
    - **Later: always push.** A choice next to Push, per project, for people
      who want follow-ups pushed as the lead commits them. Built, on by
-     default, as [ADR-071](../decisions/071-a-lead-s-commits-push-as-its-turn-ends.md).
+     default, as [ADR-072](../decisions/072-a-lead-s-commits-push-as-its-turn-ends.md).
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every

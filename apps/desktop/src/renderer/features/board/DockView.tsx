@@ -173,7 +173,7 @@ export function DockView({
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
-          // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-071),
+          // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),
           // and nothing is accepted until they're on it.
           unpushed={change.localHead === null || !personPushes(change) ? 0 : change.unpushed}
           going={change.localHead === null || personPushes(change) ? 0 : change.unpushed}

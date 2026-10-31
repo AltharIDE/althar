@@ -233,7 +233,7 @@ export const ReadyChecksFailedNarrow: Story = {
   },
 }
 /**
- * Where the project pushes its leads' commits on their own (ADR-071), Push shows only for those Althar held, with why: here,
+ * Where the project pushes its leads' commits on their own (ADR-072), Push shows only for those Althar held, with why: here,
  * someone pushed to the pull request outside Althar, so the lead's commit waits rather than going on top unseen.
  */
 export const ReadyPushHeldNarrow: Story = {

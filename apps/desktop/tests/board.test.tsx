@@ -1176,7 +1176,7 @@ describe('the board', () => {
     expect(push).toHaveBeenLastCalledWith('t4', 'def456', 'https://github.com/meridian/api/pull/12')
   })
 
-  it('offers neither Push nor Accept while what the lead committed goes up on its own (ADR-071)', async () => {
+  it('offers neither Push nor Accept while what the lead committed goes up on its own (ADR-072)', async () => {
     const later = board().tasks.map((work) =>
       work.taskId === 't4' && work.change !== null
         ? { ...work, change: { ...work.change, unpushed: 1, localHead: 'def456', pushing: { held: null } } }
