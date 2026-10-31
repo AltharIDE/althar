@@ -33,4 +33,6 @@ bun run check
 bun run test
 ```
 
+`src/select.ts` is what CI runs for a change: the workflows `harness`, `desktop` and `ui` plan with it, and run its plan ([Changes and CI](../../DEVELOPMENT.md#changes-and-ci)). `tests/select.test.ts` checks the plan for example changes in a small repository shaped like this one, and that every import in this one leads to a file or a package it depends on, so none goes unseen.
+
 `tests/reporter.test.ts` runs Vitest on a test that fails once, then passes (`tests/fixtures/once.fixture.ts`), and checks that it alone is reported. `tests/quarantine.test.ts` runs Vitest on tests that always fail (`tests/fixtures/fails.fixture.ts`, `broken.fixture.ts`, `hook.fixture.ts`, with a fake coverage provider in `coverage.ts`), and the Playwright reporter on a run's end, and checks which runs quarantine lets pass; and the matching of tests to issues, the decision and the job's summary on their own. `tests/deadline.test.ts` checks the waits and their deadline. `tests/limits.test.ts` reads every test in the repository and fails on any that sets a time of its own: a third argument to `it`, `test` or `describe` other than a budget by name, a `timeout` in a test's options, a time given to a hook or to a wait, or a loop that gives up after so many tries.

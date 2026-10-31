@@ -4,19 +4,10 @@ name: windows-installer
 # scripts/windows-smoke.sh, and uploaded as the artifact desktop-windows-installer, to install on a Windows machine.
 # Unsigned, as releases are for now, so SmartScreen warns: More info, then Run anyway.
 #
-# On a pull request that changes how Althar is packaged or what it ships; after merge, from post-merge.yml; and by hand
-# on any branch (`gh workflow run windows-installer.yml --ref <branch>`). It packages only: Windows' checks and tests
-# are another job's.
+# After merge, from post-merge.yml, on every merge; and by hand on any branch, to try a change to how Althar is
+# packaged before it merges (`gh workflow run windows-installer.yml --ref <branch>`). It packages only: Windows' tests
+# are post-merge's own jobs.
 on:
-  pull_request:
-    paths:
-      [
-        'apps/desktop/scripts/**',
-        'apps/desktop/package.json',
-        'apps/desktop/src/main/**',
-        'bun.lock',
-        '.github/workflows/windows-installer.yml',
-      ]
   workflow_call:
   workflow_dispatch:
 
@@ -27,10 +18,6 @@ jobs:
   package:
     runs-on: windows-2025
     timeout-minutes: 45
-    # A newer push to a pull request replaces its run; on main, post-merge's own concurrency holds.
-    concurrency:
-      group: windows-installer-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     defaults:
       run:
         shell: bash

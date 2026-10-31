@@ -204,11 +204,18 @@ span.you {
   min-width: max-content;
 }
 .error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
   margin: 0;
+  min-width: 0;
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--danger);
+  color: var(--t-2);
   text-wrap: pretty;
+  /* a long ref, hash or address breaks rather than running off the card */
+  overflow-wrap: anywhere;
 }
 
 /* how big it is, the way into the diff, and its files */

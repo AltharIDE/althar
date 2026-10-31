@@ -92,6 +92,10 @@ type GitProcessResult = {
   readonly error: (Error & { readonly code?: unknown }) | null
   readonly stdout: string
   readonly stderr: string
+  readonly code?: number
+  readonly signal?: string
+  readonly timedOut?: true
+  readonly timeout?: number
 }
 
 const spawnGit = (
@@ -123,6 +127,7 @@ const spawnGit = (
     }
   }
   let why: string | null = null
+  let timeoutMilliseconds: number | undefined
   const out: Array<Buffer> = []
   const err: Array<Buffer> = []
   let size = 0
@@ -139,12 +144,19 @@ const spawnGit = (
   child.stdout.on('data', collect(out))
   child.stderr.on('data', collect(err))
   let ended = false
-  const end = (error: (Error & { readonly code?: unknown }) | null) => {
+  const end = (error: (Error & { readonly code?: unknown }) | null, code?: number, signal?: string | null) => {
     if (ended) return
     ended = true
     const stderr = Buffer.concat(err).toString()
     // What it said before it was stopped, then why it was.
-    resolveResult({ error, stdout: Buffer.concat(out).toString(), stderr: why === null ? stderr : `${stderr.trim()}\n${why}`.trim() })
+    resolveResult({
+      error,
+      stdout: Buffer.concat(out).toString(),
+      stderr: why === null ? stderr : `${stderr.trim()}\n${why}`.trim(),
+      ...(code === undefined ? {} : { code }),
+      ...(signal == null ? {} : { signal }),
+      ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
+    })
   }
   child.on('error', end)
   child.on('close', (code, signal) =>
@@ -152,6 +164,8 @@ const spawnGit = (
       code === 0 && why === null
         ? null
         : Object.assign(new Error(why ?? `git ${args[0] ?? ''} failed (${code ?? signal})`), { code: code ?? 128 }),
+      code ?? 128,
+      signal,
     ),
   )
   // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
@@ -161,6 +175,7 @@ const spawnGit = (
     result: Effect.promise(() => result),
     timeout: (milliseconds) => {
       if (ended) return
+      timeoutMilliseconds = milliseconds
       why ??= `No answer within ${milliseconds / 1000} s, so Althar stopped waiting.`
       stop()
     },
@@ -205,10 +220,19 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   runProcess(timeout, cwd, args, env, input).pipe(
-    Effect.flatMap(({ error, stdout, stderr }) =>
-      error === null
-        ? Effect.succeed(trim ? stdout.trim() : stdout)
-        : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
+    Effect.flatMap((result) =>
+      result.error === null
+        ? Effect.succeed(trim ? result.stdout.trim() : result.stdout)
+        : Effect.fail(
+            new GitFailed({
+              args: [...args],
+              cwd,
+              stderr: result.stderr.trim() || result.error.message,
+              ...(result.code === undefined ? {} : { code: result.code }),
+              ...(result.signal === undefined ? {} : { signal: result.signal }),
+              ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
+            }),
+          ),
     ),
   )
 

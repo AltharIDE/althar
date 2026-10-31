@@ -101,7 +101,7 @@ describe('what a task changed, card by card', () => {
     const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
     show(task({ files: [FILE], commits: 1, here }, { items: [items.step({ step: 'review', verdict: 'pass', agentId: 'codex' })] }))
     expect(await screen.findByText(/Reviewed by/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
   })
 
   it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {
