@@ -84,3 +84,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
 | [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
 | [077](077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md) | A task's screenshots go in one comment on its pull request, written anew as they change, by hand or by a project rule |
+| [078](078-the-coordinator-merges-and-releases-on-the-person-s-word.md) | The coordinator merges, queues and releases on the person's word, does what can be undone itself, and hears every pull request and main |
+| [079](079-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |
