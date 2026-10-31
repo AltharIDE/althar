@@ -506,6 +506,21 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/** How many more times a lead goes on its own in each worktree, as `[lead:gone-once]` and `[lead:gone-twice]` say: kept across sessions. */
+const goneLeft = new Map<string, number>()
+
+const goesOnItsOwn = (session: SessionState) => {
+  if (!goneLeft.has(session.cwd)) {
+    if (session.markers.has('[lead:gone-once]')) goneLeft.set(session.cwd, 1)
+    else if (session.markers.has('[lead:gone-twice]')) goneLeft.set(session.cwd, 2)
+    else return false
+  }
+  const left = goneLeft.get(session.cwd) ?? 0
+  if (left === 0) return false
+  goneLeft.set(session.cwd, left - 1)
+  return true
+}
+
 /**
  * A lead that stalls or goes round in circles, as markers say:
  * `[lead:hang]` runs \`npm run dev\` and never ends its turn until cancelled,
@@ -1751,6 +1766,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
+      // `[lead:gone-once]` goes on its own in its first turn in its worktree, as an agent that crashes does; `[lead:gone-twice]` in its
+      // first two. Counted by worktree, as the session started again after is a new one.
+      if (!session.coordinator && goesOnItsOwn(session)) {
+        connections.get(shared(client))?.close()
+        return ended()
+      }
       // Told its checks failed, or to see them through after its agent went, `[lead:fix-gone]` goes before it does anything.
       if (
         (session.markers.has('[lead:fix-gone]') || text.includes('[lead:fix-gone]')) &&

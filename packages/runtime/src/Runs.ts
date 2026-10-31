@@ -1453,6 +1453,9 @@ export class Runs extends Context.Service<
             if (yield* asking(event.threadId)) return
             // A round that made nothing new ends with its lead (ADR-034).
             if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
+            // Gone on its own, it is started again once, as after a restart (DEV-173); gone again soon after, it needs the person.
+            const key = `${on.run.runId}:${on.nodeKey}:${on.iteration}`
+            if (event.state === 'lost' && !(yield* soonAgain(on.run, '$.startedAgain', key))) return yield* startAgain(on, key, info)
             return yield* stuck(on.run, { id: on.attemptId }, info('session_ended', null))
           }
           // A turn of a session another agent has taken over from is that session's last, not the step's.
@@ -4013,12 +4016,19 @@ export class Runs extends Context.Service<
        * line that said it carried on at least, came within RESTART_GRACE of
        * that line.
        */
-      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) =>
+      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) => soonAgain(current, '$.restarted', step.nodeId)
+
+      /**
+       * Whether a step Althar carried on by itself, as its notice keyed so in
+       * the task's thread says, stopped again soon after: nothing of the task's
+       * thread or its review's came RESTART_GRACE after that notice.
+       */
+      const soonAgain = (current: RunRow, key: '$.restarted' | '$.startedAgain', value: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [carried] = yield* sql<{ createdAt: string }>`
             SELECT created_at FROM thread_items
-            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, '$.restarted') = ${step.nodeId}
+            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, ${key}) = ${value}
             ORDER BY sequence DESC LIMIT 1`
           if (carried === undefined) return false
           const grace = new Date(Date.parse(carried.createdAt) + Duration.toMillis(RESTART_GRACE)).toISOString()
@@ -4179,6 +4189,39 @@ export class Runs extends Context.Service<
           // A lead that can't start, or one handed on for a limit that can't, leaves its step needing the person, as when a plan starts.
           if (carried._tag === 'Failure')
             yield* stuck(current, { id: step.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
+        })
+
+      /**
+       * Starts a step again whose agent went on its own (DEV-173), as a restart
+       * carries one on: the lead's steps on the lead, its model and effort, told
+       * to carry on; a review's round again on its reviewer. Said in the task's
+       * thread keyed by the step, so going again soon after needs the person
+       * (`soonAgain`); one that can't start needs them too.
+       */
+      const startAgain = (on: LimitedStep, key: string, info: (why: StuckWhy, detail: string | null) => StuckInfo) =>
+        Effect.gen(function* () {
+          const asked = info('session_ended', null)
+          const lead = on.step === 'implement' || on.step === 'settle'
+          const { agentId, model, effort } = lead
+            ? yield* lastLead(on.run)
+            : {
+                agentId: asked.agentId,
+                model: asked.agentId === null ? null : yield* modelOnStep(on.run.taskId, on.step, asked.agentId),
+                effort: null,
+              }
+          if (agentId === null) return yield* stuck(on.run, { id: on.attemptId }, asked)
+          yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: 'Started again after its agent stopped on its own.',
+            startedAgain: key,
+          })
+          const starting = yield* envelope('thread.send', { threadId: on.run.threadId, startedAgain: on.attemptId })
+          const carried = yield* Effect.exit(
+            carryOn(on.run, on.attemptId, asked, { kind: 'retry', agentId }, starting, model, undefined, effort),
+          )
+          if (carried._tag === 'Failure')
+            yield* stuck(on.run, { id: on.attemptId }, { ...asked, why: 'failed_to_start', detail: summarize(carried.cause) || null })
         })
 
       /**
