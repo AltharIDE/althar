@@ -17,7 +17,7 @@ import {
   type WorkCardProps,
   ModelPick,
 } from '@althar/ui'
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 import s from './app.module.css'
 import {
@@ -174,33 +174,77 @@ const AT_WORK: readonly AtWork[] = [
 /** How long a task has run, as the board says it: 6m, 1h 12m. */
 const ran = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`)
 
+/**
+ * A task the board follows on its way through, as a phone shows it: in Up
+ * next until it starts, then first in the lane it has reached, drawn as
+ * `card`. Arriving, its place there is held unseen while it travels in.
+ * Where one comes in, the rest slide down to make room.
+ */
+export interface BoardStory {
+  task: string
+  lane: BoardLane
+  card?: ReactNode
+  arriving?: boolean
+  /** Its card's class, in the lane it has reached. */
+  className?: string
+}
+
 /** Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
-export function BoardAtWork({ beat }: { beat: number }) {
+export function BoardAtWork({ beat, story }: { beat: number; story?: BoardStory }) {
+  // With a story, each card is keyed by its task, so it slides when one comes in above it.
+  const keyed = (task: string, item: ReactNode) => (story ? <div data-move={task}>{item}</div> : item)
+  const first = (lane: BoardLane) =>
+    story && story.lane === lane && lane !== BoardLane.Next ? (
+      <div
+        key="story"
+        data-story={story.arriving ? 'arriving' : ''}
+        className={story.className}
+        style={story.arriving ? { visibility: 'hidden' } : undefined}
+      >
+        {story.card}
+      </div>
+    ) : null
+  const next = story && story.lane !== BoardLane.Next ? NEXT.filter((x) => x.task !== story.task) : NEXT
+  const extra = (lane: BoardLane) => (story?.lane === lane && lane !== BoardLane.Next ? 1 : 0)
   return (
     <Board label="Tally’s work">
-      <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
+      <BoardColumn lane={BoardLane.Next} count={next.length}>
         <BoardList>
-          {NEXT.map((x, i) => (
-            <NextRow key={x.task} {...x} place={i + 1} />
-          ))}
+          {next.map((x, i) =>
+            story?.task === x.task ? (
+              <div key={x.task} data-story="">
+                <NextRow {...x} place={i + 1} />
+              </div>
+            ) : (
+              <Fragment key={x.task}>{keyed(x.task, <NextRow {...x} place={i + 1} />)}</Fragment>
+            ),
+          )}
         </BoardList>
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Running} count={AT_WORK.length}>
+      <BoardColumn lane={BoardLane.Running} count={AT_WORK.length + extra(BoardLane.Running)}>
+        {first(BoardLane.Running)}
         {AT_WORK.map(({ minutes, every, ...x }) => (
-          <WorkCard key={x.task} {...x} at={Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)} elapsed={ran(minutes + beat)} />
+          <Fragment key={x.task}>
+            {keyed(
+              x.task,
+              <WorkCard {...x} at={Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)} elapsed={ran(minutes + beat)} />,
+            )}
+          </Fragment>
         ))}
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
-        <AcceptCard {...READY_TWO_REPOS} />
+      <BoardColumn lane={BoardLane.Yours} count={CALLS.length + extra(BoardLane.Yours)}>
+        {first(BoardLane.Yours)}
+        {keyed(READY_TWO_REPOS.task, <AcceptCard {...READY_TWO_REPOS} />)}
         {CALLS.slice(0, 2).map((x) => (
-          <CallCard key={x.title} {...x} />
+          <Fragment key={x.title}>{keyed(x.title, <CallCard {...x} />)}</Fragment>
         ))}
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length}>
+      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length + extra(BoardLane.Settled)}>
         <BoardList>
-          {SETTLED.map((x) => (
-            <SettledRow key={x.task} {...x} />
-          ))}
+          {[
+            first(BoardLane.Settled),
+            ...SETTLED.map((x) => <Fragment key={x.task}>{keyed(x.task, <SettledRow {...x} />)}</Fragment>),
+          ].filter((row) => row !== null)}
         </BoardList>
       </BoardColumn>
     </Board>

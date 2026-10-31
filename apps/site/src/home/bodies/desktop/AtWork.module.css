@@ -2,20 +2,55 @@
 .wrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
 .frame { border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 140px rgba(255, 150, 70, 0.14); }
 
-/* On a phone: a lane at a time, its foot fading into the panel, so it reads as going on; the view glides from lane to lane. */
+/* On a phone: a lane at a time, its foot fading into the panel, so it reads as going on; the view glides along with the task it follows. */
 .lane {
   border-radius: 14px;
   mask-image: linear-gradient(#000 58%, transparent 96%);
   transition: opacity var(--turn) var(--ease);
 }
-.lanes [data-picture] { transition: transform var(--glide) var(--ease); }
-/* At the last lane it fades, and comes back at the first without gliding across. */
-.turning .lane { opacity: 0; }
+.lanes [data-picture] { transition: transform var(--glide) var(--ease) var(--follow); }
+/* At the end it fades, and comes back at the first lane without gliding across. */
+.fading .lane { opacity: 0; }
 .cut [data-picture] { transition: none; }
+
+/* The task it follows: pressed, its action gives a little under a tap, as it is accepted. */
+.hero { transition: scale 180ms var(--ease); }
+.hero [class*='strip'] { position: relative; transition: opacity 180ms var(--ease); }
+.pressed { scale: 0.985; }
+.pressed [class*='strip'] { opacity: 0.7; }
+.pressed [class*='strip']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: var(--signal-line);
+  animation: tap 560ms var(--ease) both;
+}
+@keyframes tap {
+  from { opacity: 1; scale: 0.2; }
+  to { opacity: 0; scale: 2.6; }
+}
+
+/* On its way between lanes: over the board, lifted, what it was and what it becomes one over the other. */
+.flight {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  visibility: hidden;
+  filter: drop-shadow(0 16px 26px rgba(40, 28, 10, 0.2)) drop-shadow(0 3px 6px rgba(40, 28, 10, 0.1));
+}
+.flight > * { grid-area: 1 / 1; align-self: start; }
+/* A row lifted from its list is a card in flight, on paper of its own; it lands as a row again. */
+.flight > :first-child > article { background: var(--n-1); }
 
 @media (max-width: 700px) {
   .wrap { margin-top: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lane, .lanes [data-picture] { transition: none; }
+  .lane, .lanes [data-picture], .hero { transition: none; }
+  .pressed [class*='strip']::after { animation: none; }
 }
