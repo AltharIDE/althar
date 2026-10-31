@@ -63,6 +63,9 @@ export interface WorkActions {
   readonly dismissError: () => void
 }
 
+/** Where a task's card is in Needs you: a call waits on the person, or it stopped, or its work is ready (`lanesOf`). */
+const NEEDS_YOU: ReadonlySet<BoardTask['phase']> = new Set(['waiting', 'stopped', 'ready'])
+
 /** What the actions act on: the tasks shown, by which a merge that went through shows as merging until it reads so. */
 export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): WorkActions => {
   const { client } = useServices()
@@ -89,10 +92,13 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
   const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
   const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
-  // Kept by the way: what fails to keep it changes nothing the person sees.
+  /** Whether a task's card is in Needs you as it is pressed, as last shown: Done on one kept for later settles none there. */
+  const inNeeds = useCallback((taskId: string) => NEEDS_YOU.has(tasks?.find((task) => task.taskId === taskId)?.phase ?? 'settled'), [tasks])
+  // Kept by the way: what fails to keep it changes nothing the person sees. A task's press counts where its card was in Needs
+  // you before it was pressed (`from`); a call's always is.
   const pressed = useCallback(
-    (through: boolean, press: OnePress) => {
-      if (through) void client.settledWithOnePress(press).catch(() => {})
+    (from: boolean, through: boolean, press: OnePress) => {
+      if (from && through) void client.settledWithOnePress(press).catch(() => {})
       return through
     },
     [client],
@@ -140,16 +146,19 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     settling,
     resolving,
     resolveNow: useCallback(
-      async (taskId) => pressed(await busy(setResolving, taskId, () => client.resolveConflictsNow(taskId)), { taskId, action: 'resolve' }),
-      [busy, client, pressed],
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setResolving, taskId, () => client.resolveConflictsNow(taskId)), { taskId, action: 'resolve' }),
+      [busy, client, pressed, inNeeds],
     ),
     markDone: useCallback(
-      async (taskId) => pressed(await busy(setSettling, taskId, () => client.markTaskDone(taskId)), { taskId, action: 'done' }),
-      [busy, client, pressed],
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setSettling, taskId, () => client.markTaskDone(taskId)), { taskId, action: 'done' }),
+      [busy, client, pressed, inNeeds],
     ),
     keep: useCallback(
-      async (taskId) => pressed(await busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), { taskId, action: 'keep' }),
-      [busy, client, pressed],
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), { taskId, action: 'keep' }),
+      [busy, client, pressed, inNeeds],
     ),
     mergeHere: useCallback(
       (task) => busy(setMerging, task.taskId, () => client.mergeHere(task.taskId, headsOf(task.here))),
@@ -157,26 +166,28 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     ),
     push: useCallback(
       async (taskId, head, url) =>
-        pressed(await busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), { taskId, action: 'push' }),
-      [busy, client, pressed],
+        pressed(inNeeds(taskId), await busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), { taskId, action: 'push' }),
+      [busy, client, pressed, inNeeds],
     ),
     // Its card says why it didn't merge (`failures`), as the window keeps it.
     merge: useCallback(
       async (taskId, head, url) => {
         setError(null)
         setFailed(({ [taskId]: _, ...rest }) => rest)
+        const from = inNeeds(taskId)
         try {
           await merge({ taskId, head, url })
-          return pressed(true, { taskId, action: 'merge' })
+          return pressed(from, true, { taskId, action: 'merge' })
         } catch (failure) {
           fail(failure)
           return false
         }
       },
-      [merge, fail, pressed],
+      [merge, fail, pressed, inNeeds],
     ),
     sendBack: useCallback(
       async (task, note, onePress = false) => {
+        const from = inNeeds(task.taskId)
         const through = await busy(setSending, task.taskId, async () => {
           const head = await client.getThread(task.threadId, { limit: 0 })
           const restarting = head.session === null || !head.session.held
@@ -201,9 +212,9 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
               setError(`Queued, but the lead didn't start. ${messageOf(failure)}`)
             })
         })
-        return onePress ? pressed(through, { taskId: task.taskId, action: 'carry_on' }) : through
+        return onePress ? pressed(from, through, { taskId: task.taskId, action: 'carry_on' }) : through
       },
-      [busy, client, pressed],
+      [busy, client, pressed, inNeeds],
     ),
     openChange: useCallback((taskId) => busy(setOpening, taskId, () => client.openChange(taskId)), [busy, client]),
     answer: useCallback(
@@ -212,7 +223,7 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
           .answer({ attentionId, decision, ...(reason === undefined ? {} : { reason }), ...(always === undefined ? {} : { always }) })
           .then(
             // Answered as it stands, with nothing written: one press.
-            () => (reason === undefined ? pressed(true, { attentionId, action: decision }) : true),
+            () => (reason === undefined ? pressed(true, true, { attentionId, action: decision }) : true),
             (failure: unknown) => {
               fail(failure)
               return false

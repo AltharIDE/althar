@@ -1836,7 +1836,6 @@ export class Queries extends Context.Service<
             leadEffort: string | null
             firstSession: string | null
             lastEnded: string | null
-            lastTurn: string | null
             turns: number
             settingUp: number | null
             starting: number
@@ -1876,8 +1875,6 @@ export class Queries extends Context.Service<
               -- When its last agent went: for a moment after, with nothing that says why, the next is on its way (DEV-173).
               (SELECT max(s.ended_at) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = k.id)
                 AS last_ended,
-              -- When its lead's last turn ended: what it committed goes up then, a moment after (ADR-072).
-              (SELECT max(d.ended_at) FROM turn_deliveries d WHERE d.thread_id = t.id) AS last_turn,
               -- Whether its lead has had a turn yet: before its first, no agent has worked on it.
               (SELECT count(*) FROM turn_deliveries d WHERE d.thread_id = t.id) AS turns,
               -- Its folder being set up (Setups.ts): whether by the setup kept for its repository (1), else the install its
@@ -1957,16 +1954,9 @@ export class Queries extends Context.Service<
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
           const going = task.runState === 'succeeded' ? byItself(shown) : null
-          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's. Nor commits going up
-          // long after its lead's last turn ended, as ones made outside a turn, which nothing pushes: those are the person's too.
-          const goes =
-            going === 'checks_running'
-              ? (yield* ranTooLong(taskId, shown?.head ?? null))
-                ? null
-                : going
-              : going === 'pushing' && !betweenAgents(task.lastTurn, yield* Clock.currentTimeMillis, betweenMs)
-                ? null
-                : going
+          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's. Commits made outside
+          // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
+          const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
           // Its last agent gone a moment ago, no turn of its cut short and nothing that says why: the next is on its way, as a step
           // is started again or the call that says why comes, not stopped. Sessions reads its card again once the moment is over.
           const between =

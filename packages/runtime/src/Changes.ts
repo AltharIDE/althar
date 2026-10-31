@@ -126,6 +126,7 @@ import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
+import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
 /*
  * A task's change on its code host (docs/architecture/06; docs/plans/
@@ -808,6 +809,8 @@ export class Changes extends Context.Service<
       const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0]) =>
         Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change) }), scope))
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
+      // How long after its lead's turn ended its commits are still going up (DEV-173).
+      const goingFor = Duration.toMillis((yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS))
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
@@ -5255,7 +5258,10 @@ export class Changes extends Context.Service<
        * How each of a task's pull requests stands for its lead's commits
        * (ADR-072), read from the record: going up as its turn ends while its
        * lead is in one, else held where Althar kept why since anything last
-       * went up. Null where the rules leave every push to the person.
+       * went up. Null where the rules leave every push to the person; and
+       * none for one held for no reason a moment after its lead's last turn
+       * ended, as commits made outside a turn, which nothing pushes, the
+       * person's to push as where the rules leave it to them (DEV-173).
        */
       const pushingOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -5264,6 +5270,11 @@ export class Changes extends Context.Service<
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
           const lead = thread === undefined ? Option.none() : yield* sessions.running(thread.id)
           const atWork = Option.isSome(lead) && lead.value.turnRunning
+          const [turn] =
+            atWork || thread === undefined
+              ? []
+              : yield* sql<{ ended: string | null }>`SELECT max(ended_at) AS ended FROM turn_deliveries WHERE thread_id = ${thread.id}`
+          const going = atWork || betweenAgents(turn?.ended ?? null, yield* Clock.currentTimeMillis, goingFor)
           const shown = new Map<string, { readonly held: string | null }>()
           for (const link of yield* linksOf(taskId)) {
             const snapshot = yield* decodeSnapshot(link.snapshot)
@@ -5275,7 +5286,8 @@ export class Changes extends Context.Service<
                     AND h.observed_at >= coalesce((SELECT max(p.observed_at) FROM observations p WHERE p.subject_type = 'external_link'
                       AND p.subject_id = ${link.id} AND p.kind = 'pushed'), '')
                   ORDER BY h.observed_at DESC, h.rowid DESC LIMIT 1`
-            shown.set(snapshot.url, { held: held?.why ?? null })
+            if (held !== undefined) shown.set(snapshot.url, { held: held.why })
+            else if (going) shown.set(snapshot.url, { held: null })
           }
           return shown
         })

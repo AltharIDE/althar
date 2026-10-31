@@ -650,7 +650,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(bare, 'rev-parse', task.branch), git(task.path, 'rev-parse', 'HEAD'))
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
-      assert.deepStrictEqual(card?.change?.pushing, { held: null })
+      assert.isNull(card?.change?.pushing?.held ?? null)
       assert.include(yield* notices(task.threadId), "Pushed 1 commit to PR #1 as the lead's turn ended.")
 
       // Asked to push before its turn ends, the lead's tool pushes at once rather than asking the person.
@@ -676,6 +676,25 @@ describe('what a lead commits after the person has looked', () => {
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Tidy up')
       assert.isUndefined(card?.change?.pushing)
       assert.strictEqual((yield* cards(task.projectId))[0]?.change?.unpushed, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('wait for the person’s push where they were made outside a turn, which nothing pushes: Ready, not going up (DEV-173)', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // A commit in the task's folder well after its lead's turn ended, and what that turn left went up: nothing pushes it.
+      yield* Effect.sleep(Duration.seconds(1))
+      git(task.path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'By hand')
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 1)
+      // The person's to push, as where the rules leave every push to them: in Needs you with its Push, never going up.
+      assert.isUndefined(card?.change?.pushing)
+      assert.strictEqual(card?.phase, 'ready')
+      yield* Effect.sleep(Duration.seconds(1))
+      assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'By hand')
+      assert.strictEqual((yield* cards(task.projectId))[0]?.phase, 'ready')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -761,7 +780,7 @@ describe('what a lead commits after the person has looked', () => {
       // Back online, their Push takes it up, and nothing is held any more.
       yield* (yield* Changes).push(card?.taskId ?? '', card?.change?.localHead ?? '')
       const [after] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
-      assert.deepStrictEqual(after?.change?.pushing, { held: null })
+      assert.isNull(after?.change?.pushing?.held ?? null)
       assert.include(git(bare, 'log', '--format=%s', task.branch).split('\n'), 'Tidy up')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

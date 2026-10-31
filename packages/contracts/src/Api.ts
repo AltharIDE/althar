@@ -955,7 +955,8 @@ export const ChangeSummary = Schema.Struct({
    * Where its project's rules push the lead's commits on their own (ADR-072):
    * `held` null while those here go up as its lead's turn ends, so they are
    * nothing for the person to push; else why they wait for the person's push,
-   * in a few words. Absent where every push is the person's.
+   * in a few words. Absent where every push is the person's, as for
+   * commits made outside its lead's turn, which nothing pushes (DEV-173).
    */
   pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String) })),
   /**

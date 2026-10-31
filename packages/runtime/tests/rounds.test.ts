@@ -386,10 +386,10 @@ describe('a task that goes back to work', () => {
       assert.isFalse((yield* queries.thread(task.threadId)).task.skipReview)
       slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
-      // No review of the round: the plan's, then the round's own report.
+      // No review of the round: the plan's, then the round's own report, and its next pull request, which it opened by itself.
       assert.deepStrictEqual(
         (yield* results(task.threadId)).map((result) => result.step),
-        ['implement', 'review', 'publish', 'implement'],
+        ['implement', 'review', 'publish', 'implement', 'publish'],
       )
       const [plan, round] = yield* runsOf(task.taskId)
       const reviewOf = (parameters: string | undefined) =>
@@ -517,7 +517,11 @@ describe('a task that goes back to work', () => {
       git(clone, 'push', '-q', 'origin', 'main')
       yield* say(task.threadId, 'Once more. [lead:finish]')
       yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'succeeded')
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      // Althar tries to open it by itself as the round ends (ADR-034), and can't: then the person's try is refused the same way.
+      yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      )
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       const refused = (yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen
       assert.deepStrictEqual([refused.why, refused.detail], ['conflicts', 'change.txt'])
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')

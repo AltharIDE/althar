@@ -1989,6 +1989,40 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('counts Keep pressed in Needs you as settled with one press, and Done on one kept for later not (DEV-173)', async () => {
+    tasks = [
+      task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null }),
+      task({
+        taskId: 'p2',
+        threadId: 'thp2',
+        title: 'Spike the limits',
+        phase: 'kept',
+        kind: 'plain',
+        branch: null,
+        keptAt: '2026-09-30T11:00:00.000Z',
+      }),
+    ]
+    const markTaskDone = vi.fn(async () => {})
+    const keepTaskForLater = vi.fn(async () => {})
+    const settledWithOnePress = vi.fn(async () => {})
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ markTaskDone, keepTaskForLater, settledWithOnePress, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Prototype the tabs')
+    await userEvent.click(card.getByRole('button', { name: 'Keep for later' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 'p1', action: 'keep' }))
+    // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
+    const lane = within(screen.getByRole('region', { name: /^Settled/ }))
+    await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
+    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(settledWithOnePress).toHaveBeenCalledOnce()
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it('pushes right there, and does not open the task', async () => {
     const onOpen = vi.fn()
     let finish = () => {}
