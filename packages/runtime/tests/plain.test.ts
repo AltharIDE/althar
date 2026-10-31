@@ -27,6 +27,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, listTools, notices, repository, runtime, until } from './support'
+import { withoutReview } from './changesSupport'
 
 /*
  * A plain task (DEV-96, ADR-035): what the coordinator starts with
@@ -811,7 +812,7 @@ describe('making a quick task a change', () => {
         github.changes.map((change) => [change.title, change.draft]),
         [['Settings, for real', false]],
       )
-      assert.isTrue(github.changes[0]?.body.startsWith('Settings were a sketch; this makes them real.'))
+      assert.isTrue(withoutReview(github.changes[0]?.body ?? '').startsWith('Settings were a sketch; this makes them real.'))
       yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
     }).pipe(Effect.provide(withGitHub(github)))
   })

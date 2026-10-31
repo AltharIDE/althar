@@ -40,6 +40,7 @@ import {
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
+  type ScreenshotsOnChange,
 } from '@althar/contracts'
 import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -50,6 +51,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
 import { Coordinator } from './Coordinator'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverifiedIn } from './evidence'
@@ -687,7 +689,18 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Agents
+  | Sessions
+  | Coordinator
+  | Changes
+  | PullRequestScreenshots
+  | RuntimeConfig
+  | Artifacts
+  | Launches
+  | Busy
 
 /** The lines of what waits one read has read, by project: a board of queued cards reads its line once, not once a card. */
 const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>('@althar/runtime/Queries/LinesRead', {
@@ -1559,6 +1572,10 @@ export class Queries extends Context.Service<
           })()
           // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
           const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
+          // How its screenshots stand on each open pull request whose host takes them (ADR-077).
+          const screenshots = links.some((link) => link.kind === 'change')
+            ? yield* Effect.flatMap(PullRequestScreenshots, (all) => all.onChanges(taskId))
+            : new Map<string, ScreenshotsOnChange>()
           const changes = yield* Effect.forEach(
             links.flatMap((link) => {
               const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
@@ -1593,7 +1610,12 @@ export class Queries extends Context.Service<
                         b.created_at, b.rowid
                       LIMIT 1`
                         const held = pushing?.get(change.url)
-                        const shown = held === undefined ? change : { ...change, pushing: held }
+                        const pictures = screenshots.get(change.url)
+                        const shown = {
+                          ...change,
+                          ...(held === undefined ? {} : { pushing: held }),
+                          ...(pictures === undefined ? {} : { screenshots: pictures }),
+                        }
                         if (here === undefined || !existsSync(here.path)) return shown
                         return { ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
                       }),

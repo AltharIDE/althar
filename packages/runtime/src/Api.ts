@@ -34,6 +34,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -48,6 +49,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
   allowsEverything,
@@ -58,6 +60,7 @@ import {
   type ProjectRules,
   resolvesConflicts,
   pushesCommits,
+  postsScreenshots,
   ruleSetOf,
   usageLimitOf,
 } from './Policies'
@@ -86,6 +89,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
@@ -201,6 +205,7 @@ export const handlers = Api.toLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
@@ -372,6 +377,7 @@ export const handlers = Api.toLayer(
         end: rules.end ?? null,
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
+        postScreenshots: postsScreenshots(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -548,6 +554,14 @@ export const handlers = Api.toLayer(
           Effect.gen(function* () {
             const reading = yield* projects.read(yield* folders.path(grant))
             return { ...reading, repositories: [...reading.repositories] }
+          }),
+        ),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      MakeRepository: ({ grant, name }) =>
+        api(
+          Effect.gen(function* () {
+            const made = yield* makeRepository(yield* folders.path(grant), name)
+            return { grant: yield* folders.allow(made.path), path: made.path }
           }),
         ),
       OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
@@ -829,6 +843,7 @@ export const handlers = Api.toLayer(
             const atOnce = yield* busy.atOnce
             return {
               coAuthor: { on, line: coAuthorLine },
+              reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
@@ -841,6 +856,9 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSealStyle: ({ commandId, style }) =>
+        once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       GetTaskFolders: () => api(cleanup.list),
@@ -1250,6 +1268,7 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
+      PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
       AddAccount: ({ commandId, agentId, name, grant }) =>
         once(
           commandId,
@@ -1365,6 +1384,8 @@ export const handlers = Api.toLayer(
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
               // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
               if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
+              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-077).
+              if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* screenshots.syncNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),
           ),

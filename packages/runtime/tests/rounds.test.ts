@@ -24,6 +24,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { withoutReview } from './changesSupport'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, until } from './support'
 
 /*
@@ -197,9 +198,10 @@ describe('a task that goes back to work', () => {
       assert.deepStrictEqual([second?.source, second?.target, second?.draft], ['althar/add-a-retry-2', 'main', true])
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry-2^'), git(bare, 'rev-parse', 'main'))
       assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry-2'), '1')
-      // Described as the lead wrote it for the round's work, with nothing of its review; and the merged branch is as it was merged.
-      assert.isTrue(second?.body.startsWith(`${DESCRIBED}\n\n`))
-      assert.notMatch(second?.body ?? '', /review/i)
+      // Described as the lead wrote it for the round's work, with nothing of its review but what Althar adds of it; and the merged
+      // branch is as it was merged.
+      assert.isTrue(withoutReview(second?.body ?? '').startsWith(`${DESCRIBED}\n\n`))
+      assert.notMatch(withoutReview(second?.body ?? ''), /review/i)
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), mergedHead)
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
       const [workspace] = yield* sql<{
@@ -807,7 +809,7 @@ describe('a task’s first pull request in a repository, and a reported round wi
         yield* until(cards(project.projectId), (all) => all[0]?.change?.number === 2)
         assert.include(github.changes[1]?.url, '/meridian/web/')
         assert.strictEqual(github.changes[1]?.source, task.branch)
-        assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
+        assert.isTrue(withoutReview(github.changes[1]?.body ?? '').startsWith('Web gave up on the first failed call too.'))
         assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
         assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
 

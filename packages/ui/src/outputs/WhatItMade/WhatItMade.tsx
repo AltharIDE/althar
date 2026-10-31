@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -56,6 +56,8 @@ export type WhatItMadeProps = RootProps<
     checked: ReadonlyArray<EvidencePiece>
     /** What it couldn't show working. */
     unverified: ReadonlyArray<string>
+    /** At the end of What it looks like's heading row, where there are pictures: what can be done with them, such as a PostScreenshots. */
+    looksAction?: ReactNode
     headingLevel?: HeadingLevel
     text?: Partial<WhatItMadeText>
   }
@@ -65,7 +67,17 @@ export type WhatItMadeProps = RootProps<
 const MANY = 8
 const FEW = 6
 
-export function WhatItMade({ story, shots, checked, unverified, headingLevel = 2, text, className, ...rest }: WhatItMadeProps) {
+export function WhatItMade({
+  story,
+  shots,
+  checked,
+  unverified,
+  looksAction,
+  headingLevel = 2,
+  text,
+  className,
+  ...rest
+}: WhatItMadeProps) {
   const t = { ...whatItMadeText, ...text }
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState(false)
@@ -93,10 +105,20 @@ export function WhatItMade({ story, shots, checked, unverified, headingLevel = 2
       )}
       {shots.length > 0 && (
         <section className={s.part}>
-          <Heading level={headingLevel} className={s.label}>
-            {t.looks}
-            <span className={s.count}>{shots.length}</span>
-          </Heading>
+          {looksAction === undefined || looksAction === null ? (
+            <Heading level={headingLevel} className={s.label}>
+              {t.looks}
+              <span className={s.count}>{shots.length}</span>
+            </Heading>
+          ) : (
+            <div className={s.head}>
+              <Heading level={headingLevel} className={s.label}>
+                {t.looks}
+                <span className={s.count}>{shots.length}</span>
+              </Heading>
+              {looksAction}
+            </div>
+          )}
           <div className={cx(s.shots, shots.length === 1 && s.one)}>
             {(many && !all ? shots.slice(0, FEW) : shots).map((shot) => {
               const frame = (

@@ -14,6 +14,7 @@ import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
+import { ScreenshotsOnPullRequest, screenshotsTarget } from './ScreenshotsOnPullRequest'
 
 /*
  * A task's outputs, as wide as the window: what it made on the left, what
@@ -157,6 +158,7 @@ export function Outputs({
   onOpenChange,
   onPush,
   onMarkReady,
+  onPostScreenshots,
   onOpenFile,
   conflict = null,
   onResolve,
@@ -196,6 +198,12 @@ export function Outputs({
   /** Has the lead merge a pull request's commits into its branch, so a plain push works. */
   onBringIn: (url: string) => void
   onMarkReady: (url: string) => void
+  /**
+   * Puts the screenshots What it looks like shows in the comment on the pull
+   * request at `url`, without the views left out (ADR-077): null once
+   * they're up, else what went wrong. Without it, nothing is offered.
+   */
+  onPostScreenshots?: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>
   /** Opens what it changed over the whole window, on a file or the first. */
   onOpenFile: (path?: string) => void
 }) {
@@ -457,6 +465,12 @@ export function Outputs({
 
   const made = outcomeOf(snapshot)
   const telling = hasOutcome(made) || made.checked.length > 0 || made.unverified.length > 0
+  // Its screenshots on its pull request, where its host takes them: beside What it looks like.
+  const target = screenshotsTarget(open)
+  const looksAction =
+    target === undefined || onPostScreenshots === undefined ? undefined : (
+      <ScreenshotsOnPullRequest change={target} shots={made.shots} onPost={onPostScreenshots} />
+    )
   const side = (
     <>
       {change}
@@ -513,6 +527,7 @@ export function Outputs({
             shots={made.shots}
             checked={made.checked}
             unverified={made.unverified}
+            {...(looksAction === undefined ? {} : { looksAction })}
             text={{ story: text.story(task.kind === 'change' || task.changes.length > 0 || task.files.length > 0) }}
           />
         )}

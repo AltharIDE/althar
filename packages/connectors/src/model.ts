@@ -122,6 +122,9 @@ export const Check = Schema.Struct({
   name: Schema.String,
   state: CheckState,
   url: Schema.NullOr(Schema.String),
+  workflow: Schema.optional(Schema.NullOr(Schema.String)),
+  startedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  completedAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** What the check said about itself, when it says. */
   summary: Schema.NullOr(Schema.String),
 })
@@ -279,6 +282,20 @@ export interface HostCapabilities {
    * a review posted on it with comments on its lines. Only GitHub's, for now.
    */
   readonly reviews: boolean
+  /**
+   * Pictures can go in a change's conversation: uploaded to the host, which
+   * serves them to those who can see the repository, and a comment the
+   * account wrote can be edited to show them again as they change. GitHub's,
+   * not on Enterprise Server, which takes no such upload.
+   */
+  readonly pictures: boolean
+}
+
+/** A picture to upload: its bytes, its file's name, and its type, `image/png` and the like. */
+export interface PictureUpload {
+  readonly bytes: Uint8Array
+  readonly name: string
+  readonly mediaType: string
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
@@ -358,6 +375,15 @@ export interface CodeHost {
    * keeps but won't give (refused, expired, out of reach) fails, with why.
    */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  checkAnnotations?(
+    repository: Repository,
+    check: Check,
+  ): Effect.Effect<ReadonlyArray<{ path: string; line: number; message: string }>, ConnectorFailed>
+  checkArtifacts?(
+    repository: Repository,
+    check: Check,
+  ): Effect.Effect<ReadonlyArray<{ id: string; name: string; size: number }>, ConnectorFailed>
+  checkArtifact?(repository: Repository, id: string, maxBytes: number): Effect.Effect<Uint8Array, ConnectorFailed>
   /**
    * What a check the host keeps no log of reported of itself, where it said
    * more than its summary: a GitHub check run's own summary and text. Null
@@ -392,7 +418,24 @@ export interface CodeHost {
    * the host, with its words.
    */
   postReview(repository: Repository, number: number, review: NewReview): Effect.Effect<PostedReview, ConnectorFailed>
+  /**
+   * Uploads a picture for the repository's conversations, and gives the
+   * address a comment shows it by. Where the host has
+   * `capabilities.pictures`; refused elsewhere, as `rejected`. The host keeps
+   * it for good: nothing takes an upload back.
+   */
+  uploadPicture?(repository: Repository, picture: PictureUpload): Effect.Effect<string, ConnectorFailed>
+  /**
+   * Writes a comment in a change's conversation anew, one the account wrote,
+   * and reads it back. `not_found` where it was deleted. Where the host has
+   * `capabilities.pictures`.
+   */
+  editComment?(repository: Repository, number: number, commentId: string, body: string): Effect.Effect<Comment, ConnectorFailed>
 }
+
+/** A host's refusal of a picture, where it has no `capabilities.pictures`. */
+export const noPictures = (product: Product): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: 'This host takes no pictures in its conversations' })
 
 /** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
 export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>

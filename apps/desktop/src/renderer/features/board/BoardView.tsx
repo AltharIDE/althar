@@ -6,6 +6,7 @@ import {
   type BoardCardProps,
   BoardColumn,
   BoardDivider,
+  BoardEmpty,
   type BoardFolds,
   BoardLane,
   BoardList,
@@ -75,6 +76,12 @@ export const text = {
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
   planned: 'Planned',
+  /** Up next on a board with nothing on it yet, as on a new project: how work gets here. */
+  nothingYet: {
+    title: 'Nothing lined up yet',
+    how: 'Tell the coordinator what you want done. The tasks it plans line up here.',
+    talk: 'Talk to the coordinator',
+  },
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
   followUp: 'Follow-up',
@@ -630,6 +637,17 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   }
 }
 
+/** Nothing on the board at all: nothing up next, under way, waiting on the person, kept or settled. */
+const nothingYet = (lanes: Lanes) =>
+  lanes.next.length === 0 &&
+  lanes.running.length === 0 &&
+  lanes.waiting.length === 0 &&
+  lanes.stopped.length === 0 &&
+  lanes.calls.length === 0 &&
+  lanes.ready.length === 0 &&
+  lanes.kept.length === 0 &&
+  lanes.settledTotal === 0
+
 export function BoardView({
   lanes,
   agents,
@@ -641,6 +659,7 @@ export function BoardView({
   line,
   folds,
   onFoldsChange,
+  onTalk,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -659,6 +678,8 @@ export function BoardView({
   /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is shown. */
   folds?: BoardFolds
   onFoldsChange?: (folds: BoardFolds) => void
+  /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
+  onTalk?: () => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Which of Settled's tabs shows, while something is kept for later.
@@ -725,7 +746,24 @@ export function BoardView({
       {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
       onPointerLane={pointed}
     >
-      <BoardColumn lane={BoardLane.Next} count={shown.upNext} filled={shown.next.length > 0}>
+      <BoardColumn
+        lane={BoardLane.Next}
+        count={shown.upNext}
+        filled={shown.next.length > 0}
+        // Nothing anywhere on the board, as on a new project, Up next says where work comes from; otherwise it is an empty box.
+        {...(nothingYet(lanes)
+          ? {
+              empty: (
+                <BoardEmpty
+                  title={text.nothingYet.title}
+                  {...(onTalk === undefined ? {} : { action: <LinkButton onClick={onTalk}>{text.nothingYet.talk}</LinkButton> })}
+                >
+                  {text.nothingYet.how}
+                </BoardEmpty>
+              ),
+            }
+          : {})}
+      >
         {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
         {free > 0 && (
           <BoardDivider

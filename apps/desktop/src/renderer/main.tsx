@@ -12,6 +12,7 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 import { receivePort } from './data/client'
 import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
+import { QuitDialog } from './features/quit/QuitDialog'
 import { ReportDialog } from './features/report/ReportDialog'
 import { ProfileInUseView } from './features/update/ProfileInUseView'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
@@ -122,5 +123,7 @@ createRoot(element).render(
     <Window />
     {/* Report a problem opens over whatever the window shows, with or without the runtime. */}
     <ReportDialog host={window.althar} />
+    {/* So does Quit with work under way, which asks first. */}
+    <QuitDialog host={window.althar} />
   </StrictMode>,
 )

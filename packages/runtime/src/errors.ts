@@ -21,6 +21,15 @@ export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARe
   path: Schema.String,
 }) {}
 
+/** A new repository can't be made where the person chose: a folder of its name is there already, or the name makes no folder. */
+export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('RepositoryRefused', {
+  reason: Schema.Literals(['taken', 'no_name']),
+  /** The folder it would be. */
+  name: Schema.String,
+  /** The folder it would be in. */
+  parent: Schema.String,
+}) {}
+
 /** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
 export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()('RepositoriesNeeded', {
   unknown: Schema.Array(Schema.String),
@@ -286,5 +295,15 @@ export class FolderStayed extends Schema.TaggedError<FolderStayed>()('FolderStay
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */
 export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnanswered', {
   tool: Schema.String,
+  message: Schema.String,
+}) {}
+
+/**
+ * A task's screenshots can't go in a comment on its pull request as asked
+ * (ADR-077): its host takes no pictures, there are none to post, or a
+ * picture of them is no longer kept. Said in words for the person.
+ */
+export class ScreenshotsRefused extends Schema.TaggedError<ScreenshotsRefused>()('ScreenshotsRefused', {
+  why: Schema.Literals(['no_pictures', 'none', 'unkept']),
   message: Schema.String,
 }) {}

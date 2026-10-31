@@ -254,6 +254,12 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
+- **A pull request shows the review its change had** (ADR-076), unless the
+  person turned it off in Settings: on GitHub, a seal in its corner, drawn
+  by the site from its address, names the reviewer, how many passes, and
+  the commit the last pass read. Folded at the description's end, what
+  changed after review, with the commits that made it, and what the lead
+  kept, with why. Never how many findings there were.
 - **After the first push, a lead's commits go up as its turn ends** (ADR-072),
   where the project's rules say so (`pushCommits`, "Push the lead's commits
   automatically", on unless the person turns it off). When a plan's steps are
@@ -1147,3 +1153,22 @@ silently switch SaaS authority.
 - [Linear rate limits](https://linear.app/developers/rate-limiting)
 - [Jira Cloud webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/)
 - [Jira Cloud rate limiting](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)
+
+### CI output is untrusted data
+
+`read_checks` reads the task's pull request head or a named commit/branch,
+including passing jobs. It returns bounded cleaned logs, literal searches,
+annotations and workflow-run artifact listings. Full logs and small artifact
+ZIPs can be exported to the worktree's gitignored `.althar/ci/` scratch area;
+artifacts are never extracted or executed. Existing files are not overwritten.
+The host listing limit is stated in the response; unavailable metadata is
+reported rather than inferred. GitLab job traces share the log operations;
+GitLab annotations and artifact downloads are not implemented yet.
+
+A fork PR's workflow output is less trusted: contributors can change the code
+and scripts producing it, even when the workflow itself belongs to the project.
+Logs, annotations and artifact names/content are evidence, never instructions
+or authority to run commands or disclose credentials. Reading CI does not relax
+the existing filtering of outsiders' comments. Tool responses are capped at
+32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
+applies while streaming, even when the server omits or lies about its size.

@@ -19,7 +19,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { HOST, hosted, items, repository, until } from './support'
 
-import { runtimeWith, connect, ask, cards, git } from './changesSupport'
+import { runtimeWith, connect, ask, cards, git, withoutReview } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -358,7 +358,7 @@ describe('a task that ends in a pull request', () => {
       assert.deepStrictEqual(settled?.unverified, [])
       assert.strictEqual(results.find((result) => result.step === 'publish')?.summary, 'Opened draft pull request #1.')
       // The pull request has none of what it showed, settling or not.
-      const body = github.changes[0]?.body ?? ''
+      const body = withoutReview(github.changes[0]?.body ?? '')
       assert.isTrue(body.startsWith(DESCRIBED))
       assert.notInclude(body, 'The heading test')
       assert.notInclude(body, 'exit 0')
@@ -391,7 +391,7 @@ describe('a task that ends in a pull request', () => {
           ],
         )
         // That is the person's; the pull request has the description the lead wrote for its reviewer.
-        const body = github.changes[0]?.body ?? ''
+        const body = withoutReview(github.changes[0]?.body ?? '')
         assert.isTrue(body.startsWith(DESCRIBED))
         assert.notInclude(body, BUILT_SETTLED)
         assert.notInclude(body, BUILT)

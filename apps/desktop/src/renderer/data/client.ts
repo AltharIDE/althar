@@ -15,6 +15,7 @@ import {
   type ProjectNote,
   type ProjectRulesView,
   type SandboxEdits,
+  type SealStyle,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -36,6 +37,8 @@ import {
   type FileDiff,
   type FolderHeld,
   type FolderReading,
+  type MadeRepository,
+  type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
   type IssueList,
@@ -105,6 +108,10 @@ export interface Client {
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
+  readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
+  /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
+  readonly makeRepository: (grant: string, name: string) => Promise<MadeRepository>
   /**
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
@@ -203,6 +210,10 @@ export interface Client {
   readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
+  readonly setReviewSeal: (on: boolean) => Promise<void>
+  /** How the review seal looks. */
+  readonly setReviewSealStyle: (style: SealStyle) => Promise<void>
   /** A project's automations, for its Automations tab. */
   readonly getAutomations: (projectId: string) => Promise<AutomationsSnapshot>
   /** One automation, for its own page: its definition, its limits and its runs. */
@@ -408,6 +419,12 @@ export interface Client {
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review: in a task of several repositories, the one at `url`. */
   readonly markReady: (taskId: string, url?: string) => Promise<void>
+  /** Puts the task's screenshots, as its Outputs show them, in the comment on its pull request at `url`, without the views left out (ADR-077). */
+  readonly postScreenshots: (input: {
+    readonly taskId: string
+    readonly url: string
+    readonly leftOut: ReadonlyArray<string>
+  }) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
@@ -594,6 +611,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
+    makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
         api.OpenProject({
@@ -640,6 +659,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
+    setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),
     getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
     getAutomation: (automationId) => settle(api.GetAutomation({ automationId })),
     makeAutomation: ({ projectId, definition, on }) =>
@@ -744,6 +765,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId, url) => command((commandId) => api.MarkReady({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
+    postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
     merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

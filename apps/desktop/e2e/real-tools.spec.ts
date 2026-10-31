@@ -95,6 +95,7 @@ test('a real coordinator and lead install, run, screenshot, stop, and run checks
       ALTHAR_PROFILE: join(home, 'profile'),
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_CODE_HOME: home,
+      ALTHAR_QUIT_WITHOUT_ASKING: '1',
       ALTHAR_FAKE_CONNECTORS: 'github',
       ALTHAR_FAKE_REMOTE: remote,
       // A flaky test GitHub runs again, and a build another service reported, which it can't.

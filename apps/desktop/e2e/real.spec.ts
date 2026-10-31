@@ -39,7 +39,13 @@ test('a real agent plans a task, leads it and answers', async () => {
   const { ALTHAR_FAKE_AGENTS: _, ...env } = process.env
   const app = await electron.launch({
     args: [join(import.meta.dirname, '..')],
-    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees'), ALTHAR_CODE_HOME: home },
+    env: {
+      ...env,
+      ALTHAR_PROFILE: join(home, 'profile'),
+      ALTHAR_WORKTREES: join(home, 'worktrees'),
+      ALTHAR_CODE_HOME: home,
+      ALTHAR_QUIT_WITHOUT_ASKING: '1',
+    },
   })
   try {
     await app.evaluate(({ dialog }, chosen) => {
