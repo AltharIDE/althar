@@ -1758,7 +1758,10 @@ export class Queries extends Context.Service<
       /** How long a task is between agents, or its lead's commits on their way up, before it is the person's (`betweenAgents`). */
       const betweenMs = config.betweenAgents === undefined ? BETWEEN_AGENTS_MS : Duration.toMillis(config.betweenAgents)
 
-      /** Whether the checks on a task's pull request's head have run longer than Althar waits for them, or it gave up on them so. */
+      /**
+       * Whether Althar no longer sees the checks on a task's pull request's head through: they have run longer than it waits for
+       * them, or it gave up on them so, or its host won't show them (ADR-041), when what it last read of them never changes.
+       */
       const ranTooLong = (taskId: string, head: string | null) =>
         Effect.gen(function* () {
           if (head === null) return false
@@ -1769,8 +1772,9 @@ export class Queries extends Context.Service<
                 WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change' AND o.kind = 'checks_running'
                 AND json_extract(o.payload, '$.id') = ${`running:${head}`}) AS since,
               EXISTS (SELECT 1 FROM observations o JOIN external_links l ON l.id = o.subject_id
-                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change' AND o.kind = 'checks_stuck'
-                AND json_extract(o.payload, '$.id') = ${`stuck:${head}`}) AS stuck`
+                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change'
+                AND json_extract(o.payload, '$.id') IN (${`stuck:${head}`}, ${`unreadable:${head}`})
+                AND o.kind IN ('checks_stuck', 'checks_unreadable')) AS stuck`
           if (row === undefined) return false
           const limit = Duration.toMillis(config.checksStuck ?? STUCK_AFTER)
           return row.stuck === 1 || (row.since !== null && (yield* Clock.currentTimeMillis) - Date.parse(row.since) >= limit)
@@ -1978,7 +1982,7 @@ export class Queries extends Context.Service<
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
           const going = task.runState === 'succeeded' ? byItself(shown) : null
-          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's. Commits made outside
+          // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
           // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
           const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
           // Its last agent gone a moment ago, no turn of its cut short and nothing that says why: the next is on its way, as a step
@@ -2006,8 +2010,10 @@ export class Queries extends Context.Service<
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173).
-            if (task.runState === 'succeeded') return checksRun || fixing?.withLead === true || goes !== null ? 'running' : 'ready'
+            // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
+            // conflict round whose merge they fail on handed them back, its lead not told again.
+            const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
+            if (task.runState === 'succeeded') return checksRun || withLead || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'

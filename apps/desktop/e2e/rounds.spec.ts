@@ -29,7 +29,7 @@ const squashMerge = (remote: string, branch: string) => {
   git(clone, 'push', '-q', 'origin', 'main')
 }
 
-test('a merged task goes back to work when the person writes to its lead, and ships it as a second pull request', async () => {
+test('a merged task goes back to work when the person writes to its lead, and ships it as a second pull request by itself', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const remote = join(home, 'api.git')
@@ -69,17 +69,15 @@ test('a merged task goes back to work when the person writes to its lead, and sh
     await expect(work.getByText('PR #1 merged')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/rounds-running-board.png', animations: 'disabled' })
 
-    // Done, it is ready again: its commit is in no pull request, and a new one opens from the task.
-    await expect(work.getByText('Ready for a new pull request')).toBeVisible()
-    await page.screenshot({ path: 'test-results/rounds-ready-board.png', animations: 'disabled' })
+    // Done, its commit is in no pull request: a new draft opens by itself, as its plan's did, and the card is under way until it
+    // has (ADR-034, DEV-173). It is ready to accept, never ready for a pull request the person would only have to open.
+    await expect(work.getByText('Ready to accept')).toBeVisible()
+    await expect(work.getByText('Ready for a new pull request')).toHaveCount(0)
     await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await page
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Outputs/ })
       .click()
-    await expect(page.getByText('One commit after PR #1 isn’t in a pull request yet.')).toBeVisible()
-    await page.screenshot({ path: 'test-results/rounds-offer.png', animations: 'disabled' })
-    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
 
     // The task has both: the new draft, on a branch of its own from main, and the merged one before it.
     await expect(page.getByText('Before this: PR #1, merged on GitHub.')).toBeVisible()
