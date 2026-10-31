@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { chromium } from '@playwright/test'
+import { chromium, type Page } from '@playwright/test'
 
 import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
 
@@ -104,7 +104,9 @@ const started = spawn('arch', [`-${lipo}`, join(app, 'Contents', 'MacOS', produc
   env: { ...process.env, ALTHAR_PROFILE: profile, ALTHAR_WORKTREES: join(profile, 'worktrees') },
   stdio: 'ignore',
 })
-const until = async (what: string, done: () => boolean | Promise<boolean>, seconds = 120) => {
+// Rosetta translates each program the first time it runs, which takes minutes for Electron on a busy Mac.
+const opening = arch === 'x64' && appleSilicon ? 900 : 120
+const until = async (what: string, done: () => boolean | Promise<boolean>, seconds = opening) => {
   for (let i = 0; i < seconds; i += 1) {
     if (
       await Promise.resolve()
@@ -121,17 +123,21 @@ try {
   const log = join(profile, 'logs', 'runtime.log')
   if (await until("Althar's runtime didn't get ready", () => existsSync(log) && readFileSync(log, 'utf8').includes('Runtime ready')))
     ok('Althar opens and its runtime is ready')
-  await until('Chromium never answered on its debugging port', async () => (await fetch(`http://127.0.0.1:${port}/json/version`)).ok)
+  if (
+    !(await until('Chromium never answered on its debugging port', async () => (await fetch(`http://127.0.0.1:${port}/json/version`)).ok))
+  )
+    throw new Error('Althar has no window to read.')
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
-  const page = browser
-    .contexts()
-    .flatMap((context) => context.pages())
-    .find((it) => !it.url().startsWith('devtools:'))
-  if (page === undefined) bad('Althar has no window')
+  // Althar's window, among the menu bar's: the one whose first screen lists the agents, once it has found them.
+  const agentsIn = (page: Page) => page.getByRole('list', { name: /^Agents on / }).getByRole('listitem')
+  let page: Page | undefined
+  await until('the first screen found no agent', async () => {
+    for (const each of browser.contexts().flatMap((context) => context.pages())) if ((await agentsIn(each).count()) > 0) page = each
+    return page !== undefined
+  })
+  if (page === undefined) bad('no window of Althar’s shows its first screen')
   else {
-    const agents = page.getByRole('list', { name: /^Agents on / }).getByRole('listitem')
-    if (await until('the first screen found no agent', async () => (await agents.count()) > 0, 60))
-      ok(`the first screen finds ${(await agents.allInnerTexts()).map((row) => row.split('\n')[0]).join(', ')}`)
+    ok(`the first screen finds ${(await agentsIn(page).allInnerTexts()).map((row) => row.split('\n')[0]).join(', ')}`)
     // Rosetta marks the processes it translates (P_TRANSLATED in ps's flags); Chromium's own answer names the Mac's chip, not the app's.
     const translated = execFileSync('ps', ['-axo', 'flags=,command='], { encoding: 'utf8' })
       .split('\n')
@@ -148,6 +154,8 @@ try {
     process.stdout.write(`${shot}\n`)
   }
   await browser.close().catch(() => undefined)
+} catch (error) {
+  bad(String(error))
 } finally {
   started.kill()
   rmSync(profile, { recursive: true, force: true })
