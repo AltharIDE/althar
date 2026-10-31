@@ -190,15 +190,16 @@ describe('a new project', () => {
     })
     const openProject = vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: 'Git couldn’t read it.' })))
     const { host, view, onCreated } = opened({ readFolder, openProject }, { pickFolders, grantDropped: vi.fn(async () => null) })
-    const choose = screen.getByRole('button', { name: 'Choose a folder…' })
-    await userEvent.click(choose)
+    // The empty state gives way to the folder being read, and comes back when it can't be: the button is found each time.
+    const choose = () => screen.getByRole('button', { name: 'Choose a folder…' })
+    await userEvent.click(choose())
     expect(await screen.findByText('That’s a folder inside mono. Add mono itself.')).toBeTruthy()
-    await userEvent.click(choose)
+    await userEvent.click(choose())
     expect(await screen.findByText('There’s no git repository in notes.')).toBeTruthy()
-    await userEvent.click(choose)
+    await userEvent.click(choose())
     expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
     // Nothing chosen adds nothing.
-    await userEvent.click(choose)
+    await userEvent.click(choose())
     expect(screen.queryByRole('list', { name: 'Its folders' })).toBeNull()
 
     const page = view.container.querySelector('section') as Element
@@ -208,7 +209,7 @@ describe('a new project', () => {
 
     // Named and with a folder, the runtime says no: the foot says why, and the tab stays.
     await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Northwind')
-    await userEvent.click(choose)
+    await userEvent.click(choose())
     await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(1))
     await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))
     expect(await screen.findByText('Git couldn’t read it.')).toBeTruthy()

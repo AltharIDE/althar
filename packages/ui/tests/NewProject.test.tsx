@@ -122,6 +122,27 @@ describe('starting from nothing', () => {
     expect(onCreate).toHaveBeenCalledOnce()
   })
 
+  it('shows where the folders will be until one is added, saying what a new repository is named', () => {
+    const { again } = tab({ name: 'Nördwind Ops!', folders: [], onStartFresh: vi.fn() })
+    expect(screen.getByText('Drop a git repository here')).toBeTruthy()
+    expect(screen.getByText('New repository makes an empty one named nordwind-ops, in a folder you choose.')).toBeTruthy()
+    again({ name: '', folders: [], onStartFresh: vi.fn() })
+    expect(screen.getByText('New repository makes an empty one named after the project, in a folder you choose.')).toBeTruthy()
+    again({ folders: [APP], onStartFresh: vi.fn() })
+    expect(screen.queryByText('Drop a git repository here')).toBeNull()
+    expect(screen.getByText('or drop them here')).toBeTruthy()
+  })
+
+  it('keeps focus on Choose a folder as the first folder takes the empty state’s place, and as the last gives it back', () => {
+    const { again } = tab({ folders: [], onStartFresh: vi.fn() })
+    screen.getByRole('button', { name: 'Choose a folder…' }).focus()
+    again({ folders: [APP], onStartFresh: vi.fn() })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Choose a folder…' }))
+    expect(screen.queryByText('Drop a git repository here')).toBeNull()
+    again({ folders: [], onStartFresh: vi.fn() })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Choose a folder…' }))
+  })
+
   it('has no way to start one without a way to, and asks for a folder alone', () => {
     tab({ folders: [] })
     expect(screen.queryByRole('button', { name: 'New repository…' })).toBeNull()

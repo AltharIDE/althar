@@ -124,6 +124,10 @@ export interface NewProjectText {
   fresh: string
   /** Said of a new repository in its row, where a read one says its remote. */
   freshFact: string
+  /** Before anything is added: where the folders will be. */
+  zone: string
+  /** Under it, what New repository makes: named after the project, by the folder its name makes, null before it is named. */
+  freshNote: (folder: string | null) => string
   found: string
   foundLike: (name: string) => string
   add: string
@@ -160,6 +164,8 @@ export const newProjectText: NewProjectText = {
   chooseNote: 'or drop them here',
   fresh: 'New repository…',
   freshFact: 'new repository',
+  zone: 'Drop a git repository here',
+  freshNote: (folder) => `New repository makes an empty one named ${folder ?? 'after the project'}, in a folder you choose.`,
   found: `On ${device.this}`,
   foundLike: (name) => `On ${device.this}, named like ${name}`,
   add: 'Add',
@@ -231,6 +237,20 @@ export type NewProjectProps = RootProps<
     text?: Partial<NewProjectText>
   }
 >
+
+/**
+ * The folder a new repository named after the project gets, as the runtime
+ * names it (`slugify` in @althar/runtime): northwind-ops, for Northwind Ops.
+ */
+export const repositoryFolder = (name: string) =>
+  name
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/, '')
 
 /** What is missing when Create is pressed. */
 type Missing = 'name' | 'folder' | null
@@ -320,6 +340,15 @@ export function NewProject({
     ;(buttons[Math.min(was.at, buttons.length - 1)] ?? chooseButton.current)?.focus()
   })
 
+  // The first folder takes the place of the empty state, and the last gives it back: its buttons go with it, so focus goes to Choose a folder.
+  const empty = folders.length === 0
+  const wasEmpty = useRef(empty)
+  useEffect(() => {
+    if (wasEmpty.current === empty) return
+    wasEmpty.current = empty
+    if (document.activeElement === null || document.activeElement === document.body) chooseButton.current?.focus()
+  }, [empty])
+
   // Escape makes nothing, and ⌘↵ makes it, from anywhere on the page; what is open over it, a tooltip too, hears Escape first.
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event)
@@ -407,7 +436,7 @@ export function NewProject({
           <h2 id={ids.folders} className={s.title}>
             {t.folders}
           </h2>
-          {over && <div className={s.empty} aria-hidden="true" />}
+          {over && !empty && <div className={s.empty} aria-hidden="true" />}
           {folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
               {folders.map((folder, at) => (
@@ -423,29 +452,62 @@ export function NewProject({
               ))}
             </ul>
           )}
-          <div className={s.chooseRow}>
-            <Button
-              ref={chooseButton}
-              size="small"
-              icon="folder"
-              onClick={onChoose}
-              aria-describedby={missing === 'folder' ? ids.missing : undefined}
-            >
-              {t.choose}
-            </Button>
-            {fresh && (
-              <Button size="small" icon="plus" onClick={startFresh}>
-                {t.fresh}
-              </Button>
-            )}
-            {missing === 'folder' ? (
-              <span id={ids.missing} className={s.missing} role="alert">
-                {fresh ? t.needsFolderOrFresh : t.needsFolder}
+          {empty ? (
+            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+            <div className={cx(s.zone, over && s.zoneOver)}>
+              <span className={s.zoneIcon} aria-hidden="true">
+                <Icon name="folder" size={18} />
               </span>
-            ) : (
-              <span className={s.note}>{t.chooseNote}</span>
-            )}
-          </div>
+              <p className={s.zoneTitle}>{t.zone}</p>
+              <div className={s.zoneButtons}>
+                <Button
+                  ref={chooseButton}
+                  size="small"
+                  icon="folder"
+                  onClick={onChoose}
+                  aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                >
+                  {t.choose}
+                </Button>
+                {fresh && (
+                  <Button size="small" icon="plus" onClick={startFresh}>
+                    {t.fresh}
+                  </Button>
+                )}
+              </div>
+              {missing === 'folder' ? (
+                <p id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </p>
+              ) : (
+                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+              )}
+            </div>
+          ) : (
+            <div className={s.chooseRow}>
+              <Button
+                ref={chooseButton}
+                size="small"
+                icon="folder"
+                onClick={onChoose}
+                aria-describedby={missing === 'folder' ? ids.missing : undefined}
+              >
+                {t.choose}
+              </Button>
+              {fresh && (
+                <Button size="small" icon="plus" onClick={startFresh}>
+                  {t.fresh}
+                </Button>
+              )}
+              {missing === 'folder' ? (
+                <span id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </span>
+              ) : (
+                <span className={s.note}>{t.chooseNote}</span>
+              )}
+            </div>
+          )}
           {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}

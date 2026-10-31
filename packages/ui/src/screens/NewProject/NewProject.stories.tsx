@@ -118,6 +118,9 @@ export const Named: Story = {}
 /** Just opened: no name, so no mark yet, and what is found is offered as it is. */
 export const Unnamed: Story = { args: { name: '', found: { like: null, first: FOUND.more, more: [] } } }
 
+/** Nothing on this Mac to offer: where the folders will be, with the two ways to add one. */
+export const NothingFound: Story = { args: { name: 'Northwind Ops', found: { like: null, first: [], more: [] } } }
+
 /** Still looking on this Mac: nothing offered yet. */
 export const Looking: Story = { args: { found: null } }
 
@@ -311,6 +314,7 @@ export const AllStates: Story = {
       cells={[
         { state: 'unnamed', node: <NewProject {...args} name="" found={{ like: null, first: FOUND.more, more: [] }} /> },
         { state: 'named', node: <NewProject {...args} /> },
+        { state: 'nothing found', node: <NewProject {...args} {...NothingFound.args} /> },
         { state: 'looking', node: <NewProject {...args} found={null} /> },
         { state: 'reading', node: <NewProject {...args} {...Reading.args} /> },
         { state: 'read', node: <NewProject {...args} {...Read.args} /> },
