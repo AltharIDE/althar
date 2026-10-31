@@ -24,8 +24,10 @@
     "verify": "bun run check && bun run test:coverage && bun run build"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
     "iconoir-react": "^7.12.1",
     "marked": "^18.0.14",
+    "mermaid": "^12.2.0",
     "radix-ui": "^1.6.7",
     "shiki": "^4.5.0"
   },
