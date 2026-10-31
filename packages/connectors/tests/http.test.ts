@@ -204,7 +204,14 @@ describe('a call to a service', () => {
       assert.strictEqual(failure(yield* Effect.exit(slow.json(Thing, 'GET', 'https://api.test/thing')))?.reason, 'unreachable')
       const unreadable = makeHttp({
         product: 'github',
-        fetch: async () => ({ status: 200, headers: new Headers(), text: () => Promise.reject(new Error('reset')) }) as unknown as Response,
+        fetch: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error('reset'))
+              },
+            }),
+          ),
         authorization: Effect.succeed('Bearer t'),
       })
       assert.strictEqual(failure(yield* Effect.exit(unreadable.text('https://api.test/log')))?.reason, 'unreachable')
@@ -428,3 +435,34 @@ describe('a GraphQL call', () => {
     }),
   )
 })
+
+it.effect('caps streamed downloads even without content-length and preserves binary bytes', () =>
+  Effect.gen(function* () {
+    let cancelled = false
+    const http = makeHttp({
+      product: 'github',
+      authorization: Effect.succeed('Bearer secret'),
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([0, 255, 80]))
+              controller.enqueue(new Uint8Array(10))
+            },
+            cancel() {
+              cancelled = true
+            },
+          }),
+        ),
+    })
+    const error = yield* Effect.flip(http.bytes('https://api.test/file', 4))
+    assert.include(error.message, 'size cap')
+    assert.isTrue(cancelled)
+    const binary = makeHttp({
+      product: 'github',
+      authorization: Effect.succeed('Bearer secret'),
+      fetch: async () => new Response(new Uint8Array([0, 255, 80])),
+    })
+    assert.deepEqual([...(yield* binary.bytes('https://api.test/file', 4))], [0, 255, 80])
+  }),
+)

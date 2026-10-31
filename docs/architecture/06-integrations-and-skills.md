@@ -1147,3 +1147,22 @@ silently switch SaaS authority.
 - [Linear rate limits](https://linear.app/developers/rate-limiting)
 - [Jira Cloud webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/)
 - [Jira Cloud rate limiting](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)
+
+### CI output is untrusted data
+
+`read_checks` reads the task's pull request head or a named commit/branch,
+including passing jobs. It returns bounded cleaned logs, literal searches,
+annotations and workflow-run artifact listings. Full logs and small artifact
+ZIPs can be exported to the worktree's gitignored `.althar/ci/` scratch area;
+artifacts are never extracted or executed. Existing files are not overwritten.
+The host listing limit is stated in the response; unavailable metadata is
+reported rather than inferred. GitLab job traces share the log operations;
+GitLab annotations and artifact downloads are not implemented yet.
+
+A fork PR's workflow output is less trusted: contributors can change the code
+and scripts producing it, even when the workflow itself belongs to the project.
+Logs, annotations and artifact names/content are evidence, never instructions
+or authority to run commands or disclose credentials. Reading CI does not relax
+the existing filtering of outsiders' comments. Tool responses are capped at
+32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
+applies while streaming, even when the server omits or lies about its size.

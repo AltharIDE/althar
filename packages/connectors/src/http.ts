@@ -34,6 +34,7 @@ export interface Http {
    * not by `fetch`: the sign-in goes only to the service's own origin, never
    * to storage elsewhere that a log is sent to.
    */
+  bytes(url: string, maxBytes: number): Effect.Effect<Uint8Array, ConnectorFailed>
   text(url: string): Effect.Effect<string, ConnectorFailed>
   /** A GET whose answer is its headers, such as who Bitbucket Data Center says is signed in. */
   headers(url: string): Effect.Effect<Headers, ConnectorFailed>
@@ -267,6 +268,7 @@ export const makeHttp = (options: HttpOptions): Http => {
       readonly etag?: string
       readonly manual?: boolean
       readonly elsewhere?: boolean
+      readonly maxBytes?: number
     },
   ) =>
     Effect.gen(function* () {
@@ -293,10 +295,34 @@ export const makeHttp = (options: HttpOptions): Http => {
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })
       const body = yield* Effect.tryPromise({
-        try: () => response.text(),
+        try: async () => {
+          const limit = init.maxBytes ?? 16 * 1024 * 1024
+          const reader = response.body?.getReader()
+          if (reader === undefined) return new Uint8Array()
+          const chunks: Uint8Array[] = []
+          let size = 0
+          try {
+            for (;;) {
+              const next = await reader.read()
+              if (next.done) break
+              size += next.value.byteLength
+              if (size > limit) throw new Error(`Response exceeds ${limit} byte size cap`)
+              chunks.push(next.value)
+            }
+          } finally {
+            await reader.cancel()
+          }
+          const bytes = new Uint8Array(size)
+          let offset = 0
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset)
+            offset += chunk.length
+          }
+          return bytes
+        },
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })
-      return { status: response.status, headers: response.headers, body }
+      return { status: response.status, headers: response.headers, body: new TextDecoder().decode(body), bytes: body }
     }).pipe(
       Effect.timeoutOrElse({
         duration: timeout,
@@ -315,6 +341,41 @@ export const makeHttp = (options: HttpOptions): Http => {
       Effect.flatMap((value) => Schema.decodeUnknownEffect(schema)(value)),
       Effect.mapError((error) => (error instanceof ConnectorFailed ? error : invalid(error.message))),
     )
+
+  const bytes = (url: string, maxBytes: number) =>
+    Effect.gen(function* () {
+      // `fetch` would send the sign-in on to wherever it is redirected (Electron's net.fetch does), and the storage a log is
+      // kept in refuses a request signed twice: by its URL and by a token not its own. Each hop is asked here instead.
+      const origin = new URL(url).origin
+      let at = url
+      for (let hop = 0; hop <= REDIRECTS_FOLLOWED; hop++) {
+        const elsewhere = new URL(at).origin !== origin
+        const answer = yield* call('GET', at, { accept: '*/*', manual: true, elsewhere, maxBytes })
+        const location = REDIRECTS.has(answer.status) ? answer.headers.get('location') : null
+        if (location === null) {
+          if (answer.status >= 200 && answer.status < 300) return answer.bytes
+          const now = yield* Clock.currentTimeMillis
+          if (!elsewhere) return yield* Effect.fail(failureOf(product, answer.status, answer.headers, answer.body, now))
+          // Storage elsewhere says why in its own XML, which isn't words Althar can read: where it was, and its status, are. Its
+          // refusal is of the signed address it was sent to, not of Althar's sign-in, which never went there.
+          const failed = failureOf(
+            product,
+            answer.status,
+            answer.headers,
+            answer.body,
+            now,
+            `${new URL(at).host} answered ${answer.status}`,
+          )
+          return yield* Effect.fail(
+            failed.reason === 'unauthorized' || failed.reason === 'forbidden'
+              ? new ConnectorFailed({ product, reason: 'rejected', status: answer.status, message: failed.message })
+              : failed,
+          )
+        }
+        at = new URL(location, at).toString()
+      }
+      return yield* Effect.fail(invalid(`The service redirected more than ${REDIRECTS_FOLLOWED} times`))
+    })
 
   return {
     json: (schema, method, url, body) =>
@@ -336,40 +397,8 @@ export const makeHttp = (options: HttpOptions): Http => {
         else keep(url, { etag, body: ok.body })
         return yield* decode(schema, ok.body)
       }),
-    text: (url) =>
-      Effect.gen(function* () {
-        // `fetch` would send the sign-in on to wherever it is redirected (Electron's net.fetch does), and the storage a log is
-        // kept in refuses a request signed twice: by its URL and by a token not its own. Each hop is asked here instead.
-        const origin = new URL(url).origin
-        let at = url
-        for (let hop = 0; hop <= REDIRECTS_FOLLOWED; hop++) {
-          const elsewhere = new URL(at).origin !== origin
-          const answer = yield* call('GET', at, { accept: '*/*', manual: true, elsewhere })
-          const location = REDIRECTS.has(answer.status) ? answer.headers.get('location') : null
-          if (location === null) {
-            if (answer.status >= 200 && answer.status < 300) return answer.body
-            const now = yield* Clock.currentTimeMillis
-            if (!elsewhere) return yield* Effect.fail(failureOf(product, answer.status, answer.headers, answer.body, now))
-            // Storage elsewhere says why in its own XML, which isn't words Althar can read: where it was, and its status, are. Its
-            // refusal is of the signed address it was sent to, not of Althar's sign-in, which never went there.
-            const failed = failureOf(
-              product,
-              answer.status,
-              answer.headers,
-              answer.body,
-              now,
-              `${new URL(at).host} answered ${answer.status}`,
-            )
-            return yield* Effect.fail(
-              failed.reason === 'unauthorized' || failed.reason === 'forbidden'
-                ? new ConnectorFailed({ product, reason: 'rejected', status: answer.status, message: failed.message })
-                : failed,
-            )
-          }
-          at = new URL(location, at).toString()
-        }
-        return yield* Effect.fail(invalid(`The service redirected more than ${REDIRECTS_FOLLOWED} times`))
-      }),
+    bytes,
+    text: (url) => bytes(url, 16 * 1024 * 1024).pipe(Effect.map((body) => new TextDecoder().decode(body))),
     headers: (url) =>
       call('GET', url, {}).pipe(
         Effect.flatMap(success),
