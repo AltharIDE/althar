@@ -54,8 +54,8 @@ export const pushFailureOf = (
 }
 
 /** All git said and how it ended, for a quiet Details: what the sentence leaves out. */
-export const pushDetailOf = (failed: Pick<GitFailed, 'stderr' | 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>
-  [failed.stderr.trim(), endedOf(failed)].filter((line) => line !== '').join('\n')
+export const pushDetailOf = (failed: Pick<GitFailed, 'stderr' | 'reason' | 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>
+  [failed.stderr.trim(), failed.reason?.trim() ?? '', endedOf(failed)].filter((line) => line !== '').join('\n')
 
 /** How a git command ended, where it failed: past its time, stopped by a signal, or its exit code. */
 export const endedOf = (failed: Pick<GitFailed, 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>

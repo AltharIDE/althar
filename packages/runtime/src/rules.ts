@@ -392,11 +392,127 @@ const envFile = (path: string) => {
 const envKept = (path: string) =>
   kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', 'floor')
 
-/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const DEVICE_BRIDGE_REFUSED =
+  'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+
+/**
+ * The Flatpak grants the app a broad host bridge; agents must not invoke it
+ * directly, nor the ssh Althar's own git runs through it, which signs in with
+ * the person's SSH agent (ADR-073).
+ */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
-  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
-    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
-    : undefined
+  ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
+
+/** That ssh, or the bridge itself, named in a command line. */
+const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
+
+/**
+ * It as an assignment's value, which the words a command is read as don't
+ * keep: `GIT_SSH_COMMAND=…`, `-c core.sshCommand=…`, `GIT_CONFIG_VALUE_0=…`,
+ * or `X=…` for a later `$X`.
+ */
+const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-ssh|flatpak-spawn)/i
+
+/**
+ * Or a value a substitution finds, whose spaces don't end it:
+ * `core.sshCommand="$(command -v althar-host-ssh)"`, or with backticks.
+ */
+const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-ssh|flatpak-spawn)/i
+
+/** A shell given a script to run, or `eval`, which runs single-quoted text after all. */
+const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
+
+/**
+ * A `git commit` or `git tag` message about to start: `-m `, `-am`,
+ * `--message=`, after the command's start and nothing but its own words,
+ * which may be quoted (`-c user.name='A Name'`, `--author="…"`) but not
+ * substituted. Any other program may run the single-quoted text it's given
+ * (`python3 -c '…'`, `echo '…' | sh`), and the list of those has no end.
+ */
+const MESSAGE_FOLLOWS =
+  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+(?:[^\s;&|'"`$\\]|'[^']*'|"[^"`$\\]*")+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'[^']*'|"[^"`$\\]*")*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
+
+/**
+ * The line as the shell substitutes in it, as far as a message goes: a
+ * `git commit` or `git tag` message in single quotes, such as one quoting
+ * the command, substitutes nothing, unless the line hands it to a shell to
+ * run. Other single-quoted text is kept, as source something may run. A
+ * shell or `eval` named only in a message runs nothing. A comment is left
+ * out as the shell leaves it, and a message never runs across a line, so
+ * neither a comment, a heredoc's text nor a `$'…'` can fake its start.
+ */
+const substitutedIn = (command: string): string => {
+  let kept = ''
+  let doubled = false
+  // Whether a word starts here: after a blank or operator the shell reads as
+  // one, not an escaped one such as `\ `.
+  let wordStarts = true
+  for (let at = 0; at < command.length; at++) {
+    const char = command.charAt(at)
+    if (char === '\\') {
+      // `\` and a newline join two lines, as if neither were there.
+      if (command[at + 1] !== '\n') {
+        kept += command.slice(at, at + 2)
+        wordStarts = false
+      }
+      at++
+    } else if (char === '"') {
+      doubled = !doubled
+      kept += char
+      wordStarts = false
+    } else if (char === '#' && !doubled && wordStarts) {
+      // A comment, to the line's end.
+      const end = command.indexOf('\n', at)
+      at = (end === -1 ? command.length : end) - 1
+    } else if (char === '$' && command[at + 1] === "'" && !doubled) {
+      // `$'…'`, where `\'` doesn't end it: kept as written.
+      let end = at + 2
+      while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
+      kept += command.slice(at, end + 1)
+      at = end
+      wordStarts = false
+    } else if (char === "'" && !doubled) {
+      // Single-quoted text, as far as its closing quote, or the line's end.
+      const closing = command.indexOf("'", at + 1)
+      const end = closing === -1 ? command.length : closing
+      const quoted = command.slice(at, end + 1)
+      kept += MESSAGE_FOLLOWS.test(kept) && !quoted.includes('\n') ? "''" : quoted
+      at = end
+      wordStarts = false
+    } else {
+      kept += char
+      wordStarts = !doubled && /[\s;&|()]/.test(char)
+    }
+  }
+  return RUNS_A_SCRIPT.test(kept) ? command : kept
+}
+
+/** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
+const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
+
+/** A path in a git folder, or a git config file. */
+const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$|config\.worktree$/
+
+/**
+ * A command line that has git run the device's ssh, or the bridge, as it is
+ * now or once it's kept in a config for a later plain `git fetch`: set as a
+ * variable or with `-c`, with `git config` (its ssh settings, an alias), or
+ * written into a git folder. A line that only names it, a search or a commit
+ * message, sets nothing and runs nothing.
+ */
+const deviceSshReason = (command: string): string | undefined => {
+  if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
+  if (
+    [DEVICE_BRIDGE_ASSIGNED, GIT_RUNS_SET].some((pattern) => pattern.test(command)) ||
+    DEVICE_BRIDGE_SUBSTITUTED.test(substitutedIn(command))
+  )
+    return DEVICE_BRIDGE_REFUSED
+  const sets = parseCommandLine(command).commands.some((written) => {
+    const words = unwrap(written)
+    return gitCall(words, '/')?.subcommand === 'config' || words.some((word) => GIT_CONFIG_PATH.test(word))
+  })
+  return sets ? DEVICE_BRIDGE_REFUSED : undefined
+}
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -2948,10 +3064,12 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands, system) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused = lineReadings(commandOf(request), system)
-      .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
-      .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
-      .find((reason) => reason !== undefined)
+    const refused =
+      deviceSshReason(commandOf(request)) ??
+      lineReadings(commandOf(request), system)
+        .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+        .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
+        .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
@@ -4730,6 +4848,8 @@ const envOutsideIn = (command: string, cwd: string) => {
  * words the shell expands.
  */
 const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
+  const deviceSsh = deviceSshReason(command)
+  if (deviceSsh !== undefined) return deviceSsh
   if (options.trusted === true) {
     if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)

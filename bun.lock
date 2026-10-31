@@ -238,6 +238,7 @@
         "@althar/domain": "workspace:*",
         "@althar/persistence-sqlite": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
+        "@althar/skills": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
         "effect": "4.0.0-rc.118",
         "fflate": "0.8.3",
@@ -245,6 +246,24 @@
       "devDependencies": {
         "@althar/testing": "workspace:*",
         "@effect/vitest": "4.0.0-rc.118",
+        "@types/node": "^24.0.0",
+        "@vitest/coverage-v8": "5.0.5",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+        "vite-plus": "1.4.0",
+        "vitest": "5.0.5",
+      },
+    },
+    "packages/skills": {
+      "name": "@althar/skills",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.118",
+        "js-yaml": "4.3.2",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-rc.118",
+        "@types/js-yaml": "^4.0.9",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -353,6 +372,8 @@
     "@althar/runtime": ["@althar/runtime@workspace:packages/runtime"],
 
     "@althar/site": ["@althar/site@workspace:apps/site"],
+
+    "@althar/skills": ["@althar/skills@workspace:packages/skills"],
 
     "@althar/testing": ["@althar/testing@workspace:packages/testing"],
 
@@ -1057,6 +1078,8 @@
     "@types/hast": ["@types/hast@3.0.5", "", { "dependencies": { "@types/unist": "*" } }, "sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g=="],
 
     "@types/http-cache-semantics": ["@types/http-cache-semantics@4.2.0", "", {}, "sha512-L3LgimLHXtGkWikKnsPg0/VFx9OGZaC+eN1u4r+OB1XRqH3meBIAVC2zr1WdMH+RHmnRkqliQAOHNJ/E0j/e0Q=="],
+
+    "@types/js-yaml": ["@types/js-yaml@4.0.9", "", {}, "sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg=="],
 
     "@types/keyv": ["@types/keyv@3.1.4", "", { "dependencies": { "@types/node": "*" } }, "sha512-BQ5aZNSCpj7D6K2ksrRCTmKRLEpnPvWDiLPfoGyhZ++8YtiK9d/3DBKPJgry359X/P1PfruyYwvnvwFjuEiEIg=="],
 

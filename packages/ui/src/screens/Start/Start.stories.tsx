@@ -5,7 +5,7 @@ import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
 import { Brand } from '../../foundations/brands/brands'
 import { RuntimeState } from '../../foundations/vocabulary'
-import { CrashReportsLine } from '../../setup/Preferences/Preferences'
+import { CrashReportsLine, SkillsLine } from '../../setup/Preferences/Preferences'
 import { States } from '../../storybook/States'
 import type { RuntimeEntry } from '../../setup/Runtimes/Runtimes'
 import { Start, type StartProps, type StartRepository } from './Start'
@@ -49,10 +49,21 @@ function Picking(props: Partial<StartProps>) {
   )
 }
 
-/* As the app gives it: crash reports' line at the sheet's foot, on until turned off. */
+/* As the app gives it: crash reports' line at the sheet's foot, on until turned off, and agent skills', off until turned on. */
 function Asking(props: StartProps) {
   const [on, setOn] = useState(true)
-  return <Start {...props} foot={<CrashReportsLine on={on} onChange={setOn} />} />
+  const [skills, setSkills] = useState(false)
+  return (
+    <Start
+      {...props}
+      foot={
+        <>
+          <SkillsLine on={skills} onChange={setSkills} />
+          <CrashReportsLine on={on} onChange={setOn} />
+        </>
+      }
+    />
+  )
 }
 
 const meta = {
@@ -140,6 +151,18 @@ export const CrashReportsAsked: Story = {
     await expect(crashes).not.toBeChecked()
     // Making the project never waits on it.
     await expect(within(canvasElement).getByRole('heading', { level: 1 })).toHaveTextContent('Where should they work?')
+  },
+}
+
+/** Agent skills asked once, at the sheet's foot beside crash reports: off until turned on, and Settings named as where to choose them. */
+export const SkillsAsked: Story = {
+  render: (args) => <Asking {...args} />,
+  play: async ({ canvasElement }) => {
+    const skills = within(canvasElement).getByRole('switch', { name: 'Agent skills' })
+    await expect(skills).not.toBeChecked()
+    await expect(skills).toHaveAccessibleDescription(/in Settings, under Skills/)
+    await userEvent.click(skills)
+    await expect(skills).toBeChecked()
   },
 }
 

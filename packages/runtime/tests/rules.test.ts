@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, parse, relative, resolve } from 'node:path'
+import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
@@ -40,6 +40,18 @@ const context: RuleContext = { worktree, defaultBranch: 'main', taskBranch: 'alt
  * which a path in reads as thrown away.
  */
 const furnished = join(import.meta.dirname, 'fixtures', 'home')
+
+/** Ignore a .git folder above a temporary test fixture: some developers' /tmp itself is a checkout. */
+const realPathInFixture = (root: string) => {
+  const fixture = realpathSync(root)
+  return (path: string) => {
+    const resolved = realpathSync(path)
+    const fromFixture = relative(fixture, resolved)
+    if (parse(path).base === '.git' && (fromFixture === '..' || fromFixture.startsWith(`..${sep}`) || isAbsolute(fromFixture)))
+      throw new Error('A .git folder above the temporary test fixture is not part of it.')
+    return resolved
+  }
+}
 
 const request = (fields: Partial<PermissionRequest>): PermissionRequest => ({
   sessionId: 's',
@@ -809,6 +821,88 @@ describe('a role that only reads', () => {
     ]) {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
       assert.include(decided.verdict === 'deny' ? decided.reason : '', 'Agents do not run commands on the device through Flatpak', command)
+    }
+  })
+
+  it('refuses Althar’s own ssh on the device to an agent, however it is named (ADR-011, ADR-073)', () => {
+    for (const command of [
+      '/app/bin/althar-host-ssh -T git@github.com',
+      'GIT_SSH_COMMAND=/app/bin/althar-host-ssh git push origin main',
+      'env GIT_SSH_COMMAND=althar-host-ssh git fetch',
+      'git -c core.sshCommand=/app/bin/althar-host-ssh fetch origin',
+      "git -c core.sshcommand='althar-host-ssh -v' fetch origin",
+      "sh -c 'althar-host-ssh git@github.com'",
+      // Kept in a git config for a later, plain `git fetch` to use.
+      'git config core.sshCommand /app/bin/althar-host-ssh',
+      'git config set --local core.sshcommand althar-host-ssh',
+      'git config --add core.sshCommand "althar-host-ssh -v"',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0=/app/bin/althar-host-ssh git fetch',
+      "git config alias.f '!/app/bin/althar-host-ssh'",
+      "printf '[core]\\n\\tsshCommand = althar-host-ssh\\n' >> ../.git/config",
+      // Or the bridge itself as git's ssh.
+      "git config core.sshCommand 'flatpak-spawn --host ssh'",
+      "GIT_SSH_COMMAND='flatpak-spawn --host ssh' git push origin main",
+      // Through a variable, set on the line.
+      'X=/app/bin/althar-host-ssh; git -c core.sshCommand="$X" fetch',
+      'export GIT_SSH_COMMAND=$(echo althar-host-ssh) && git fetch',
+      // Or found by a substitution, whose spaces don't end the value.
+      'git -c core.sshCommand="$(command -v althar-host-ssh)" fetch',
+      'git -c core.sshCommand=`command -v althar-host-ssh` fetch',
+      'git -c "core.sshCommand=$(command -v althar-host-ssh)" fetch',
+      'X="$(command -v althar-host-ssh)"; git -c core.sshCommand="$X" fetch',
+      // Single quotes handed to a shell to run still substitute.
+      `sh -c 'git -c core.sshCommand="$(command -v althar-host-ssh)" fetch'`,
+      `eval 'git -c core.sshCommand="$(command -v althar-host-ssh)" fetch'`,
+      // Nor is single-quoted source handed to any other program that runs it.
+      `python3 -c 'import os; os.system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
+      `node -e 'require("child_process").execSync("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
+      `echo 'git -c core.sshCommand=$(command -v althar-host-ssh) fetch' | sh`,
+      // A message's start faked where the shell quotes nothing: a comment, `$'…'`, a heredoc.
+      `#; git commit -m '\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      `echo $'\\' ; git commit -m ' ; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      `cat <<EOF\n; git commit -m '\nEOF\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      // Nor a comment the shell never sees, its line joined to the last by `\`.
+      `echo x\\\n#; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
+      `echo x\\\n#; git commit -m '\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      // Nor one after an escaped space, which is still part of the word.
+      `echo x\\ #; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
+      `echo x\\\t#; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
+      // A single-quoted setting before a commit is git's to run, not a message.
+      `git -c core.sshCommand='$(command -v althar-host-ssh)' commit -m 'x'`,
+      `git commit -m 'x' && perl -e 'system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
+      // An apostrophe inside double quotes quotes nothing.
+      `echo "it's"; X="$(command -v althar-host-ssh)"; echo "it's"; git -c core.sshCommand="$X" fetch`,
+    ]) {
+      for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
+        assert.include(
+          decided.verdict === 'deny' ? decided.reason : '',
+          'Agents do not run commands on the device through Flatpak',
+          command,
+        )
+    }
+    // Naming it runs nothing: a search for it, or a commit message about it, isn't refused for it.
+    // Nor with the settings it would be set by beside it.
+    for (const command of [
+      'grep -rn althar-host-ssh apps',
+      "git commit -m 'Ship althar-host-ssh'",
+      "rg -n 'core\\.sshCommand.*althar-host-ssh' packages",
+      "git commit -m 'Guard core.sshCommand from althar-host-ssh'",
+      "git commit -m 'Refuse GIT_SSH_COMMAND and git config core.sshCommand naming althar-host-ssh'",
+      "grep -rn 'GIT_SSH\\|sshCommand\\|flatpak-spawn' apps/desktop/flatpak",
+      'git commit -m "$(printf \'Refuse core.sshCommand set to althar-host-ssh\')"',
+      // A substitution quoted in single quotes is only text.
+      `git commit -m 'Example: git -c core.sshCommand="$(command -v althar-host-ssh)" fetch'`,
+      `git -C . commit -am 'Guard' --message='Example: core.sshCommand=$(command -v althar-host-ssh)'`,
+      `git tag -a v1 -m'Example: core.sshCommand=$(command -v althar-host-ssh)'`,
+      // Quoted settings before the command, or among its own words, are no script either.
+      `git -c user.name='A Name' commit -m 'Document core.sshCommand="$(command -v althar-host-ssh)"'`,
+      `git -c "user.name=A Name" commit --author='A <a@b.c>' -m 'Document core.sshCommand=$(command -v althar-host-ssh)'`,
+      // Naming eval or sh -c in the message runs neither.
+      `git commit -m 'Document why eval of core.sshCommand="$(command -v althar-host-ssh)" is unsafe'`,
+      `git commit -m 'Say why sh -c with core.sshCommand=$(command -v althar-host-ssh) is refused'`,
+    ]) {
+      for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
+        assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
     }
   })
 
@@ -1962,7 +2056,7 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
     mkdirSync(join(root, 'notes'))
     writeFileSync(join(app, 'main.ts'), 'work\n')
     writeFileSync(join(root, 'notes', 'list.txt'), 'notes\n')
-    const here = rules(allow, { scratch: [] })
+    const here = rules(allow, { scratch: [], realPath: realPathInFixture(root) })
     const main = join(app, 'main.ts')
     for (const command of [`cp empty.ts ${main}`, `echo > ${main}`, `sed -i s/a/b/ ${main}`, `tee ${main} < x`, `truncate -s 0 ${main}`])
       assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
@@ -2374,7 +2468,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     writeFileSync(join(root, 'notes.md'), 'mine')
     mkdirSync(join(root, '.evidence'))
     for (const name of ['1-log.txt', '7-log.txt']) writeFileSync(join(root, '.evidence', name), 'mine')
-    const here = rules(allow, { worktree: tree, scratch: [] })
+    const here = rules(allow, { worktree: tree, scratch: [], realPath: realPathInFixture(root) })
     // The shell kept `packages/ui` from the command before: read from the worktree's top, these name nothing that is there.
     for (const command of [
       'cd ../.. && rm -f sb.log',
@@ -2439,7 +2533,7 @@ describe('allowing everything trusts the agent with what the rules can’t read 
     const tree = join(root, 'tree')
     mkdirSync(tree)
     writeFileSync(join(root, 'kept.log'), 'mine')
-    const here = rules(allow, { worktree: tree, scratch: [] })
+    const here = rules(allow, { worktree: tree, scratch: [], realPath: realPathInFixture(root) })
     for (const command of [`rm -f ${join(root, 'gone.log')}`, `git -C ${root} checkout HEAD -- src`])
       assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
     mkdirSync(join(root, '.git'))

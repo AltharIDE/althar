@@ -20,6 +20,7 @@ import {
   fakeHost,
   githubConnection,
   project,
+  projectRules,
   repositories,
   runnables,
 } from './fixtures'
@@ -285,6 +286,70 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
     expect(descriptionOf(move)).toMatch(/The rules changed meanwhile\.$/)
     expect(descriptionOf(tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' }))).not.toMatch(/changed meanwhile/)
+  })
+
+  it('keeps skill and OpenSpec files a task commits on this Mac until each is allowed, each switch a revision of its rules', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const files = within(screen.getByRole('region', { name: 'Repository files' }))
+    // The device by the name the rest of the window gives it; and Althar never says it writes skills into the repository.
+    expect(files.getByText(/stay on this Mac unless you allow them here/)).toBeTruthy()
+    expect(files.queryByText(/this computer|runtime/)).toBeNull()
+    expect(files.getByText(/Althar never puts them there itself/)).toBeTruthy()
+    const skills = files.getByRole('switch', { name: 'Write Althar-managed skills' })
+    const openSpec = files.getByRole('switch', { name: 'Write OpenSpec artifacts' })
+    const push = files.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    for (const each of [skills, openSpec, push]) expect(each.getAttribute('aria-checked')).toBe('false')
+    expect(files.getByText('Blocked')).toBeTruthy()
+    // Writing them never allows pushing them.
+    await userEvent.click(openSpec)
+    expect(openSpec.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryFiles: { writeSkills: false, writeOpenSpec: true, pushProtected: false },
+      }),
+    )
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(push)
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        repositoryFiles: { writeSkills: false, writeOpenSpec: true, pushProtected: true },
+      }),
+    )
+    expect(files.getByText('Allowed')).toBeTruthy()
+  })
+
+  it('shows the repository files the rules allow, as kept', async () => {
+    windowAt('/projects/p1', {
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...projectRules,
+        projectId,
+        repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true },
+      })),
+    })
+    await openSettings()
+    const files = within(await screen.findByRole('region', { name: 'Repository files' }))
+    expect(files.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
+    expect(files.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')
+    expect(files.getByRole('switch', { name: 'Push skill/OpenSpec files' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('puts a repository files switch back and says why when the rules don’t take it', async () => {
+    windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
+      }),
+    })
+    await openSettings()
+    const files = within(screen.getByRole('region', { name: 'Repository files' }))
+    const push = files.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    await userEvent.click(push)
+    expect(await files.findByText('The rules changed meanwhile.')).toBeTruthy()
+    await waitFor(() => expect(push.getAttribute('aria-checked')).toBe('false'))
+    // The task switches say nothing of it.
+    expect(within(screen.getByRole('region', { name: 'Tasks' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
   it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {

@@ -38,9 +38,15 @@ export const settingsRoute = createRoute({
   path: '/settings/$section',
   component: Settings,
   pendingComponent: PagePending,
-  loader: ({ context: { client, cache } }) => {
+  // What every section shows, and the skills too on their own section, read before it shows (ADR-014).
+  loader: ({ params: { section }, context: { client, cache } }) => {
     const read = reads(client)
-    return readFirst(cache.fetchQuery(read.status()), cache.fetchQuery(read.settings()), cache.fetchQuery(read.connections()))
+    return readFirst(
+      cache.fetchQuery(read.status()),
+      cache.fetchQuery(read.settings()),
+      cache.fetchQuery(read.connections()),
+      ...(section === 'skills' ? [cache.fetchQuery(read.skills())] : []),
+    )
   },
   validateSearch: settingsSearchOf,
 })

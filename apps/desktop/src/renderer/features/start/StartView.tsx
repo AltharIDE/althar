@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState } from '@althar/ui'
+import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, SkillsLine } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
@@ -10,6 +10,7 @@ import { device } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
 import { AgentAccounts } from '../accounts/AgentAccounts'
+import { useSkills } from '../settings/useSkills'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
@@ -20,8 +21,9 @@ import type { StartModel } from './useStart'
  * Where the window starts. With no project yet, the kit's Start screen: the
  * agents answering round the mark, and the repositories found where people
  * keep code, ticked into the first project (useFirstProject), and at the
- * sheet's foot crash reports, asked once as a quiet line with their switch
- * (DEV-66), which Settings keeps too. Once there are projects, the home,
+ * sheet's foot agent skills, whether the leads are given Althar's, and
+ * crash reports (DEV-66), each asked once as a quiet line with its switch,
+ * which Settings keeps too. Once there are projects, the home,
  * where a new project starts in a tab of its own.
  */
 
@@ -194,9 +196,12 @@ function First({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const error = project.error ?? model.error
+  const skills = useSkills()
+  const error = project.error ?? model.error ?? skills.error
   const { preferences, set } = usePreferences()
   const { host } = useServices()
+  // The skills that can be given: one Althar can't read is left as it is, on or off.
+  const sound = skills.rows?.filter((skill) => skill.problem === undefined) ?? []
   return (
     <div className={`${s.window} ${s.bare}`}>
       <BareBar className={s.over} />
@@ -219,11 +224,16 @@ function First({
         text={text.first()}
         runtimesText={{ missing: `Not installed on ${device.this}` }}
         foot={
-          <CrashReportsLine
-            on={preferences.crashReports}
-            onChange={(on) => set('crashReports', on)}
-            doNotTrack={host.doNotTrack === true}
-          />
+          <>
+            {/* Only where Althar has skills to give, once the store is read: off until turned on, as each one is. */}
+            {/* On only when every one is, so with some on it turns the rest on, as Settings' Turn all on does. */}
+            {skills.enabled && sound.length > 0 && <SkillsLine on={sound.every((skill) => skill.on)} onChange={skills.toggleAll} />}
+            <CrashReportsLine
+              on={preferences.crashReports}
+              onChange={(on) => set('crashReports', on)}
+              doNotTrack={host.doNotTrack === true}
+            />
+          </>
         }
       />
       {model.unremoved !== null && <StartError model={model} />}

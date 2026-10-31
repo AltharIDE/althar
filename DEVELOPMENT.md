@@ -55,6 +55,7 @@ everything, Windows' tests, coverage and the packages too, after merge.
 | [`packages/domain`](packages/domain) | `@althar/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
 | [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@althar/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
 | [`packages/provider-adapters`](packages/provider-adapters) | `@althar/provider-adapters`: how Althar talks to agents over ACP, and the agent registry |
+| [`packages/skills`](packages/skills) | `@althar/skills`: skill validation, the shared store, the default catalog's format, per-run projection and the repository boundary |
 | [`packages/runtime`](packages/runtime) | `@althar/runtime`: the store's one writer, which owns projects, tasks, agent sessions, turns and permissions |
 | [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
 | [`packages/testing`](packages/testing) | `@althar/testing`: how the tests run in CI, retried once, with the flaky ones reported and quarantined |
@@ -176,7 +177,7 @@ distribution (the packaged app, not a dev build):
 | X11 | `apps/desktop/scripts/x11-smoke.sh` under a real X server and window manager (`DISPLAY=:0 ALTHAR_BIN=/usr/bin/althar`, with `ALTHAR_ARGS=--no-sandbox` where the desktop runs as root) | the window's identity, its own buttons, moving, resizing, maximizing, closing |
 | Wayland | run the packaged app on a GNOME or KDE Wayland session | the same through the compositor, and the window's own chrome under it |
 | packages | `bun run package` in `apps/desktop`, then install the deb and rpm on their real target distributions (or run the AppImage) | The AppImage build is covered in CI; `.deb` and `.rpm` installation, menu entry, icon and keyring still need later real-desktop checks. Track those follow-ups in `docs/plans/package-linux.md`. |
-| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, the keyring over the secret service (see [ADR-027](docs/decisions/027-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
+| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, git over SSH (pinned hosts, the person's agent through the device: [ADR-073](docs/decisions/073-git-over-ssh-in-the-flatpak-goes-through-the-device.md)), the keyring over the secret service (see [ADR-027](docs/decisions/027-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
 | keyring | a GNOME session (gnome-keyring) and a KDE one (KWallet 5.97+) | sealing a sign-in, and reopening it after a restart |
 
 CI runs the end-to-end suite with the fake agent under Xvfb instead; the legs

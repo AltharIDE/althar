@@ -1,0 +1,35 @@
+{
+  "name": "@althar/skills",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Agent Skills for every harness: validation, the shared store, the default catalog, per-run projection and the repository boundary.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.118",
+    "js-yaml": "4.3.2"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.118",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.0.5",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vite-plus": "1.4.0",
+    "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

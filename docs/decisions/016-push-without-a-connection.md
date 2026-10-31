@@ -2,6 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-09
+- **Amended:** 2026-10-18: before any push Althar makes for a task, it
+  holds back skill and OpenSpec files the task's commits changed unless the
+  project allows them
+  ([ADR-077](077-skill-and-openspec-files-stay-off-the-repository.md)).
+  2026-10-24: in the Flatpak, a push over SSH runs the device's ssh, so it
+  uses the person's agent there too; nothing it runs asks a question
+  ([ADR-073](073-git-over-ssh-in-the-flatpak-goes-through-the-device.md)).
 - **Owner:** Repository maintainers
 - **Context:** A task without a pull request ended on its branch. The
   person could merge it into the default branch on this Mac and push that,

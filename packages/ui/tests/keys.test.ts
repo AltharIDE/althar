@@ -30,7 +30,15 @@ describe('keys', () => {
     const { keys, device } = await on()
     expect(device.device.this).toBe('this Mac')
     expect(keys.modKey('N')).toBe('⌘N')
+    expect(keys.modKey(keys.keys.enter)).toBe('⌘↵')
+    expect(keys.modKey(keys.keys.return)).toBe('⌘⏎')
+    expect(keys.chord(keys.keys.mod, keys.keys.shift, '5')).toBe('⌘⇧5')
+    expect(keys.chord(keys.keys.alt, 'Z')).toBe('⌥Z')
+    expect(keys.primaryDown({ metaKey: true, ctrlKey: false })).toBe(true)
+    expect(keys.primaryDown({ metaKey: false, ctrlKey: true })).toBe(false)
+    expect(keys.commandDown({ metaKey: false, ctrlKey: true })).toBe(true)
     expect(keys.commandDown({ metaKey: true, ctrlKey: false })).toBe(true)
+    expect(keys.commandDown({ metaKey: false, ctrlKey: false })).toBe(false)
   })
 
   it('are Ctrl, Alt and Shift joined with a plus on Linux and Windows, and Ctrl is the primary modifier', async () => {

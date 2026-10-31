@@ -73,6 +73,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
           'packages/domain',
           'packages/persistence-sqlite',
           'packages/provider-adapters',
+          'packages/skills',
           'packages/testing',
           'apps/cli',
         ],

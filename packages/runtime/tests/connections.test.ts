@@ -59,7 +59,6 @@ const stub = (routes: ReadonlyArray<Route>) => {
 const withGitHub = (
   fetch: Fetch,
   more: {
-    readonly callbackPort?: number
     readonly linear?: ReturnType<typeof makeFakeService>
     readonly secrets?: Layer.Layer<Secrets>
     /** Real adapters for other products, offered with GitHub's. */
@@ -85,7 +84,7 @@ const withGitHub = (
         ],
         fetch,
         clientIds: { github: 'Iv1.althar', linear: 'lin-althar' },
-        callbackPort: more.callbackPort ?? 0,
+        callbackPort: 0,
         cliToken: more.cliToken ?? (() => Effect.succeed(null)),
       }),
     ),
@@ -1202,6 +1201,7 @@ describe('the agents', () => {
     writeFileSync(join(home, '.gitconfig'), '[credential]\n\thelper = "!f() { echo username=dana; echo password=leaked; }; f"\n')
     const fill = (env: Readonly<Record<string, string>>) =>
       spawnSync('git', ['credential', 'fill'], {
+        cwd: home,
         input: 'protocol=https\nhost=github.com\n\n',
         env: { PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', ...env },
       }).stdout.toString()
