@@ -199,10 +199,14 @@
   /* ---- Projects: a step lighter, for a swatch and the wash of a project's page ---- */
   --project-clay: #d4774f;
   --project-ochre: #c3a259;
+  --project-sand: #b4a285;
   --project-olive: #a3ab5a;
   --project-moss: #82b07c;
   --project-teal: #5fa8b4;
   --project-slate: #95a0ae;
+  --project-indigo: #8798d7;
+  --project-plum: #c082b2;
   --project-rose: #d27d8e;
+  --project-brick: #d57e75;
   --project-umber: #b48b77;
 }

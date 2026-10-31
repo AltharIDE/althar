@@ -41,11 +41,15 @@ export type ProjectMarkProps = RootProps<
 const INK: Record<ProjectInk, string | undefined> = {
   [ProjectInk.Clay]: s.clay,
   [ProjectInk.Ochre]: s.ochre,
+  [ProjectInk.Sand]: s.sand,
   [ProjectInk.Olive]: s.olive,
   [ProjectInk.Moss]: s.moss,
   [ProjectInk.Teal]: s.teal,
   [ProjectInk.Slate]: s.slate,
+  [ProjectInk.Indigo]: s.indigo,
+  [ProjectInk.Plum]: s.plum,
   [ProjectInk.Rose]: s.rose,
+  [ProjectInk.Brick]: s.brick,
   [ProjectInk.Umber]: s.umber,
 }
 

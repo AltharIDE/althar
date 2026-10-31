@@ -351,7 +351,20 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 
 /** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
-export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
+export const ProjectInk = Schema.Literals([
+  'clay',
+  'ochre',
+  'sand',
+  'olive',
+  'moss',
+  'teal',
+  'slate',
+  'indigo',
+  'plum',
+  'rose',
+  'brick',
+  'umber',
+])
 export type ProjectInk = typeof ProjectInk.Type
 
 export const ProjectSummary = Schema.Struct({
@@ -479,6 +492,21 @@ export const FoundRepository = Schema.Struct({
   remote: Schema.NullOr(Schema.String),
 })
 export type FoundRepository = typeof FoundRepository.Type
+
+/** A repository not made yet, in a folder the person chose: its folder's name, and its path on this computer. */
+export const PlacedRepository = Schema.Struct({
+  /** Its folder's name, from the project's: northwind-ops. */
+  name: Schema.String,
+  path: Schema.String,
+})
+export type PlacedRepository = typeof PlacedRepository.Type
+
+/** A repository just made: its root, and the grant a project is opened with it by. */
+export const MadeRepository = Schema.Struct({
+  grant: Schema.String,
+  path: Schema.String,
+})
+export type MadeRepository = typeof MadeRepository.Type
 
 /**
  * What opening a folder would make, read before anything is: a repository, a
@@ -2922,6 +2950,18 @@ export const Api = RpcGroup.make(
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }),
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
+  /**
+   * Where a new repository named after `name` would go, in the folder the
+   * person chose by `grant`, read without making anything: refused where a
+   * folder of its name has something in it already.
+   */
+  call('PlaceRepository', { grant: Schema.String, name: Schema.String }, PlacedRepository),
+  /**
+   * Makes that repository: its folder, `git init` on main, and a first
+   * commit with nothing in it, so a task has a commit to branch from. Its
+   * grant comes back, for OpenProject.
+   */
+  call('MakeRepository', { grant: Schema.String, name: Schema.String }, MadeRepository),
   /**
    * Opens the folder the person chose, by the grant the app gave for it: the
    * window never names a path. A folder holding several repositories opens

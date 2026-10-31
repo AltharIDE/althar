@@ -29,6 +29,7 @@ const saidOf = (error: ConnectorFailed) => (error.message === '' || error.messag
 
 /** Why a log the host keeps couldn't be read, in plain words. */
 export const whyUnread = (host: string, error: ConnectorFailed): string => {
+  if (error.sizeLimit !== undefined) return `Log exceeds the ${error.sizeLimit / (1024 * 1024)} MiB size cap; use the check URL`
   const status = error.status === undefined ? '' : ` (${error.status})`
   switch (error.reason) {
     // Only a sign-in a second look bore out as no good reaches here (Connections' `guarded`).

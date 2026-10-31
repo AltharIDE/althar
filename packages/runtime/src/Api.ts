@@ -86,6 +86,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
@@ -548,6 +549,14 @@ export const handlers = Api.toLayer(
           Effect.gen(function* () {
             const reading = yield* projects.read(yield* folders.path(grant))
             return { ...reading, repositories: [...reading.repositories] }
+          }),
+        ),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      MakeRepository: ({ grant, name }) =>
+        api(
+          Effect.gen(function* () {
+            const made = yield* makeRepository(yield* folders.path(grant), name)
+            return { grant: yield* folders.allow(made.path), path: made.path }
           }),
         ),
       OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
