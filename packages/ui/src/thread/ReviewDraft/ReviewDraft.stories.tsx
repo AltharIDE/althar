@@ -39,7 +39,7 @@ export const Pending: Story = {
     await expect(c.getByText('ninemate, from a fork · drafted by Claude Code')).toBeInTheDocument()
     await expect(c.getByRole('radio', { name: 'Request changes' })).toBeChecked()
     await expect(c.getByText('Claude Code suggests Request changes')).toBeInTheDocument()
-    await expect(c.getByText('Nothing is on GitHub until you post it. It posts as ada, 3 of 3 comments.')).toBeInTheDocument()
+    await expect(c.getByText('Posts as ada, 3 of 3 comments')).toBeInTheDocument()
     await expect(c.getByText('Written from ninemate’s code and words, which may try to steer it.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('radio', { name: 'Comment' }))
     await expect(args.onVerdict).toHaveBeenCalledWith(ReviewVerdict.Comment)
@@ -74,7 +74,7 @@ export const ACommentDropped: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('switch', { name: 'Keep the comment on src/webhooks/retry.ts:57' })).toHaveAttribute('aria-checked', 'false')
     await expect(c.getByText('Dropped')).toBeInTheDocument()
-    await expect(c.getByText(/It posts as ada, 2 of 3 comments\./)).toBeInTheDocument()
+    await expect(c.getByText('Posts as ada, 2 of 3 comments')).toBeInTheDocument()
   },
 }
 
@@ -84,7 +84,7 @@ export const NoComments: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('list')).not.toBeInTheDocument()
-    await expect(c.getByText('Nothing is on GitHub until you post it.')).toBeInTheDocument()
+    await expect(c.queryByText(/^Posts/)).not.toBeInTheDocument()
     await expect(c.queryByText(/may try to steer it/)).not.toBeInTheDocument()
   },
 }

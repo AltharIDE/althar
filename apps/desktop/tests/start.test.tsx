@@ -437,11 +437,15 @@ describe('accounts in settings', () => {
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_work'))
   })
 
-  it('offers to remove an account anyway when its sign-out didn’t work', async () => {
+  it('offers to remove an account anyway when its sign-out didn’t work, saying its sign-in may stay', async () => {
     const codex = codexWith(usual('acc_usual', 'signed_in'), { ...usual('acc_x', 'signed_in'), name: 'x', home: '/x' })
     const { client } = fakeClient({
       removeAccount: vi.fn(async (_accountId: string, anyway?: boolean) => {
-        if (anyway !== true) throw new ApiError({ reason: 'SignOutFailed', message: 'Althar couldn’t sign this account out.' })
+        if (anyway !== true)
+          throw new ApiError({
+            reason: 'SignOutFailed',
+            message: "Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on this computer.",
+          })
       }),
       status: codex.status,
     })
@@ -449,7 +453,7 @@ describe('accounts in settings', () => {
     const accounts = await codexAccounts()
     await userEvent.click(within(accounts).getByRole('button', { name: 'More for x' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Remove/ }))
-    expect((await screen.findByRole('alert')).textContent).toContain('couldn’t sign this account out')
+    expect((await screen.findByRole('alert')).textContent).toContain('its sign-in may stay on this computer')
     await userEvent.click(screen.getByRole('button', { name: 'Remove anyway' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenLastCalledWith('acc_x', true))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove anyway' })).toBeNull())
@@ -568,7 +572,7 @@ describe('the start', () => {
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+      'go to Althar’s team. Never your code or any name.',
     )
     // Not a dialog, and nothing waits on it.
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -678,9 +682,7 @@ describe('the start', () => {
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
     expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
-    expect(
-      await screen.findByText('docs is a folder inside mono: on its own it makes a project, but with others, add mono itself.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('docs is inside mono. Add mono instead.')).toBeTruthy()
     expect(client.openProject).not.toHaveBeenCalled()
     // Alone, it opens as the folder it is.
     await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))

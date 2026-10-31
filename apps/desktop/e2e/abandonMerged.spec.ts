@@ -100,7 +100,7 @@ test('a merged task with a commit after its pull request needs the person, and a
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Conversation/ })
       .click()
-    await expect(page.getByText('Abandoned 1 commit after PR #1.')).toBeVisible()
+    await expect(page.getByText('Abandoned 1 commit.')).toBeVisible()
     await page.screenshot({ path: 'test-results/abandon-merged-left.png', animations: 'disabled', scale: 'css' })
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(work.getByText('Ready for a new pull request')).toHaveCount(0)

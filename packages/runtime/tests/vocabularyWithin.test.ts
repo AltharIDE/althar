@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { branchedWords } from '../src/firstWrite'
+import { branchedWords, repositoriesWords } from '../src/firstWrite'
 import { vocabulary } from '../src/vocabulary'
 import { repository } from './support'
 
@@ -46,8 +46,14 @@ describe('a project’s words', () => {
 })
 
 describe('where a task’s work is', () => {
-  it('is its branch, said once where its repositories share it, or each of them', () => {
+  it('is its branch, said once where its repositories share it, or how many', () => {
     assert.strictEqual(branchedWords(['althar/retry', 'althar/retry']), 'on its branch althar/retry')
-    assert.strictEqual(branchedWords(['althar/retry', 'althar/retry-web']), 'on its branches althar/retry, althar/retry-web')
+    assert.strictEqual(branchedWords(['althar/retry', 'althar/retry-web']), 'on 2 branches')
+  })
+
+  it('names two repositories at most, and counts more', () => {
+    assert.strictEqual(repositoriesWords(['web']), 'web')
+    assert.strictEqual(repositoriesWords(['api', 'web']), 'api and web')
+    assert.strictEqual(repositoriesWords(['api', 'web', 'ops', 'docs']), '4 repositories')
   })
 })

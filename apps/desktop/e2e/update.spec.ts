@@ -43,7 +43,7 @@ test('an update that can’t move the data keeps a copy from before, leaves the 
   try {
     await expect(page.getByRole('heading', { name: 'This update couldn’t move your data', level: 1 })).toBeVisible()
     if (process.platform !== 'darwin') await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
-    await expect(page.getByRole('alert')).toContainText('Your data is safe. Althar made a copy of it before the update.')
+    await expect(page.getByRole('alert')).toContainText('A copy from before the update is kept.')
     const copies = readdirSync(join(profile, 'backups'))
     expect(copies).toEqual([
       expect.stringMatching(new RegExp(`^althar-${String(was.at).padStart(4, '0')}-\\d{4}-\\d{2}-\\d{2}-\\d{6}\\.sqlite$`)),

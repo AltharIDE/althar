@@ -886,7 +886,7 @@ export class Automations extends Context.Service<
             })
             .pipe(Effect.mapError((error) => (error instanceof ReviewRefused ? refused(error.message) : error)))
           if (started.already) return yield* end(occurrenceId, 'skipped', 'A task reviews it already.')
-          if (!started.leading) return yield* end(occurrenceId, 'failed', 'Its lead couldn’t start; its task’s thread says why.')
+          if (!started.leading) return yield* end(occurrenceId, 'failed', 'Its lead couldn’t start.')
         })
 
       /**
@@ -991,7 +991,7 @@ export class Automations extends Context.Service<
                 slot,
                 dueAt: time,
                 state: 'missed',
-                reason: `Missed: the computer was asleep, or Althar closed, at ${clockOf(time, zone)}.`,
+                reason: `Missed ${clockOf(time, zone)}.`,
               })
               return coming
             }
@@ -1063,18 +1063,18 @@ export class Automations extends Context.Service<
               if (one.leadState === 'completed' || one.leadState === 'cancelled')
                 return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
               if (one.leadState === 'lost' || one.leadState === 'failed')
-                return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review; its task’s thread says why.')
+                return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review.')
               // A turn that failed may be taken over, as after a usage limit, and one the person stopped from the composer is
               // theirs to carry on: only one left so, with nothing waiting, for as long as the run may work ends it.
               const allowed = (Option.getOrUndefined(definitionOf(one))?.minutes ?? 45) * 60_000
               const quiet = one.queued === 0 && (one.turnEnded ?? 0) > allowed
               if (quiet && one.turnState === 'failed')
-                return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review; its task’s thread says why.')
+                return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review.')
               if (quiet && one.turnState === 'interrupted')
                 return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
             } else {
               if (one.runState === 'succeeded') return yield* end(one.id, 'made', null)
-              if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed; its thread says why.')
+              if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed.')
               if (one.runState === 'cancelled' || one.runState === 'suspended') return yield* end(one.id, 'failed', 'Its task was stopped.')
               if (one.runState === null && one.taskState === 'draft') {
                 // Made, but stopped before its plan started: it starts now.

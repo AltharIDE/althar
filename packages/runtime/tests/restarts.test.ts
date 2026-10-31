@@ -26,7 +26,7 @@ import { fakeAgents, notices, repository, runtime, until } from './support'
  * the last one carried it on.
  */
 
-const CARRIED = 'Althar restarted; the step carried on from here.'
+const CARRIED = 'Carried on after Althar restarted.'
 
 /**
  * A task whose lead works on Implement until it is stopped, in the store at

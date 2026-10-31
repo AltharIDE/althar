@@ -55,7 +55,6 @@ export interface AutomationPageText {
   turnBackOn: string
   does: string
   doesNote: string
-  doesNoteNew: string
   limits: string
   runs: string
   noRuns: string
@@ -77,15 +76,14 @@ export const automationPageText: AutomationPageText = {
   rename: 'Rename',
   delete: 'Delete…',
   deleteTitle: (name) => `Delete ${name}?`,
-  deleteNote: 'Nothing of it starts again. The tasks its runs made stay.',
+  deleteNote: 'The tasks its runs made stay.',
   deleteConfirm: 'Delete',
   cancel: 'Cancel',
   pausedItself: 'It paused itself.',
   runItNow: 'Run it now',
   turnBackOn: 'Turn it back on',
   does: 'What it does',
-  doesNote: 'Change any of it here; it holds from its next run.',
-  doesNoteNew: 'Say it as you would to the coordinator.',
+  doesNote: 'Holds from its next run.',
   limits: 'Limits',
   runs: 'Runs',
   noRuns: 'No runs yet.',
@@ -498,7 +496,7 @@ export function AutomationPage({
             )}
           </div>
         )}
-        <Section title={t.does} note={making ? t.doesNoteNew : t.doesNote} level={inner}>
+        <Section title={t.does} {...(making ? {} : { note: t.doesNote })} level={inner}>
           {card}
         </Section>
         <Section title={t.limits} level={inner}>

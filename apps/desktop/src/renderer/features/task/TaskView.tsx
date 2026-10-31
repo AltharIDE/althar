@@ -18,7 +18,6 @@ import {
   modKey,
   DictationTray,
   Issue,
-  TaskActivity,
   LinkButton,
   type ModelInfo,
   TaskFace,
@@ -40,7 +39,6 @@ import {
 import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { device } from '../../shared/device'
 import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -123,14 +121,14 @@ export const text = {
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
-  needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
+  needsAgent: 'No agent is signed in. Sign one in from Settings.',
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
-  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  conflictUnsent: (why: string) => `Conflicts with its default branch. ${why}`,
   resolveNow: 'Resolve now',
   /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
-  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  conflictUnchecked: (why: string) => `Couldn’t check for a conflict with its default branch. ${why}`,
   lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
@@ -1166,8 +1164,6 @@ export function TaskView({
       {host.lightbox}
       {abandoning && (
         <AbandonTask
-          text={{ branchHere: (name) => `Its branch ${name} stays on ${device.this}.` }}
-          activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
           changes={offered.map((one) => ({ id: one.url, name: `${one.noun} ${one.prefix}${one.number}`, host: productName(one.product) }))}

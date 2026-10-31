@@ -1,4 +1,4 @@
-/* Under where a task says it waits: who holds the places, and the servers to stop. */
+/* Under where a task says it waits: the servers to stop, and the way to the front. */
 .holders {
   display: flex;
   flex-wrap: wrap;
@@ -6,7 +6,7 @@
   gap: 8px;
 }
 
-.held {
+.front {
   margin: 0;
   color: var(--t-2);
   font-size: 12.5px;

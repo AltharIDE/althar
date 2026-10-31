@@ -28,7 +28,7 @@ export const text = {
   /** A queued message taken back to edit whose images wouldn't fit beside those waiting: it stays in the queue. */
   noRoom: `Its images don’t fit beside these: a message can carry at most ${MESSAGE_IMAGES.count} images. Remove some first.`,
   /** Images dropped for an agent that says it doesn't take them. */
-  refused: (agent: string) => `${agent} doesn’t take images, so they can’t be sent to it.`,
+  refused: (agent: string) => `${agent} doesn’t take images.`,
   /** Images waiting for an agent picked since, which doesn't take them. */
   blocked: (agent: string) => `${agent} doesn’t take images. Remove them to send this, or pick an agent that does.`,
   stillReading: 'The images are still being read. Send again in a moment.',

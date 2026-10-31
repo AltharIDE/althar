@@ -243,7 +243,7 @@ export const Deleting: Story = {
     await userEvent.click(c.getByRole('button', { name: 'More' }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Delete…' }))
     const dialog = within(await within(document.body).findByRole('dialog', { name: 'Delete Morning review?' }))
-    await expect(dialog.getByText('Nothing of it starts again. The tasks its runs made stay.')).toBeInTheDocument()
+    await expect(dialog.getByText('The tasks its runs made stay.')).toBeInTheDocument()
     await userEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     await expect(args.onDelete).not.toHaveBeenCalled()
     await userEvent.click(c.getByRole('button', { name: 'More' }))
@@ -297,7 +297,7 @@ export const New: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('heading', { name: 'Runs' })).toBeNull()
-    await expect(c.getByText('Say it as you would to the coordinator.')).toBeInTheDocument()
+    await expect(c.queryByText('Holds from its next run.')).toBeNull()
     await expect(c.queryByRole('button', { name: 'Try it once now' })).toBeNull()
     await expect(c.queryByRole('switch', { name: 'On' })).toBeNull()
     await expect(c.queryByRole('button', { name: 'More' })).toBeNull()

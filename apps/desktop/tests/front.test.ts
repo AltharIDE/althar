@@ -218,6 +218,11 @@ describe('a project’s header', () => {
       }),
     ).toEqual({ policy: 'Allow, except what you keep', asks: 'Always asks you: “npm publish”.' })
     expect(rulesLineOf({ ...projectRules, permissions: 'ask', alwaysAsk: [] }).asks).toBe('Nothing always asks you.')
+    // More than two: a count, not a list that runs on.
+    expect(
+      rulesLineOf({ ...projectRules, alwaysAsk: ['deploy', 'default-branch'], commands: [{ pattern: 'npm publish', decision: 'ask' }] })
+        .asks,
+    ).toBe('3 things always ask you.')
     // With everything allowed, what always asks is kept but asks nothing.
     expect(
       rulesLineOf({

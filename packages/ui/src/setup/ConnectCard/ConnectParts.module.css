@@ -121,7 +121,8 @@
   padding: 0;
   list-style: none;
 }
-.ol li {
+/* the steps only: a list in a step's words keeps its own rows */
+.ol > li {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 8px;

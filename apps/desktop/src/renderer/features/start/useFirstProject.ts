@@ -146,7 +146,7 @@ export const useFirstProject = (): FirstProjectModel => {
     }
     const [inside] = chosen.length > 1 ? chosen.flatMap(({ name, added }) => (added?.insideOf ? [{ name, of: added.insideOf }] : [])) : []
     if (inside !== undefined) {
-      setError(`${inside.name} is a folder inside ${inside.of}: on its own it makes a project, but with others, add ${inside.of} itself.`)
+      setError(`${inside.name} is inside ${inside.of}. Add ${inside.of} instead.`)
       return null
     }
     busy.current = true

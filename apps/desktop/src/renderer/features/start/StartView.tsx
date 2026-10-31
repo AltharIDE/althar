@@ -36,7 +36,7 @@ export const text = {
     return {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
-      noneHere: `None is on ${device.this} yet. Download one below, or install one yourself.`,
+      noneHere: `None on ${device.this} yet`,
       away: `Not on ${device.this}`,
       awayLabel: `Agents not on ${device.this}`,
       add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') },
@@ -84,7 +84,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
     case 'signed_out':
       return { ...base, state: RuntimeState.SignedOut }
     case 'unknown':
-      return { ...base, state: RuntimeState.Ready, account: 'Signed in, as far as it says' }
+      return { ...base, state: RuntimeState.Ready, account: 'Signed in' }
   }
 }
 

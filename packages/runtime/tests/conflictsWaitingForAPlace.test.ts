@@ -57,7 +57,7 @@ describe('checks that fail on the merge Althar pushed, with no place for the lea
     return Effect.gen(function* () {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       // Another task takes the one place: its lead works on until it is stopped.
       const busy = yield* (yield* Projects).createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
@@ -79,16 +79,16 @@ describe('checks that fail on the merge Althar pushed, with no place for the lea
       })
       assert.strictEqual(yield* plans.start(planId, actorId), 'running')
       failing = true
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The checks failed on what Althar pushed to PR #1: test.')
-      assert.strictEqual(said?.description, 'Althar asks the lead to fix them once an agent is free on this computer.')
+      yield* titled(threadId, 'test failed on PR #1.')
+      const said = (yield* notices(threadId)).find((notice) => notice.title === 'test failed on PR #1.')
+      assert.strictEqual(said?.description, 'The lead fixes them once an agent is free.')
       assert.deepStrictEqual(
         (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
         [['resolving', 1]],
       )
       // The other task is stopped: its place goes to the round, whose lead fixes the checks, and Althar pushes the fix.
       yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
-      yield* titled(threadId, 'The lead fixed the checks on the merge, and Althar pushed the fix to PR #1.')
+      yield* titled(threadId, 'The lead fixed the checks on the merge, and pushed the fix to PR #1.')
       assert.isTrue(holdsFix(bare, 'althar/add-a-retry'))
     }).pipe(Effect.provide(oneAtOnce(github)))
   })

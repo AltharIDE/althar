@@ -261,7 +261,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
         SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
       assert.include(
         notices.map((row) => row.title),
-        `Fake codex has 3% of its five-hour limit left, so the review waits until ${whenWords(resetsAt, yield* Clock.currentTimeMillis)}. To carry on now, pick another model on the task.`,
+        `Fake codex has 3% of its five-hour limit left. The review waits until ${whenWords(resetsAt, yield* Clock.currentTimeMillis)}.`,
       )
     }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } }, opencode: { holds: place } } })), onTestClock)
   })

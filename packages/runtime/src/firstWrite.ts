@@ -5,7 +5,6 @@ import type { ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { thisDevice } from './device'
 import { touchCard } from './cards'
 import { evidencePaths } from './evidence'
 import { branchExists, commitsAhead, git, uncommittedFiles } from './git'
@@ -84,7 +83,7 @@ const wroteIn = (worktree: Unbranched, evidence: (worktree: string, file: string
 /** Where a task's work is, by its branch, or each, where its repositories' differ: "on its branch althar/x". */
 export const branchedWords = (names: ReadonlyArray<string>) => {
   const distinct = [...new Set(names)]
-  return distinct.length === 1 ? `on its branch ${distinct[0] ?? ''}` : `on its branches ${distinct.join(', ')}`
+  return distinct.length === 1 ? `on its branch ${distinct[0] ?? ''}` : `on ${distinct.length} branches`
 }
 
 /** Whether one of the task's worktrees it writes in has its branch here: its work is on a branch already. */
@@ -98,14 +97,18 @@ const changing = (taskId: string) =>
     return one !== undefined
   })
 
-/** Worktrees' repositories by the names the person knows them by, the project's first first. */
+/** Repositories by the names the person knows them by: two at most; more, as a count. */
+export const repositoriesWords = (names: ReadonlyArray<string>) =>
+  names.length <= 2 ? names.join(' and ') : `${names.length} repositories`
+
+/** Worktrees' repositories in words, the project's first first. */
 const repositoriesOf = (ids: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const names = yield* sql<{ name: string }>`
       SELECT b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
       WHERE w.id IN ${sql.in(ids)} ORDER BY b.created_at, b.rowid`
-    return names.map((one) => one.name).join(', ')
+    return repositoriesWords(names.map((one) => one.name))
   })
 
 /**
@@ -159,17 +162,14 @@ export const branchOnFirstWrite = (
     const [first] = branched
     if (first === undefined) return []
     const distinct = [...new Set(branched.map((worktree) => worktree.name))]
-    const own =
-      distinct.length === 1
-        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on ${thisDevice()}`
-        : `on branches of its own now, ${distinct.join(', ')}, which stay on ${thisDevice()}`
+    const own = branchedWords(distinct)
     const title = made
       ? null
       : already
-        ? `This task’s work is ${branchedWords(distinct)} in ${yield* repositoriesOf(branched.map((worktree) => worktree.id))} too now.`
+        ? `This task’s work is ${own} in ${yield* repositoriesOf(branched.map((worktree) => worktree.id))} too now.`
         : missed.length === 0
           ? `This task’s work is ${own}.`
-          : `This task’s work is ${own}. Althar couldn’t make its branch in ${yield* repositoriesOf(missed.map((worktree) => worktree.id))} yet, and tries again as its lead’s turn ends.`
+          : `This task’s work is ${own}. Couldn’t branch in ${yield* repositoriesOf(missed.map((worktree) => worktree.id))} yet.`
     yield* sql.withTransaction(
       Effect.gen(function* () {
         const at = yield* timestamp

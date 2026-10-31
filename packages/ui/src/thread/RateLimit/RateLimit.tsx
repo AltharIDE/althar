@@ -49,49 +49,43 @@ export interface RateLimitText {
   choose: string
   /** The menu's heading, for one piece of work paused or several. */
   menu: (several: boolean) => string
-  note: (several: boolean) => string
+  /** Under the menu's heading, where there is something to say: that several move together. */
+  note: (several: boolean) => string | undefined
   wait: (resets: string) => string
   again: (runtime: string) => string
   moved: (model: string) => string
-  movedNote: string
+  /** Beside what was answered, where there is something to add; none by default. */
+  movedNote?: string
   waiting: (resets: string) => string
-  waitingNote: string
+  waitingNote?: string
   /** On work that waits on its own, kept waiting: opens the card again, to move it on after all. */
   reopen: string
   tryingAgain: (runtime: string) => string
   /** Go on without the step: for a review. */
   skip: string
   skipped: string
-  skippedNote: string
+  skippedNote?: string
 }
 
 export const rateLimitText: RateLimitText = {
   kicker: 'Out of usage',
   what: (runtime, resets) =>
-    resets === null
-      ? `${runtime} reached its usage limit and didn’t say when it resets.`
-      : `${runtime} reached its usage limit, until ${resets}.`,
+    resets === null ? `${runtime} reached its usage limit.` : `${runtime} reached its usage limit, until ${resets}.`,
   paused: (items) => <>Paused {items}.</>,
   separator: (i, n) => (i === n - 1 ? ' and ' : ', '),
   noneFree: 'No other model is free now.',
   continueWith: 'Continue with',
   choose: 'Choose another model',
   menu: (several) => (several ? 'Move the paused work to' : 'Continue the step with'),
-  note: (several) =>
-    several
-      ? 'Moves the lead and every paused step. Each picks up from the task’s record.'
-      : 'Whichever you pick picks up from the task’s record.',
+  note: (several) => (several ? 'Moves the lead and every paused step' : undefined),
   wait: (resets) => `Wait until ${resets}`,
   again: (runtime) => `Try ${runtime} again`,
   moved: (model) => `Moved to ${model}`,
-  movedNote: 'the step picks up from the task’s record',
   waiting: (resets) => `Waiting until ${resets}`,
-  waitingNote: 'the step runs again then',
   reopen: 'Pick another model',
   tryingAgain: (runtime) => `Trying ${runtime} again`,
   skip: 'Skip the review',
   skipped: 'Skipped the review',
-  skippedNote: 'the task is ready without one',
 }
 
 export type RateLimitProps = RootProps<
@@ -185,7 +179,7 @@ export function RateLimit({
       case LimitAnswer.Moved:
         return (
           <AskAnswered said={t.moved(result.model.short)} {...line}>
-            <AskNote>· {t.movedNote}</AskNote>
+            {t.movedNote !== undefined && <AskNote>· {t.movedNote}</AskNote>}
           </AskAnswered>
         )
       case LimitAnswer.Waiting:
@@ -203,7 +197,7 @@ export function RateLimit({
                 }
               : {})}
           >
-            <AskNote>· {t.waitingNote}</AskNote>
+            {t.waitingNote !== undefined && <AskNote>· {t.waitingNote}</AskNote>}
           </AskAnswered>
         )
       case LimitAnswer.Again:
@@ -211,7 +205,7 @@ export function RateLimit({
       case LimitAnswer.Skipped:
         return (
           <AskAnswered said={t.skipped} {...line}>
-            <AskNote>· {t.skippedNote}</AskNote>
+            {t.skippedNote !== undefined && <AskNote>· {t.skippedNote}</AskNote>}
           </AskAnswered>
         )
       default:
@@ -247,7 +241,13 @@ export function RateLimit({
               }}
               moreLabel={t.choose}
               menu={(trigger) => (
-                <Menu label={t.menu(several)} align="start" width={320} trigger={trigger} note={t.note(several)}>
+                <Menu
+                  label={t.menu(several)}
+                  align="start"
+                  width={320}
+                  trigger={trigger}
+                  {...(t.note(several) === undefined ? {} : { note: t.note(several) })}
+                >
                   <MenuRadioGroup label={t.menu(several)} value={idOf(picked)} onChange={setPick}>
                     {options.map((o) => (
                       <MenuRadioItem key={idOf(o)} value={idOf(o)} disabled={o.busy} description={o.note}>

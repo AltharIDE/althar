@@ -10,7 +10,7 @@ import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import { isSection, type Section, sectionText, SECTIONS } from '../src/renderer/features/settings/sections'
+import { isSection, type Section, SECTIONS } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { reviewOf, rowOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -86,7 +86,7 @@ describe('the quick settings', () => {
     // Agents at once in one plain line, whatever the number, its default said.
     const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
     expect(count.getAttribute('aria-valuetext')).toBe('4, this Mac’s default')
-    expect(within(panel).getByText('More tasks than this wait their turn.')).toBeTruthy()
+    expect(within(panel).getByText('The rest wait their turn')).toBeTruthy()
     expect(within(panel).queryByText(/16 GB/)).toBeNull()
     // Nothing else: not the agents, the code hosts, reviews, co-author, the icon. Nor what is running: settings are calm.
     expect(within(panel).queryByText(/Agents\b(?! at once)|Code hosts|Post reviews|Co-author|App icon|In other apps|busy/)).toBeNull()
@@ -284,7 +284,6 @@ describe('the Settings tab', () => {
         .getAttribute('aria-current'),
     ).toBe('page')
     expect(screen.getByRole('heading', { name: 'Agents', level: 1 })).toBeTruthy()
-    expect(screen.getByText('The agents on this Mac, the accounts each signs in with, and the models their work may use.')).toBeTruthy()
     // The quick cards are here too, a press away.
     expect(screen.getByRole('switch', { name: 'Keep awake' })).toBeTruthy()
     // Opened, it asks the agents how they stand once, not again and again.
@@ -406,13 +405,11 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Review the update to release-notes' })).toBeNull())
   })
 
-  it('says a change to the skills reaches each lead the next time it starts, and never speaks of the runtime', async () => {
+  it('keeps the Skills section named and says when its changes reach each lead', async () => {
     withServices(<Settings at="skills" />, fakeClient().client)
+    expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeTruthy()
     expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
     expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
-    expect(sectionText.skills.lede).toBe(
-      'What each task’s lead is given as it starts, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
-    )
   })
 
   it('says when this Althar has no skills to give, without speaking of the runtime', async () => {
@@ -479,7 +476,7 @@ describe('the Settings tab', () => {
     withServices(<Settings />, client, fakeHost())
     await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
     const install = screen.getByRole('region', { name: 'OpenCode isn’t on this Mac' })
-    expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
+    expect(within(install).getByText(/from GitHub, about 45 MB/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
@@ -603,14 +600,14 @@ describe('the Settings tab', () => {
     // How many agents at once, and why: this Mac's memory and cores.
     const count = await within(page).findByRole('slider', { name: 'Agents at once' })
     expect(count.getAttribute('aria-valuenow')).toBe('4')
-    expect(within(page).getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeTruthy()
+    expect(within(page).getByText('Default for 16 GB and 10 cores')).toBeTruthy()
     expect(within(page).queryByText(/busy/)).toBeNull()
     expect(within(page).queryByRole('button', { name: 'Use the default' })).toBeNull()
     count.focus()
     await userEvent.keyboard('{ArrowRight}{ArrowRight}')
     expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(6)
     await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('6'))
-    expect(within(page).getByText(/^6: a little more than this Mac’s 16 GB suggests\. Tests may slow down\./)).toBeTruthy()
+    expect(within(page).getByText(/^Tests may slow down/)).toBeTruthy()
     await userEvent.click(within(page).getByRole('button', { name: 'Use the default' }))
     expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(null)
     await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
@@ -665,7 +662,7 @@ describe('the Settings tab', () => {
     withServices(<Settings at="reviews" />, client)
     const posts = await screen.findByRole('switch', { name: 'Post reviews of my team’s pull requests without asking' })
     expect(posts.getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText(/A review of a pull request from outside the team always waits for you to post it\./)).toBeTruthy()
+    expect(screen.getByText('Pull requests from outside the team still wait for you.')).toBeTruthy()
     await userEvent.click(posts)
     expect(client.setPostTeamReviews).toHaveBeenLastCalledWith(true)
     await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('true'))
@@ -704,7 +701,7 @@ describe('the Settings tab', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Leave it off' }))
     expect(screen.queryByRole('region', { name: /no marketing budget/ })).toBeNull()
     expect(credit.getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText('Your commits and pull requests go out with only your name.')).toBeTruthy()
+    expect(screen.getByText('Only your name goes out.')).toBeTruthy()
 
     // Opened again while off, it doesn't ask again.
     await toSection('Notifications')
@@ -733,7 +730,6 @@ describe('the Settings tab', () => {
     const host = fakeHost()
     withServices(<Settings at="notifications" />, fakeClient().client, host)
     const page = screen.getByRole('main')
-    expect(within(page).getByText('Only while Althar isn’t in front. Never for progress.')).toBeTruthy()
     await userEvent.click(await within(page).findByRole('switch', { name: 'A task is ready for you' }))
     expect(host.setPreference).toHaveBeenLastCalledWith('notifyReady', false)
     await userEvent.click(within(page).getByRole('switch', { name: 'Count them on the Dock icon' }))
@@ -802,7 +798,7 @@ describe('the Settings tab', () => {
     const usage = await screen.findByRole('switch', { name: 'Usage data' })
     await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+      'Anonymous. Never your code or any name.',
     )
     await userEvent.click(usage)
     expect(host.setPreference).toHaveBeenLastCalledWith('usageData', false)
@@ -825,7 +821,7 @@ describe('the Settings tab', () => {
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+      'What failed, and where. Never your code or any name.',
     )
     await userEvent.click(crashes)
     expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
@@ -879,7 +875,6 @@ describe('how Althar looks, on the Settings tab', () => {
     expect(checked()).toEqual(['Light'])
     await userEvent.click(within(choice).getByRole('radio', { name: 'Match the Mac' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'system'))
-    expect(await screen.findByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
     await userEvent.click(within(choice).getByRole('radio', { name: 'Dark' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'dark'))
     await waitFor(() => expect(checked()).toEqual(['Dark']))
@@ -892,7 +887,7 @@ describe('how Althar looks, on the Settings tab', () => {
     const radios = () => within(places).getAllByRole<HTMLInputElement>('radio')
     expect(radios().map((radio) => radio.checked)).toEqual([true, false])
     // Each place as the screen would look; with nothing under way, a busy moment, said as such.
-    expect(screen.getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
+    expect(screen.getByText('An example, until work is under way')).toBeTruthy()
     expect(places.textContent).toContain('Publish the SDK to npm')
     // The pictures sit beside the radios, so the island's own count is never a button inside one.
     expect(radios().every((radio) => radio.closest('label')?.querySelector('button') === null)).toBe(true)
@@ -904,7 +899,7 @@ describe('how Althar looks, on the Settings tab', () => {
   it('says where it shows on a Mac without a notch, with nothing to choose', async () => {
     const edge = vi.fn(async () => ({ place: 'island', notch: false, platform: 'darwin', tray: true }))
     withServices(<Settings at="appearance" />, fakeClient().client, fakeHost({ edge }))
-    expect(await screen.findByText('This Mac’s screen has no notch, so Althar shows in the menu bar.')).toBeTruthy()
+    expect(await screen.findByText('This screen has no notch.')).toBeTruthy()
     expect(screen.queryByRole('radiogroup', { name: 'In other apps' })).toBeNull()
     expect(screen.getByText('In the menu bar')).toBeTruthy()
   })
@@ -917,7 +912,7 @@ describe('how Althar looks, on the Settings tab', () => {
     notch = false
     await toSection('Editor')
     await toSection('Appearance')
-    expect(await screen.findByText('This Mac’s screen has no notch, so Althar shows in the menu bar.')).toBeTruthy()
+    expect(await screen.findByText('This screen has no notch.')).toBeTruthy()
   })
 
   it('keeps a choice still being kept when the section opens again and reads what was there before', async () => {

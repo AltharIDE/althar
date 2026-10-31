@@ -57,13 +57,11 @@ export function Interrupted({ text }: { text?: Partial<InterruptedText> }) {
 export interface RestartedText {
   checking: string
   carriedOn: string
-  nothingTwice: string
 }
 
 export const restartedText: RestartedText = {
-  checking: 'Althar restarted. Checking where the lead had got to before carrying on',
+  checking: 'Restarted; checking where the lead got to',
   carriedOn: 'Carried on after a restart',
-  nothingTwice: 'nothing was run twice',
 }
 
 /**
@@ -76,7 +74,7 @@ export function Restarted({ checking = false, text }: { checking?: boolean; text
   return (
     <output className={s.divider}>
       {checking ? <Spinner size="small" /> : <Icon name="corner" size={11} />}
-      <span>{checking ? t.checking : `${t.carriedOn} · ${t.nothingTwice}`}</span>
+      <span>{checking ? t.checking : t.carriedOn}</span>
       <span className={s.rule} aria-hidden="true" />
     </output>
   )

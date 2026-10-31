@@ -328,7 +328,7 @@ describe('a task that ends on its branch', () => {
         source: 'runtime',
         severity: 'info',
         title: "The task ends on its branch: GitHub isn't connected.",
-        description: 'Nothing was pushed. Connect GitHub from the project, then open the pull request from here.',
+        description: 'Connect GitHub from the project, then open the pull request.',
       })
       assert.lengthOf(github.changes, 0)
       assert.instanceOf(yield* Effect.flip(runs.publish(task.taskId)), NotConnected)
@@ -462,7 +462,7 @@ describe('a task that ends on its branch', () => {
       const { said } = yield* onItsBranch(repository())
       assert.deepStrictEqual(
         (yield* said).flatMap((item) => (item.kind === 'notice' ? [item.content.description] : [])),
-        ["Its repository isn't on a code host Althar knows, so nothing was pushed."],
+        [undefined],
       )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )

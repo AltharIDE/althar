@@ -149,8 +149,8 @@ describe('a change whose checks Althar sees through', () => {
         const [given] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && fixesOn(bare).length === FIX_ROUNDS)
         const threadId = given?.threadId ?? ''
         assert.include(
-          yield* until(notices(threadId), (said) => said.some((title) => title.includes('so the change is yours now'))),
-          `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes by its lead, so the change is yours now.`,
+          yield* until(notices(threadId), (said) => said.some((title) => title.includes('still fail after'))),
+          `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes.`,
         )
         // Its lead says what it tried, and tries no more: the card says why, and nothing is asked of the person to push.
         const [why] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
@@ -217,7 +217,7 @@ describe('a change whose checks Althar sees through', () => {
         const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
         const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
         assert.strictEqual(ready?.phase, 'ready')
-        assert.strictEqual(ready?.checksBack, 'test still fails, and the lead stopped without a fix or a reason. Tell it what to do.')
+        assert.strictEqual(ready?.checksBack, 'test still fails, and the lead stopped. Tell it what to do.')
         const threadId = ready?.threadId ?? ''
         assert.include(yield* notices(threadId), ready?.checksBack ?? '')
         // Asked once to finish, between.
@@ -242,10 +242,7 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
       assert.strictEqual(ready?.phase, 'ready')
-      assert.strictEqual(
-        ready?.checksBack,
-        "test still fails, and the lead's agent stopped on its own without a fix or a reason. Tell it what to do.",
-      )
+      assert.strictEqual(ready?.checksBack, "test still fails, and the lead's agent stopped. Tell it what to do.")
       const threadId = ready?.threadId ?? ''
       // Started again once, between, to be asked to see them through.
       const sql = yield* SqlClient.SqlClient
@@ -475,7 +472,7 @@ describe('what failed, in full', () => {
     git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry')
       .split('\n')
       .filter((name) => name.startsWith('fixed-'))
-  const AGAIN = 'Running test on PR #1 again, once, in case it failed by chance.'
+  const AGAIN = 'Running a failed check on PR #1 again.'
 
   it.live('runs a failed check again once, and tells its lead only if it fails again, not while the old failure still shows', () => {
     const { working, bare } = hosted()
@@ -583,10 +580,8 @@ describe('what failed, in full', () => {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      const said = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((title) => title.includes('have run for')))
-      assert.isTrue(
-        said.some((title) => /^The checks on PR #1 have run for (a minute|\d+ minutes), so the change is yours now\.$/.test(title)),
-      )
+      const said = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((title) => title.includes('still running after')))
+      assert.isTrue(said.some((title) => /^The checks on PR #1 are still running after (a minute|\d+ minutes)\.$/.test(title)))
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -614,9 +609,7 @@ describe('what failed, in full', () => {
       github.commentAs(1, 'dana', 'Looks good.')
       const threadId = card?.threadId ?? ''
       yield* until(arrivals(threadId), (all) => all.some((one) => one.kind === 'comment'))
-      assert.isTrue(
-        (yield* notices(threadId)).some((title) => title.startsWith("Althar can't read the checks on PR #1: its host refused them")),
-      )
+      assert.isTrue((yield* notices(threadId)).some((title) => title === "Can't read the checks on PR #1."))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

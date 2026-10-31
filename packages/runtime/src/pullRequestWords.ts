@@ -45,20 +45,19 @@ export const nameOf = (change: { readonly number: number; readonly words: { read
 
 /** Said in the task's thread as its pull request goes in its target branch's merge queue. */
 export const queuedNote = (name: string, target: string | undefined) =>
-  `${name} is in the merge queue${target === undefined ? '' : ` for ${target}`}. It merges once the queue's checks pass.`
+  `${name} is in the merge queue${target === undefined ? '' : ` for ${target}`}.`
 
 /** Said as the merge queue takes it out unmerged: why, where its host says, and where it went. */
 export const leftQueueNote = (name: string, why: ChangeRequest['leftQueue']) => {
-  const back = "It's back in Needs you, to merge again."
   switch (why) {
     case 'removed':
-      return `Someone took ${name} out of the merge queue. ${back}`
+      return `Someone took ${name} out of the merge queue.`
     case 'checks':
-      return `The merge queue took ${name} out: its checks failed there. ${back}`
+      return `The merge queue took ${name} out: its checks failed.`
     case 'conflict':
-      return `The merge queue took ${name} out: it conflicts with what's ahead of it there. ${back}`
+      return `The merge queue took ${name} out: it conflicts with what's ahead of it.`
     default:
-      return `The merge queue took ${name} out. ${back}`
+      return `The merge queue took ${name} out.`
   }
 }
 
@@ -251,11 +250,14 @@ export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) 
  * fix or a reason.
  */
 export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'gone' = 'ended') =>
-  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'}, and ${how === 'gone' ? "the lead's agent stopped on its own" : 'the lead stopped'} without a fix or a reason. Tell it what to do.`
+  `${failingWords(failing)}, and ${how === 'gone' ? "the lead's agent stopped" : 'the lead stopped'}. Tell it what to do.`
 
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
-export const spentLine = (failing: ReadonlyArray<string>, tries: number) =>
-  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'} after ${tries} fixes by the lead.`
+export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`
+
+/** Checks that still fail: the one by its name, or how many. */
+const failingWords = (failing: ReadonlyArray<string>) =>
+  failing.length === 1 ? `${failing[0]} still fails` : `${failing.length === 0 ? 'Checks' : `${failing.length} checks`} still fail`
 
 /** The checks on the default branch's latest commit, as `read_default_branch_checks` tells the lead (ADR-070). */
 export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyArray<string>) =>

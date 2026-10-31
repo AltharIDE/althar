@@ -62,7 +62,7 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await expect(card.getByRole('textbox', { name: 'What you said' })).toHaveValue(both)
     await toProject()
     await expect(box).toHaveValue(both)
-    await expect(page.getByText('What you said was written down while you were away.')).toBeVisible()
+    await expect(page.getByText('Written down while you were away')).toBeVisible()
     await page.screenshot({ path: 'test-results/drafts-5-landed-while-away.png', animations: 'disabled' })
 
     // Away while it listens: it goes on listening, carried in a pill at the window's foot, saying whose it is.

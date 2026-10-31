@@ -70,13 +70,17 @@ export interface Place {
 /** The pull request a round is on, by name: one merging here has none, so it is only ever asked of a round on one. */
 export const changeOf = (place: Place) => place.change ?? 'the pull request'
 
+/** Every file it conflicts in, as the lead is told. */
 const list = (files: ReadonlyArray<string>) => files.join(', ')
 
-/** Where it conflicts, in a line: "main, in README.md", or for several "web’s develop, in README.md; api’s main, in a.ts". */
+/** The files it conflicts in, as the person reads it: the one by its path, or how many. */
+const counted = (files: ReadonlyArray<string>) => (files.length === 1 ? (files[0] ?? '') : `${files.length} files`)
+
+/** Where it conflicts, in a line: "main, in README.md", "main, in 4 files", or for several "the default branch in 2 repositories". */
 export const whereLine = (conflicts: ReadonlyArray<Conflict>) =>
   conflicts.length === 1 && conflicts[0] !== undefined
-    ? `${conflicts[0].branch}, in ${list(conflicts[0].files)}`
-    : conflicts.map((one) => `${one.name}’s ${one.branch}, in ${list(one.files)}`).join('; ')
+    ? `${conflicts[0].branch}, in ${counted(conflicts[0].files)}`
+    : `the default branch in ${conflicts.length} repositories`
 
 const named = (files: ReadonlyArray<string>) => {
   const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
@@ -179,7 +183,7 @@ export const unresolved = (worktree: string, conflict: Conflict) =>
     const stillConflicted = (yield* git(worktree, '-c', 'core.quotePath=false', 'diff', '--name-only', '--diff-filter=U')).split('\n')
     const unmerged = stillConflicted.filter((file) => file !== '')
     if (unmerged.length > 0)
-      return { why: `${list(unmerged)} still ${unmerged.length === 1 ? 'conflicts' : 'conflict'}.`, uncommitted: false }
+      return { why: `${counted(unmerged)} still ${unmerged.length === 1 ? 'conflicts' : 'conflict'}.`, uncommitted: false }
     // Every file is settled; the merge only needs committing.
     if (merging) return { why: `The merge of ${conflict.ref} isn't committed.`, uncommitted: true }
     const head = yield* commitOf(worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
@@ -193,7 +197,7 @@ export const unresolved = (worktree: string, conflict: Conflict) =>
       .map((line) => line.slice(line.indexOf(':') + 1))
     if (markers.length > 0)
       return {
-        why: `${list(markers)} still ${markers.length === 1 ? 'has' : 'have'} conflict markers in ${markers.length === 1 ? 'it' : 'them'}.`,
+        why: `${counted(markers)} still ${markers.length === 1 ? 'has' : 'have'} conflict markers in ${markers.length === 1 ? 'it' : 'them'}.`,
         uncommitted: false,
       }
     return null
