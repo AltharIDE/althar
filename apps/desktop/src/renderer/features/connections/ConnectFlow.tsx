@@ -42,11 +42,35 @@ const and = (items: ReadonlyArray<string>): string =>
   items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.slice(-1).join('')}`
 
 /** The repositories of some places by their paths; on GitHub, whose token is made for one owner, by name where they share it. */
-const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): string => {
+const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): ReadonlyArray<string> => {
   const paths = [...new Set(places.flatMap((place) => place.repositories))]
   const github = places.every((place) => place.product === 'github')
-  return and(!github || ownerOf(places) === undefined ? paths : paths.map((path) => path.split('/').slice(1).join('/')))
+  return !github || ownerOf(places) === undefined ? paths : paths.map((path) => path.split('/').slice(1).join('/'))
 }
+
+/** Repositories by name, two at most; more, as a count. */
+const named = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `${paths.length} repositories`)
+
+/** Repositories to pick on the service's page, past two: one to a line. */
+const Names = ({ paths }: { paths: ReadonlyArray<string> }) =>
+  paths.length <= 2 ? null : (
+    <ul className={s.names}>
+      {paths.map((path) => (
+        <li key={path}>{path}</li>
+      ))}
+    </ul>
+  )
+
+/** Repositories in a step's words: two at most by name; more, counted. */
+const these = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `these ${paths.length}`)
+
+/** A step that picks repositories: its words, and past two, the list under them. */
+const toPick = (paths: ReadonlyArray<string>, words: (names: string) => string): ReactNode => (
+  <>
+    {words(these(paths))}
+    <Names paths={paths} />
+  </>
+)
 
 const projectsIn = (places: ReadonlyArray<ConnectPlace>) => [...new Set(places.map((place) => place.project))]
 
@@ -115,7 +139,11 @@ export const text = {
     </>
   ),
   install: (owner: string) => `Install Althar on ${owner}`,
-  installSteps: (repositories: string) => ['Choose Only select repositories.', `Pick ${repositories}.`, 'Install.'],
+  installSteps: (repositories: ReadonlyArray<string>) => [
+    'Choose Only select repositories.',
+    toPick(repositories, (names) => `Pick ${names}.`),
+    'Install.',
+  ],
   waitingFor: (who: string) => `Waiting for ${who}`,
   ownersApprove: (owner: string) => `If you don’t own ${owner}, its owners approve it first.`,
   approveOn: (service: string) => `Approve Althar on ${service}`,
@@ -161,10 +189,10 @@ export const text = {
   githubFilled: (owner: string | undefined) => (owner === undefined ? 'Opens filled in.' : `Opens filled in, for ${owner}.`),
   classicFilled: 'Opens with the repo and workflow scopes ticked.',
   gitlabFilled: 'Opens with the api scope ticked.',
-  githubSteps: (repositories: string | null) => [
+  githubSteps: (repositories: ReadonlyArray<string> | null) => [
     repositories === null
       ? 'Under Repository access, choose the repositories Althar works in.'
-      : `Under Repository access, choose Only select repositories: ${repositories}.`,
+      : toPick(repositories, (names) => `Under Repository access, choose Only select repositories: ${names}.`),
     'Generate token, then copy it.',
   ],
   classicSteps: ['Set when it runs out.', 'Generate token, then copy it.'],
@@ -280,7 +308,7 @@ export const text = {
     scope: (scope: string) => `The token wasn’t given the ${scope} scope.`,
     permission: (permission: string) => `${permission} isn’t allowed on this token.`,
     role: (role: string | null) => (role === null ? 'Your account can’t do this there.' : `As ${role}, your account can’t do this there.`),
-    unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${and(names)}.`,
+    unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${named(names)}.`,
     notInstalled: (owner: string) => `Althar isn’t installed on ${owner} yet.`,
     restricted: (owner: string) => `${owner} keeps out apps that sign in with OAuth, gh among them, until its owners approve one.`,
     sso: (owner: string) => `${owner} signs in with SAML: the token needs authorizing for it.`,
@@ -289,7 +317,7 @@ export const text = {
   },
   fix: {
     githubSet: (what: string) => `Set ${what}, then Update.`,
-    githubAdd: (names: string) => `Add ${names} under Repository access, then Update.`,
+    githubAdd: (names: ReadonlyArray<string>) => `Add ${these(names)} under Repository access, then Update.`,
     githubScope: (scope: string) => `Tick ${scope}, then Update token.`,
     remake: (service: string, scope: string) => `A ${service} token keeps the scopes it was made with: make one with ${scope}.`,
     restricted: (owner: string) => `Its owners can approve GitHub CLI for ${owner}, or you can make a token instead.`,
@@ -534,7 +562,7 @@ const checkLines = (model: ConnectModel, product: Product): ReadonlyArray<Connec
   const service = serviceName(model.service)
   const webUrl = model.instance?.webUrl ?? ''
   const places = placesAt(model.guide?.places ?? [], product, webUrl)
-  const repositories = repositoriesIn(places)
+  const repositories = named(repositoriesIn(places))
   const said = (need: AccessLine['need']) => lineText(need, product, model, repositories)
   if (model.check !== null)
     return model.check.lines.map((line) => {
@@ -1186,12 +1214,15 @@ function Fix({
         {text.fix.makeNew}
       </Button>
     )
-  const row = (note: string | null, ...presses: ReadonlyArray<ReactNode>) => (
+  /** The fix's words, past two repositories the list of them, and its presses. */
+  const listed = (note: string | null, paths: ReadonlyArray<string>, ...presses: ReadonlyArray<ReactNode>) => (
     <>
       {note !== null && <ConnectText tone="note">{note}</ConnectText>}
+      <Names paths={paths} />
       <ConnectActions>{presses}</ConnectActions>
     </>
   )
+  const row = (note: string | null, ...presses: ReadonlyArray<ReactNode>) => listed(note, [], ...presses)
   if (reason === null) return row(null, checkAgain, asItIs)
   switch (reason.kind) {
     case 'refused':
@@ -1215,7 +1246,7 @@ function Fix({
       )
     case 'unseen':
       return product === 'github' && reason.url !== null
-        ? row(text.fix.githubAdd(and(reason.names)), change(reason.url), checkAgain, asItIs)
+        ? listed(text.fix.githubAdd(reason.names), reason.names, change(reason.url), checkAgain, asItIs)
         : row(null, checkAgain, asItIs)
     case 'not_installed':
       return row(null, checkAgain, asItIs)

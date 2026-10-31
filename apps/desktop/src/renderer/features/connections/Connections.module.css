@@ -80,3 +80,12 @@
   top: 10vh;
   max-height: 80vh;
 }
+/* the repositories to pick on a service's page, past two: one to a line */
+.names {
+  display: grid;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 12px;
+}

@@ -416,7 +416,7 @@ describe('connecting Bitbucket', () => {
     })
     expect(await heading('Connected as me@northwind.io')).toBeTruthy()
     expect(within(panel).getByText('Your Atlassian account')).toBeTruthy()
-    expect(within(panel).getByText('Reaches northwind/tessera-web, northwind/tessera-api and northwind/tessera-ops')).toBeTruthy()
+    expect(within(panel).getByText('Reaches 3 repositories')).toBeTruthy()
     expect(within(panel).getByText('Write')).toBeTruthy()
     expect(within(panel).getByText('Read build statuses and pipeline logs')).toBeTruthy()
 
@@ -850,6 +850,25 @@ describe('connecting GitHub', () => {
       press: 'Check again',
     },
     {
+      // Past two, the line counts them, and the fix lists them one to a line, to pick on GitHub.
+      check: lacking('reach', {
+        kind: 'unseen',
+        names: ['northwind/api', 'northwind/web', 'northwind/ops', 'northwind/docs'],
+        url: 'https://github.com/settings/personal-access-tokens/7',
+      }),
+      title: 'It doesn’t reach every repository',
+      says: [
+        'It doesn’t see 4 repositories.',
+        'Add these 4 under Repository access, then Update.',
+        'northwind/api',
+        'northwind/web',
+        'northwind/ops',
+        'northwind/docs',
+      ],
+      press: 'Change it on GitHub',
+      opens: 'https://github.com/settings/personal-access-tokens/7',
+    },
+    {
       check: lacking('reach', { kind: 'sso', owner: 'northwind', url: 'https://github.com/orgs/northwind/sso' }),
       title: 'northwind wants this token authorized',
       says: [
@@ -961,7 +980,12 @@ describe('connecting GitHub', () => {
     )
     expect(await within(panel).findByText('For meridian: 3 repositories')).toBeTruthy()
     await press(/Make a token/)
-    expect(within(panel).getByText('Under Repository access, choose Only select repositories: api, web and ops.')).toBeTruthy()
+    expect(within(panel).getByText('Under Repository access, choose Only select repositories: these 3.')).toBeTruthy()
+    expect(
+      within(panel)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(expect.arrayContaining(['api', 'web', 'ops']))
     expect(within(panel).getByText('Opens filled in, for northwind.')).toBeTruthy()
     await comeBack()
     expect(await heading('Paste the token')).toBeTruthy()

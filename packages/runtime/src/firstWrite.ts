@@ -97,14 +97,18 @@ const changing = (taskId: string) =>
     return one !== undefined
   })
 
-/** Worktrees' repositories by the names the person knows them by, the project's first first. */
+/** Repositories by the names the person knows them by: two at most; more, as a count. */
+export const repositoriesWords = (names: ReadonlyArray<string>) =>
+  names.length <= 2 ? names.join(' and ') : `${names.length} repositories`
+
+/** Worktrees' repositories in words, the project's first first. */
 const repositoriesOf = (ids: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const names = yield* sql<{ name: string }>`
       SELECT b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
       WHERE w.id IN ${sql.in(ids)} ORDER BY b.created_at, b.rowid`
-    return names.map((one) => one.name).join(', ')
+    return repositoriesWords(names.map((one) => one.name))
   })
 
 /**

@@ -2330,7 +2330,10 @@ describe('words', () => {
       [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
       [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more."],
       [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
-      [{ _tag: 'SignOutFailed', line: 'codex logout' }, "Couldn't sign this account out. Try again, or remove it anyway."],
+      [
+        { _tag: 'SignOutFailed', line: 'codex logout' },
+        "Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on this computer.",
+      ],
       [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
       [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
       [{ _tag: 'DraftUntitled' }, 'An issue needs a title.'],

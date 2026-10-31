@@ -240,7 +240,7 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return "Couldn't sign this account out. Try again, or remove it anyway."
+        return "Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on this computer."
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
