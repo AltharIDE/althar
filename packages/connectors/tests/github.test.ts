@@ -183,12 +183,27 @@ describe('GitHub as a code host', () => {
         ['POST', `${API}/graphql`, queue({ isInMergeQueue: true })],
       ])
       assert.deepInclude(yield* inIt.host.change(repository, 12, { queue: true }), { queued: true, leftQueue: null })
-      // A pull request GraphQL doesn't find, as REST did a moment before, isn't taken for one out of the queue.
+      // A pull request GraphQL doesn't find, as REST did a moment before, on a branch known to have a queue, isn't taken for
+      // one out of it.
+      let found = true
       const unfound = github([
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
-        ['POST', `${API}/graphql`, { json: { data: { repository: null } } }],
+        ['POST', `${API}/graphql`, () => (found ? queue({ isInMergeQueue: true }) : { json: { data: { repository: null } } })],
       ])
+      yield* unfound.host.change(repository, 12, { queue: true })
+      found = false
       assert.strictEqual((yield* Effect.flip(unfound.host.change(repository, 12, { queue: true }))).reason, 'not_found')
+      // On a branch not known to have one, where GitHub fails to say, the read stands without, and the next read asks again.
+      const unsaid = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, { status: 502, json: {} }],
+      ])
+      assert.notProperty(yield* unsaid.host.change(repository, 12, { queue: true }), 'queued')
+      assert.notProperty(yield* unsaid.host.change(repository, 12, { queue: true }), 'queued')
+      assert.lengthOf(
+        unsaid.sent.filter((request) => request.method === 'POST'),
+        2,
+      )
       // Merged, there is no queue to ask about.
       const merged = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-28T12:00:00Z' }) }]])
       assert.notProperty(yield* merged.host.change(repository, 12, { queue: true }), 'queued')

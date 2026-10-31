@@ -246,6 +246,21 @@ describe('a project’s settings', () => {
     expect(move.getAttribute('aria-checked')).toBe('false')
   })
 
+  it('pushes the lead’s commits by itself unless switched off', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const push = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Push the lead’s commits automatically',
+    })
+    expect(push.getAttribute('aria-checked')).toBe('true')
+    expect(descriptionOf(push)).toBe(
+      'When a lead’s turn ends, what it committed goes up to its pull request, even after you’ve looked. If someone else pushed there, it waits for you.',
+    )
+    await userEvent.click(push)
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
+  })
+
   it('lets changes to issues apply without a card once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()

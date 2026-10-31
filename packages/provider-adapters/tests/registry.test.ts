@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { agents, type Contained } from '../src/registry'
+import { agents, claudeSandboxStarts, type Contained } from '../src/registry'
 import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
@@ -301,6 +301,43 @@ describe('the agent registry', () => {
       assert.include(held.settings.permissions.ask, 'Bash', JSON.stringify(options))
       assert.isFalse(held.settings.sandbox.autoAllowBashIfSandboxed)
     }
+  })
+
+  it('says which of Claude Code’s sessions its sandbox holds, so what it holds runs unread (ADR-071)', () => {
+    const holds = agents['claude-code'].holds
+    if (holds === undefined) return assert.fail('Claude Code says what its sandbox holds')
+    type Sandbox = { failIfUnavailable: boolean }
+    const sandboxOf = (role: 'lead' | 'reader', options?: Parameters<typeof holds>[1]) =>
+      (agents['claude-code'].sessionMeta?.(role, options) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode
+        .options.settings.sandbox
+    const folder = '/work/meridian/.coordinator'
+    const contained = { folder, reads: { allowed: [folder], denied: ['/work/meridian'] } }
+    if (!claudeSandboxStarts()) {
+      // Where it can't start, nothing is held: the rules read every command, and a lead starts without it, as before.
+      assert.isUndefined(holds('lead', { sandbox: { commands: ['ps'], hosts: [] } }))
+      assert.isUndefined(holds('reader', { contained }))
+      assert.isFalse(sandboxOf('lead').failIfUnavailable)
+      return
+    }
+    // A lead: but for what runs outside from the start and what it asks to run outside; and it doesn't start without it.
+    assert.deepStrictEqual(holds('lead', { sandbox: { commands: ['ps', 'bunx playwright'], hosts: ['github.com'] } }), {
+      outside: ['ps', 'bunx playwright'],
+      unsandboxed: true,
+    })
+    assert.isTrue(sandboxOf('lead').failIfUnavailable)
+    // The coordinator, which runs nothing outside.
+    assert.deepStrictEqual(holds('reader', { contained }), { outside: [], unsandboxed: false })
+    // Never a review's lead, nor a reader that isn't held to a folder: the rules read each of their commands.
+    assert.isUndefined(holds('reader', { contained, untrusted: true }))
+    assert.isUndefined(holds('reader', { contained, offline: true }))
+    assert.isUndefined(holds('reader'))
+    // Only Claude Code says: Codex asks only to go beyond its sandbox already, and the rest have none Althar holds.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.holds !== undefined)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
   })
 
   it('reviews a pull request from outside only on an agent its session holds to reading', () => {

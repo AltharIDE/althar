@@ -86,6 +86,22 @@ export interface KindWords {
   except?: string
 }
 
+/**
+ * What an ask or a refusal is counted as (ADR-071): one of the kinds, what
+ * Althar can't read, a command the project names, credentials, the code
+ * host, what a reader may not do, and the rest.
+ */
+export type TallyKind = RuleKind | 'unclear' | 'command' | 'credentials' | 'code-host' | 'reader' | 'other'
+
+/** How one kind went lately: asked and allowed, refused, and how often the agent found another way after one it wasn't allowed. */
+export interface KindTally {
+  kind: TallyKind
+  asked: number
+  allowed: number
+  refused: number
+  workedAround: number
+}
+
 /** A value of a setting, as its menu offers it and as the sentence says it. */
 interface Worded extends ChoiceWords {
   word: string
@@ -96,7 +112,17 @@ export interface ProjectRulesText {
   lede: (project: string) => string
   key: Partial<CharterKeyText>
   /** Each sentence's word in the margin. */
-  label: { always: string; never: string; ask: string; allow: string; rest: string; sandbox: string; finished: string; limits: string }
+  label: {
+    always: string
+    never: string
+    ask: string
+    allow: string
+    rest: string
+    sandbox: string
+    tally: string
+    finished: string
+    limits: string
+  }
   /** What no project can change. */
   fixed: string
   /** Who the sentences are about: first named, then again. */
@@ -142,6 +168,13 @@ export interface ProjectRulesText {
     empty: Record<SandboxList, string>
     typed: Record<SandboxList, string>
   }
+  /** How each kind went lately, a line each: its name, then how often it asked and was allowed, was refused and worked around. */
+  tally: {
+    names: Record<Exclude<TallyKind, RuleKind>, string>
+    asked: (times: number, allowed: number) => string
+    refused: (times: number, around: number) => string
+    none: string
+  }
   finished: {
     opens: string
     pushes: string
@@ -184,6 +217,7 @@ export const projectRulesText: ProjectRulesText = {
     allow: 'Go ahead',
     rest: 'The rest',
     sandbox: 'Sandbox',
+    tally: 'Last 14 days',
     finished: 'Finished',
     limits: 'Limits',
   },
@@ -302,7 +336,7 @@ export const projectRulesText: ProjectRulesText = {
     withoutAsking: ' without asking',
     once: ', once everything else is allowed',
     noHosts: ' Every host they reach asks first.',
-    holds: ' Each command still meets these rules.',
+    holds: ' What stays in their sandbox runs without asking; what leaves it meets these rules.',
     add: { commands: 'Add a command leads run outside their sandbox', hosts: 'Add a host leads reach without asking' },
     field: { commands: 'A command, as it starts', hosts: 'A host' },
     empty: {
@@ -310,6 +344,21 @@ export const projectRulesText: ProjectRulesText = {
       hosts: 'A host such as registry.npmjs.org',
     },
     typed: { commands: 'Runs outside the sandbox', hosts: 'Reached without asking' },
+  },
+  tally: {
+    names: {
+      unclear: 'Commands Althar couldn’t read',
+      command: 'Commands this project names',
+      credentials: 'Reading credentials or keys',
+      'code-host': 'Changing things on the code host',
+      reader: 'What a reader may not do',
+      other: 'Everything else',
+    },
+    asked: (times, allowed) =>
+      `asked you ${times === 1 ? 'once' : `${times} times`}, ${allowed === times ? (times === 1 ? 'and you allowed it' : `and you allowed all ${times}`) : `and you allowed ${allowed}`}`,
+    refused: (times, around) =>
+      `refused ${times === 1 ? 'once' : `${times} times`}${around === 0 ? '' : `, and agents found another way ${around === times ? (times === 1 ? 'that time' : 'each time') : `${around} times`}`}`,
+    none: 'Nothing asked you or was refused.',
   },
   finished: {
     opens: 'A finished task opens ',
@@ -387,6 +436,8 @@ const KINDS = [
   RuleKind.Deploy,
   RuleKind.Outside,
 ] as const
+/** Whether what a tally counts is one of the kinds, which say their own name. */
+const isRuleKind = (kind: TallyKind): kind is RuleKind => (KINDS as readonly string[]).includes(kind)
 const PLACES = [RulePlace.Never, RulePlace.Ask, RulePlace.Allow, RulePlace.Rest] as const
 /** What the rest can be; allowing everything is the switch over every sentence. */
 const MODES = [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask] as const
@@ -445,6 +496,12 @@ export type ProjectRulesProps = RootProps<
       onAdd: (list: SandboxList, typed: string) => string | undefined
       onRemove: (list: SandboxList, value: string) => void
     }
+    /**
+     * How each kind of ask and refusal went lately, the most first, for
+     * leads and the coordinator, so a kind that mostly gets worked around
+     * can be dropped. Without it, the sentence isn't said.
+     */
+    tally?: readonly KindTally[]
     text?: Partial<ProjectRulesText>
   }
 >
@@ -553,6 +610,7 @@ export function ProjectRules({
   allowed,
   onAllowedChange,
   sandbox,
+  tally,
   text,
   className,
   ...rest
@@ -952,6 +1010,21 @@ export function ProjectRules({
               )}
             </span>
             {t.sandbox.holds}
+          </Clause>
+        )}
+
+        {tally !== undefined && (
+          <Clause label={t.label.tally} headingLevel={sub}>
+            {tally.length === 0
+              ? t.tally.none
+              : tally.map((each) => (
+                  <span key={each.kind} className={s.tallyLine}>
+                    {`${isRuleKind(each.kind) ? t.kinds[each.kind].name : t.tally.names[each.kind]}: ${[
+                      ...(each.asked > 0 ? [t.tally.asked(each.asked, each.allowed)] : []),
+                      ...(each.refused > 0 ? [t.tally.refused(each.refused, each.workedAround)] : []),
+                    ].join('; ')}.`}
+                  </span>
+                ))}
           </Clause>
         )}
 

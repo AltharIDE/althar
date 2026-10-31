@@ -1140,6 +1140,7 @@ describe('project rules, through the API', () => {
           commands: [],
           end: null,
           resolveConflicts: false,
+          pushCommits: true,
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
@@ -1153,6 +1154,8 @@ describe('project rules, through the API', () => {
             hosts: [],
             edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
           },
+          // Nothing asked or was refused yet.
+          tally: [],
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(

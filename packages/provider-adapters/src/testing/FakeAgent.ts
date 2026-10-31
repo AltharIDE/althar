@@ -11,6 +11,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { REFUSAL_META } from '../registry'
 import { recorded } from './recorded'
 
 /** A program run to its end, as `git` is, without stopping whatever else runs in this process meanwhile. */
@@ -371,6 +372,8 @@ interface SessionState {
   coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
+  /** Why Althar refused the last call, where its answer said so (`REFUSAL_META`), as Claude Code's adapter hands it the model. */
+  told?: string | undefined
   /** What it left running, by its task's id. */
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
@@ -624,7 +627,8 @@ const playStall = async (
  * says again what the task built, `[lead:fix-more]` commits other work after it,
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
- * `[lead:push]` commits what it has and asks the person to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
+ * `[lead:push]` commits what it has and asks the person to push it; asked to "tidy pls", `[lead:commit]` commits and ends its
+ * turn, asking no one to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -1034,6 +1038,11 @@ const playRole = async (
       if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
+      }
+      // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
+      if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
+        commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        return 'Tidied up, and committed it.'
       }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {
@@ -1584,6 +1593,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         asking -= 1
         if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
+        const told = answer._meta?.[REFUSAL_META]
+        if (typeof told === 'string') session.told = told
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
@@ -1786,6 +1797,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           await say(`chosen=${chosen}`)
+          if (session.told !== undefined) {
+            await say(` told=${session.told}`)
+            session.told = undefined
+          }
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
@@ -1991,7 +2006,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         }
         case scenarios.planUsage: {
-          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          // As the CLI sends them (SDK 0.3.312): each window it tracks, and its own window with no use of its own until one nears its limit.
+          // Resets ahead of now: one that has passed is unknown.
           const inSeconds = (seconds: number) => Math.floor(now() / 1000) + seconds
           await update({
             sessionUpdate: 'usage_update',
@@ -1999,19 +2015,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             size: 100,
             _meta: {
               '_claude/rateLimit': {
-                status: 'allowed_warning',
+                status: 'allowed',
                 rateLimitType: 'five_hour',
-                utilization: 0.82,
                 resetsAt: inSeconds(3 * 3600),
+                unifiedWindows: {
+                  five_hour: { utilization: 0.82, resetsAt: inSeconds(3 * 3600), status: 'allowed_warning' },
+                  seven_day: { utilization: 0.4, resetsAt: inSeconds(5 * 86_400), status: 'allowed' },
+                },
               },
-            },
-          })
-          await update({
-            sessionUpdate: 'usage_update',
-            used: 20,
-            size: 100,
-            _meta: {
-              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
             },
           })
           return ended()

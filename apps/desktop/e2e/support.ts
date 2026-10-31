@@ -190,6 +190,15 @@ export const backToWork = async (page: Page) => {
     .click()
 }
 
+/** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
+export const pushByHand = async (page: Page) => {
+  await projectSettings(page, 'General')
+  const pushes = page.getByRole('switch', { name: 'Push the lead’s commits automatically' })
+  await pushes.click()
+  await expect(pushes).not.toBeChecked()
+  await backToWork(page)
+}
+
 /**
  * Connects the fake GitHub, where the project's work goes, from where its
  * settings say so, with a token pasted as the person would; then back to

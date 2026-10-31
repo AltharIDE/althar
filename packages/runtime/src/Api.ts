@@ -57,6 +57,7 @@ import {
   Policies,
   type ProjectRules,
   resolvesConflicts,
+  pushesCommits,
   ruleSetOf,
   usageLimitOf,
 } from './Policies'
@@ -75,6 +76,7 @@ import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
+import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
@@ -348,10 +350,15 @@ export const handlers = Api.toLayer(
           hosts: withEdits(reach.hosts, edits.hosts),
           edits,
         }
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox }
+        // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
+        const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox'> => {
+    const rulesFields = (
+      projectId: string,
+      rules: ProjectRules,
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -364,6 +371,7 @@ export const handlers = Api.toLayer(
         commands: set.commands,
         end: rules.end ?? null,
         resolveConflicts: resolvesConflicts(rules),
+        pushCommits: pushesCommits(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -1353,6 +1361,8 @@ export const handlers = Api.toLayer(
               const kept = yield* policies.current(projectId as ProjectId)
               // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
+              if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),
           ),

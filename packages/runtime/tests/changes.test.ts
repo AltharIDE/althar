@@ -482,6 +482,58 @@ describe('a task that ends in a pull request', () => {
     },
   )
 
+  it.live(
+    'hears a pull request put in its merge queue outside Althar, keeps Accept and merge from merging it again, and settles it once merged',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const number = ready?.change?.number ?? 0
+        const changes = yield* Changes
+        const said = Effect.map(notices(ready?.threadId ?? ''), (all) => all.map((notice) => notice.title ?? ''))
+        const card = Effect.map(cards(projectId), (all) => all[0])
+        const inQueue = Effect.map(said, (all) => all.filter((title) => title.includes('is in the merge queue')))
+        assert.notStrictEqual(ready?.change?.queued, true)
+        // Put in the queue on GitHub's site, it is heard so on the next turn: in it, at work still, and its thread says so.
+        github.enqueueByHand(number)
+        yield* changes.refresh(taskId)
+        const [queued] = yield* until(cards(projectId), (all) => all[0]?.change?.queued === true)
+        assert.deepInclude(queued?.change, { state: 'open', queued: true })
+        assert.strictEqual(queued?.phase, 'ready')
+        assert.include(yield* said, "PR #1 is in the merge queue for main. It merges once the queue's checks pass.")
+        // Heard again, it isn't said again.
+        yield* changes.refresh(taskId)
+        assert.lengthOf(yield* inQueue, 1)
+        // Accept and merge, pressed on it as it sits in the queue, merges nothing: it is in the queue still, said once.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        assert.notInclude(github.calls, 'merge')
+        assert.isTrue((yield* card)?.change?.queued)
+        assert.lengthOf(yield* inQueue, 1)
+        // The queue takes it out, its checks failed there: the thread says so, and it is the person's again.
+        github.dequeue(number, 'checks')
+        yield* changes.refresh(taskId)
+        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
+        assert.strictEqual(back?.change?.state, 'open')
+        assert.include(yield* said, "The merge queue took PR #1 out: its checks failed there. It's back in Needs you, to merge again.")
+        // Put in again from outside, and merged by the queue, it settles.
+        github.enqueueByHand(number)
+        yield* changes.refresh(taskId)
+        yield* until(cards(projectId), (all) => all[0]?.change?.queued === true)
+        github.mergeByHand(number)
+        yield* changes.refresh(taskId)
+        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
+        assert.strictEqual(settled?.change?.state, 'merged')
+        assert.lengthOf(yield* inQueue, 2)
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+    },
+  )
+
   it.live('pushes the branch only, when that is how the task ends', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

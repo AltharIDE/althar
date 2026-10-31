@@ -67,6 +67,12 @@ export const ProjectRules = Schema.Struct({
    */
   resolveConflicts: Schema.optional(Schema.Boolean),
   /**
+   * Whether what a task's lead commits goes up to its open pull request on
+   * its own, as its turn ends, whoever has looked (ADR-072), rather than
+   * waiting for the person's push. On without it.
+   */
+  pushCommits: Schema.optional(Schema.Boolean),
+  /**
    * How a task's branch and its pull request's title are named, by a pattern
    * (`@althar/contracts`' names): the person's own, over what each
    * repository's docs say. Without one, the docs', else Althar's own.
@@ -179,6 +185,9 @@ export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssue
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
+
+/** Whether a revision's rules push a lead's commits on their own (ADR-072): they do unless the person turned it off. */
+export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits ?? true
 
 /** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
 export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>
