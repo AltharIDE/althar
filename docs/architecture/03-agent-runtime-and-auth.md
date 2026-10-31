@@ -1041,8 +1041,10 @@ Superset, Conductor and Codex do, before the lead starts
   `record_setup` (`recorded_setup`): the ignored files to copy from the
   person's checkout, from the repository's root, and the commands, run one
   after another from the repository's folder until one fails. The files are
-  copied first, never over what the worktree has, and only from inside the
-  checkout; one that isn't there is said, and fails nothing. Without one
+  copied first, only from inside the checkout, and never over or into
+  what the worktree has, nor through a folder of it that is a symbolic
+  link, which a commit can point anywhere. One that couldn't be copied, gone
+  from the checkout say, fails the setup, and the lead is told which. Without one
   recorded, the setup kept for the repository (`set_run_command`'s `setup`,
   the same one a run of the project starts with), else the install
   its lockfile names: `bun install --frozen-lockfile`, `pnpm install

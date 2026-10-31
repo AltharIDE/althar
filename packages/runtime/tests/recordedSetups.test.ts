@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -8,7 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { copyablePath, lineOf, type Recorded, recordedOf, type SetUp } from '../src/Setups'
+import { copyablePath, copyInto, lineOf, type Recorded, recordedOf, type SetUp } from '../src/Setups'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, repository, runtime, until } from './support'
@@ -134,12 +135,13 @@ describe('a recorded setup in a later task', () => {
       const path = withEnv()
       const first = yield* taskIn(path)
       yield* setUpOf(first.task.taskId)
-      yield* callTool(first.lead, 'record_setup', { copy: ['.env', 'config/missing.yml'], commands: [step('one'), step('two')] })
+      yield* callTool(first.lead, 'record_setup', { copy: ['.env'], commands: [step('one'), step('two')] })
 
       const later = yield* taskIn(path, 'Refund over budget')
       const setUp = yield* setUpOf(later.task.taskId)
       assert.deepInclude(setUp, { command: `${step('one')}\n${step('two')}`, code: 0, timedOut: false })
-      assert.include(setUp.last ?? '', 'Copied .env\nNot in the checkout: config/missing.yml')
+      assert.isUndefined(setUp.missing)
+      assert.include(setUp.last ?? '', 'Copied .env')
       assert.strictEqual(readFileSync(join(later.task.worktree, '.env'), 'utf8'), 'API_KEY=local\n')
       assert.strictEqual(readFileSync(join(later.task.worktree, 'ran.txt'), 'utf8'), 'one\ntwo\n')
       // The thread shows it as installing, which the card says too, with what it did kept for the fold.
@@ -185,6 +187,47 @@ describe('a recorded setup in a later task', () => {
         assert.strictEqual(readFileSync(join(next.task.worktree, 'ran.txt'), 'utf8'), 'fixed\n')
         assert.isFalse(existsSync(join(next.task.worktree, '.env')))
       }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a recorded setup’s files', () => {
+  it.live('that are gone from the checkout fail the setup, and the lead is told which, though its commands went through', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      yield* callTool(first.lead, 'record_setup', { copy: ['.env', 'config/local.yml'], commands: [step('one')] })
+
+      const later = yield* taskIn(path, 'Refund over budget')
+      const setUp = yield* setUpOf(later.task.taskId)
+      assert.deepInclude(setUp, { code: 0, missing: ['config/local.yml'] })
+      assert.include(setUp.last ?? '', 'Copied .env\nNot in the checkout: config/local.yml')
+      const [item] = yield* setupItems(later.task.threadId)
+      assert.deepInclude((item?.ended ?? {}) as object, { code: 0, missing: ['config/local.yml'] })
+      const said = yield* brief(later.task.threadId)
+      assert.include(said, "Althar set it up with the repository's recorded setup, and it couldn't copy `config/local.yml`.")
+      assert.include(said, 'Not in the checkout: config/local.yml')
+      assert.include(said, 'record the setup that works with record_setup')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.effect('are never copied through a link out of the task’s folder, nor over or into what it has', () =>
+    Effect.gen(function* () {
+      const checkout = mkdtempSync(join(tmpdir(), 'althar-checkout-'))
+      mkdirSync(join(checkout, 'config'))
+      writeFileSync(join(checkout, 'config', 'local.env'), 'SECRET=1\n')
+      writeFileSync(join(checkout, '.env'), 'API_KEY=local\n')
+      const worktree = mkdtempSync(join(tmpdir(), 'althar-worktree-'))
+      const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+      // A commit can make a folder of the worktree a link to anywhere.
+      symlinkSync(elsewhere, join(worktree, 'config'))
+      writeFileSync(join(worktree, '.env'), 'API_KEY=the task’s\n')
+      const { said, missing } = yield* copyInto(checkout, worktree, ['config/local.env', '.env'])
+      assert.deepStrictEqual(missing, ['config/local.env'])
+      assert.deepStrictEqual(said, ["Not copied, as it leads outside the task's folder: config/local.env", 'Already there: .env'])
+      assert.deepStrictEqual(readdirSync(elsewhere), [])
+      assert.strictEqual(readFileSync(join(worktree, '.env'), 'utf8'), 'API_KEY=the task’s\n')
+    }),
   )
 })
 

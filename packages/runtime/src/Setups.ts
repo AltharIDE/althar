@@ -1,4 +1,4 @@
-import { cp, realpath } from 'node:fs/promises'
+import { cp, lstat, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
@@ -66,6 +66,8 @@ export interface SetUp {
   readonly timedOut: boolean
   /** What it copied and the end of what it printed; null for nothing. */
   readonly last: string | null
+  /** The files a recorded setup copies that it couldn't; absent for none. */
+  readonly missing?: ReadonlyArray<string>
 }
 
 /** A repository's setup as a lead recorded it, or the person changed it: what Althar replays in each new task's worktree. */
@@ -105,40 +107,76 @@ export const copyablePath = (path: string): string | null => {
 }
 
 /**
+ * Where a path in the worktree stands for a copy: `out` where a folder on
+ * the way to it, or it, is a symbolic link, which a commit can make point
+ * anywhere; `there` where the worktree has it already, which is never
+ * copied over, nor copied into, as a folder could hold such a link; `new`
+ * where the copy makes it, in real folders of the worktree.
+ */
+const placeOf = async (worktree: string, path: string): Promise<'out' | 'there' | 'new'> => {
+  const root = await realpath(worktree).catch(() => null)
+  if (root === null) return 'out'
+  let at = root
+  for (const part of path.split('/')) {
+    at = join(at, part)
+    const found = await lstat(at).catch(() => null)
+    if (found === null) return 'new'
+    if (found.isSymbolicLink()) return 'out'
+  }
+  return 'there'
+}
+
+/**
  * Copies what a setup names from the person's checkout into a worktree:
- * each that is there and stays inside the checkout, never over what the
- * worktree has. It says, a line each, what it copied and what it couldn't;
- * one it couldn't never fails the setup.
+ * each that is there and stays inside the checkout, never over or into
+ * what the worktree has, nor through a link out of it. It says, a line each, what it
+ * copied and what it couldn't, and gives those it couldn't, which fail the
+ * setup (ADR-076).
  */
 export const copyInto = (checkout: string | null, worktree: string, paths: ReadonlyArray<string>) =>
   Effect.promise(async () => {
     const said: Array<string> = []
+    const missing: Array<string> = []
+    const missed = (path: string, why: string) => {
+      said.push(why)
+      missing.push(path)
+    }
     const root = checkout === null ? null : await realpath(checkout).catch(() => null)
     for (const path of paths) {
       if (root === null) {
-        said.push(`Not copied, with no checkout of the repository on this computer: ${path}`)
+        missed(path, `Not copied, with no checkout of the repository on this computer: ${path}`)
         continue
       }
       const from = await realpath(join(root, path)).catch(() => null)
       if (from === null) {
-        said.push(`Not in the checkout: ${path}`)
+        missed(path, `Not in the checkout: ${path}`)
         continue
       }
       if (from !== root && !from.startsWith(`${root}${sep}`)) {
-        said.push(`Not copied, as it leads outside the checkout: ${path}`)
+        missed(path, `Not copied, as it leads outside the checkout: ${path}`)
         continue
       }
-      const copied = await cp(from, join(worktree, path), { recursive: true, force: false, errorOnExist: false }).then(
+      const place = await placeOf(worktree, path)
+      if (place === 'out') {
+        missed(path, `Not copied, as it leads outside the task's folder: ${path}`)
+        continue
+      }
+      if (place === 'there') {
+        said.push(`Already there: ${path}`)
+        continue
+      }
+      const copied = await cp(from, join(worktree, path), { recursive: true, force: false, errorOnExist: true }).then(
         () => true,
         () => false,
       )
-      said.push(copied ? `Copied ${path}` : `Couldn't copy ${path}`)
+      if (copied) said.push(`Copied ${path}`)
+      else missed(path, `Couldn't copy ${path}`)
     }
-    return said
+    return { said, missing }
   })
 
-/** A setup failed: something ran, and didn't end with 0. */
-export const failedSetUp = (setUp: SetUp) => setUp.command !== null && setUp.code !== 0
+/** A setup failed: something ran, and didn't end with 0, or a file it copies couldn't be. */
+export const failedSetUp = (setUp: SetUp) => setUp.command !== null && (setUp.code !== 0 || (setUp.missing?.length ?? 0) > 0)
 
 /** At most how many commands a recorded setup runs, and how long each may be. */
 const MOST_COMMANDS = 20
@@ -192,6 +230,7 @@ interface Shown {
     /** Althar quit as it ran. */
     readonly stopped: boolean
     readonly last: string | null
+    readonly missing?: ReadonlyArray<string>
   } | null
 }
 
@@ -371,7 +410,8 @@ export class Setups extends Context.Service<
             ended: null,
           }
           const item = yield* addItem({ projectId: unset.projectId, threadId: unset.threadId }, 'setup', shown)
-          const copies = recorded === null ? [] : yield* copyInto(unset.checkout, unset.worktree, recorded.copy)
+          const { said: copies, missing } =
+            recorded === null ? { said: [], missing: [] } : yield* copyInto(unset.checkout, unset.worktree, recorded.copy)
           const { printed: output, ...ran } =
             recorded !== null && recorded.commands.length === 0
               ? { code: 0, timedOut: false, last: null, printed: '' }
@@ -379,11 +419,18 @@ export class Setups extends Context.Service<
           const printed = [...copies, ...(output === '' ? [] : [output])].join('\n')
           // What it copied, then the end of what it printed, kept either way: the thread shows it folded.
           const last = printed === '' ? null : printed
-          const done: SetUp = { at: yield* timestamp, command, ...ran, last }
+          const done: SetUp = { at: yield* timestamp, command, ...ran, last, ...(missing.length === 0 ? {} : { missing }) }
           yield* kept(unset, done)
           yield* updateItem(unset.projectId, item, {
             ...shown,
-            ended: { at: done.at, code: done.code, timedOut: done.timedOut, stopped: false, last: done.last },
+            ended: {
+              at: done.at,
+              code: done.code,
+              timedOut: done.timedOut,
+              stopped: false,
+              last: done.last,
+              ...(missing.length === 0 ? {} : { missing }),
+            },
           } satisfies Shown)
           return { setUp: done, printed }
         })
@@ -596,7 +643,7 @@ export class Setups extends Context.Service<
               })
             const recorded: Recorded = { copy, commands, at: yield* provide(timestamp), taskId }
             yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId))
-            const copied = copy.length === 0 ? [] : yield* copyInto(one.checkout, one.worktree, copy)
+            const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
             return [
               `Recorded ${one.name}'s setup: Althar gets every later task's folder ready with it before its lead starts.`,
               ...(copied.length === 0 ? [] : [`In your folder now: ${copied.join('; ')}.`]),
@@ -624,12 +671,18 @@ export class Setups extends Context.Service<
 }
 
 /** How a setup that failed ended, in words for the lead. */
-const howItFailed = (setUp: SetUp) =>
-  setUp.timedOut
+const howItFailed = (setUp: SetUp) => {
+  const ended = setUp.timedOut
     ? 'it ran out of time and was stopped'
     : setUp.code === null
       ? "it didn't finish"
-      : `it failed with exit code ${setUp.code}`
+      : setUp.code === 0
+        ? null
+        : `it failed with exit code ${setUp.code}`
+  const missing = setUp.missing ?? []
+  const copied = missing.length === 0 ? null : `couldn't copy ${missing.map((path) => `\`${path}\``).join(', ')}`
+  return ended === null ? `it ${copied ?? 'went through'}` : copied === null ? ended : `${ended}, and ${copied}`
+}
 
 /** What a lead is told of how its task's worktrees were set up, each by name where there are several. */
 export const toldOf = (

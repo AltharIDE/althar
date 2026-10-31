@@ -53,6 +53,12 @@ describe('Althar setting up a worktree', () => {
     expect(screen.getByText('Couldn’t set up meridian.')).toBeTruthy()
     expect(screen.getByText('bun install --frozen-lockfile')).toBeTruthy()
   })
+
+  it('shows a recorded setup that couldn’t copy a file as failed, with what it did', () => {
+    show([items.setup({ ended: { ...ended(0, 'Not in the checkout: .env\nDone in 2s'), missing: ['.env'] } })])
+    expect(screen.getByText('Couldn’t copy .env into meridian’s folder.')).toBeTruthy()
+    expect(screen.getByText('Not in the checkout: .env')).toBeTruthy()
+  })
 })
 
 describe('Althar’s lines and a step’s report', () => {

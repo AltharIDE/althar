@@ -38,9 +38,10 @@
   - **Althar replays it in every later task's folder,** as ADR-023 sets up a
     worktree: as the folder is made, while the task waits for an agent
     place if it has to, outside any sandbox, before the lead's first turn.
-    It copies the files from the person's checkout, never over what is
-    there, and says which it couldn't; then runs the commands until one
-    fails. A recorded setup comes before a kept setup line, which comes
+    It copies the files from the person's checkout, never over or into what
+    the worktree has, nor through a link out of it; then runs the commands
+    until one fails. A file it couldn't copy fails the setup as a command
+    does, so the lead is told which. A recorded setup comes before a kept setup line, which comes
     before the lockfile's install. The card says "Installing dependencies"
     while it runs, and the thread keeps what it did and printed, folded.
   - **A replay that fails never holds the task up.** The lead starts, told
