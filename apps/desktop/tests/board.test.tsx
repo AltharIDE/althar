@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
+import { TrackStep, trackOf as trackItems } from '@althar/ui'
 
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
+import { MERGE_QUEUE_STEP, MERGING_STEP } from '../src/renderer/data/merges'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
@@ -670,14 +672,23 @@ describe('the board’s lanes', () => {
   })
 
   it('names a task’s steps, and the one it is on', () => {
-    expect(trackOf(task({ step: 'settle' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'publish' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0 })
+    expect(trackOf(task({ step: 'settle' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'publish' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0, done: false })
     // A task with no plan is a conversation with its lead.
-    expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0 })
+    expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0, done: false })
     // Resolving a conflict, or fixing the checks on the merge, comes after the steps.
-    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+  })
+
+  it('has every step done, none on, while a task is merging or in its merge queue', () => {
+    // Its steps are finished; the merge is what is left, and the words at the top say so.
+    expect(trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: MERGING_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    // Drawn with that flag, no step is left as the one on it.
+    const { steps, at, done } = trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))
+    expect(trackItems(steps, at, at, done).map((step) => step.state)).toEqual([TrackStep.Done, TrackStep.Done])
   })
 
   it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {

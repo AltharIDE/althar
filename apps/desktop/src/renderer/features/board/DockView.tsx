@@ -50,8 +50,9 @@ export const text = {
 
 /** A task's steps, as the dock lists them: done, the one it is on, and those to come. */
 const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
-  const { steps, at } = trackOf(task)
-  const finished = task.phase === 'ready' || task.phase === 'settled'
+  const { steps, at, done } = trackOf(task)
+  // Merging, or in its merge queue, its steps are all done: its merge is what is left, and the words say so.
+  const finished = done || task.phase === 'ready' || task.phase === 'settled'
   // A plan that hasn't started has all its steps to come; one under way that waits to go on still has the one it is on.
   const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
