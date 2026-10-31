@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { git } from './git'
+import { git, gitOutcome } from './git'
 import { timestamp } from './records'
 
 /*
@@ -38,11 +38,11 @@ export interface ReviewRecord {
   readonly lead: string
   /** How many times the reviewer read the change. */
   readonly passes: number
-  /** The commit the last pass read, as it was sent. */
-  readonly sha: string
+  /** The commit the last pass read, as it was sent; null where no commit holds exactly what it read. */
+  readonly sha: string | null
   /** The day the last pass ended, as YYYY-MM-DD. */
   readonly date: string
-  /** What changed after review, in the lead's words, each with the commits that made it, as they were sent. */
+  /** What changed after review, in the lead's words, each with the commit the lead said made it, as it was sent. */
   readonly changed: ReadonlyArray<{ readonly what: string; readonly commits: ReadonlyArray<string> }>
   /** What the reviewer raised that the lead kept as it was, and why. */
   readonly kept: ReadonlyArray<{ readonly point: string; readonly why: string | null }>
@@ -66,17 +66,18 @@ const sealable = (record: ReviewRecord) =>
   record.reviewer.length > 0 &&
   record.reviewer.length <= MODEL_MAX &&
   /^[\x20-\x7e]+$/.test(record.reviewer) &&
+  record.sha !== null &&
   /^[0-9a-f]{7,}$/.test(record.sha)
 
 /** The address the site draws a seal at (packages/ui's sealUrl writes the same). */
-export const sealUrl = (style: SealStyle, record: ReviewRecord, ink: 'light' | 'dark', origin = SEAL_ORIGIN) => {
+export const sealUrl = (style: SealStyle, record: ReviewRecord & { readonly sha: string }, ink: 'light' | 'dark', origin = SEAL_ORIGIN) => {
   const query = new URLSearchParams({ model: record.reviewer, sha: short(record.sha), passes: String(record.passes), date: record.date })
   if (ink === 'dark') query.set('ink', 'dark')
   return `${origin}/seal/${style}.svg?${query.toString()}`
 }
 
 /** What the seal says, for whoever can't see it, and the section's folded line. */
-const reviewedLine = (record: ReviewRecord) => `Reviewed by ${record.reviewer} in ${passesOf(record.passes)}, at`
+const reviewedLine = (record: ReviewRecord) => `Reviewed by ${record.reviewer} in ${passesOf(record.passes)}`
 
 /**
  * The seal, at the head of the description, in its corner: its ink for a
@@ -84,19 +85,22 @@ const reviewedLine = (record: ReviewRecord) => `Reviewed by ${record.reviewer} i
  * Null where it can't be set.
  */
 export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORIGIN): string | null => {
-  if (!sealable(record) || record.passes < 1 || record.passes > 99) return null
-  const alt = lineOf(`${reviewedLine(record)} ${short(record.sha)}`).replace(/"/g, '&quot;')
+  // A seal names the commit it passed: without one that holds what the last pass read, there is none.
+  const sha = record.sha
+  if (sha === null || !sealable(record) || record.passes < 1 || record.passes > 99) return null
+  const alt = lineOf(`${reviewedLine(record)}, at ${short(sha)}`).replace(/"/g, '&quot;')
   return [
     '<picture>',
-    `  <source media="(prefers-color-scheme: dark)" srcset="${sealUrl(style, record, 'dark', origin)}">`,
-    `  <img align="right" width="${SEAL_WIDTH}" alt="${alt}" src="${sealUrl(style, record, 'light', origin)}">`,
+    `  <source media="(prefers-color-scheme: dark)" srcset="${sealUrl(style, { ...record, sha }, 'dark', origin)}">`,
+    `  <img align="right" width="${SEAL_WIDTH}" alt="${alt}" src="${sealUrl(style, { ...record, sha }, 'light', origin)}">`,
     '</picture>',
   ].join('\n')
 }
 
 /** The review, folded at the description's end: what changed after it, what was kept, and who built and reviewed the change. */
 export const detailsOf = (record: ReviewRecord) => {
-  const parts = [`<details>\n<summary>${lineOf(reviewedLine(record))} <code>${short(record.sha)}</code></summary>`]
+  const at = record.sha === null ? '' : `, at <code>${short(record.sha)}</code>`
+  const parts = [`<details>\n<summary>${lineOf(reviewedLine(record))}${at}</summary>`]
   if (record.changed.length > 0)
     parts.push(
       `**What changed after review**\n\n${record.changed
@@ -207,37 +211,39 @@ export const reviewRecordOf = (input: {
         pass.round,
         pass.snapshot === null ? null : yield* git(input.cwd, 'rev-parse', `${pass.snapshot}^`).pipe(Effect.orElseSucceed(() => null)),
       )
-    const lastStart = starts.get(last.round) ?? null
-    if (lastStart === null) return null
+    const read = last.snapshot === null ? null : yield* reviewedCommit(input.cwd, last.snapshot, input.end)
 
     const findings = yield* sql<{
       round: number
       claim: string
       state: 'fixed' | 'set_aside'
       response: string | null
-      file: string | null
+      fixedBy: string | null
     }>`
-      SELECT n.iteration AS round, f.claim, f.state, f.response, json_extract(f.location, '$.file') AS file
+      SELECT n.iteration AS round, f.claim, f.state, f.response,
+        (SELECT json_extract(r.payload, '$.commit') FROM record_events r
+          WHERE r.aggregate_type = 'finding' AND r.aggregate_id = f.id AND r.type = 'finding.fixed' ORDER BY r.sequence DESC LIMIT 1) AS fixed_by
       FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
       JOIN workflow_executions e ON e.id = n.execution_id
       WHERE e.run_id = ${input.runId} AND f.state IN ('fixed', 'set_aside')
       ORDER BY n.iteration, f.created_at`
 
-    /** The commits the lead made settling a round, touching `file` where any did: from where the round started to where the next did, or the end. */
-    const madeIn = (round: number, file: string | null) =>
+    /**
+     * The commit the lead said fixed a finding of `round`, where it is one the
+     * lead made settling that round: after where the round started, and by
+     * where the next started, or the end. Anything else names nothing.
+     */
+    const fixedBy = (round: number, named: string | null) =>
       Effect.gen(function* () {
         const from = starts.get(round) ?? null
         const next = passes.find((pass) => pass.round > round)
         const to = next === undefined ? input.end : (starts.get(next.round) ?? null)
-        if (from === null || to === null || from === to) return []
-        const list = (...path: ReadonlyArray<string>) =>
-          git(input.cwd, 'rev-list', '--reverse', '--no-merges', `${from}..${to}`, ...(path.length === 0 ? [] : ['--', ...path])).pipe(
-            Effect.map((out) => out.split('\n').filter((line) => line !== '')),
-            Effect.orElseSucceed(() => [] as Array<string>),
-          )
-        const touching = file === null ? [] : yield* list(file)
-        // The last two that made it: more is a range no one reads.
-        return (touching.length > 0 ? touching : yield* list()).slice(-2)
+        if (named === null || !/^[0-9a-f]{7,64}$/.test(named) || from === null || to === null) return []
+        const commit = yield* git(input.cwd, 'rev-parse', '--verify', '--quiet', `${named}^{commit}`).pipe(Effect.orElseSucceed(() => null))
+        if (commit === null || commit === from) return []
+        const within = (older: string, newer: string) =>
+          Effect.map(gitOutcome(input.cwd, 'merge-base', '--is-ancestor', older, newer), (answer) => answer.code === 0)
+        return (yield* within(from, commit)) && (yield* within(commit, to)) ? [commit] : []
       })
 
     const changed: Array<{ what: string; commits: ReadonlyArray<string> }> = []
@@ -246,17 +252,38 @@ export const reviewRecordOf = (input: {
       const response = finding.response?.trim() || null
       if (finding.state === 'set_aside') kept.push({ point: finding.claim, why: response })
       // Fixed without a word on what changed, as a lead may: what the reviewer said, as fixed.
-      else changed.push({ what: response ?? `Fixed: ${finding.claim}`, commits: yield* madeIn(finding.round, finding.file) })
+      else changed.push({ what: response ?? `Fixed: ${finding.claim}`, commits: yield* fixedBy(finding.round, finding.fixedBy) })
     }
-    const sent = yield* input.sent([lastStart, ...changed.flatMap((one) => one.commits)])
+    const sent = yield* input.sent([...(read === null ? [] : [read]), ...changed.flatMap((one) => one.commits)])
     const asSent = (sha: string) => sent.get(sha) ?? sha
     return {
       reviewer,
       lead,
       passes: passes.length,
-      sha: asSent(lastStart),
+      sha: read === null ? null : asSent(read),
       date: (last.endedAt ?? (yield* timestamp)).slice(0, 10),
       changed: changed.map((one) => ({ what: one.what, commits: one.commits.map(asSent) })),
       kept,
     } satisfies ReviewRecord
   })
+
+/**
+ * The commit that holds exactly what a review pass read, or null. A pass
+ * reads a copy of the worktree (reviewCopy.ts), uncommitted work and all,
+ * made as a commit on the head: that head, where nothing was left
+ * uncommitted; else the first commit after it, up to `end`, that the lead
+ * made of the same files.
+ */
+export const reviewedCommit = (cwd: string, snapshot: string, end: string) =>
+  Effect.gen(function* () {
+    const tree = yield* git(cwd, 'rev-parse', `${snapshot}^{tree}`)
+    const head = yield* git(cwd, 'rev-parse', `${snapshot}^`)
+    if ((yield* git(cwd, 'rev-parse', `${head}^{tree}`)) === tree) return head
+    const after = yield* git(cwd, 'log', '--reverse', '--format=%H %T', `${head}..${end}`)
+    return (
+      after
+        .split('\n')
+        .map((line) => line.split(' '))
+        .find(([, other]) => other === tree)?.[0] ?? null
+    )
+  }).pipe(Effect.orElseSucceed(() => null))

@@ -9,7 +9,7 @@ import { SEAL_STYLES, sealOf, sealSvg } from '@althar/ui'
  * two keep one format, here.
  */
 
-const RECORD: ReviewRecord = {
+const RECORD = {
   reviewer: 'GPT-6.1 Sol',
   lead: 'Claude Opus 5.5',
   passes: 3,
@@ -17,7 +17,7 @@ const RECORD: ReviewRecord = {
   date: '2026-10-31',
   changed: [],
   kept: [],
-}
+} satisfies ReviewRecord
 
 describe('the review seal’s address', () => {
   it('is drawn by the site as the runtime wrote it, in each look and ink', () => {

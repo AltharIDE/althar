@@ -191,7 +191,13 @@ const Finished = Schema.Struct({
   /** When settling a review: what became of each finding, by its id. */
   findings: Schema.optional(
     Schema.Array(
-      Schema.Struct({ id: Schema.String, outcome: Schema.Literals(['fixed', 'set_aside']), reason: Schema.optional(Schema.String) }),
+      Schema.Struct({
+        id: Schema.String,
+        outcome: Schema.Literals(['fixed', 'set_aside']),
+        reason: Schema.optional(Schema.String),
+        /** For one fixed, the commit that fixed it: the pull request names it. */
+        commit: Schema.optional(Schema.String),
+      }),
     ),
   ),
 })
@@ -2144,7 +2150,7 @@ export class Runs extends Context.Service<
 
       /** What the lead is told to settle a review's findings. */
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
-        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, with what changed in a line of plain words, or set_aside, with why in a line. The pull request lists both. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
+        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, with what changed in a line of plain words and the commit that fixed it, or set_aside, with why in a line. The pull request lists both. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
 
       /** The model a session is on, where it says. */
       const modelOf = (sessionId: string) =>
@@ -3172,7 +3178,12 @@ export class Runs extends Context.Service<
       const settleFindings = (
         run: RunRow,
         attemptId: string,
-        settled: ReadonlyArray<{ readonly id: string; readonly outcome: 'fixed' | 'set_aside'; readonly reason?: string | undefined }>,
+        settled: ReadonlyArray<{
+          readonly id: string
+          readonly outcome: 'fixed' | 'set_aside'
+          readonly reason?: string | undefined
+          readonly commit?: string | undefined
+        }>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3194,7 +3205,7 @@ export class Runs extends Context.Service<
               aggregateId: finding.id,
               revision,
               type: `finding.${outcome.outcome}`,
-              payload: { reason: outcome.reason ?? null },
+              payload: { reason: outcome.reason ?? null, ...(outcome.outcome === 'fixed' ? { commit: outcome.commit ?? null } : {}) },
               actorId: instance.systemId,
             })
           }
@@ -3344,6 +3355,11 @@ export class Runs extends Context.Service<
                       type: 'string',
                       description:
                         'For one fixed, what changed, in a line of plain words ("A session’s windows stay over an endpoint answer asked before them."); for one set aside, why it stays, in a line. The pull request lists them.',
+                    },
+                    commit: {
+                      type: 'string',
+                      description:
+                        'For one fixed, the sha of the commit you made that fixed it, where one did. The pull request names it beside what changed.',
                     },
                   },
                   required: ['id', 'outcome'],

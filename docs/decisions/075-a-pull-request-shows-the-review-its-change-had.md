@@ -25,7 +25,7 @@
     - After the lead's description, the **review, folded** under "Reviewed
       by GPT-6.1 Sol in 3 passes, at `2f67c42`":
       - What changed after review, each line in the lead's words with the
-        commits that made it.
+        commit the lead said made it.
       - What was looked at and kept, each with the lead's reason.
       - A last line naming the model that built the change and the one that
         reviewed it.
@@ -34,13 +34,18 @@
     already took for one set aside, now says for a fixed one what changed,
     in a line, and the lead is asked for it. A fix without that line shows
     the reviewer's claim as fixed.
-  - **Where its commits come from.** No record links a finding to a commit.
-    Each review pass records the head it read (ADR-008's snapshot), so a
-    pass's fixes are the commits from where it started to where the next
-    one started, or the run's end. Commits that touch the finding's file are
-    preferred, and at most the last two are named. Crediting makes commits
-    again before they are pushed (`credit.ts`), so each sha goes through its
-    memory of what it made: the sha shown is the one the host has.
+  - **Where its commits come from.** Nothing linked a finding to a commit,
+    and guessing one from the files a pass touched would cite commits that
+    didn't make the fix. So the lead names it: `finish_step`'s findings take
+    a `commit` for one fixed, kept in the `finding.fixed` fact. It is shown
+    only where it is a commit the lead made settling that pass, after where
+    the pass started and by where the next one did; anything else names
+    nothing. The commit the last pass read is the head its copy was made on
+    only where nothing was left uncommitted. Otherwise it is the first
+    commit after that holds the same tree, or none, and then there is no
+    seal. Crediting makes commits again before they are pushed
+    (`credit.ts`), so each sha goes through its memory: the sha shown is the
+    one the host has.
   - **The seal is drawn by the site.** A code host shows an image only by
     its address, so the site has one Worker route, `/seal/<look>.svg`.
     - It draws the seal from its query: model, sha, passes, date, ink. It
@@ -74,8 +79,9 @@
     reader's machine has, so the same address would draw differently.
   - Embedding a font in each SVG: about 60 KB a seal, against about 10 KB
     of outlines.
-  - Asking the lead to name each fix's commit: more for the lead to get
-    wrong. The pass ranges already say where a fix went.
+  - Inferring each fix's commit from the pass's range and the finding's
+    file: a later change to the file, or a fix in another file, would cite
+    the wrong commit.
   - Editing the description after later rounds: no host connector can, yet.
 - **Trade-off:** the seal depends on althar.ai being up when a reader's
   host first fetches it. Hosts' image proxies keep it after that, and its

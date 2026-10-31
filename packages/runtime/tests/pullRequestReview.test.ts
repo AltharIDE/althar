@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -6,6 +11,7 @@ import {
   detailsOf,
   lineOf,
   type ReviewRecord,
+  reviewedCommit,
   reviewSeal,
   sealOf,
   sealUrl,
@@ -21,7 +27,7 @@ import { HOST, hosted, until } from './support'
  * its commits, and what was kept, with why; never how many findings.
  */
 
-const RECORD: ReviewRecord = {
+const RECORD = {
   reviewer: 'GPT-6.1 Sol',
   lead: 'Claude Opus 5.5',
   passes: 3,
@@ -35,7 +41,7 @@ const RECORD: ReviewRecord = {
     { point: 'Ask the endpoint every 5 minutes, not every 15', why: 'its 429 asks for up to an hour’s wait.' },
     { point: 'Rename the reader', why: null },
   ],
-}
+} satisfies ReviewRecord
 
 describe('the review on a pull request, as words', () => {
   it('folds what changed and what was kept under who reviewed it, in how many passes, at which commit', () => {
@@ -82,10 +88,71 @@ describe('the review on a pull request, as words', () => {
     )
   })
 
+  it('names no commit, and has no seal, where no commit holds what the last pass read', () => {
+    const unsure = { ...RECORD, sha: null }
+    assert.isNull(sealOf('ring', unsure))
+    assert.include(detailsOf(unsure), '<summary>Reviewed by GPT-6.1 Sol in 3 passes</summary>')
+  })
+
   it('goes without a seal where one can’t set the reviewer’s name', () => {
     assert.isNull(sealOf('ring', { ...RECORD, reviewer: 'Modèle' }))
     assert.isNull(sealOf('ring', { ...RECORD, reviewer: 'x'.repeat(33) }))
     assert.isNotNull(sealOf('ring', { ...RECORD, reviewer: 'x'.repeat(32) }))
+  })
+})
+
+describe('the commit a pass read', () => {
+  const repo = () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'reviewed-'))
+    const run = (...args: Array<string>) =>
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
+        .toString()
+        .trim()
+    run('init', '-q')
+    writeFileSync(join(cwd, 'a.txt'), 'one\n')
+    run('add', '-A')
+    run('commit', '-q', '-m', 'One')
+    /** A pass's copy, as reviewCopy.ts makes it: the worktree as it stands, uncommitted work too, as a commit on the head. */
+    const snapshot = () => {
+      run('add', '-A')
+      const tree = run('write-tree')
+      return run('commit-tree', tree, '-p', 'HEAD', '-m', 'What review round 1 reads')
+    }
+    return { cwd, run, snapshot }
+  }
+
+  it.effect('is the head the copy was made on, where nothing was left uncommitted', () => {
+    const { cwd, run, snapshot } = repo()
+    const copy = snapshot()
+    const head = run('rev-parse', 'HEAD')
+    return Effect.map(reviewedCommit(cwd, copy, head), (read) => assert.strictEqual(read, head))
+  })
+
+  it.effect('is the commit the lead made later of what it read uncommitted, never the head it sat on', () => {
+    const { cwd, run, snapshot } = repo()
+    writeFileSync(join(cwd, 'a.txt'), 'two\n')
+    const copy = snapshot()
+    run('reset', '-q')
+    const head = run('rev-parse', 'HEAD')
+    run('commit', '-q', '-am', 'Two')
+    const two = run('rev-parse', 'HEAD')
+    writeFileSync(join(cwd, 'a.txt'), 'three\n')
+    run('commit', '-q', '-am', 'Three')
+    const end = run('rev-parse', 'HEAD')
+    return Effect.map(reviewedCommit(cwd, copy, end), (read) => {
+      assert.notStrictEqual(read, head)
+      assert.strictEqual(read, two)
+    })
+  })
+
+  it.effect('is none, where no commit ever held what it read uncommitted', () => {
+    const { cwd, run, snapshot } = repo()
+    writeFileSync(join(cwd, 'a.txt'), 'two\n')
+    const copy = snapshot()
+    run('checkout', '-q', '--', 'a.txt')
+    writeFileSync(join(cwd, 'a.txt'), 'other\n')
+    run('commit', '-q', '-am', 'Other')
+    return Effect.map(reviewedCommit(cwd, copy, run('rev-parse', 'HEAD')), (read) => assert.isNull(read))
   })
 })
 
@@ -131,6 +198,22 @@ describe('a pull request opened after a review', () => {
       assert.notInclude(body, 'Looked at and kept')
       assert.match(body, /<sub>Built by .+ · Reviewed by .+<\/sub>\n<\/details>\n\nOpened by \[Althar\]/)
       assert.notMatch(body, /finding/i)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('names no commit for a fix where the lead named one it didn’t make settling', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-elsewhere] [review:findings]',
+      )
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const body = github.changes[0]?.body ?? ''
+      assert.include(body, '**What changed after review**\n\n- The heading names the retry.\n\n')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
