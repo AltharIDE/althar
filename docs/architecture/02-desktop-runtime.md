@@ -242,7 +242,8 @@ Quitting (`main.ts`, `before-quit`):
    main asks the runtime what it would stop (`work`, `runtime/atWork.ts`):
    the leads and reviews at work as Busy counts them, the project runs still
    going, and what agents left running. With nothing at work it goes on at
-   once;
+   once; a runtime that doesn't answer in time is not nothing: the question
+   is asked as "may stop work";
 2. otherwise a window asks the person (`QuitWork` in the kit): quit anyway,
    keep working in the background where the edge keeps Althar in reach (the
    windows close, the runtime carries on, and closing the last window no
