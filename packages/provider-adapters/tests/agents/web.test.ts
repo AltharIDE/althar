@@ -8,6 +8,19 @@ import { Effect, Ref, Stream } from 'effect'
 import { connect } from '../../src/AgentConnection'
 import { agents } from '../../src/registry'
 
+/** A native tool input must name the page itself, not merely contain its name. */
+const namesPage = (input: unknown): boolean => {
+  if (typeof input === 'string') {
+    try {
+      return new URL(input).href === 'https://example.com/'
+    } catch {
+      return false
+    }
+  }
+  if (Array.isArray(input)) return input.some(namesPage)
+  return typeof input === 'object' && input !== null && Object.values(input).some(namesPage)
+}
+
 // Opt-in, signed-in probes: only public URLs, in an empty scratch repository.
 for (const id of ['claude-code', 'codex', 'opencode'] as const) {
   it.live(`${id} searches and fetches a public page without a permission request`, () =>
@@ -55,7 +68,7 @@ for (const id of ['claude-code', 'codex', 'opencode'] as const) {
         const native = tools.filter((tool) => tool.kind === 'fetch' || tool.kind === 'search' || tool.title === 'websearch')
         assert.isAtLeast(native.length, 2, 'must actually search and open the page')
         assert.isTrue(
-          events.some((event) => 'rawInput' in event && JSON.stringify(event.rawInput)?.includes('https://example.com')),
+          events.some((event) => 'rawInput' in event && namesPage(event.rawInput)),
           'must call a tool with the public page URL',
         )
         assert.match(text, /Example Domain/i)
