@@ -495,12 +495,22 @@ const Listed = Schema.Struct({
  */
 export const LISTING_KEPT_MS = 60_000
 
+/**
+ * How long a branch found to have no merge queue is taken to have none: its
+ * pull requests aren't asked about one meanwhile, so a repository without a
+ * queue costs one GraphQL call an hour per branch, and one that turns its
+ * queue on is heard within the hour. One with a queue is asked each turn.
+ */
+export const NO_QUEUE_KEPT_MS = 60 * 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
   const graphqlUrl = api.endsWith('/api/v3') ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
   /** Listings by their search, with when each was asked. */
   const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
+  /** Whether each `owner/name branch` merges through a merge queue, as GitHub last said, and when. */
+  const queues = new Map<string, { readonly at: number; readonly enabled: boolean }>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
@@ -517,7 +527,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   }))
 
   /** Where a pull request stands with its target branch's merge queue, as GraphQL alone says: asked only where that matters. */
-  const queueOf = (repository: Repository, number: number) =>
+  const queueOf = (repository: Repository, number: number, target: string) =>
     Effect.gen(function* () {
       const answer = yield* http.graphql(QueueAnswer, graphqlUrl, QUEUE, { owner: repository.path[0], name: repository.path[1], number })
       const pull = answer.repository?.pullRequest
@@ -527,8 +537,10 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           reason: 'not_found',
           message: `No pull request #${number} in ${repository.path.join('/')}`,
         })
+      queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
     })
+  const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
   const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
@@ -693,7 +705,28 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const change = changeOf(yield* http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`))
         if (ask?.queue !== true || change.state !== 'open') return change
-        const queue = yield* queueOf(repository, number)
+        // Its branch known to have no queue, it is in none: out of one it was in, retargeted, or since the queue was turned off.
+        const outside: ChangeRequest = { ...change, queued: false, leftQueue: null }
+        // Asked only where its branch has a queue, or may: one found without, a while ago, isn't asked again until it's due.
+        const known = queues.get(queueKey(repository, change.target))
+        if (known !== undefined && !known.enabled && (yield* Clock.currentTimeMillis) - known.at < NO_QUEUE_KEPT_MS) return outside
+        const queue = yield* queueOf(repository, number, change.target).pipe(
+          Effect.catch((error) =>
+            known?.enabled === true
+              ? Effect.fail(error)
+              : // Where GitHub refuses the question itself, as a GitHub Enterprise without queues does, it isn't asked again for a
+                // while. Failing otherwise (unreachable, rate limited), the next turn asks again. Either way the read stands
+                // without, saying nothing of a queue: listening isn't stopped by a question it didn't need.
+                error.reason === 'rejected' || error.reason === 'forbidden'
+                ? Effect.map(Clock.currentTimeMillis, (at) => {
+                    queues.set(queueKey(repository, change.target), { at, enabled: false })
+                    return null
+                  })
+                : Effect.succeed(null),
+          ),
+        )
+        if (queue === null) return change
+        if (!queue.isMergeQueueEnabled) return outside
         return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
       }),
     listChanges: (repository, query) =>
@@ -745,7 +778,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
               (error) => error.status === 405,
               (refused) =>
                 Effect.gen(function* () {
-                  const queue = yield* queueOf(repository, change.number).pipe(Effect.mapError(() => refused))
+                  const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
                   if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
                   if (!queue.isInMergeQueue)
                     yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
