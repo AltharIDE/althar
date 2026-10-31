@@ -21,6 +21,15 @@ export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARe
   path: Schema.String,
 }) {}
 
+/** A new repository can't be made where the person chose: a folder of its name is there already, or the name makes no folder. */
+export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('RepositoryRefused', {
+  reason: Schema.Literals(['taken', 'no_name']),
+  /** The folder it would be. */
+  name: Schema.String,
+  /** The folder it would be in. */
+  parent: Schema.String,
+}) {}
+
 /** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
 export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()('RepositoriesNeeded', {
   unknown: Schema.Array(Schema.String),

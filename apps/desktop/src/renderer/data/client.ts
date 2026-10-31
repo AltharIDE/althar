@@ -35,6 +35,8 @@ import {
   type FileDiff,
   type FolderHeld,
   type FolderReading,
+  type MadeRepository,
+  type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
   type IssueList,
@@ -99,6 +101,10 @@ export interface Client {
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
+  readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
+  /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
+  readonly makeRepository: (grant: string, name: string) => Promise<MadeRepository>
   /**
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
@@ -586,6 +592,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
+    makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
         api.OpenProject({

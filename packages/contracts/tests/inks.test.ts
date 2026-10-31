@@ -7,7 +7,7 @@ describe("a new project's ink", () => {
     expect(inkFor('proj_a', [])).toBe(inkFor('proj_a', []))
     const first = inkFor('proj_a', [])
     expect(inkFor('proj_a', [first])).not.toBe(first)
-    const all = ['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber']
+    const all = ['clay', 'ochre', 'sand', 'olive', 'moss', 'teal', 'slate', 'indigo', 'plum', 'rose', 'brick', 'umber']
     expect(inkFor('proj_a', all)).toBe(first)
     expect(
       inkFor(

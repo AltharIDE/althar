@@ -193,7 +193,7 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke and commit it, then push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
+    'Fix what broke and commit it, then push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. Read more with read_checks (tail, search, full log file, annotations and artifacts). read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
   ].join('\n\n')
 
 /**
@@ -213,7 +213,7 @@ export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyA
       `- where it is broken on ${base}, or fails for a reason that has nothing to do with this change, as when the same check fails the same way on ${base}'s latest commit (read_default_branch_checks shows its checks): change nothing on the branch to work around it, and call hand_checks_to_person with one short line saying so, such as "Fails on ${base} too: test times out in limit.test.ts", and what would fix it;`,
       '- where it needs the person to decide, call hand_checks_to_person with what they are to decide.',
     ].join('\n'),
-    `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
+    `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Read more with read_checks (tail, search, full log file, annotations and artifacts). read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
   ].join('\n\n')
 
 /**

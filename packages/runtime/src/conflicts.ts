@@ -166,6 +166,7 @@ export const fixNoteFor = (place: Place, failed: { readonly failing: ReadonlyArr
   [
     `Checks failed on the merge Althar pushed to ${changeOf(place)}: ${failed.failing.join(', ')}.`,
     ...failed.logs,
+    'Read more with read_checks: list jobs, read a tail or search, or compare ref main.',
     `Fix what broke and commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to ${changeOf(place)} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
   ].join('\n\n')
 

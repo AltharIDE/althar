@@ -459,6 +459,8 @@ describe('the API', () => {
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
+              PlaceRepository: () => Effect.die('unused'),
+              MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
