@@ -118,7 +118,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await projectSettings(page, 'General')
     await page.getByRole('navigation', { name: 'Project settings' }).getByRole('button', { name: 'Remove from Althar…' }).click()
     const remove = page.getByRole('dialog', { name: 'Remove Refunds v2 from Althar?' })
-    await expect(remove.getByText(/Nothing in its folders changes/)).toBeVisible()
+    await expect(remove.getByText(/Its folders.* stay\./)).toBeVisible()
     await page.screenshot({ path: 'test-results/project-remove.png', animations: 'disabled' })
     await remove.getByRole('button', { name: 'Remove project' }).click()
     await expect(remove).toBeHidden()

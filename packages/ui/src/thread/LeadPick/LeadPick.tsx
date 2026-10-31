@@ -23,7 +23,6 @@ export interface LeadPickText {
   yourChoice: (recommended: string) => string
   change: string
   menu: string
-  menuNote: string
 }
 
 export const leadPickText: LeadPickText = {
@@ -32,7 +31,6 @@ export const leadPickText: LeadPickText = {
   yourChoice: (rec) => `your choice · the coordinator recommended ${rec}`,
   change: 'Change',
   menu: 'Lead for this task',
-  menuNote: 'Reviewers are chosen per step, in the workflow.',
 }
 
 export type LeadPickProps = RootProps<
@@ -67,7 +65,6 @@ export function LeadPick({ value, onChange, options, recommended: recommendedId,
           label={t.menu}
           align="end"
           width={360}
-          note={t.menuNote}
           trigger={
             <ActionButton className={s.change} trailingIcon="chevronD">
               {t.change}

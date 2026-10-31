@@ -47,7 +47,7 @@ export const LongWords: Story = {
     defaultOpen: true,
     editor: 'Visual Studio Code – Insiders',
     text: {
-      stopAbout: 'Every agent working on this task stops at once. Its branch, its worktree and everything it found stay as they are.',
+      stop: 'Stop every agent working on this task at once, wherever each of them is',
     },
   },
 }
@@ -177,7 +177,7 @@ export const OpeningTheRules: Story = {
   play: async ({ canvasElement }) => {
     const page = await opened(canvasElement)
     const held = await page.findByRole('menuitem', { name: /Allow everything on this task/ })
-    await expect(held).toHaveAccessibleDescription(/On for every task in this project/)
+    await expect(held).toHaveTextContent('On for the project, in its Rules')
     await userEvent.click(held)
     await expect(rules).toHaveBeenCalledOnce()
   },
@@ -185,13 +185,13 @@ export const OpeningTheRules: Story = {
 
 /** Every row is one line: what the one highlighted does shows at the menu's foot, and is its description either way. */
 export const SayingWhatItDoes: Story = {
-  args: { defaultOpen: true },
+  args: { defaultOpen: true, merged: true },
   play: async () => {
     const page = within(document.body)
-    const stop = await page.findByRole('menuitem', { name: /Stop the task/ })
-    await expect(stop).toHaveAccessibleDescription(/Every agent on it stops/)
-    await userEvent.hover(stop)
-    await expect(await page.findByText(/Every agent on it stops/, { selector: '[aria-hidden="true"]' })).toBeVisible()
+    const abandon = await page.findByRole('menuitem', { name: /Abandon/ })
+    await expect(abandon).toHaveAccessibleDescription('Its pull request stays merged.')
+    await userEvent.hover(abandon)
+    await expect(await page.findByText('Its pull request stays merged.', { selector: '[aria-hidden="true"]' })).toBeVisible()
   },
 }
 

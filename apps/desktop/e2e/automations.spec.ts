@@ -24,10 +24,10 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
     await openFirstProject(electronApp, page, repository(home))
     await say(page, 'Every Friday at 16:00, write release notes from what merged this week. [coordinator:automate]')
 
-    // Proposed on a card: nothing runs until the person turns it on.
-    const proposed = page.getByText('Nothing runs until you turn it on.')
-    await expect(proposed).toBeVisible()
-    const card = page.locator('[data-rhythm="card"]').filter({ has: proposed })
+    // Proposed on a card, off until the person turns it on.
+    const card = page.locator('[data-rhythm="card"]').filter({ has: page.getByRole('button', { name: 'Turn on' }) })
+    // Its foot reads "Off", then the way to its limits.
+    await expect(card.getByText(/^Off\b/)).toBeVisible()
     await card.screenshot({ path: 'test-results/automations-1-proposed.png', animations: 'disabled', scale: 'css' })
     await card.getByRole('button', { name: 'Turn on' }).click()
     // Once on, the card folds to a line, with the way to its page.

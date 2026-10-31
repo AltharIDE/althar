@@ -77,7 +77,7 @@ describe('a coordinator handed to a fresh session', () => {
       assert.deepInclude(yield* notices(threadId), {
         source: 'runtime',
         severity: 'info',
-        title: 'Started a fresh session; picked up 1 open task.',
+        title: 'Started a fresh session.',
       })
     }).pipe(Effect.provide(runtime())),
   )

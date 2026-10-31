@@ -32,7 +32,7 @@ export const InterruptedByYou: Story = {
 }
 /** Althar restarted mid-task: it checks what already happened before carrying on. */
 export const RestartedChecking: Story = { render: () => <Restarted checking /> }
-/** Checked, and carried on: nothing was run twice. */
+/** Checked, and carried on. */
 export const RestartedCarriedOn: Story = { render: () => <Restarted /> }
 /** A usage limit the rule handled: the work moved. */
 export const LimitHandled: Story = {
@@ -43,7 +43,7 @@ export const LimitWaits: Story = { render: () => <LimitMoved what="The lead" run
 export const EmptyThread: Story = {
   render: () => (
     <ThreadEmpty kicker="Task 432 · held before it started" title="Backfill idempotency keys on refunds created before PR 1184">
-      You held the plan in the coordinator. Nothing has run yet; tell the lead how to start, or start it as planned.
+      Nothing has run yet.
     </ThreadEmpty>
   ),
 }

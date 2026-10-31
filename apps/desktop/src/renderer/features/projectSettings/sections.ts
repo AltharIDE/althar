@@ -25,17 +25,11 @@ export const FIRST_PROJECT_SECTION: ProjectSection = 'general'
 /** The sections in their groups, a little apart down the side. */
 export const PROJECT_GROUPS: ReadonlyArray<ReadonlyArray<ProjectSection>> = [['general', 'code'], ['rules', 'running'], ['notes']]
 
-/** Each section's name and icon, and a line under its name only where the name doesn't say enough. */
-export const projectSectionText: Readonly<
-  Record<ProjectSection, { readonly title: string; readonly lede?: string; readonly icon: IconName }>
-> = {
+/** Each section's name and icon. */
+export const projectSectionText: Readonly<Record<ProjectSection, { readonly title: string; readonly icon: IconName }>> = {
   general: { title: 'General', icon: 'gear' },
   code: { title: 'Code and issues', icon: 'plug' },
-  rules: { title: 'Rules', lede: 'For every task, from its next request on.', icon: 'lock' },
+  rules: { title: 'Rules', icon: 'lock' },
   running: { title: 'Running', icon: 'play' },
-  notes: {
-    title: 'Notes',
-    lede: 'What the coordinator remembers from your conversations. Every session starts with them.',
-    icon: 'quote',
-  },
+  notes: { title: 'Notes', icon: 'quote' },
 }

@@ -94,7 +94,7 @@ vi.mock('../src/renderer/shared/dictation/recorder', () => ({
 
 const coordinatorBox = () => screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Tell the coordinator something' })
 const taskBox = () => screen.findByRole<HTMLTextAreaElement>('textbox', { name: /^Tell .* something$/ })
-const AWAY = 'What you said was written down while you were away.'
+const AWAY = 'Written down while you were away'
 
 describe('a draft', () => {
   it('is there again, the cursor at its end, after going elsewhere and coming back', async () => {
@@ -276,7 +276,7 @@ describe('dictation, once the person leaves', () => {
     await speech.fails()
     withServices(<Task />, client, host)
     expect(await screen.findByText('Couldn’t write that down')).toBeTruthy()
-    expect(screen.getByText('What you said (0:00) is kept; try again.')).toBeTruthy()
+    expect(screen.getByText('What you said (0:00) is kept.')).toBeTruthy()
     // Escape doesn't throw it away; only Throw it away does.
     fireEvent.keyDown(screen.getByRole('group', { name: 'Dictation' }), { key: 'Escape' })
     expect(screen.getByText('Couldn’t write that down')).toBeTruthy()
@@ -509,7 +509,7 @@ describe('dictation carried with the person', () => {
     await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
     await speech.fails()
     const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
-    expect(within(card).getByText(/of what you said couldn’t be written down/)).toBeTruthy()
+    expect(within(card).getByText(/not written down/)).toBeTruthy()
     await userEvent.click(within(card).getByRole('button', { name: 'Try again' }))
     await speech.heard('Why is checkout slow?')
     const written = await screen.findByRole('region', { name: 'To the coordinator · meridian' })

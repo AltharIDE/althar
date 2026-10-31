@@ -229,7 +229,7 @@ describe('a card that waits on the person', () => {
         ),
       ),
     )
-    expect(cardOf('Publishing').getByText("Althar couldn't open the pull request. Try again, or go on without it.")).toBeTruthy()
+    expect(cardOf('Publishing').getByText("Couldn't open the pull request.")).toBeTruthy()
     expect(cardOf('Nobody named').getByText(/^The agent closed before finishing the step/)).toBeTruthy()
     expect(screen.getAllByText(/^The agent closed before finishing the step/)).toHaveLength(2)
     // Listed for the bar as it is on the board.

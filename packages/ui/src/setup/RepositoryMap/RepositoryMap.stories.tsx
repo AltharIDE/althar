@@ -211,7 +211,7 @@ export const LeavingOutQuietly: Story = {
     const map = within(canvasElement)
     const page = within(document.body)
     await userEvent.click(map.getByRole('button', { name: 'More for meridian-infra' }))
-    await expect(await page.findByRole('menuitem', { name: /Leave out/ })).toHaveTextContent('Nothing in its folder changes')
+    await expect(await page.findByRole('menuitem', { name: /Leave out/ })).not.toHaveTextContent(/keep/)
     await userEvent.keyboard('{Escape}')
     await userEvent.click(map.getByRole('button', { name: 'More for meridian-api' }))
     await expect(await page.findByRole('menuitem', { name: /Leave out/ })).toHaveTextContent('The task using it keeps it')

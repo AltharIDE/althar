@@ -34,8 +34,8 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests]')
       moveHostMainOn(working, bare)
       // Its turn ends with the merge settled and not committed, the tests still running: not yet judged.
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       // Asked once, with no retry used: the merge was committed after its turn, by the lead the tests woke.
       const said = yield* given(threadId)
       assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
@@ -57,7 +57,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-codex]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       // Not judged at the end of its turn: the tests were reported just after, and it was woken by them.
       const said = yield* given(threadId)
       assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
@@ -74,7 +74,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-slow]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       // The tests ended and the lead said nothing for longer than the quiet: still not judged.
       const said = yield* given(threadId)
       assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
@@ -91,7 +91,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-output]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const said = yield* given(threadId)
       assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
       const [round] = yield* rounds(taskId)
@@ -105,7 +105,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-again]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const said = yield* given(threadId)
       assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
       const [round] = yield* rounds(taskId)
@@ -127,7 +127,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       yield* Effect.sleep(Duration.millis(1200))
       const [during] = yield* rounds(taskId)
       assert.deepStrictEqual([during?.state, during?.attempt], ['resolving', 1])
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const said = yield* given(threadId)
       assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
       const [round] = yield* rounds(taskId)
@@ -141,8 +141,8 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-fix]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge and its fix to PR #1.')
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge and its fix to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual(
         [round?.state, round?.attempt, round?.pushedHead],
@@ -163,8 +163,8 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-fix]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge and its fix to PR #1.')
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge and its fix to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const tip = git(bare, 'rev-parse', 'althar/add-a-retry')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%s', tip), 'Fix what the tests found')
       assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', tip), '')
@@ -208,8 +208,8 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-forgets]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       const said = yield* given(threadId)
       const notes = said.filter((body) => body.includes('Bring the branch up to date') || body.includes('resolved but not committed'))
       assert.strictEqual(notes.length, 2)
@@ -237,7 +237,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
         ([seen]) => seen?.phase === 'running' && seen.step === 'conflict' && !seen.turn,
       )
       // Pushed, it waits for the checks on what Althar pushed: ready for the person to accept once they pass.
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -248,12 +248,12 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { projectId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix-late]')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
+      yield* titled(threadId, 'test failed on PR #1.')
       yield* until(
         Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
         ([seen]) => seen?.phase === 'running' && seen.step === 'checks' && !seen.turn,
       )
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      yield* titled(threadId, 'The checks passed on PR #1.')
       assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -297,7 +297,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       assert.deepStrictEqual(yield* asked(threadId), [])
       // Its run done, the same conflict is the lead's.
       yield* sql`UPDATE runs SET state = 'succeeded' WHERE task_id = ${taskId}`
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

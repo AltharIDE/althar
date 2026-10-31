@@ -56,7 +56,7 @@ describe('images the person sent that the agent never gets', () => {
       yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'codex' })
       assert.strictEqual(
         yield* noticed(created.threadId, (title) => title.includes('kept any more')),
-        "An image you sent isn't kept any more, so Fake codex didn't get it.",
+        "An image you sent isn't kept any more. Fake codex didn't get it.",
       )
       const [first] = yield* until(turns(created.threadId), (rows) => rows[0]?.prompt != null)
       assert.include(first?.prompt ?? '', "Look at this.\n\n(The person sent an image with this, which Althar couldn't pass on to you.)")
@@ -71,7 +71,7 @@ describe('images the person sent that the agent never gets', () => {
       yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'codex' })
       assert.strictEqual(
         yield* noticed(created.threadId, (title) => title.includes('kept any more')),
-        "2 images you sent aren't kept any more, so Fake codex didn't get them.",
+        "2 images you sent aren't kept any more. Fake codex didn't get them.",
       )
     }).pipe(Effect.provide(runtime(':memory:', {}, { artifactsRoot: root }))),
   )
@@ -83,7 +83,7 @@ describe('images the person sent that the agent never gets', () => {
       yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'codex' })
       assert.strictEqual(
         yield* noticed(created.threadId, (title) => title.includes("doesn't take images")),
-        "Fake codex doesn't take images, so the image you sent wasn't passed on to it.",
+        "Fake codex doesn't take images. The image you sent wasn't passed on.",
       )
     }).pipe(Effect.provide(runtime(':memory:', {}, { each: { codex: { images: false } } }))),
   )

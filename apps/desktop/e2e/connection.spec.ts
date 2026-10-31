@@ -82,19 +82,19 @@ test('waits for the connection rather than go Stuck, and carries on by itself on
     const before = anthropic.asked()
     await anthropic.listen(port)
     await expect(waiting).toBeVisible()
-    await expect(page.getByText(/Stuck|stopped twice without saying/)).toHaveCount(0)
+    await expect(page.getByText(/Stuck|stopped without saying/)).toHaveCount(0)
 
     // Back: the step asks its service, which answers, and carries on by itself, in the same session, and finishes.
     await online(electronApp, page, true)
     await expect(offline).toHaveCount(0)
     await expect.poll(anthropic.asked).toBeGreaterThan(before)
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    await expect(page.getByText(/Stuck|stopped twice without saying/)).toHaveCount(0)
+    await expect(page.getByText(/Stuck|stopped without saying/)).toHaveCount(0)
     await page
       .getByRole('button', { name: /^Open task/ })
       .first()
       .click()
-    await expect(page.getByText('The connection is back; the step carried on from here.')).toBeVisible()
+    await expect(page.getByText('The connection is back.')).toBeVisible()
     await expect(page.getByText('Lost the connection to Anthropic', { exact: false }).first()).toBeVisible()
     // Said once, calmly: the step's thread has no error for it, as the coordinator's chat would.
     await expect(page.getByText("Claude Code couldn't answer.")).toHaveCount(0)

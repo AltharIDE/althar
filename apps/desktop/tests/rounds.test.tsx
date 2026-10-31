@@ -165,7 +165,7 @@ describe('a task’s thread in rounds', () => {
         items.you('Go'),
         when(items.tool({ toolKind: 'edit' }), 0),
         when(items.says('Now the tests.'), 5),
-        when(items.notice({ source: 'runtime', title: 'Althar restarted; the step carried on from here.' }, null), day),
+        when(items.notice({ source: 'runtime', title: 'Carried on after Althar restarted.' }, null), day),
       ],
       true,
       at(day + 1),
@@ -388,7 +388,7 @@ describe('a task’s lead that is signed out', () => {
         } as never,
       ],
     })
-    expect(await screen.findByText(/Claude Code is signed out\. Sign in again, then try again/)).toBeTruthy()
+    expect((await screen.findAllByText(/^Claude Code is signed out\.$/)).length).toBeGreaterThan(0)
     // One Sign in again, the card's own, first; Try again is the card's too.
     expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
@@ -439,9 +439,8 @@ describe('a task’s thread in rounds, on its screen', () => {
     ])
     expect(await screen.findByRole('heading', { name: 'A · Quiet' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'View S1 · The switcher full size' })).toBeTruthy()
-    // The same view taken again is named in a line, and opens on a click.
-    expect(screen.getByText(/It also retook/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'View A1 · Quiet, from the switcher full size' }).textContent).toBe('A1')
+    // The same view taken again is counted in a line, and opens on a click.
+    expect(screen.getByRole('button', { name: 'Also retook 1 shown earlier' })).toBeTruthy()
     expect(screen.queryByRole('columnheader', { name: 'Caption' })).toBeNull()
   })
 

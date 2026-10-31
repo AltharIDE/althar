@@ -116,7 +116,7 @@ describe('an agent that offers no choice of model', () => {
       yield* say(created.threadId, 'Serve it. [lead:hang]')
       yield* until(
         Effect.map(notices(created.threadId), (said) =>
-          said.filter((notice) => notice.title === 'Fake opencode showed no sign of work again, so Althar started it afresh.'),
+          said.filter((notice) => notice.title === 'Fake opencode went quiet again. Started it afresh.'),
         ),
         (said) => said.length === 1,
       )

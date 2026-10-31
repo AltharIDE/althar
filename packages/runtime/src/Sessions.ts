@@ -1463,9 +1463,9 @@ export class Sessions extends Context.Service<
                 severity: 'warning',
                 title: running.connection.info.images
                   ? withheld === 1
-                    ? `An image you sent isn't kept any more, so ${running.entry.definition.name} didn't get it.`
-                    : `${withheld} images you sent aren't kept any more, so ${running.entry.definition.name} didn't get them.`
-                  : `${running.entry.definition.name} doesn't take images, so ${withheld === 1 ? 'the image' : `the ${withheld} images`} you sent ${withheld === 1 ? "wasn't" : "weren't"} passed on to it.`,
+                    ? `An image you sent isn't kept any more. ${running.entry.definition.name} didn't get it.`
+                    : `${withheld} images you sent aren't kept any more. ${running.entry.definition.name} didn't get them.`
+                  : `${running.entry.definition.name} doesn't take images. ${withheld === 1 ? 'The image' : `The ${withheld} images`} you sent ${withheld === 1 ? "wasn't" : "weren't"} passed on.`,
               },
             )
           // A task's card says when its lead or reviewer is at work, and so does its thread, open: what was read of it while a round
@@ -1897,9 +1897,9 @@ export class Sessions extends Context.Service<
                 severity: 'warning',
                 title: `${running.entry.definition.name} stopped on its own.`,
                 description: {
-                  task: 'Start the lead again to carry on; it picks up from the thread.',
-                  coordinator: 'Say something to start the coordinator again; it picks up from the thread.',
-                  reviewer: 'The review waits; Althar starts the reviewer again when the task resumes.',
+                  task: 'Start the lead again to carry on.',
+                  coordinator: 'Say something to start it again.',
+                  reviewer: 'The review waits until the task resumes.',
                 }[running.thread.role],
               },
             )
@@ -3121,12 +3121,7 @@ export class Sessions extends Context.Service<
               addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title:
-                  brief.open === null
-                    ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
-                    : brief.open === 0
-                      ? 'Started a fresh session.'
-                      : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
+                title: brief.open === null ? `Started ${previous.entry.definition.name} afresh.` : 'Started a fresh session.',
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {

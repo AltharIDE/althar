@@ -90,7 +90,6 @@ export interface RuntimesText {
   checking: string
   signingIn: (name: string) => string
   signedOut: string
-  signInNote: (name: string) => string
   waiting: (n: number) => string
   outOfUsage: (resets: string) => string
   movesTo: (to: string) => string
@@ -114,7 +113,6 @@ export const runtimesText: RuntimesText = {
   checking: 'Checking who it is signed in as…',
   signingIn: (name) => `Finish signing in to ${name} in your browser`,
   signedOut: 'Signed out',
-  signInNote: (name) => `Sign in opens ${name}’s own sign-in. Althar never sees your password.`,
   waiting: (n) => (n === 1 ? '1 task waits for it' : `${n} tasks wait for it`),
   outOfUsage: (resets) => `Out of usage until ${resets}`,
   movesTo: (to) => `its work moves to ${to}`,
@@ -128,10 +126,8 @@ export const runtimesText: RuntimesText = {
   update: 'How to update',
   add: 'Connect another',
   download: 'Download',
-  downloadNote: (name, size) =>
-    `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it, and keep it in its own folder.`,
-  pinnedNote: (name, size, { from, version }) =>
-    `Althar can fetch ${name} ${version} from ${from}, about ${size}, check it, and keep it in its own folder.`,
+  downloadNote: (name, size) => `${name}’s latest release, from GitHub, about ${size}.`,
+  pinnedNote: (name, size, { from, version }) => `${name} ${version}, from ${from}, about ${size}.`,
   installing: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
   tryAgain: 'Try again',
 }
@@ -198,7 +194,15 @@ function Row({ r, t, onSignIn, onCancel, onCheck, onHelp, onInstall }: RowProps)
 type Handlers = Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp' | 'onInstall'>
 
 /* What a row says and offers, by state. `calls` when something waits on you. */
-function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
+/** A row's parts: its line, a note under it, its actions, and whether it calls for the person. */
+interface Parts {
+  readonly line: ReactNode
+  readonly note?: string
+  readonly actions?: ReactNode
+  readonly calls?: boolean
+}
+
+function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers): Parts {
   const help = (words: string) =>
     h.onHelp &&
     r.guide !== false && (
@@ -241,7 +245,6 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
       const waiting = r.waiting ? t.waiting(r.waiting) : undefined
       return {
         line: waiting ? `${t.signedOut} · ${waiting}` : t.signedOut,
-        note: t.signInNote(r.name),
         calls: Boolean(waiting),
         actions: h.onSignIn && (
           <Button variant={waiting ? 'signal' : 'default'} onClick={() => h.onSignIn?.(r.id)}>

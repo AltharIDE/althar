@@ -20,6 +20,8 @@ export const text = {
   openOn: (where: string) => `Open on ${where}`,
   moreTrackers: (n: number) => `+${n} more`,
   alwaysAsks: (what: string) => `Always asks you: ${what}.`,
+  /** More than two: how many, rather than a list that runs on. */
+  alwaysAsksMany: (n: number) => `${n} things always ask you.`,
   nothingAsks: 'Nothing always asks you.',
   /** Everything allowed: what always asks is kept, but doesn't ask. */
   nothingWaits: 'Nothing waits for you.',
@@ -211,6 +213,8 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
       ? text.nothingWaits
       : asking.length === 0
         ? text.nothingAsks
-        : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
+        : asking.length > 2
+          ? text.alwaysAsksMany(asking.length)
+          : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
 }

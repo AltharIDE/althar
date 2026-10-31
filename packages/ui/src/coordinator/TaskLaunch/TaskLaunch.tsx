@@ -104,7 +104,7 @@ export const taskLaunchText: TaskLaunchText = {
   startsIn: (n) => `Starts in ${n}s`,
   starting: 'Starting…',
   startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
-  announce: (n) => `The plan starts on its own in ${n} seconds. Hold it to take your time.`,
+  announce: (n) => `Starts in ${n} seconds`,
   hold: 'Hold',
   start: 'Start',
   startNow: 'Start now',

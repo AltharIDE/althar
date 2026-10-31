@@ -61,7 +61,7 @@ export const acceptPeekText: AcceptPeekText = {
   sendBackPlaceholder: 'What should change?',
   sendNote: 'Send to the lead',
   cancel: 'Cancel',
-  checksFirst: 'It can be accepted once its checks pass',
+  checksFirst: 'Waiting for its checks',
   noChecks: 'No checks ran on it.',
   unpushed: (n) => (n === 1 ? 'One commit isn’t on the pull request yet' : `${n} commits aren’t on the pull request yet`),
   going: (n) => (n === 1 ? 'One commit is going up to the pull request' : `${n} commits are going up to the pull request`),

@@ -155,15 +155,9 @@
   align-self: center;
   color: var(--t-2);
 }
-.k {
-  color: var(--t-3);
-}
 .in {
   color: var(--t-1);
   font-weight: 500;
-}
-.in .k {
-  font-weight: 400;
 }
 .reason {
   margin: 2px 0 0;

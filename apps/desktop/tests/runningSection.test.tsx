@@ -97,7 +97,7 @@ describe('how its branches are named', () => {
 describe('the running section', () => {
   it('lists nothing to run and no ending before the coordinator, rules and repositories are read, and says where worktrees will be', () => {
     show()
-    expect(screen.getByText('Made with its first task, never in its repositories’ own folders')).toBeTruthy()
+    expect(screen.getByText('Made with its first task')).toBeTruthy()
     expect(screen.queryByText('Branch names')).toBeNull()
     expect(screen.queryByText('When a task is done')).toBeNull()
   })
@@ -105,7 +105,7 @@ describe('the running section', () => {
   it('says a task stays on its branch on a host Althar doesn’t know, with the rules to change it', async () => {
     const { onRules } = show({ rules: rulesWith(), repositories: [unknownHost], worktrees: '/Users/me/Althar/meridian' })
     expect(screen.getByText('~/Althar/meridian')).toBeTruthy()
-    expect(screen.getByText('Leave it on its branch. Its repositories are on no host Althar knows, so no pull request opens.')).toBeTruthy()
+    expect(screen.getByText('Leave it on its branch. No code host Althar knows.')).toBeTruthy()
     const changes = screen.getAllByRole('button', { name: 'Change in Rules' })
     await userEvent.click(changes.at(-1) as HTMLElement)
     expect(onRules).toHaveBeenCalled()

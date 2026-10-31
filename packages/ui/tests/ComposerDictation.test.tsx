@@ -115,8 +115,8 @@ describe('back to a composer', () => {
 
   it('says, quietly, when what was said was written down while you were away', () => {
     const { queryByText, rerender } = render(back(true))
-    expect(queryByText('What you said was written down while you were away.')).not.toBeNull()
+    expect(queryByText('Written down while you were away')).not.toBeNull()
     rerender(back(false))
-    expect(queryByText('What you said was written down while you were away.')).toBeNull()
+    expect(queryByText('Written down while you were away')).toBeNull()
   })
 })

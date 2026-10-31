@@ -50,7 +50,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await page.getByRole('button', { name: 'allowed', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const goAhead = page.getByRole('listitem', { name: 'Go ahead' })
-    await expect(goAhead).toContainText('Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.')
+    await expect(goAhead).toContainText('Nothing goes ahead by a rule yet.')
     await backToWork(page)
 
     await startAndOpen(page, 'Look at the tree')

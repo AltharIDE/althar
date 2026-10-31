@@ -923,11 +923,10 @@ export class Runs extends Context.Service<
             ...(host === null
               ? {
                   title: 'The task ends on its branch.',
-                  description: "Its repository isn't on a code host Althar knows, so nothing was pushed.",
                 }
               : {
                   title: `The task ends on its branch: ${host.name} isn't connected.`,
-                  description: `Nothing was pushed. Connect ${host.name} from the project, then open the pull request from here.`,
+                  description: `Connect ${host.name} from the project, then open the pull request.`,
                 }),
           })
         })
@@ -1064,8 +1063,7 @@ export class Runs extends Context.Service<
               yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: `${said.join(', ')}, so what the follow-up committed isn't in a pull request yet.`,
-                description: 'Open a new pull request for it from the task.',
+                title: "What the follow-up committed isn't in a pull request yet.",
               })
             yield* finish(run, 'succeeded')
             return yield* Effect.ignore(changes.settleIfMerged(run.taskId))
@@ -1333,7 +1331,7 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: on.run.projectId, threadId }, 'notice', {
             source: 'runtime',
             severity: 'warning',
-            title: 'Its turn ended before it could do anything, so Althar tells it to carry on in a minute.',
+            title: 'Its turn ended without doing anything.',
             about: 'stall',
             role: 'aside',
           })
@@ -2656,14 +2654,12 @@ export class Runs extends Context.Service<
             }),
           )
           if (!done) return false
-          const step = on.step === 'publish' ? undefined : outStep[on.step]
-          const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
           yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: held.offline
-              ? `Lost the connection to ${service}. ${capitalized(waits)} for it, and carries on by itself when it's back.`
-              : `${service} failed, so ${waits}: Althar tries again in ${pauseWords(connectivity.pauses[held.tries - 1] ?? connectivity.every)}.`,
+              ? `Lost the connection to ${service}.`
+              : `${service} failed. Trying again in ${pauseWords(connectivity.pauses[held.tries - 1] ?? connectivity.every)}.`,
             ...(held.failure === null ? {} : { description: held.failure }),
           })
           yield* touchCard(on.run.taskId)
@@ -3538,7 +3534,6 @@ export class Runs extends Context.Service<
           if (Date.parse(until) <= Date.parse(yield* timestamp))
             return yield* carryOnPlaced(current, attemptId, info, { kind: 'retry', agentId: info.agentId }, envelope)
           const agentId = info.agentId
-          const from = (yield* limits.named(agentId, null, info.limit?.accountId)).agent
           const model = yield* modelOnStep(current.taskId, info.step, agentId)
           const held = yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -3575,7 +3570,7 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until, yield* Clock.currentTimeMillis)}, when ${from} is back, as you said.`,
+            title: `${capitalized(info.step === 'publish' ? 'the step waits' : `${outStep[info.step].work} ${outStep[info.step].waits}`)} until ${whenWords(until, yield* Clock.currentTimeMillis)}.`,
           })
           yield* touchCard(current.taskId)
           yield* Queue.offer(holdsChanged, undefined)
@@ -4161,7 +4156,7 @@ export class Runs extends Context.Service<
                   yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
                     source: 'runtime',
                     severity: 'info',
-                    title: 'Althar restarted; the step carried on from here.',
+                    title: 'Carried on after Althar restarted.',
                     restarted: step.nodeId,
                   })
                   const carrying = yield* envelope('thread.send', { threadId: current.threadId, restarted: step.attemptId })
@@ -4267,7 +4262,7 @@ export class Runs extends Context.Service<
               yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: 'The connection is back; the step carried on from here.',
+                title: 'The connection is back.',
               })
               yield* sessions.send({ envelope: resuming, threadId, body: RECONNECTED, quiet: true })
               return yield* touchCard(held.taskId)

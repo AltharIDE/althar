@@ -147,12 +147,12 @@ export type Block =
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
 const RESTARTED = 'Althar restarted.'
 
-/** What Althar says as it carries a step on after a restart, under a new turn of its lead's. */
-const CARRIED_ON = 'Althar restarted; the step carried on from here.'
+/** What Althar says as it carries a step on after a restart, under a new turn of its lead's; and what earlier versions said. */
+const CARRIED_ON = new Set(['Carried on after Althar restarted.', 'Althar restarted; the step carried on from here.'])
 
 /** Whether a notice is Althar carrying a step on after a restart: the turn before it is over, whatever runs now. */
 export const carriedOn = (content: { readonly source: string; readonly title: string }): boolean =>
-  content.source === 'runtime' && content.title === CARRIED_ON
+  content.source === 'runtime' && CARRIED_ON.has(content.title)
 
 /** What the coordinator passed on to a lead, before notices had roles: by its title. */
 const RELAYED_TITLE = 'From the coordinator'

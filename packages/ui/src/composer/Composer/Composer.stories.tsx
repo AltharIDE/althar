@@ -445,7 +445,7 @@ export const ChoosingTheMicrophoneFirstTime: Story = {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose the microphone' }))
     const menu = await screen.findByRole('menu', { name: 'Microphone' })
     await expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(1)
-    await expect(within(menu).getByText(/Other microphones show here/)).toBeInTheDocument()
+    await expect(within(menu).getByText('Others show once the microphone is allowed')).toBeInTheDocument()
   },
 }
 /** Another microphone, chosen while you talk: it goes on from that one, and what you said before stays. */
@@ -545,9 +545,9 @@ export const QueueingAndEditing: Story = {
   render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Queued; the lead reads it next')).toBeInTheDocument()
+    await expect(c.getByText('Queued')).toBeInTheDocument()
     await userEvent.type(c.getByRole('textbox', { name: 'Tell the lead' }), 'And keep the limiter where it is.{Enter}')
-    await expect(c.getByText('2 queued; the lead reads them in order')).toBeInTheDocument()
+    await expect(c.getByText('2 queued')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Take “Also check the webhook retry path.” out of the queue' }))
     await userEvent.click(c.getByRole('button', { name: 'Edit' }))
     await expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue('And keep the limiter where it is.')
@@ -570,7 +570,7 @@ export const SendingQueuedNow: Story = {
     await userEvent.click(c.getAllByRole('button', { name: 'Send now' })[1]!)
     await expect(args.onSendNow).toHaveBeenCalledTimes(1)
     await expect(args.onSendNow).toHaveBeenCalledWith('Use the fixture log, not staging.')
-    await expect(c.getByText('Queued; the lead reads it next')).toBeInTheDocument()
+    await expect(c.getByText('Queued')).toBeInTheDocument()
     await expect(c.queryByText('Use the fixture log, not staging.')).toBeNull()
   },
 }

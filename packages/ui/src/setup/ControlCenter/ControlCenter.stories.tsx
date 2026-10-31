@@ -306,9 +306,7 @@ function Settings({
       {open === 'edge' && (
         <ControlDetail title="In other apps" onBack={back}>
           <ControlSheet>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--t-3)' }}>
-              Where Althar shows what needs you, while you work in another app.
-            </p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--t-3)' }}>Where what needs you shows</p>
             {where.page ? (
               <EdgeHere
                 title={where.page.title}

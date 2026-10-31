@@ -49,7 +49,7 @@ const shown = async (launches: ReadonlyArray<Launch> = [], more: Parameters<type
     ...more,
   })
   withServices(<Project />, client)
-  await screen.findByText(/^Ask the coordinator about/)
+  await screen.findByRole('button', { name: /^Coordinator: / })
   return { client, emit }
 }
 

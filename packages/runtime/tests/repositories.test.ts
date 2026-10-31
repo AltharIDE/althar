@@ -279,7 +279,7 @@ describe('a task of several repositories', () => {
       assert.include(git(join(folder, 'web'), 'log', '--format=%s', 'main'), 'Retry')
       assert.notInclude(git(join(folder, 'api'), 'log', '--format=%s', 'main'), 'Retry')
       assert.deepStrictEqual((yield* notices(task.threadId)).map((notice) => notice.title).slice(-2), [
-        'Merged here: web into main.',
+        'Merged into main here.',
         `Not done yet: PR #${github.changes[0]?.number ?? 0} in api is still open.`,
       ])
       assert.deepStrictEqual((yield* queries.thread(task.threadId, { limit: 0 })).task.here, [])

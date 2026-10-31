@@ -613,11 +613,8 @@ describe('attaching a task to a pull request its branch can follow as it is', ()
       const [card] = yield* until(cardOf(projectId, task.taskId), (all) => all[0]?.change != null)
       assert.deepInclude(card?.change, { number: draft.number, draft: true })
       const notice = (yield* items(task.threadId)).find((item) => item.kind === 'notice')
-      assert.strictEqual(notice?.content.title, `The task follows PR #${draft.number} now: Send back, not ready`)
-      assert.strictEqual(
-        notice?.content.description,
-        'Its work goes to PR #2’s branch, fix-send-back, on you/api, as a plain push: nothing opens another.',
-      )
+      assert.strictEqual(notice?.content.title, `Following PR #${draft.number}: Send back, not ready`)
+      assert.isUndefined(notice?.content.description)
     }).pipe(Effect.provide(withQueries(github)))
   })
 
@@ -723,10 +720,7 @@ describe('attaching a task to a pull request from its own repository', () => {
       assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), head)
       // Its work goes to that branch of the repository itself.
       const notice = (yield* items(task.threadId)).find((item) => item.kind === 'notice')
-      assert.include(
-        String(notice?.content.description),
-        'Its work goes to PR #1’s branch, fix-send-back, on meridian/api, as a plain push',
-      )
+      assert.match(String(notice?.content.title), /^Following PR #1: /)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

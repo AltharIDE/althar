@@ -192,7 +192,7 @@ describe('images sent with a message', () => {
         assert.include(said(thread.items), "echo: Look\n\n(The person sent 2 images with this, which Althar couldn't pass on to you.)")
         assert.notInclude(said(thread.items).join('\n'), 'saw images')
         const notices = thread.items.flatMap((item) => (item.kind === 'notice' ? [item.content.title] : []))
-        assert.include(notices, "Fake codex doesn't take images, so the 2 images you sent weren't passed on to it.")
+        assert.include(notices, "Fake codex doesn't take images. The 2 images you sent weren't passed on.")
         // The message keeps them all the same.
         assert.lengthOf(messages(thread.items)[0]?.content.pictures ?? [], 2)
         // The window knows which agents take images, from what each said when it started or was asked.
@@ -227,13 +227,10 @@ describe('images sent with a message', () => {
             (error) => error.message,
           )
         const svg = { data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64'), name: 'logo.svg' }
-        assert.strictEqual(yield* refused([png, svg]), "logo.svg isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.")
+        assert.strictEqual(yield* refused([png, svg]), "logo.svg isn't a PNG, JPEG, GIF or WebP image.")
         const huge = Buffer.alloc(5 * 1024 * 1024 + 1)
         PNG.copy(huge)
-        assert.strictEqual(
-          yield* refused([{ data: huge.toString('base64'), name: null }]),
-          "An image is larger than 5 MB, so it can't be sent.",
-        )
+        assert.strictEqual(yield* refused([{ data: huge.toString('base64'), name: null }]), 'An image is over 5 MB.')
         assert.strictEqual(yield* refused([{ digest: 'f'.repeat(64), name: 'old.png' }]), "old.png isn't kept any more. Add it again.")
         // More than a message carries doesn't leave the window.
         const many = yield* Effect.exit(

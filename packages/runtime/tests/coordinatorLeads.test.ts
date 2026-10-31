@@ -79,7 +79,7 @@ describe('a quick task’s lead making it a change', () => {
       )
       const said = (yield* notices(task?.threadId ?? '')).find((notice) => notice.title?.startsWith('This task is a change now') === true)
       assert.deepInclude(said, {
-        title: 'This task is a change now: with no review, it ends on its branch, as its repository isn’t on a code host Althar knows.',
+        title: 'This task is a change now: with no review, it ends on its branch.',
       })
       assert.isUndefined(said?.description)
     }).pipe(Effect.provide(runtime())),

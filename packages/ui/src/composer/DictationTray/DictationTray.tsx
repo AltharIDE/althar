@@ -33,7 +33,8 @@ export interface DictationTrayText {
   download: string
   notNow: string
   asking: string
-  askingNote: string
+  /** Under the wait for the system's question; none where the question says it. */
+  askingNote?: string
   downloading: string
   downloadingFacts: (got: string, size: string, left?: string) => string
   /** The bar's name. */
@@ -63,22 +64,21 @@ export const dictationTrayText: DictationTrayText = {
   label: 'Dictation',
   offer: `Dictation needs a speech model on ${device.this}`,
   offerFacts: (size) => `${size}, downloaded once`,
-  offerNote: `It turns what you say into text here; nothing you say leaves ${device.the}.`,
+  offerNote: `Runs on ${device.this}`,
   download: 'Download',
   notNow: 'Not now',
   asking: 'Waiting for macOS to allow the microphone',
-  askingNote: 'Answer the question macOS shows to go on.',
   downloading: 'Downloading the speech model',
   downloadingFacts: (got, size, left) => `${got} of ${size}${left ? `, ${left}` : ''}`,
   progress: 'Speech model download',
   preparing: 'Getting the speech model ready',
   cancel: 'Cancel',
-  hide: 'Hide; the download carries on',
+  hide: 'Hide',
   stopped: 'The download stopped',
-  stoppedNote: (got, size) => `At ${got} of ${size}. It carries on from there.`,
+  stoppedNote: (got, size) => `At ${got} of ${size}`,
   retry: 'Try again',
   noRoom: 'Not enough space for the speech model',
-  noRoomNote: (need, free) => `It needs ${need}; ${free} is free. Make room, then try again.`,
+  noRoomNote: (need, free) => `It needs ${need}; ${free} is free.`,
   denied: 'Althar can’t use the microphone',
   deniedNote: 'Turn on Althar in System Settings › Privacy & Security › Microphone, then press the microphone again.',
   openPrivacy: 'Open System Settings',
@@ -86,7 +86,7 @@ export const dictationTrayText: DictationTrayText = {
   noMicrophoneNote: 'Connect one, or choose an input in System Settings › Sound.',
   openSound: 'Open Sound settings',
   failed: 'Couldn’t write that down',
-  failedNote: (said) => (said ? `What you said (${said}) is kept; try again.` : 'Nothing was written; try again.'),
+  failedNote: (said) => (said ? `What you said (${said}) is kept.` : 'Nothing was written.'),
   discard: 'Throw it away',
   close: 'Close',
 }

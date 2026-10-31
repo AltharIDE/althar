@@ -6,17 +6,17 @@ import { runningOf } from './running'
 import { useNow } from './time'
 
 /*
- * Who holds the places a waiting task waits for (ADR-032): the tasks whose
- * agents are at work, and, said so, those kept only by a server they left
- * running, listed under "Keeping a place" with the task each is from and a
- * Stop, so the person can free the place from where the task waits. A task
- * 2nd or later in its project's line can be put at its front from here.
+ * What the person can do about the places a waiting task waits for (ADR-032):
+ * the servers tasks left running that keep one, listed under "Keeping a place"
+ * with the task each is from and a Stop, so the person can free the place from
+ * where the task waits. A task 2nd or later in its project's line can be put at
+ * its front from here. The tasks whose agents are at work aren't named: the
+ * count beside "Waiting" says enough.
  */
 
 export const text = {
   /** The pill, naming the servers that keep a place. */
   holding: 'Keeping a place',
-  heldBy: (holders: ReadonlyArray<Pick<Holder, 'title'>>) => `Held by ${holders.map((holder) => holder.title).join(', ')}`,
   front: 'Move to the front of the line',
 }
 
@@ -38,18 +38,13 @@ export function Holders({
       ? []
       : running.map((command) => ({ ...command, id: `${threadId} ${command.id}`, where: title, threadId, left: command.id })),
   )
-  // The pill names the tasks whose commands it lists; the sentence only those it doesn't.
-  const unlisted = (holders ?? []).filter((holder) => !left.some((command) => command.threadId === holder.threadId))
-  const held = unlisted.length > 0
-  if (!held && left.length === 0 && onFront === undefined) return null
+  if (left.length === 0 && onFront === undefined) return null
   const find = (id: string) => left.find((command) => command.id === id)
   return (
     <div className={s.holders}>
-      {(held || onFront !== undefined) && (
-        <p className={s.held}>
-          {held && text.heldBy(unlisted)}
-          {held && onFront !== undefined && ' '}
-          {onFront !== undefined && <LinkButton onClick={onFront}>{text.front}</LinkButton>}
+      {onFront !== undefined && (
+        <p className={s.front}>
+          <LinkButton onClick={onFront}>{text.front}</LinkButton>
         </p>
       )}
       {left.length > 0 && (
