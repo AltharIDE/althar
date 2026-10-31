@@ -278,7 +278,7 @@ fixed where it is.
     - free ports, and `gh`'s deadline from the budget (#420);
     - the fake agent's git asynchronous;
     - testing-library's waits from the budget (#418).
-  - **The hardening pull request (#HARDENING):**
+  - **The hardening pull request (#459):**
     - one way to remove a file or folder, retried, which never fails the work it follows (`cleanUp`, `removeFully`), and `althar/one-removal` holding the runtime and the agent adapters to it;
     - the end-to-end app's own home and PATH, so no spec reads this computer's agents;
     - `e2eLimits` failing a spec that imports what Node can't load;
@@ -294,7 +294,7 @@ fixed where it is.
   - a probe's folder Windows still held lost what the probe found, and had the agent asked twice (#431, #434; fixed in #446);
   - the permission judge's folder the same, which left a judgment the coordinator had made to the person (#448);
   - a spec that went on at a round's card raced the round's end (#438; fixed in #445);
-  - a process's temporary folder the same, which left its `stopped` signal unset (#HARDENING).
+  - a process's temporary folder the same, which left its `stopped` signal unset (#459).
 - **Left, none of it a flake the census or the first days of stress and flaky issues saw:**
   - **Phase 4's git, process and port lookups as services with fakes.** Git has 167 call sites; once phase 3's budget is in, this is about speed on Windows more than flakes. `folderCleanup`'s two flakes were slow git there.
   - **45 tests that pass short real-time timer options** (`listenEvery: 100 ms`), and with them the fake agent's timings measured against the runtime's own windows in real time (`[lead:resolve-tests*]`, `[lead:serve*]`), which go onto the test's clock together.
