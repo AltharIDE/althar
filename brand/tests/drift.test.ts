@@ -21,7 +21,7 @@ const repo = resolve(import.meta.dirname, '../..')
 const read = (path: string): string => readFileSync(resolve(repo, path), 'utf8')
 
 const COPIES = [
-  'packages/ui/src/foundations/Logo/Logo.tsx',
+  'packages/ui/src/foundations/Logo/Logo.paths.ts',
   'packages/ui/.storybook/theme.ts',
   'packages/ui/.storybook/public/favicon.svg',
   'apps/site/public/favicon.svg',

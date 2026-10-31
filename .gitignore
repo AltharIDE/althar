@@ -22,3 +22,6 @@ apps/desktop/.flatpak-builder/
 # Local planning (OpenSpec) and agent tooling (.opencode): not part of the repository
 /openspec/
 /.opencode/
+
+# CI scratch exports (logs and unextracted artifacts)
+.althar/ci/

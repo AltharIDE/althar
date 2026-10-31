@@ -11,7 +11,8 @@
     "./artifacts": "./src/artifactFiles.ts",
     "./device": "./src/device.ts",
     "./attachments": "./src/attachments.ts",
-    "./screenshots": "./src/screenshots.ts"
+    "./screenshots": "./src/screenshots.ts",
+    "./pullRequestReview": "./src/pullRequestReview.ts"
   },
   "scripts": {
     "check": "vp check",

@@ -972,6 +972,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
+    placeRepository: vi.fn(async (_grant: string, name: string) => ({
+      name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    })),
+    makeRepository: vi.fn(async (_grant: string, name: string) => ({
+      grant: 'grant_made',
+      path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
     searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
@@ -1031,6 +1039,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      reviewSeal: { on: true, style: 'ring' as const },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
       automationsPaused: false,
@@ -1038,6 +1047,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setReviewSeal: vi.fn(async () => {}),
+    setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
     getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
     makeAutomation: vi.fn(async () => 'auto2'),
@@ -1222,6 +1233,7 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
   pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
+  pickPlace: vi.fn(async (): Promise<string | null> => 'grant_place'),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   attach: vi.fn(async (file: File) => ({
     ok: true as const,

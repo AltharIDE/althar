@@ -15,7 +15,9 @@ import { shortFolder } from '../../shared/folders'
  * folder of several repositories adds each. One draft a window, kept for
  * this launch only, in a store every part of the window shares, so it is
  * the same draft whichever tab the person went to meanwhile; a read that
- * ends after its tab closed changes nothing.
+ * ends after its tab closed changes nothing. A project that starts from
+ * nothing has a new repository, placed in a folder the person chose and
+ * named after the project, which is made only as the project is.
  */
 
 /** A repository added, as the runtime read it. */
@@ -35,6 +37,18 @@ export interface DraftFolder {
   readonly found: string | null
 }
 
+/** A new repository, placed but not made: in the folder the person chose, by its grant. */
+export interface FreshRepository {
+  /** The grant of the folder it goes in. */
+  readonly grant: string
+  /** Its folder's name, from the project's. */
+  readonly name: string
+  /** Its path, as the runtime placed it: the draft's key for it. */
+  readonly path: string
+  /** Where it will be, as the person knows the place. */
+  readonly where: string
+}
+
 /** A folder being read: its name and where it is, and main's id, where they are known before it is read. */
 export interface Reading {
   readonly key: string
@@ -50,6 +64,8 @@ export interface Draft {
   /** The ink the person chose; null for the runtime's pick, shown as it would be. */
   readonly ink: ProjectInk | null
   readonly folders: ReadonlyArray<DraftFolder>
+  /** A new repository it starts with, made as it is; one at most, as it is named after the project. */
+  readonly fresh: FreshRepository | null
   readonly reading: ReadonlyArray<Reading>
   readonly creating: boolean
   /** Made: its tab is the project's now, and stays only until the window has gone there; a new one starts afresh. */
@@ -73,6 +89,8 @@ export interface DraftStore {
 export interface DraftActions {
   /** Asks for folders, several at once, and adds what is in each. */
   readonly choose: () => Promise<void>
+  /** Asks where a new repository named after the project goes, and places it there. */
+  readonly startFresh: () => Promise<void>
   /** Adds folders dropped on the window. */
   readonly drop: (files: ReadonlyArray<File>) => Promise<void>
   /** Adds a repository main found, by its id, with its name and place to show while it is read. */
@@ -104,7 +122,17 @@ const make = (): DraftStore => {
     get: () => draft,
     start: () => {
       if (draft !== null && !draft.made) return draft
-      const made: Draft = { id: newProjectId(), name: '', ink: null, folders: [], reading: [], creating: false, made: false, error: null }
+      const made: Draft = {
+        id: newProjectId(),
+        name: '',
+        ink: null,
+        folders: [],
+        fresh: null,
+        reading: [],
+        creating: false,
+        made: false,
+        error: null,
+      }
       set(made)
       return made
     },
@@ -197,6 +225,24 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
       const grants = await host.pickFolders()
       await Promise.all(grants.map((grant) => read(at.id, begin(at.id, {}), grant, {})))
     },
+    startFresh: async () => {
+      const at = store.get()
+      const name = at?.name.trim() ?? ''
+      if (at === null || name === '' || at.fresh !== null) return
+      const key = begin(at.id, {})
+      const grant = await host.pickPlace(name)
+      // Cancelled: nothing to say.
+      if (grant === null) return finish(at.id, key)
+      try {
+        const placed = await client.placeRepository(grant, name)
+        finish(at.id, key, (now) => ({
+          ...now,
+          fresh: { grant, name: placed.name, path: placed.path, where: shortFolder(placed.path) },
+        }))
+      } catch (failure) {
+        finish(at.id, key, (now) => ({ ...now, error: messageOf(failure) }))
+      }
+    },
     drop: async (files) => {
       await Promise.all(
         files.map((file) => add(() => host.grantDropped(file), { name: file.name }, `${file.name} isn’t a folder on this computer.`)),
@@ -207,15 +253,34 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
     create: async (ink) => {
       const at = store.get()
       const name = at?.name.trim() ?? ''
-      const [first] = at?.folders ?? []
-      if (at === null || at.creating || at.reading.length > 0 || name === '' || first === undefined) return null
+      if (at === null || at.creating || at.reading.length > 0 || name === '' || (at.folders.length === 0 && at.fresh === null)) return null
       store.change(at.id, (now) => ({ ...now, creating: true, error: null }))
       try {
+        // The new repository is made first, and is a folder like the others from then on: trying again doesn't make it twice.
+        const { fresh } = at
+        const folders =
+          fresh === null
+            ? at.folders
+            : await client.makeRepository(fresh.grant, fresh.name).then((made) => {
+                const folder: DraftFolder = {
+                  path: made.path,
+                  grant: made.grant,
+                  name: fresh.name,
+                  where: fresh.where,
+                  remote: null,
+                  project: null,
+                  found: null,
+                }
+                store.change(at.id, (now) => ({ ...now, fresh: null, folders: [...now.folders, folder] }))
+                return [...at.folders, folder]
+              })
+        const [first] = folders
+        if (first === undefined) return null
         const made = await client.openProject(first.grant, {
           name,
           projectId: at.id,
           ink,
-          repositories: at.folders.map(({ grant, path }) => ({ grant, path })),
+          repositories: folders.map(({ grant, path }) => ({ grant, path })),
         })
         // The projects read again, so the project is in them as its tab opens.
         await cache.refetchQueries({ queryKey: keys.projects }).catch(() => undefined)

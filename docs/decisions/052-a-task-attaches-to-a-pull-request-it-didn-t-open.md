@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-17
-- **Amended:** 2026-10-31 ([ADR-076](076-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): every open pull request in the project's repositories is followed slowly, for the coordinator's news, with no task attached unless the person asks.
+- **Amended:** 2026-10-31 ([ADR-077](077-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): every open pull request in the project's repositories is followed slowly, for the coordinator's news, with no task attached unless the person asks.
 - **Owner:** Repository maintainers
 - **Context:** A task followed only the pull request Althar opened for it, or
   adopted from its own branch: the host was asked for one open from a branch
