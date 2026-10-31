@@ -9,6 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from '../src/device'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -154,7 +155,7 @@ describe('a plain task', () => {
       assert.include(first?.prompt, `${worktree.path}, with no branch yet, at main at ${worktree.baseCommit.slice(0, 12)}`)
       assert.include(first?.prompt, `its scratch folder, ${scratchOf(worktree.path)}`)
       assert.include(first?.prompt, `on a branch of its own, ${worktree.branch}, when your turn ends`)
-      assert.include(first?.prompt, 'Nothing of it leaves this computer')
+      assert.include(first?.prompt, `Nothing of it leaves ${thisDevice()}`)
       assert.include(first?.prompt, 'call make_it_a_change')
       assert.notInclude(first?.prompt, `The branch ${worktree.branch}`)
       // Its report has no word of what it built, and needn't.
@@ -843,7 +844,7 @@ describe('making a quick task a change', () => {
         role: 'aside',
       })
       // Its thread says nothing of a branch that stays here.
-      assert.notInclude(said.map((notice) => notice.title).join('\n'), 'stays on this computer')
+      assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
       // A change now, Done doesn't settle it: it waits to be accepted.

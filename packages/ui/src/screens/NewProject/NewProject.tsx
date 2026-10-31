@@ -1,5 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { commandDown, keys, modKey } from '../../foundations/keys'
+import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -139,12 +141,12 @@ export const newProjectText: NewProjectText = {
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
   chooseNote: 'or drop them here',
-  found: 'On this Mac',
-  foundLike: (name) => `On this Mac, named like ${name}`,
+  found: `On ${device.this}`,
+  foundLike: (name) => `On ${device.this}, named like ${name}`,
   add: 'Add',
   addLabel: (name) => `Add ${name}`,
   inProject: (project) => `in ${project}`,
-  more: (count) => `${count} more on this Mac`,
+  more: (count) => `${count} more on ${device.this}`,
   read: 'What Althar read',
   connected: (host, owners, account) => (
     <>
@@ -164,7 +166,7 @@ export const newProjectText: NewProjectText = {
   ),
   create: (name) => `Create ${name}`,
   createUnnamed: 'Create project',
-  createKbd: '⌘↵',
+  createKbd: modKey(keys.enter),
   needsName: 'Name the project first.',
   needsFolder: 'Add a folder first.',
   swatches: {},
@@ -289,7 +291,7 @@ export function NewProject({
       if (creating || overlaid() || (event.target instanceof Element && event.target.closest('[data-own-escape]') !== null)) return
       event.preventDefault()
       onCancel()
-    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    } else if (event.key === 'Enter' && commandDown(event)) {
       event.preventDefault()
       create()
     }

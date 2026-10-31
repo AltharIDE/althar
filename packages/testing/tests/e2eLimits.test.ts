@@ -98,6 +98,25 @@ const limitsIn = (file: string) =>
     else if (callee.type === 'Identifier' && (callee.name === 'setTimeout' || callee.name === 'setInterval')) at(`a sleep: ${text(one)}`)
   })
 
+/*
+ * Nor presses a key only a Mac has. The end-to-end run is on Linux and Windows too, where Althar's shortcuts are Ctrl's
+ * and the Super key is no modifier of ours: `Meta+n` there opens nothing, and the spec waits out its time for what it
+ * opened. `ControlOrMeta+n` is each system's own; a spec that means one system names it.
+ */
+const macKeysIn = (file: string) =>
+  walk(file, (one, at, text) => {
+    if (one.type !== 'CallExpression') return
+    const callee = one.callee as Any
+    const first = (one.arguments as Array<Any>)[0]
+    if (
+      callee.type === 'MemberExpression' &&
+      keyOf({ key: callee.property } as Any) === 'press' &&
+      first?.type === 'Literal' &&
+      String(first.value).startsWith('Meta+')
+    )
+      at(`a Mac's key on every system: ${text(one)}`)
+  })
+
 /** Where the config gives a time that isn't the budget's. */
 const configLimits = () =>
   walk(CONFIG, (one, at, text) => {
@@ -112,6 +131,10 @@ test('finds the end-to-end specs', () => {
 
 test('no end-to-end spec sets a time of its own or sleeps', () => {
   expect(specs.flatMap(limitsIn)).toEqual([])
+})
+
+test("no end-to-end spec presses a Mac's key on every system", () => {
+  expect(specs.flatMap(macKeysIn)).toEqual([])
 })
 
 test('the end-to-end run takes its times from the budget', () => {

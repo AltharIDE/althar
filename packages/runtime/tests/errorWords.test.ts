@@ -7,6 +7,7 @@ import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, Ru
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
 import { StartTimedOut } from '../src/Sessions'
 import { agentSaid, expected, summarize, words } from '../src/words'
+import { thisDevice } from '../src/device'
 
 /*
  * What the window says when something the person asked for couldn't be done:
@@ -100,7 +101,7 @@ describe('the words for what went wrong', () => {
   })
 
   it('says a command-line tool that isn’t signed in to the host', () => {
-    assert.strictEqual(said(new CliSignedOut({ tool: 'gh', host: 'github.com' })), "gh isn't signed in to github.com on this computer.")
+    assert.strictEqual(said(new CliSignedOut({ tool: 'gh', host: 'github.com' })), `gh isn't signed in to github.com on ${thisDevice()}.`)
   })
 
   it('counts the person’s mistakes as theirs to put right, and the runtime’s own as worth the log', () => {

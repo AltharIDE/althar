@@ -1,0 +1,39 @@
+name: cask
+
+# The Homebrew cask template (packaging/homebrew/althar.rb, Linear DEV-72) is still valid Homebrew: `brew style` on
+# macOS, where Homebrew is. Only on a pull request that changes the cask, its fill-in script or this file. `brew audit
+# --strict --online` needs a published release to download and check, so it is run by hand with a release
+# (apps/desktop/README.md, "The Homebrew tap").
+on:
+  pull_request:
+    paths: ['packaging/homebrew/**', '.github/workflows/cask.yml', '.github/workflows/homebrew-tap.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  style:
+    runs-on: macos-26
+    timeout-minutes: 15
+    concurrency:
+      group: cask-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+      # brew style takes a cask from a tap, not a path.
+      - name: brew style
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew tap-new --no-git local/althar
+          tap="$(brew --repository local/althar)"
+          mkdir -p "$tap/Casks"
+          cp packaging/homebrew/althar.rb "$tap/Casks/althar.rb"
+          brew style --cask local/althar/althar
+      - name: The fill-in script keeps the cask valid
+        run: |
+          packaging/homebrew/fill.sh 9.9.9 "$(printf 'a%.0s' {1..64})" > "$RUNNER_TEMP/filled.rb"
+          diff <(sed -e '/^  version /d' -e '/^  sha256 /d' packaging/homebrew/althar.rb) \
+               <(sed -e '/^  version /d' -e '/^  sha256 /d' "$RUNNER_TEMP/filled.rb")
+          grep -q '^  version "9.9.9"$' "$RUNNER_TEMP/filled.rb"

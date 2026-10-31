@@ -87,7 +87,7 @@ export const text = {
     [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
-  /** Why a stopped task's lead stopped, in a card's words. */
+  /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
   carryOn: 'Carry on',
   carryingOn: 'Telling the lead',
@@ -100,6 +100,8 @@ export const text = {
   /** Settles a finished task that isn't a change, from its kept row. */
   done: 'Done',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
+  /** Its folder being set up before its lead starts: the install its lockfile names, or the setup kept for its repository. */
+  settingUp: { install: 'Installing dependencies', kept: 'Setting up' } satisfies Record<NonNullable<BoardTask['settingUp']>, string>,
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -285,8 +287,15 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
         : work.reconnects != null
           ? { status: TaskStatus.Paused, word: text.status[TaskStatus.Paused], why: reconnectsWords(work.reconnects, clock) }
           : work.phase === 'stopped'
-            ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped] }
-            : null
+            ? {
+                status: TaskStatus.Stopped,
+                word: text.status[TaskStatus.Stopped],
+                ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
+              }
+            : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+              work.settingUp != null
+              ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+              : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -350,8 +359,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     ...rest,
     status: TaskStatus.Stopped,
     word: text.status[TaskStatus.Stopped],
+    // What stopped it, where something says; the word Stopped says the rest.
     ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
-    ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
+    // When, where something says; else no time.
+    ...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
       ? {}
       : {

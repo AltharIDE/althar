@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { SignInWay, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
@@ -134,7 +135,7 @@ export const accountSignInText: AccountSignInText = {
   code: 'A code',
   key: (name) => name,
   console: (name) => name,
-  folder: 'A folder on this computer',
+  folder: `A folder on ${device.this}`,
   holds: (who) => `The browser may still be signed in as ${who}: use another profile, or a code.`,
   approveOn: (host) => `Approve on ${host} in your browser`,
   copyLink: 'Copy the link',

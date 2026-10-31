@@ -1,3 +1,5 @@
+import { askedSecond } from './browser'
+
 /*
  * Time, not scroll: each site scene is a timeline, drawn by writing to the
  * DOM from a frame loop. It plays once when the page opens, pauses while it
@@ -28,9 +30,9 @@ export interface Playback {
 
 /** Plays a timeline. Returns the cleanup for an effect. `?t=4.5` in the address holds it at that second, for looking at one frame. */
 export function playback({ total, draw, replay, idle = false, watch }: Playback): () => void {
-  const at = Number(new URLSearchParams(window.location.search).get('t') ?? NaN)
-  if (stillNow() || Number.isFinite(at)) {
-    draw(Number.isFinite(at) ? at : total)
+  const at = askedSecond()
+  if (stillNow() || at !== null) {
+    draw(at ?? total)
     if (replay) replay.hidden = true
     return () => {}
   }

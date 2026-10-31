@@ -142,11 +142,11 @@ describe('a conflict its pull request’s host reports', () => {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
       moveHostMainOn(working, bare)
       // The host refuses what comes to the task's branch from here on.
-      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused" >&2\nexit 1\n', { mode: 0o755 })
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "Pushes here need a review first" >&2\nexit 1\n', { mode: 0o755 })
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, but Althar couldn’t push the merge.')
       const said = (yield* notices(threadId)).find((notice) => notice.title?.endsWith('but Althar couldn’t push the merge.') === true)
       // Why, as the task's Push card says it: what the host said, in a sentence, not git's hint.
-      assert.match(said?.description ?? '', /^PR #1 refused the push: pre-receive hook declined\. Push it from PR #1’s card\.$/)
+      assert.match(said?.description ?? '', /^PR #1 refused the push: Pushes here need a review first\. Push it from PR #1’s card\.$/)
       assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

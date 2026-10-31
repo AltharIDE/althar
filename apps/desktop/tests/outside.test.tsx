@@ -75,7 +75,7 @@ describe('connections', () => {
     emit(changed('connection', 'conn1', null, null))
     expect(await screen.findByText('Signed in as you')).toBeTruthy()
     vi.mocked(client.listConnections).mockResolvedValue(connectionList)
-    await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Disconnect GitHub' }))
     expect(client.disconnect).toHaveBeenCalledWith('conn1')
     await waitFor(() => expect(screen.queryByText('Signed in as you')).toBeNull())
   })
@@ -333,8 +333,7 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('Its sign-in stopped working')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in again to northwind.atlassian.net' }))
     expect(await screen.findByRole('heading', { name: 'Make a new API token' })).toBeTruthy()
     expect(screen.getByText('Its token stopped working.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
@@ -574,7 +573,7 @@ describe('connections', () => {
     })
     withServices(<Connections />, client)
     expect(await screen.findByText(/git\.meridian\.dev/)).toBeTruthy()
-    expect(screen.getByText('Its sign-in stopped working')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in again to Linear' })).toBeTruthy()
     // A connected service that runs on companies' own servers takes another, by its address.
     await userEvent.click(screen.getByRole('button', { name: 'Add a server' }))
     expect(await screen.findByLabelText('Server address')).toBeTruthy()
@@ -597,13 +596,11 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('· FNT')).toBeTruthy()
-    expect(screen.getByText('· althar')).toBeTruthy()
-    expect(screen.getAllByText('Signed in as mate.kokai99', { exact: false })).toHaveLength(2)
-    // Each disconnects on its own.
-    const [, second] = screen.getAllByRole('button', { name: 'Disconnect' })
-    if (second === undefined) throw new Error('no second Disconnect')
-    await userEvent.click(second)
+    expect(await screen.findByText('FNT')).toBeTruthy()
+    expect(screen.getByText('althar')).toBeTruthy()
+    expect(screen.getAllByText('mate.kokai99')).toHaveLength(2)
+    // Each disconnects on its own, its Disconnect named for it.
+    await userEvent.click(screen.getByRole('button', { name: 'Disconnect FNT' }))
     await waitFor(() => expect(client.disconnect).toHaveBeenCalledWith('conn6'))
     // Another workspace is the first one's walk in again, not a server's.
     expect(screen.queryByRole('button', { name: 'Add a server' })).toBeNull()

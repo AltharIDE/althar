@@ -1,0 +1,22 @@
+/* The review, large and down the middle of its dark section, its ground the section's own. */
+.wrap { max-width: 1160px; margin: 56px auto 0; padding: 0 var(--gut); }
+.stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  container-type: inline-size;
+  /* Its edges melt into the section, so the drawing's own ground shows no frame. */
+  mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(transparent, #000 5%, #000 95%, transparent);
+  mask-composite: intersect;
+}
+
+@media (max-width: 700px) {
+  .wrap { margin-top: 32px; padding: 0; }
+}
+
+/* A phone: the drawing stands upright, with the lead above the change and the reviewer below it. */
+@media (max-width: 559px) {
+  .stage { aspect-ratio: 5 / 7; }
+}
+

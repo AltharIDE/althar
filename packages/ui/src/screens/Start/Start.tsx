@@ -1,6 +1,8 @@
 import { Checkbox } from 'radix-ui'
 import { type ReactNode, useEffect, useId, useRef } from 'react'
 
+import { keys, modKey } from '../../foundations/keys'
+import { device } from '../../foundations/device'
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Light } from '../../foundations/Light/Light'
@@ -88,18 +90,18 @@ export interface StartText {
 }
 
 export const startText: StartText = {
-  looking: 'Looking around this Mac…',
+  looking: `Looking around ${device.this}…`,
   pick: 'Where should they work?',
   nowhere: 'Where is your code?',
   over: 'Let go to add it',
   pickNote: 'One or more repositories',
   agents: 'Agents',
-  agentsLabel: 'Agents on this Mac',
+  agentsLabel: `Agents on ${device.this}`,
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
-  noneHere: 'None on this Mac yet',
-  away: 'Not on this Mac',
-  awayLabel: 'Agents not on this Mac',
+  noneHere: `None on ${device.this} yet`,
+  away: `Not on ${device.this}`,
+  awayLabel: `Agents not on ${device.this}`,
   downloadNamed: (name, size) => `Download ${name}, ${size}`,
   downloadFrom: (pinned) => (pinned === undefined ? 'Its latest release, from GitHub' : `${pinned.version}, from ${pinned.from}`),
   downloading: (size) => `Downloading, ${size}…`,
@@ -112,13 +114,13 @@ export const startText: StartText = {
   lookedIn: (where) => `in ${where}`,
   searching: 'Looking…',
   none: 'None found in the usual places.',
-  add: { title: 'Add a folder…', note: 'anywhere on this Mac', kbd: '⌘N' },
+  add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') },
   project: 'Your first project',
   name: 'Project name',
   more: 'Tick more, or drop folders on the window.',
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
-  createKbd: '⌘↵',
+  createKbd: modKey(keys.return),
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {

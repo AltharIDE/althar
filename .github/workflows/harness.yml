@@ -1,6 +1,8 @@
 name: harness
 
-# On a pull request, checks and unit tests. The coverage gate runs after merge, in post-merge.yml.
+# On a pull request, and for its entry in the merge queue: the checks and unit tests its change reaches
+# (packages/testing/src/select.ts). The coverage gate, and every test on Linux and Windows, run after merge, in
+# post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -17,6 +19,10 @@ on:
         'package.json',
         'bun.lock',
         'vite.config.ts',
+        '.bun-version',
+        '.node-version',
+        'lint/**',
+        'patches/**',
         'packages/testing/**',
         '.github/actions/flaky/**',
         '.github/workflows/harness.yml',
@@ -35,53 +41,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The packages besides the runtime, one after another in one job: each takes under a minute, and a job of its own
-  # mostly waits for a machine and installs, which in the merge queue keeps other pull requests waiting. Every package
-  # runs even when one before it fails, so a run says all that broke.
-  verify:
-    name: verify (packages)
+  # What the change reaches: which packages' checks run, which of their tests, and on how many machines the runtime's.
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      jobs: ${{ steps.plan.outputs.jobs }}
+      any: ${{ steps.plan.outputs.any }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
+      # group's head merges the whole group when it passes, and so must cover every entry in it.
       - env:
-          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/testing apps/cli
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
         run: |
-          failed=''
-          for package in $PACKAGES; do
-            echo "::group::$package"
-            (cd "$package" && bun run check && bun run test) || failed="$failed $package"
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::Failed:$failed"
-            exit 1
+          if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
+            git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
+          else
+            echo '*' > "$RUNNER_TEMP/changed"
           fi
-      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
-      - if: always()
-        uses: ./.github/actions/flaky
+      - id: plan
+        run: bun packages/testing/src/select.ts plan harness "$RUNNER_TEMP/changed"
 
-  # The runtime's tests in four parts by file (vitest's --shard), each its own job: as one they took most of a quarter
-  # of an hour, and often more.
-  runtime:
-    name: verify (packages/runtime ${{ matrix.shard }})
+  # Each job's packages one after another, every one run even when one before it fails, so a run says all that broke:
+  # the packages besides the runtime in one (each takes under a minute, and a job of its own mostly waits for a machine
+  # and installs), and the runtime's tests split by file (vitest's --shard) into as many as they take, up to four.
+  verify:
+    name: verify (${{ matrix.name }})
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
     runs-on: ubuntu-24.04
     # A few times a part's usual run, so a hang fails here, not at the limit.
-    timeout-minutes: 12
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1/4, 2/4, 3/4, 4/4]
-    defaults:
-      run:
-        working-directory: packages/runtime
+        include: ${{ fromJSON(needs.plan.outputs.jobs) }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -91,25 +89,11 @@ jobs:
         with:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
-        working-directory: .
-      - run: bun run check
-      - run: bun run test --shard=${{ matrix.shard }}
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
+      - env:
+          PLAN: ${{ toJSON(matrix) }}
+        run: bun packages/testing/src/select.ts run
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
-
-  # The runtime's parts as the one check they were before, under its name: passes only when every part did.
-  runtime-verified:
-    name: verify (packages/runtime)
-    needs: runtime
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - env:
-          PARTS: ${{ needs.runtime.result }}
-        run: |
-          if [ "$PARTS" != success ]; then
-            echo "::error::A part of the runtime's tests didn't pass: $PARTS"
-            exit 1
-          fi

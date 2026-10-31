@@ -673,7 +673,7 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
     expect(outputs.getByText('Althar opens its pull request once GitHub is connected.')).toBeTruthy()
     expect(outputs.getByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
     expect(outputs.queryByText(/Not on origin/)).toBeNull()
@@ -726,6 +726,154 @@ describe('a task', () => {
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
     expect(await outputs.findByText('origin/althar/add-a-retry refused the push: protected branch.')).toBeTruthy()
+  })
+
+  describe('a push of its branch that failed', () => {
+    const failing = (why: string, message: string, detail: string, { phase = 'ready' as const, connected = false } = {}) => {
+      const base = thread({ session: null })
+      return fakeClient({
+        getThread: vi.fn(async () => ({
+          ...base,
+          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected },
+          task: {
+            ...base.task,
+            phase: phase as 'ready' | 'running',
+            commits: 1,
+            here: [
+              {
+                repository: 'engine',
+                name: 'engine',
+                branch: 'main',
+                head: 'abc111',
+                remote: { name: 'origin', branch: 'althar/set-up-character-image-folders', newPullRequest: null, pushed: false, ahead: 1 },
+              },
+            ],
+          },
+        })),
+        pushBranch: vi.fn(async () => Promise.reject(new ApiError({ reason: 'PushRefused', message, why, detail }))),
+      }).client
+    }
+    const pushIn = async () => {
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      await userEvent.click(outputs.getByRole('button', { name: 'Push to origin' }))
+      return outputs
+    }
+
+    it('says GitLab didn’t accept the sign-in, keeps git’s words behind Details, and leaves connecting to the card’s own button', async () => {
+      const said =
+        "remote: HTTP Basic: Access denied.\nfatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'\nExit code 128."
+      withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', said))
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain('GitLab didn’t accept your sign-in, so nothing was pushed.'))
+      // git's own words stay out of the sentence until asked for.
+      expect(alert.textContent).not.toContain('Authentication failed')
+      expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+      await userEvent.click(within(alert).getByRole('button', { name: 'Details' }))
+      expect(alert.textContent).toContain("fatal: Authentication failed for 'https://gitlab.com/acme/engine.git/'")
+      await userEvent.click(within(alert).getByRole('button', { name: 'Hide details' }))
+      expect(alert.textContent).not.toContain('Authentication failed')
+      // Connecting, which opens a pull request with Althar's sign-in in place of the push, is the card's: offered once.
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      expect(outputs.getAllByRole('button', { name: 'Connect GitLab' })).toHaveLength(1)
+      await userEvent.click(outputs.getByRole('button', { name: 'Connect GitLab' }))
+      expect(await screen.findByRole('complementary', { name: 'Connect GitLab' })).toBeTruthy()
+    })
+
+    it('once GitLab is connected, opens a pull request with Althar’s sign-in in place of the push that failed', async () => {
+      withServices(<Task />, failing('denied', 'GitLab didn’t accept your sign-in, so nothing was pushed.', '', { connected: true }))
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      expect(await outputs.findByRole('button', { name: 'Open a draft pull request' })).toBeTruthy()
+      expect(outputs.queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+    })
+
+    it('says how to sign git in, with no Connect, where connecting wouldn’t change the push: a branch still being worked on', async () => {
+      const message = 'GitLab didn’t accept your sign-in, so nothing was pushed. Sign git in to GitLab from a terminal, then try again.'
+      withServices(<Task />, failing('denied', message, 'fatal: Authentication failed', { phase: 'running' as 'ready' }))
+      // Under way, Outputs is a tab away.
+      await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain(message))
+      expect(outputs.queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+    })
+
+    it('says how to sign git in, with no Connect, for a push of what merged here', async () => {
+      const message = 'GitLab didn’t accept your sign-in, so nothing was pushed. Sign git in to GitLab from a terminal, then try again.'
+      const base = thread({ session: null })
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => ({
+          ...base,
+          host: { product: 'gitlab' as const, name: 'GitLab', webUrl: 'https://gitlab.com', connected: false },
+          task: {
+            ...base.task,
+            phase: 'settled' as const,
+            merged: [{ repository: 'engine', name: 'engine', branch: 'main', remote: 'origin/main', ahead: 1 }],
+          },
+        })),
+        pushHere: vi.fn(async () =>
+          Promise.reject(new ApiError({ reason: 'PushRefused', message, why: 'denied', detail: 'fatal: Authentication failed' })),
+        ),
+      })
+      withServices(<Task />, client)
+      const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
+      await userEvent.click(outputs.getByRole('button', { name: 'Push main to origin' }))
+      const alert = await outputs.findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain(message))
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      expect(within(alert).getByRole('button', { name: 'Details' })).toBeTruthy()
+    })
+
+    it('says one it can’t name in a sentence of its own, with git’s words only under Details', async () => {
+      const said = "fatal: unable to access 'https://gitlab.example.com/acme/engine.git/': SSL certificate problem\nExit code 128."
+      withServices(<Task />, failing('failed', 'Althar couldn’t push to GitLab. What git said is under Details.', said))
+      const alert = await (await pushIn()).findByRole('alert')
+      await waitFor(() => expect(alert.textContent).toContain('Althar couldn’t push to GitLab. What git said is under Details.'))
+      expect(alert.textContent).not.toContain('SSL certificate')
+      await userEvent.click(within(alert).getByRole('button', { name: 'Details' }))
+      expect(alert.textContent).toContain('SSL certificate problem')
+    })
+
+    it('offers trying again where GitLab couldn’t be reached', async () => {
+      const client = failing('unreachable', 'Althar couldn’t reach GitLab, so nothing was pushed.', 'Could not resolve host: gitlab.com')
+      withServices(<Task />, client)
+      const alert = await (await pushIn()).findByRole('alert')
+      expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+      await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(client.pushBranch).toHaveBeenCalledTimes(2))
+    })
+
+    it('offers trying again where it got no answer, as from a sign-in git couldn’t ask for, beside the card’s Connect', async () => {
+      withServices(
+        <Task />,
+        failing('unanswered', 'GitLab didn’t answer in time, so the push was stopped.', 'Stopped after a minute with no answer.'),
+      )
+      const outputs = await pushIn()
+      const alert = await outputs.findByRole('alert')
+      expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
+      expect(outputs.getAllByRole('button', { name: 'Connect GitLab' })).toHaveLength(1)
+    })
+
+    it('says a missing permission or a protected branch in words alone, where no press here puts it right', async () => {
+      for (const [why, message] of [
+        [
+          'forbidden',
+          'Your account can’t push to this repository on GitLab, so nothing was pushed. Push to a fork of it, or ask its owners for access.',
+        ],
+        [
+          'protected',
+          'The branch is protected on GitLab, so it didn’t take the push. Push to another branch or a fork, or ask its owners to let you push to it.',
+        ],
+      ] as const) {
+        const view = withServices(<Task />, failing(why, message, 'remote: You are not allowed to push code to this project.'))
+        const alert = await (await pushIn()).findByRole('alert')
+        await waitFor(() => expect(alert.textContent).toContain(message))
+        expect(within(alert).queryByRole('button', { name: 'Connect GitLab' })).toBeNull()
+        expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+        expect(within(alert).getByRole('button', { name: 'Details' })).toBeTruthy()
+        view.unmount()
+      }
+    })
   })
 
   it('names each repository’s pull request page by its host, and says how far behind its remote is', async () => {
@@ -820,7 +968,7 @@ describe('a task', () => {
     expect(outputs.getByText('althar/add-a-retry')).toBeTruthy()
     expect(outputs.getByText('checkout.ts')).toBeTruthy()
     expect(screen.getByText('Ready to accept')).toBeTruthy()
-    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main on this Mac' }))
     await waitFor(() => expect(client.mergeHere).toHaveBeenCalledWith('t1', [{ repository: 'meridian', head: 'abc111' }]))
     // c for the conversation, o for the outputs; not while typing.
     await userEvent.keyboard('c')
@@ -902,8 +1050,8 @@ describe('a task', () => {
     )
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main' }))
-    expect(await outputs.findByText(/It conflicts with main as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(outputs.getByRole('button', { name: 'Merge into main on this Mac' }))
+    expect(await outputs.findByText(/It conflicts with main in README\.md\./)).toBeTruthy()
     await userEvent.click(outputs.getByRole('button', { name: 'Ask the lead to resolve it' }))
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith(
@@ -952,8 +1100,8 @@ describe('a task', () => {
       new ApiError({ reason: 'CantMerge', message: 'It conflicts.', why: 'conflicts', detail: 'web: README.md' }),
     )
     withServices(<Task />, conflicted.client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
-    expect(await screen.findByText(/It conflicts with web’s develop as it is now, in README\.md\./)).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch on this Mac' }))
+    expect(await screen.findByText(/It conflicts with web’s develop in README\.md\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Ask the lead to resolve it' }))
     await waitFor(() =>
       expect(conflicted.client.send).toHaveBeenCalledWith(
@@ -1945,7 +2093,7 @@ describe('a task', () => {
       getThread: vi.fn(async () => thread({ session: null, task: { ...snapshot().task, phase: 'ready', commits: 2, here } })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into each default branch on this Mac' }))
     await waitFor(() =>
       expect(client.mergeHere).toHaveBeenCalledWith('t1', [
         { repository: 'api', head: 'abc111' },
@@ -1965,7 +2113,7 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main on this Mac' }))
     await waitFor(() =>
       expect(client.mergeHere).toHaveBeenCalledWith('t1', [
         { repository: 'tools', head: 'abc111' },

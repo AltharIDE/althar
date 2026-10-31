@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
 
-import { deviceWords } from '../src/renderer/shared/device'
+import { deviceWords } from '@althar/ui/device'
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, still } from './support'
 

@@ -1,11 +1,10 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
-import { platform } from '../../shared/device'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
@@ -231,7 +230,7 @@ export function HomeView({
             text={{
               projects: {
                 // The shortcut as this system writes it.
-                newProjectKbd: platform === 'darwin' ? '⌘N' : 'Ctrl+N',
+                newProjectKbd: modKey('N'),
                 ...(queued === null ? {} : { queued: (n: number) => queuedOfWords(n, queued) }),
               },
             }}

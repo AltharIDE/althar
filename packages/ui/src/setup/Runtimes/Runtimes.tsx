@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { device } from '../../foundations/device'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { Brand } from '../../foundations/brands/brands'
@@ -116,7 +117,7 @@ export const runtimesText: RuntimesText = {
   outOfUsage: (resets) => `Out of usage until ${resets}`,
   movesTo: (to) => `its work moves to ${to}`,
   waits: 'its work waits for the reset',
-  missing: 'Not installed on this Mac',
+  missing: `Not installed on ${device.this}`,
   outdated: (version, needs) => `Version ${version} · Althar needs ${needs} or later`,
   signIn: 'Sign in',
   cancel: 'Cancel',

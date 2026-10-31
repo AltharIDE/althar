@@ -1,5 +1,6 @@
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -140,7 +141,7 @@ export interface KeepAwakeText {
 }
 
 export const keepAwakeText: KeepAwakeText = {
-  title: 'Keep this Mac awake while work runs',
+  title: `Keep ${device.this} awake while work runs`,
   note: 'The display can still sleep.',
   battery: 'On battery too',
 }
@@ -205,8 +206,8 @@ export const agentsAtOnceText: AgentsAtOnceText = {
     return 'May run hot'
   },
   short: 'The rest wait their turn',
-  mark: ({ count }) => `${count} · this Mac`,
-  value: (n, { count }) => (n === count ? `${n}, this Mac’s default` : String(n)),
+  mark: ({ count }) => `${count} · ${device.this}`,
+  value: (n, { count }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
   reset: 'Use the default',
 }
 

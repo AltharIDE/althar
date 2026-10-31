@@ -7,18 +7,20 @@ import { KIND_WORD, SHIFTS, ShiftKind, UPCOMING, type Shift, type Upcoming } fro
 import { useHash, useToday } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { Footer } from '../shared/footer/Footer'
-import { Lit } from '../shared/Lit'
 import { Nav } from '../shared/Nav'
+import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import { byMonth, countByKind, daysCovered, newestFirst, onlyKind, shortDate, soonestFirst, stillAhead, untilWord } from './group'
 import s from './Shifts.module.css'
 
 /*
  * Shifts: what changed under developers who code with agents, since August.
- * A cobalt head with the count and every shift on one strip of days, then the
- * list by month, filterable by kind, each entry linking its source. The
- * argument is made once, at the top; the entries are only facts. A second
- * view lists what is announced but not yet in effect, soonest first; it opens
- * from #upcoming.
+ * It opens on the night window the changelog does: the last shift, how many
+ * companies moved and what is announced along its top; the count and the
+ * argument in the middle; every shift on one strip of days standing on the
+ * planet's lit edge, the newest lit. Then the list by month, in the dark,
+ * filterable by kind, each entry linking its source. The argument is made
+ * once, at the top; the entries are only facts. A second view lists what is
+ * announced but not yet in effect, soonest first; it opens from #upcoming.
  */
 
 const MARK_OF: Record<string, Brand> = {
@@ -35,7 +37,7 @@ const MARK_OF: Record<string, Brand> = {
 const DAY = 86_400_000
 const time = (date: string) => Date.parse(`${date}T00:00:00Z`)
 
-/** Every shift on one strip of days, from the first of the oldest month to the newest shift. */
+/** Every shift on one strip of days, from the first of the oldest month to the newest shift, which is lit. */
 function Strip({ shifts }: { shifts: readonly Shift[] }) {
   const sorted = newestFirst(shifts)
   const newest = sorted[0]
@@ -56,7 +58,7 @@ function Strip({ shifts }: { shifts: readonly Shift[] }) {
             <li key={x.id} style={{ '--at': at, '--stack': stack } as CSSProperties}>
               <a
                 href={`#${x.id}`}
-                className={s.mark}
+                className={cx(s.mark, x === newest && s.newest)}
                 data-kind={x.kind}
                 data-side={at < 0.2 ? 'start' : at > 0.8 ? 'end' : undefined}
                 aria-label={`${shortDate(x.date)}: ${x.title}`}
@@ -137,6 +139,7 @@ export function Shifts() {
   const kinds = Object.values(ShiftKind).filter((k) => counts[k] > 0)
   const months = upcomingView ? byMonth(onlyKind(upcoming, kind), soonestFirst) : byMonth(onlyKind(SHIFTS, kind))
   const newest = newestFirst(SHIFTS)[0]
+  const companies = new Set(SHIFTS.map((x) => x.who)).size
 
   const show = (next: View) => {
     setPicked(next)
@@ -161,26 +164,46 @@ export function Shifts() {
   return (
     <div className={s.page}>
       <Nav />
-      <main id="main" tabIndex={-1}>
-        <Lit
-          kicker={<>Shifts{newest && ` · updated ${shortDate(newest.date)} 2026`}</>}
-          title={
+      <Night>
+        <Window
+          deck={
             <>
-              The ground keeps moving.{' '}
-              <b>
-                {SHIFTS.length} shifts in {daysCovered(SHIFTS)} days.
-              </b>
+              {newest && (
+                <Readout label="Last shift" href={`#${newest.id}`}>
+                  <b>
+                    {shortDate(newest.date)} {newest.date.slice(0, 4)}
+                  </b>
+                </Readout>
+              )}
+              <Readout label="Companies" href="#every" at="mid">
+                <b>{companies}</b>
+              </Readout>
+              <Readout label="Announced" href="#upcoming" at="end">
+                <b>{upcoming.length} ahead</b>
+              </Readout>
             </>
           }
-          lead="New models, new limits, new owners, new terms: what changed for people who code with agents, since August. Each one is a reason not to tie your work to a single agent."
-        />
-        <div className={s.wrap}>
-          <Strip shifts={SHIFTS} />
-        </div>
+        >
+          <div className={n.head}>
+            <p className={n.over}>
+              <span className={n.overLit}>{SHIFTS.length}</span>
+              <span>shifts in {daysCovered(SHIFTS)} days</span>
+            </p>
+            <h1 className={n.headline}>The ground keeps moving.</h1>
+            <p className={n.why}>
+              New models, new limits, new owners, new terms: what changed for people who code with agents, since August. Each one is a
+              reason not to tie your work to a single agent.
+            </p>
+          </div>
+          <div className={s.stripPic}>
+            <Strip shifts={SHIFTS} />
+          </div>
+        </Window>
 
-        <section className={s.list} aria-label="Every shift">
+        <section id="every" className={s.list} aria-label="Every shift">
           <div className={s.wrap}>
-            <fieldset className={cx(s.filters, s.views)}>
+            {/* Where #upcoming lands: the views, the upcoming one open. */}
+            <fieldset id="upcoming" className={cx(s.filters, s.views)}>
               <legend className={s.legend}>View</legend>
               <button type="button" aria-pressed={!upcomingView} onClick={() => show('happened')}>
                 Happened <span>{SHIFTS.length}</span>
@@ -220,12 +243,12 @@ export function Shifts() {
                 </ol>
               </section>
             ))}
-            <p className={cx(s.note)}>
+            <p className={s.note}>
               We link the reporting; we don’t host it. Missing a shift, or one we got wrong? <a href={LINKS.issues}>Tell us on GitHub</a>.
             </p>
           </div>
         </section>
-      </main>
+      </Night>
       <Footer />
     </div>
   )

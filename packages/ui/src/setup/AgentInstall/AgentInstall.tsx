@@ -1,3 +1,4 @@
+import { device } from '../../foundations/device'
 import { BrandChip } from '../../foundations/Marks/Marks'
 import type { Brand } from '../../foundations/brands/brands'
 import { cx } from '../../lib/cx'
@@ -28,7 +29,7 @@ export interface AgentInstallText {
 }
 
 export const agentInstallText: AgentInstallText = {
-  missing: (name) => `${name} isn’t on this Mac`,
+  missing: (name) => `${name} isn’t on ${device.this}`,
   can: (name, size) => `${name}’s latest release, from GitHub, about ${size}.`,
   canPinned: (name, size, { from, version }) => `${name} ${version}, from ${from}, about ${size}.`,
   cannot: (name) => `Install ${name} with its own installer, then come back here.`,

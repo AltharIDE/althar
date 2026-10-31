@@ -10,8 +10,9 @@ const ci = process.env.CI === 'true'
  * test). A package with setup files of its own puts them after `setupFiles` here.
  *
  * In CI a test that fails runs once more, so one that fails only now and then doesn't stop a merge. One that passes
- * only then is flaky, and is reported as such (reporter.ts): it stays in sight until its cause is fixed. Locally
- * nothing runs twice, so a flaky test fails where it is written.
+ * only then is flaky, and is reported as such (reporter.ts): it stays in sight until its cause is fixed, and while its
+ * issue is open its failures don't fail CI (quarantine.ts). Locally nothing runs twice and nothing is quarantined, so
+ * a flaky test fails where it is written.
  */
 export const testing = (size: Size) => ({
   testTimeout: budget[size],
