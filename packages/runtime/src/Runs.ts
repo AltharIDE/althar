@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { type LimitCall, LimitChoice } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
@@ -25,7 +26,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { Connectivity } from './Connectivity'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor } from './errors'
+import { AttentionClosed, GitFailed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor, PushRefused } from './errors'
 import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
@@ -316,6 +317,22 @@ type Store =
   | LeftBehind
 
 /**
+ * Whether a publish step's failure may pass if tried again (DEV-173): the
+ * code host failing or not answering (a 5xx, a rate limit, the network), a
+ * push that couldn't reach it, or git running past its time. Not one that
+ * won't: not connected, signed out, refused, or a request the host turned
+ * down as it stands.
+ */
+export const mayPass = (cause: Cause.Cause<unknown>): boolean => {
+  const error = Cause.findErrorOption(cause)
+  if (Option.isNone(error)) return false
+  const failed = error.value
+  if (failed instanceof ConnectorFailed) return failed.reason === 'unreachable' || failed.reason === 'rate_limited'
+  if (failed instanceof PushRefused) return failed.why === 'unreachable'
+  return failed instanceof GitFailed && failed.timedOut === true
+}
+
+/**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
  * after a reminder, went, couldn't start, a restart stopped it, it stalled,
  * went round in circles, ran past its budget, or refused; or review ran out
@@ -566,6 +583,7 @@ export class Runs extends Context.Service<
       const agentsHere = yield* Agents
       const scope = yield* Effect.scope
       const blankPause = (yield* RuntimeConfig).idle?.blank ?? BLANK_PAUSE
+      const publishAgain = (yield* RuntimeConfig).publishAgain ?? Duration.seconds(30)
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1096,7 +1114,21 @@ export class Runs extends Context.Service<
           if (admitted === undefined) return
           const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
-          const published = yield* Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
+          const publishing = Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
+          const first = yield* publishing
+          // A failure that may pass is tried again once by itself, after a pause, unless it was stopped meanwhile: only a second
+          // asks the person (DEV-173). Publishing again adopts what the first did on the host.
+          const again =
+            first._tag === 'Failure' && mayPass(first.cause)
+              ? yield* Effect.andThen(
+                  Effect.sleep(publishAgain),
+                  Effect.gen(function* () {
+                    const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+                    return still?.state === 'running' && (yield* going(run))
+                  }),
+                )
+              : false
+          const published = again ? yield* publishing : first
           if (published._tag === 'Failure') {
             const error = Cause.findErrorOption(published.cause)
             const notConnected = Option.isSome(error) && error.value instanceof NotConnected

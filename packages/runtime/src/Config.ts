@@ -100,6 +100,11 @@ export interface RuntimeOptions {
   readonly checksAppear?: Duration.Duration
   /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
   readonly checksStuck?: Duration.Duration
+  /**
+   * How long a publish step that failed for a reason that may pass (the code host's 5xx, a rate limit, a timeout, a dropped
+   * connection) waits before Althar tries it once more by itself: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly publishAgain?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */

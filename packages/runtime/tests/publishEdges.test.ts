@@ -113,6 +113,63 @@ const runsOf = (taskId: string) =>
     return yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId} ORDER BY created_at, rowid`
   })
 
+/** The fake GitHub, its first `times` openings failing as given, and how many it was asked for. */
+const failing = (github: FakeService, times: number, reason: ConnectorFailed['reason'], status?: number) => {
+  const asked = { count: 0 }
+  const service: FakeService = {
+    ...github,
+    openChange: (repository, change) =>
+      Effect.suspend(() => {
+        asked.count += 1
+        return asked.count <= times
+          ? Effect.fail(
+              new ConnectorFailed({ product: 'github', reason, message: 'The host failed', ...(status === undefined ? {} : { status }) }),
+            )
+          : github.openChange(repository, change)
+      }),
+  }
+  return { service, asked }
+}
+
+describe('opening a task’s pull request when the host fails', () => {
+  it.live('tries again once by itself where the failure may pass, and asks nothing when that opens it', () => {
+    const { working, github } = onGitHub()
+    const { service, asked } = failing(github, 1, 'unreachable', 502)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* publishing(working)
+      yield* until(published(task.threadId), (said) => said.length === 1)
+      assert.deepStrictEqual(yield* published(task.threadId), ['Opened draft pull request #1.'])
+      assert.strictEqual(asked.count, 2)
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck'`, 0)
+      assert.deepStrictEqual(yield* runsOf(task.taskId), [{ state: 'succeeded' }])
+    }).pipe(Effect.provide(runtimeWith(service)))
+  })
+
+  it.live('needs the person when the try again fails too', () => {
+    const { working, github } = onGitHub()
+    const { service, asked } = failing(github, 2, 'rate_limited', 429)
+    return Effect.gen(function* () {
+      const task = yield* publishing(working)
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['publish', 'failed_to_start'])
+      assert.strictEqual(asked.count, 2)
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(runtimeWith(service)))
+  })
+
+  it.live('needs the person at once where the failure won’t pass', () => {
+    const { working, github } = onGitHub()
+    const { service, asked } = failing(github, 1, 'forbidden', 403)
+    return Effect.gen(function* () {
+      const task = yield* publishing(working)
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['publish', 'failed_to_start'])
+      assert.strictEqual(asked.count, 1)
+    }).pipe(Effect.provide(runtimeWith(service)))
+  })
+})
+
 describe('opening a task’s pull request', () => {
   it.live('needs the person when the host refuses it, and opens it when they say to try again', () => {
     const { working, github } = onGitHub()
