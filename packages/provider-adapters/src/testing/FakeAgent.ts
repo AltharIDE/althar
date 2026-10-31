@@ -615,7 +615,7 @@ const playStall = async (
  * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after; asked to, `[lead:make-change]` makes its quick task a change
+ * it after, with `[lead:answered]` saying it only answered the person; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
  * turn there; `[review:pass]` and `[review:findings]`
@@ -1021,13 +1021,15 @@ const playRole = async (
       const finish = async () => {
         // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
         const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
-        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
+        // Asked only something, in this turn, `[lead:answered]`: what it committed came with answering.
+        const answered = text.includes('[lead:answered]') ? { answered: true } : {}
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...answered, ...evidence() })
         if (!answer.startsWith("Write the description of the task's pull request")) return answer
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
-        const text =
+        const described =
           template === undefined ? DESCRIBED : template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
         const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
-        const descriptions = names === undefined ? [{ text }] : names.map((repository) => ({ repository, text }))
+        const descriptions = names === undefined ? [{ text: described }] : names.map((repository) => ({ repository, text: described }))
         return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.

@@ -238,7 +238,7 @@ describe('opening a task’s pull request', () => {
     }).pipe(Effect.provide(runtimeWith(refusing, { stopGrace: Duration.millis(300) })))
   })
 
-  it.live('opens a round of work after its pull request was closed in a new one by itself, a draft (ADR-078)', () => {
+  it.live('opens a round of work after its pull request was closed in a new one by itself, a draft (ADR-034)', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -261,11 +261,41 @@ describe('opening a task’s pull request', () => {
       yield* until(published(task.threadId), (said) => said.length === 2)
       assert.lengthOf(github.changes, 2)
       assert.isTrue(github.changes[1]?.draft)
+      // Named by the one it follows, ahead of the task's own title.
+      assert.strictEqual(github.changes[1]?.title, `After #1: ${github.changes[0]?.title}`)
       // Opened, nothing says it isn't in one.
       assert.notInclude(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         "What the follow-up committed isn't in a pull request yet.",
       )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('opens none for a round whose lead only answered the person, and says what waits (ADR-034)', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const changes = yield* Changes
+      const task = yield* publishing(working)
+      yield* until(published(task.threadId), (said) => said.length === 1)
+      github.close(1)
+      yield* changes.refresh(task.taskId)
+      yield* until(
+        Effect.map(items(task.threadId), (all) => all.filter((item) => item.kind === 'arrival' && item.content.kind === 'closed')),
+        (closed) => closed.length === 1,
+      )
+      // A question, which its lead commits something for in passing as it answers.
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: task.threadId,
+        body: 'Why twice? [lead:finish] [lead:edit] [lead:answered]',
+      })
+      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
+      yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      )
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(github.changes, 1)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

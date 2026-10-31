@@ -148,7 +148,7 @@ describe('a task that goes back to work', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running' && all[0].followUp === true)
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
-      // The host can't be reached as the round ends, so the next pull request it opens by itself can't open (ADR-078).
+      // The host can't be reached as the round ends, so the next pull request it opens by itself can't open (ADR-034).
       pushes.to = join(bare, 'nowhere')
       slow.open('[lead:slowly]')
 
@@ -794,7 +794,7 @@ describe('a task’s first pull request in a repository, and a reported round wi
           descriptions: [{ repository: 'web', text: 'Web gave up on the first failed call too. It now retries once, as api does.' }],
         })
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
-        // Web's first opens by itself as the round ends (ADR-078), from the task's branch, as a first one does; api's merged one
+        // Web's first opens by itself as the round ends (ADR-034), from the task's branch, as a first one does; api's merged one
         // stays as it is.
         yield* until(
           Effect.sync(() => github.changes),

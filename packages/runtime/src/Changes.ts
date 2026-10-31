@@ -1269,8 +1269,9 @@ export class Changes extends Context.Service<
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
+          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034).
           const title = titleFor(rule ?? conventions.title?.pattern ?? null, {
-            title: task.title,
+            title: next?.change == null ? task.title : `After ${next.change.words.prefix}${next.change.number}: ${task.title}`,
             issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
           })
           const body = yield* bodyFor(
@@ -5839,7 +5840,7 @@ export class Changes extends Context.Service<
           // Merged or closed, its commits after it go in the task's next pull request, which the person opens (ADR-034).
           if (now.state !== 'open')
             return yield* new ToolRefused({
-              message: `${where} is ${now.state}, so there's nothing to push to. What you committed after it goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.`,
+              message: `${where} is ${now.state}, so there's nothing to push to. What you committed after it goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.`,
             })
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined || !existsSync(workspace.path))
@@ -6046,7 +6047,7 @@ export class Changes extends Context.Service<
                     message:
                       refusals.length > 0
                         ? refusals.join(' ')
-                        : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
+                        : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
                   })
                 }
                 const { link, snapshot, where, ahead, left, path, branch } = chosen

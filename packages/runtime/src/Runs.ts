@@ -189,6 +189,8 @@ const Finished = Schema.Struct({
   /** What shows the change does what it should; and what couldn't be shown. */
   evidence: Schema.optional(Schema.Array(EvidenceGiven)),
   unverified: Schema.optional(Schema.Array(Schema.String)),
+  /** A round of work where the person only asked something, and what the lead committed came with answering: it opens no pull request. */
+  answered: Schema.optional(Schema.Boolean),
   /** When settling a review: what became of each finding, by its id. */
   findings: Schema.optional(
     Schema.Array(
@@ -1065,7 +1067,7 @@ export class Runs extends Context.Service<
           const ending = yield* stepsOf(run)
           // A round of work's commits go to the task's open pull request as its lead's turn ends (ADR-072); after its last merged
           // or closed, they open the next by themselves, a draft, as a plan's ending opens the first, where the project's rules
-          // would have (ADR-078). But for the round a quick task was made a change in, which ends as the person asked.
+          // would have (ADR-034). But for the round a quick task was made a change in, which ends as the person asked.
           if (run.planId === null && !ending.publishes) {
             // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to open.
             const after = ending.here ? [] : yield* changes.unshipped(run.taskId).pipe(Effect.orElseSucceed(() => []))
@@ -1081,7 +1083,12 @@ export class Runs extends Context.Service<
             // on no host, stays so.
             const had = (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
             const end = had ? yield* changes.endFor(run.projectId, run.taskId).pipe(Effect.orElseSucceed(() => null)) : null
-            if (end !== 'draft' && end !== 'ready') {
+            // Nor a round its lead said only answered the person: what it committed in passing waits for them (ADR-034).
+            const [last] = yield* sql<{ answered: number | null }>`
+              SELECT json_extract(a.output, '$.answered') AS answered FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+              WHERE n.execution_id = ${run.executionId} AND n.node_key = 'implement' AND a.state = 'succeeded'
+              ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
+            if ((end !== 'draft' && end !== 'ready') || last?.answered === 1) {
               yield* unsaid
               return
             }
@@ -3024,6 +3031,7 @@ export class Runs extends Context.Service<
             evidence: handed = [],
             unverified,
             built: said,
+            answered: answering = false,
           } = yield* read(Finished, input)
           const built = builtIn(said)
           const builds = built === null ? {} : { built }
@@ -3082,6 +3090,8 @@ export class Runs extends Context.Service<
           // A round of work that made nothing new ends with its summary, and the task is back where it was.
           const round = current.planId === null && step === 'implement' ? roundOf(attempt.input) : undefined
           const quiet = round !== undefined && !(yield* madeSince(current.taskId, round.start))
+          // Only a round answers: what it committed opens no pull request, so it needs no description (ADR-034).
+          const answered = round !== undefined && answering
           // Whether settling changed the work: then what the task built is said again, so its end is never older than its work. A round
           // that made nothing new needn't say it.
           const workBefore = step === 'settle' ? ((JSON.parse(attempt.input) as { before?: string }).before ?? '') : ''
@@ -3113,7 +3123,7 @@ export class Runs extends Context.Service<
               })
           }
           // A pull request the task opens is described by the lead, for its reviewer: in the repository's template, where it has one.
-          if ((end === 'draft' || end === 'ready') && !quiet) {
+          if ((end === 'draft' || end === 'ready') && !quiet && !answered) {
             // A round's work after its task's pull request merged or closed goes in a new one, described from what came since.
             const after = round === undefined ? [] : yield* changes.unshipped(current.taskId).pipe(Effect.orElseSucceed(() => []))
             const since = Object.fromEntries(
@@ -3133,7 +3143,7 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
-              yield* ended(current, attempt, 'succeeded', { summary })
+              yield* ended(current, attempt, 'succeeded', { summary, ...(answered ? { answered } : {}) })
               yield* result(current, { step, round: attempt.iteration, summary, ...builds, ...descriptions, ...showing }, itemId)
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
@@ -3360,6 +3370,11 @@ export class Runs extends Context.Service<
                   },
                   required: ['kind', 'caption'],
                 },
+              },
+              answered: {
+                type: 'boolean',
+                description:
+                  'In a round of work after the plan, true where the person only asked something and what you committed came with answering it: Althar opens no pull request for it, and leaves it for the person to open from the task.',
               },
               unverified: {
                 type: 'array',
