@@ -188,6 +188,8 @@ describe('a task’s screenshots on its pull request', () => {
       // Every view left out: nothing goes up, and the person is told to choose one.
       const refused = yield* Effect.flip(screenshots.post({ taskId, url, leftOut: ['A1', 'B1', yield* firstView(threadId)] }))
       assert.strictEqual(words(refused, (id) => id).message, 'Every screenshot is left out. Choose at least one to post.')
+      // Said as it was asked: nothing went wrong to keep on the card.
+      assert.isNull((yield* standing(threadId))?.failed)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

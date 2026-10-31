@@ -1,4 +1,4 @@
-import { type PictureReport, type ScreenshotNow, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
+import { type PictureReport, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
@@ -195,7 +195,7 @@ export class PullRequestScreenshots extends Context.Service<
       /** Uploads each picture the comment shows that its host hasn't had yet, keeping each as it goes up: one never goes twice. */
       const uploaded = (on: OnHost, posting: ReturnType<typeof postingOf>, kept: Kept | undefined) =>
         Effect.gen(function* () {
-          const upload = on.host.uploadPicture
+          const upload = on.host.uploadPicture?.bind(on.host)
           if (upload === undefined) return yield* refuse('no_pictures', on.change)
           const uploads: Record<string, string> = { ...kept?.uploads }
           for (const shot of posting) {
@@ -232,7 +232,7 @@ export class PullRequestScreenshots extends Context.Service<
           input.taskId,
           Effect.gen(function* () {
             const on = yield* changes.pullRequest(input.taskId, input.url)
-            const edit = on.host.editComment
+            const edit = on.host.editComment?.bind(on.host)
             if (!on.host.capabilities.pictures || on.host.uploadPicture === undefined || edit === undefined)
               return yield* refuse('no_pictures', on.change)
             const kept = yield* keptOf(on.linkId)
@@ -302,9 +302,10 @@ export class PullRequestScreenshots extends Context.Service<
             })
             yield* touchTask(input.taskId)
           }).pipe(
-            // A try that failed is said on the card, until one goes up.
+            // A try that failed is said on the card, until one goes up: not that there was nothing to post, which is said as it is asked.
             Effect.tapError((error) =>
               Effect.gen(function* () {
+                if (error instanceof ScreenshotsRefused && error.why === 'none') return
                 const at = yield* Effect.option(changes.pullRequest(input.taskId, input.url))
                 if (Option.isNone(at)) return
                 yield* keep(at.value.linkId, at.value.projectId, { failed: failureWords(error) })
@@ -326,6 +327,8 @@ export class PullRequestScreenshots extends Context.Service<
             const kept = yield* keptOf(one.linkId)
             const standing = standingOf(now, kept, true)
             if (standing.standing === 'posted' || (standing.standing === 'unposted' && standing.changed === 0)) continue
+            // Every view left out: there is nothing to post, by the person's choice.
+            if (postingOf(now, kept?.leftOut ?? []).length === 0) continue
             // One that failed waits a while before it is tried again by itself.
             if (!force && kept?.failed != null && Date.parse(kept.updatedAt) + Duration.toMillis(RETRY_AFTER) > clock) continue
             yield* post({ taskId, url: one.change.url }).pipe(contained('Screenshots.sync', () => undefined))
