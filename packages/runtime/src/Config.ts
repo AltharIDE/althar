@@ -313,7 +313,17 @@ export class Agents extends Context.Service<
             const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
             return {
               _tag: 'Process' as const,
-              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              spec: {
+                ...spec,
+                env: {
+                  ...spec.env,
+                  ...withoutSignIns(signedOut),
+                  ...own,
+                  ...held,
+                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held }, options),
+                  ...env,
+                },
+              },
               cwd,
               ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
             }

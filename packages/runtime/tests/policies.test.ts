@@ -21,7 +21,7 @@ describe('a project’s rules, as kept', () => {
       source: 'mvp',
       alwaysAsk: ['push to the default branch', 'force push', 'merge', 'deploy', 'write outside the worktree'],
     }
-    assert.deepStrictEqual(ruleSetOf(mvp), { mode: 'rules', ask: RULES, never: [], allow: [], commands: [] })
+    assert.deepStrictEqual(ruleSetOf(mvp), { mode: 'rules', ask: RULES, never: [], allow: [], commands: [], web: true })
     assert.deepStrictEqual(
       ruleSetOf({
         source: 'person',
@@ -32,6 +32,7 @@ describe('a project’s rules, as kept', () => {
       }),
       {
         mode: 'ask',
+        web: true,
         ask: ['deploy', 'outside'],
         never: ['force-push'],
         allow: [],
@@ -302,4 +303,9 @@ describe('a project’s rules, as kept', () => {
       assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [])
     }).pipe(Effect.provide(runtime())),
   )
+})
+
+it('keeps the project web switch on by default and preserves an explicit off', () => {
+  assert.isTrue(ruleSetOf({ source: 'person', alwaysAsk: [] }).web)
+  assert.isFalse(ruleSetOf({ source: 'person', alwaysAsk: [], leadsReachWeb: false }).web)
 })

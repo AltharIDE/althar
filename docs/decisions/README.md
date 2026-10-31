@@ -84,3 +84,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
 | [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
 | [077](077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md) | A task's screenshots go in one comment on its pull request, written anew as they change, by hand or by a project rule |
+| [078](078-project-leads-can-read-the-web.md) | Project leads and their own reviewers can read the web, with a default-on project switch and outside reviews kept offline |
