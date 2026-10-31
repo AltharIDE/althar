@@ -56,8 +56,10 @@
     where their word was only a press.
   - **On the code host, typed tools for what's frequent, and one gated call
     to the host's API for the rest,** with a never list that holds whatever
-    anyone says ([On the code host](#on-the-code-host)). This amends
-    ADR-011 and ADR-058.
+    anyone says. The call can't change the repository's content, which stays
+    a task's, nor stand in for a check or a review
+    ([On the code host](#on-the-code-host)). This amends ADR-011 and
+    ADR-058.
   - **CI's news reaches the coordinator,** which is woken for what it can
     act on ([CI news](#ci-news-and-what-the-coordinator-does-with-it)).
   - **Every open pull request in the project's repositories is followed,**
@@ -90,6 +92,10 @@
     comes up often.
   - **GraphQL mutations through the gated call:** what one does can't be
     read off a method and a path.
+  - **A never list written endpoint by endpoint:** the Contents API's file
+    writes, each a commit to a branch, showed how easily one path is missed.
+    Families of paths, and a test against the host's published description
+    of its API, catch the next one.
 - **Trade-off:**
   - **Steering.** In a turn the person started, what the coordinator reads
     there could take it to a target or an action they didn't mean, and
@@ -258,22 +264,49 @@ whoever opened it.
     of their owners (such as the Homebrew tap). What comes back is data, cut
     to size, a page at a time.
   - Writes (`POST`, `PUT`, `PATCH`, `DELETE`) are asked-for.
-  - What a typed tool does (merging, the queue, tags, releases, approving a
-    run, a branch's refs) is refused with the tool's name, so the head check
-    and the line in the chat always happen.
+  - What a typed tool does (merging, bringing a branch up to date, tags,
+    releases, approving a run, deleting a branch) is refused with the tool's
+    name, so the head check and the line in the chat always happen.
+  - **A change to the repository's content is refused, whichever path it
+    takes,** and the refusal says to plan a task: a change is always a task,
+    with a lead and a review (ADR-004). On GitHub that is the Contents API's
+    file writes (`PUT` and `DELETE` on `contents/{path}`, each of which
+    commits to a branch), the Git database's writes (`git/blobs`,
+    `git/trees`, `git/commits`, `git/tags`, `git/refs`), merging one branch
+    into another (`merges`), syncing a fork (`merge-upstream`), and making a
+    repository from a template (`generate`).
+  - **What stands in for a gate is refused too:** a commit status
+    (`statuses/{sha}`) or a check run made, either of which can satisfy a
+    required check on a branch; and submitting or dismissing a review
+    (`pulls/{n}/reviews`), since an Approve can satisfy branch protection,
+    and posting a review stays the person's
+    ([below](#every-restriction-on-the-coordinator-kept-or-lifted)).
+  - **Starting a workflow** (`dispatches`, and a workflow's own
+    `dispatches`) is asked-for, and only at the default branch, whose
+    workflow files were reviewed. Here that covers `post-merge` again, or
+    `release.yml`'s run by hand from main, which still stops for the
+    `release` environment's approval.
   - The never list is refused whatever the person said, by method and path,
-    written for each host. A host with no list written gets reads only. On
-    GitHub it is:
-    - the repository's own settings: renaming it, its visibility,
-      transferring or deleting it;
+    written for each host. On GitHub it is:
+    - the repository's own settings: renaming it, its default branch, its
+      visibility, transferring or deleting it;
     - branch protection and rulesets;
     - collaborators, teams and invitations;
     - webhooks, deploy keys, installed apps, and self-hosted runners;
     - secrets and variables: Actions', Dependabot's, Codespaces' and
       environments';
-    - the settings of environments, of Actions and of Pages;
+    - the settings of environments, of Actions (a workflow turned off
+      included) and of Pages;
+    - codespaces, each of which can push as the person;
     - anything under `orgs`, `user`, `users`, `admin`, `enterprises`,
       `applications` and `authorizations`.
+  - **Each list is written by family of paths, not endpoint by endpoint,** so
+    a new endpoint under `contents` or `git` is refused with the rest. A test
+    reads GitHub's published description of its API
+    (`github/rest-api-description`) and fails on any write it can't place:
+    let through, a typed tool's, content, a gate, or never. At run time a
+    write Althar hasn't placed, such as one GitHub added since, is refused
+    as never until it is. A host with no lists written gets reads only.
   - GraphQL is for queries only: what a mutation does is in its name and
     arguments, which Althar would have to read one at a time.
   - It shares the connection's rate limit, and stops before what the
@@ -327,7 +360,19 @@ coordinator now hears it too, beside plans and issue cards:
   goes to that task's lead.
 - **Main's checks** are read in the sweep, which today looks only for
   conflicts (`Changes.ts:5443-5472`): main's head each time, and its checks
-  when the head moves or a run is still going.
+  when the head moves, while a run is still going, and, at an unchanged
+  head, while main is red or a release waits on it.
+- **A finished result at an unchanged head isn't final.** A failed run can
+  be run again, by its author, the person or Althar, and a new check can
+  start, all without a push. So whatever an errand waits on is read as a
+  task's own pull request is (every 30 seconds, ten times slower after ten
+  minutes with no news) until the errand is done, finished or not: a pull
+  request's checks, main's `post-merge` run, a release's run. Each read is
+  conditional where the host allows it: on GitHub, with the last read's
+  ETag, which isn't counted against the limit when nothing changed. A run
+  Althar starts again is read again at once.
+- **What it acts on, it reads first.** A merge, a queue or a tag works from
+  a read made then, not from the last poll, which is only news.
 
 ## Every open pull request
 
@@ -337,9 +382,14 @@ coordinator now hears it too, beside plans and issue cards:
   no card: it is news for the coordinator, and a task is attached to it
   only when the person asks.
 - Slowly: the open list every five minutes, with conditional requests,
-  which GitHub doesn't count against the limit when nothing changed, and
-  each pull request's checks only when its head moves or a check is still
-  running. A task's own pull request is still polled as now.
+  which GitHub doesn't count against the limit when nothing changed. A pull
+  request's checks are read when its head moves or a check is still
+  running, and, at an unchanged head, at each sweep for a day after they
+  failed, conditionally too, so a rerun without a push still comes as
+  news. After that day, such a rerun is read when the person next asks.
+  One an errand waits on is polled as a task's own is, as
+  [above](#ci-news-and-what-the-coordinator-does-with-it), and a task's own
+  pull request is still polled as now.
 - About 30 open pull requests is well inside GitHub's 5,000 requests an
   hour. The sweep backs off as the remaining budget falls, as a failing
   service is waited out (ADR-060).
@@ -395,6 +445,7 @@ comes:
 | It posts no review; an outside pull request's waits for the person | `Reviews.ts:59`, `:223-227`, `:957-961` | Kept | An Approve can satisfy branch protection; a review task's lead drafts one |
 | Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Althar's tools are the one way to the host, which is what lets the gate hold |
 | A rerun reaches GitHub Actions' jobs only | `connectors/src/github.ts:867-872` | Kept | The host can't run another service's |
+| *New:* the gated call can't change the repository's content, make a status or a check run, submit or dismiss a review, or start a workflow off the default branch | [On the code host](#on-the-code-host) | Added | A change is always a task, and CI's and a review's gates stay as they are |
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | News brings what it would have fetched for |
 | Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The record and the review |
@@ -417,7 +468,7 @@ comes:
 | **Hearing** | | | |
 | It speaks only when spoken to | `Sessions.ts:1320-1322` | Lifted | It is woken for what it can act on, in a batch |
 | Its news is plans, issue cards, issues started and quick tasks made changes | `coordinatorNews.ts:32`, `:102-104` | Lifted | Pull requests' and main's news join them |
-| Main's checks are never polled | `Changes.ts:5443-5472` | Lifted | The sweep reads main's head, and its checks when it moves |
+| Main's checks are never polled | `Changes.ts:5443-5472` | Lifted | The sweep reads main's head, and its checks when it moves, while a run goes, and while main is red or a release waits on it |
 | **The person's word** | | | |
 | Merging, pushing and posting a review are the person's press | ADR-048 | Lifted for merging and releasing | Their message is their word; posting a review stays theirs, above |
 | Answering a permission request or a question is the person's press | ADR-019, ADR-048 | Kept | What can't be undone asks only the person |
@@ -434,15 +485,15 @@ title is a task's, in at most 60 characters.
 | # | Task | Scope | Size | After |
 | ---: | --- | --- | :---: | --- |
 | 1 | Coordinator: rerun, mark ready, close and reply on PRs | The coordinator gets `rerun_check`, `read_default_branch_checks`, `mark_ready`, `close_pull_request`, `reopen_pull_request` (a new connector call) and `reply_on_pull_request`, on any of the project's pull requests, within the kinds above. Its brief says what it does unasked, and no longer that a lead can't fetch. Doc 04's tools | S | – |
-| 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep: red, and green again. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone | M | – |
+| 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep: red, and green again, read again at an unchanged head while main is red. The watch, for task 3's errands and DEV-176: what it watches is read as a task's pull request is until it ends, finished results included, with conditional reads. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone. Tests: a failed run that passes when run again at the same head is heard, on main and on a watched pull request | M | – |
 | 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes | M | – |
 | 4 | A stopped lead hears what's meant for it | `message_lead` starts a stopped lead. Reviews, comments and the queue sending its pull request back are queued for it, and wake it (today `Changes.ts:3261` drops them). Shared with DEV-176 | S | – |
 | 5 | Coordinator merges and queues when you ask | `merge_pull_request`: merge, or the queue (GitHub's, at `expectedHeadOid`; GitLab's merge when the pipeline succeeds), with a method, at a head; `leave_queue`. Any of the project's pull requests. "Once it's green" as an errand. The line in the chat | M | 2, 3 |
 | 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. Never a rebase, never forced | M | 1 |
-| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves; backing off with the remaining budget. News only: no card, no lead | M | 2 |
+| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. Backing off with the remaining budget. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
 | 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on a commit of the default branch. In the connectors: read a release, publish a draft (GitHub, GitLab), approve a run's pending environment (GitHub), run a run's failed jobs again, read a run on a tag (with DEV-94) | M | 3 |
 | 9 | Release 0.7.0 through the coordinator | The release errand above: the version-and-notes task, then merge, tag, approve, the draft, the decision to try and publish it, Publish, the tap. Each step in the chat. The coordinator's brief for releasing. Proven by releasing 0.7.0 itself, so it goes last | M | 2, 5, 8 |
-| 10 | A gated call to the code host's API | `code_host_api`: REST reads; writes asked-for; GitHub's never list, and reads only on GitLab and Bitbucket until theirs are written; GraphQL queries only; receipts and the line in the chat; a floor under the rate limit | M | 3 |
+| 10 | A gated call to the code host's API | `code_host_api`: REST reads; writes asked-for; GitHub's lists by family of paths: typed tools' (by name), the repository's content (pointing to a task), what stands in for a gate, workflows started only at the default branch, and never. A test that places every write in GitHub's published description of its API; a write not placed is refused at run time. Reads only on GitLab and Bitbucket until their lists are written; GraphQL queries only; receipts and the line in the chat; a floor under the rate limit | L | 3 |
 | 11 | Coordinator acts on tasks when you ask | Stop, hold, restart and settle a task; discard one, asked-for; `attach_pull_request` from its head without asking; resume an automation, or run it now, on the person's word. Swapping a lead is DEV-177 | M | 3 |
 | 12 | Coordinator files issues at once or as a card | `draft_issue` files at once or drafts, as the coordinator judges from the project's notes; a card's "always" or "never" is kept as a note; "Change issues without asking" becomes a note. Commenting on an issue becomes asked-for in code | M | 3 |
 | 13 | draft_issue takes project, milestone and assignee | On every tracker: project or milestone, assignee, parent, and Jira's issue type; set right after creating where a tracker's create can't take them | M | – |
