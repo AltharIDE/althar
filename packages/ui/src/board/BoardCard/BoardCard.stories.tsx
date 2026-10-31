@@ -4,6 +4,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import {
   CHANGE_CONFLICT,
+  CHANGE_IN_MERGE_QUEUE,
   CHANGE_PERMISSION,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
@@ -315,6 +316,19 @@ export const ReadyFactsOnOneLine: Story = {
   },
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */
+/** In its branch's merge queue: its steps are all done, none on, and the words at the top say where it stands. */
+export const InMergeQueue: Story = {
+  args: CHANGE_IN_MERGE_QUEUE,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('In the merge queue')).toBeInTheDocument()
+    const track = card.getByRole('list', { name: 'Steps' }).textContent ?? ''
+    // Both steps are done: the word for one on it is never in the track.
+    await expect(track).not.toMatch(/now/)
+    await expect(track.match(/done/g)).toHaveLength(2)
+  },
+}
+export const InMergeQueueDark: Story = { ...InMergeQueue, globals: { theme: 'dark' } }
 export const MergeConflict: Story = { args: CHANGE_CONFLICT }
 /** Files by name, three at most; a long unbroken word still wraps inside the card at its narrowest. */
 export const MergeConflictLongNote: Story = {
