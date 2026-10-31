@@ -50,6 +50,7 @@ import { statements as inputFiles } from './0045_input_files'
 import { statements as shownPictures } from './0046_shown_pictures'
 import { statements as taskRequestInputs } from './0047_task_request_inputs'
 import { statements as threadItemsByInput } from './0048_thread_items_by_input'
+import { statements as decisionKind } from './0049_decision_kind'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -117,6 +118,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0046_shown_pictures', statements: shownPictures },
   { key: '0047_task_request_inputs', statements: taskRequestInputs },
   { key: '0048_thread_items_by_input', statements: threadItemsByInput },
+  { key: '0049_decision_kind', statements: decisionKind },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

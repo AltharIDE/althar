@@ -580,6 +580,24 @@ describe('AgentConnection', () => {
         }),
       )
 
+    it.live('says a refusal in the refused call itself where the agent reads it there, with no turn after (ADR-071)', () =>
+      withConnection(
+        { ...fake, permissions: { ...codexLikeMeanings, reasonInBand: true } },
+        (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const events = yield* Stream.runCollect(session.prompt(scenarios.commandChoices))
+            assert.lengthOf(find(events, 'Resumed'), 0)
+            assert.strictEqual(
+              text(events),
+              "chosen=decline told=Althar's rules refused this (Run make deploy): It would write outside the task's worktree. Carry on without it.",
+            )
+            assert.strictEqual(stopReason(events), 'end_turn')
+          }),
+        () => Effect.succeed({ decision: 'reject', reason: "It would write outside the task's worktree.", decidedBy: 'rules' }),
+      ),
+    )
+
     /** Two turns of a session that explains refusals with its next prompt, as the coordinator's does. */
     const twoTurns = (first: string, decide: Decide) =>
       withConnection(

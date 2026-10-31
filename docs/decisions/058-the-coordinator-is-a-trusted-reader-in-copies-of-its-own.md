@@ -21,6 +21,7 @@
   already: what it writes stays in the copy. It was refused a loop of
   `git fetch` and `git status` across its copies many times a day. A
   review's lead keeps the strict list.
+- **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): a command Claude Code can't read itself, which asks, now runs in the coordinator's sandbox without the reader rules reading it; the reader rules hold only where no sandbox does.
 - **Owner:** Repository maintainers
 - **Context:** The coordinator talks with the person about the project and
   reads the project's repositories in throwaway copies (ADR-004), under the

@@ -24,7 +24,7 @@ const recordIn = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Readonly<Record<string, unknown>>) : {}
 
 /** The output fields of what came back, by name: never a whole object, which may hold a file's contents. */
-const printedFields = (rawOutput: unknown): ReadonlyArray<string> => {
+export const printedFields = (rawOutput: unknown): ReadonlyArray<string> => {
   if (typeof rawOutput === 'string') return [rawOutput]
   const fields = recordIn(rawOutput)
   return ['stdout', 'stderr', 'output', 'error', 'message'].flatMap((key) => {
