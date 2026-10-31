@@ -106,7 +106,7 @@ export const TryingAgain: Story = {
   args: { resets: null, onWait: undefined, onAgain: fn() },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/didn’t say when it resets/)).toBeInTheDocument()
+    await expect(c.getByText('Claude Code reached its usage limit.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Try Claude Code again' }))
     await expect(args.onAgain).toHaveBeenCalledOnce()
     await expect(document.activeElement).toHaveTextContent('Trying Claude Code again')

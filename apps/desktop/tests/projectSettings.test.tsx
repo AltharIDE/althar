@@ -217,7 +217,7 @@ describe('a project’s settings', () => {
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(conflicts)).toBe('When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.')
+    expect(descriptionOf(conflicts)).toBe('')
     await userEvent.click(conflicts)
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
@@ -225,7 +225,7 @@ describe('a project’s settings', () => {
     // On, every open task can be looked at now, rather than as each default branch moves.
     await userEvent.click(tasks.getByRole('button', { name: 'Look for conflicts now' }))
     expect(client.lookForConflicts).toHaveBeenCalledWith('p1')
-    expect(descriptionOf(conflicts)).toContain('Looking at each open task now.')
+    expect(descriptionOf(conflicts)).toContain('Looking…')
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
@@ -238,9 +238,7 @@ describe('a project’s settings', () => {
       name: 'Move issues along with their tasks',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toBe(
-      'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
-    )
+    expect(descriptionOf(move)).toBe('To In Progress, In Review, then Done')
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
@@ -268,9 +266,6 @@ describe('a project’s settings', () => {
     await openSettings()
     const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
     expect(change.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(change)).toBe(
-      'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
-    )
     await userEvent.click(change)
     expect(change.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
@@ -380,7 +375,7 @@ describe('a project’s settings', () => {
     await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Remove meridian from Althar?' }))
     expect(dialog.getByText(/Its task under way stops/)).toBeTruthy()
-    expect(dialog.getByText(/stay in ~\/Althar\/meridian/)).toBeTruthy()
+    expect(dialog.getByText(/Its folders, worktrees and branches stay/)).toBeTruthy()
     expect(client.removeProject).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Remove project' }))
     await waitFor(() => expect(client.removeProject).toHaveBeenCalledWith('p1'))
@@ -713,11 +708,7 @@ describe('what a project runs, in its settings', () => {
     windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
     await openSettings('Running')
     const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
-    expect(
-      await where.findByText(
-        'Leave it on its branch. Nothing goes to GitHub until Althar is connected there. Then it opens a draft pull request.',
-      ),
-    ).toBeTruthy()
+    expect(await where.findByText('Leave it on its branch. GitHub isn’t connected.')).toBeTruthy()
     expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
     await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
     expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
@@ -879,12 +870,12 @@ describe('a project’s repositories, in its settings', () => {
     const { region } = await openRepositories()
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(host.pickFolder).toHaveBeenCalledWith('project')
-    expect(await screen.findByText('Reading it. Nothing in it changes')).toBeTruthy()
+    expect(await screen.findByText('Reading…')).toBeTruthy()
     expect(screen.getByText('~/code/meridian-docs')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_docs'))
     added()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
 
     // Dropped on them, each folder is granted and added the same way.
     const folder = new File([], 'meridian-docs')
@@ -950,7 +941,7 @@ describe('a project’s repositories, in its settings', () => {
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenLastCalledWith('p1', 'meridian-sdk'))
     pending[1]?.()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBeNull()
   })
 

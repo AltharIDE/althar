@@ -19,7 +19,7 @@ describe('a project’s repositories', () => {
       />,
     )
     expect(screen.getByText('Where its tasks work.')).toBeInTheDocument()
-    expect(screen.getByText('Tasks work in their own worktrees, never in these folders')).toBeInTheDocument()
+    expect(screen.getByText('Tasks work in their own worktrees')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Connect GitLab' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^More for/ })).not.toBeInTheDocument()
   })

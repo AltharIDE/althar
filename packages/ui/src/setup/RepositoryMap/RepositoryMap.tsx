@@ -79,7 +79,6 @@ export interface RepositoryMapText {
   leaveOut: string
   /** What leaving one out keeps: its tasks under way keep it. */
   keeps: (tasks: number) => string
-  untouched: string
   reading: string
   /** Where tasks work; the folder comes as code. */
   worktrees: (folder: ReactNode) => ReactNode
@@ -122,10 +121,9 @@ export const repositoryMapText: RepositoryMapText = {
   open: (host) => `Open on ${host}`,
   leaveOut: 'Leave out of the project',
   keeps: (tasks) => (tasks === 1 ? 'The task using it keeps it' : `The ${tasks} tasks using it keep it`),
-  untouched: 'Nothing in its folder changes',
-  reading: 'Reading it. Nothing in it changes',
+  reading: 'Reading…',
   worktrees: (folder) => <>Tasks work in their own worktrees, in {folder}</>,
-  worktreesUnmade: 'Tasks work in their own worktrees, never in these folders',
+  worktreesUnmade: 'Tasks work in their own worktrees',
   pushes: 'pushes',
   pullRequests: 'pull requests',
   both: 'pushes, pull requests',
@@ -140,11 +138,10 @@ export const repositoryMapText: RepositoryMapText = {
     unknown: 'Not a host Althar connects to',
   },
   what: {
-    [HostReach.Connected]: 'Althar opens the pull requests here, and brings their checks and reviews back',
-    [HostReach.NotConnected]:
-      'Branches push with your own git; you open the pull request. Connected, Althar does, and brings its checks and reviews back',
-    [HostReach.SignInAgain]: 'Branches push with your own git until you sign in again',
-    [HostReach.Unknown]: 'Branches push with your own git; you open the pull request',
+    [HostReach.Connected]: 'Althar opens the pull requests',
+    [HostReach.NotConnected]: 'You open the pull requests until it’s connected',
+    [HostReach.SignInAgain]: 'You open the pull requests until you sign in again',
+    [HostReach.Unknown]: 'You open the pull requests',
   },
   connect: (host) => `Connect ${host}`,
   signInAgain: (host) => `Sign in to ${host} again`,
@@ -627,7 +624,7 @@ function RepositoryMenu({
         <MenuItem
           icon="close"
           tone="danger"
-          description={repository.tasks > 0 ? t.keeps(repository.tasks) : t.untouched}
+          {...(repository.tasks > 0 ? { description: t.keeps(repository.tasks) } : {})}
           onSelect={() => onLeaveOut(repository.id)}
         >
           {t.leaveOut}

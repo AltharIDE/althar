@@ -1,7 +1,7 @@
 name: release
 
 # Releases come from here (ADR-024, Linear DEV-81): a tag v<version> pushed on
-# a commit on main builds every platform, signs and notarizes the Mac's
+# a commit on main builds every platform, signs and notarizes the Mac's two
 # (Windows' is unsigned for now, DEV-78), and leaves ONE draft GitHub
 # Release with all their files. A person publishes it on
 # GitHub; nothing reaches anyone before that. Run by hand on main, it makes
@@ -96,13 +96,16 @@ jobs:
             exit 1
           fi
 
-  # Althar for Apple silicon: signed with the Developer ID, notarized, stapled and checked by bun run release, which
-  # fails unless all of that holds (CI=true). On macOS 26 on Apple silicon, GitHub's standard runner, free for a public
-  # repository; named, not macos-latest, so the image changes only when this file does.
+  # Althar for Apple silicon and for Intel, two builds, each with only its own processor's Electron, Node and agents (a
+  # universal app would hold every binary twice): each signed with the Developer ID, notarized, stapled and checked by
+  # bun run release, which fails unless all of that holds (CI=true), with one latest-mac.yml the updater picks its own
+  # Mac's files from. Both on macOS 26 on Apple silicon, GitHub's standard runner, free for a public repository, which
+  # builds the Intel app too and opens it under Rosetta; named, not macos-latest, so the image changes only when this
+  # file does.
   mac:
     needs: check
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 150
     environment: release
     defaults:
       run:
@@ -186,6 +189,11 @@ jobs:
             if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
           done
           bun run release
+      # Each build opens, its first screen finds the agents, and its programs run on its processor: Intel's under Rosetta.
+      - name: Open both builds, Intel's under Rosetta
+        run: |
+          node scripts/mac-smoke.ts --arch=arm64
+          node scripts/mac-smoke.ts --arch=x64
       - name: Forget the certificate
         if: always()
         run: |
@@ -201,6 +209,10 @@ jobs:
             apps/desktop/out/dist/Althar-*-arm64.dmg.blockmap
             apps/desktop/out/dist/Althar-*-arm64-mac.zip
             apps/desktop/out/dist/Althar-*-arm64-mac.zip.blockmap
+            apps/desktop/out/dist/Althar-*-x64.dmg
+            apps/desktop/out/dist/Althar-*-x64.dmg.blockmap
+            apps/desktop/out/dist/Althar-*-x64-mac.zip
+            apps/desktop/out/dist/Althar-*-x64-mac.zip.blockmap
             apps/desktop/out/dist/latest-mac.yml
           if-no-files-found: error
           retention-days: 14
@@ -353,4 +365,4 @@ jobs:
             gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
           fi
           echo "### Draft release $TAG" >> "$GITHUB_STEP_SUMMARY"
-          echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its dmg and Windows installer, then publish it there." >> "$GITHUB_STEP_SUMMARY"
+          echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its two dmgs and Windows installer, then publish it there." >> "$GITHUB_STEP_SUMMARY"

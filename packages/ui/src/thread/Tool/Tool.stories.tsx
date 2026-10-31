@@ -33,7 +33,7 @@ export const Edit: Story = {
     sheet: true,
     meta: <Delta add={14} del={3} />,
     defaultOpen: true,
-    children: <Diff lines={ROUTER_DIFF} />,
+    children: <Diff lines={ROUTER_DIFF} path="src/refunds/router.ts" />,
   },
 }
 

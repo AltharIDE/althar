@@ -386,10 +386,7 @@ describe('a push the lead asks the person for', () => {
       commit(task.path, 'Even later, again', '--amend')
       const moved = yield* Effect.flip(changes.push(task.taskId, later?.head ?? '', later?.url ?? ''))
       assert.strictEqual(moved instanceof Error ? moved.name : String(moved), 'ChangedSinceSeen')
-      assert.strictEqual(
-        words(moved, String).message,
-        'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.',
-      )
+      assert.strictEqual(words(moved, String).message, 'The branch changed since you looked. Look again, then push.')
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Later')
       const [, , again] = yield* asked(task.threadId)
       assert.deepInclude(again, { moved: true, count: 2, state: 'open', head: git(task.path, 'rev-parse', 'HEAD') })

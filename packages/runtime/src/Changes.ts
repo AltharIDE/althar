@@ -430,6 +430,18 @@ const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(PushRequest
 /** Commits, counted, as the lead and the person read them. */
 const commitsWord = (n: number) => (n === 1 ? '1 commit' : `${n} commits`)
 
+/** Checks that failed: by name where one did, or how many. */
+const checksFailed = (failing: ReadonlyArray<string>) => (failing.length === 1 ? `${failing[0]} failed` : `${failing.length} checks failed`)
+
+/** Some of something, counted: "1 pull request", "2 pull requests". */
+const countOf = (n: number, one: string) => (n === 1 ? `1 ${one}` : `${n} ${one}s`)
+
+/** What was pushed, by its branch where there was one, or how many. */
+const pushedWords = (branches: ReadonlyArray<string>) => {
+  const unique = [...new Set(branches)]
+  return unique.length === 1 ? `Pushed ${unique[0]}.` : `Pushed ${unique.length} branches.`
+}
+
 /** Files named in a sentence, the first few. */
 const filesWord = (files: ReadonlyArray<string>) =>
   files.length <= 5 ? files.join(', ') : `${files.slice(0, 5).join(', ')} and ${files.length - 5} more`
@@ -1809,12 +1821,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `The task follows ${name}${where} now: ${pull.title}`,
-            description: `${
-              started
-                ? `Its branch ${row.branch} starts from ${name}’s head now${kept > 0 ? `, with its ${commitsWord(kept)} on top` : ''}. `
-                : ''
-            }Its work goes to ${name}’s branch, ${pull.source}, on ${own.join('/')}, as a plain push: nothing opens another.`,
+            title: `Following ${name}${where}: ${pull.title}`,
           })
           const [link] = (yield* linksOf(input.taskId)).filter((one) => one.id === linkId)
           if (link !== undefined)
@@ -2178,8 +2185,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: link.projectId, threadId: workspace.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Replaced the commits on ${where} with the branch here.`,
-            description: `As you confirmed: a force push, only from ${replaces.slice(0, 12)}, where you saw it.`,
+            title: `Force-pushed to ${where}.`,
           })
           return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head)
         })
@@ -2534,10 +2540,10 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: several
-              ? `Merged here: ${merged.map((one) => `${one.repository} into ${one.branch}`).join(', ')}.`
-              : `Merged into ${merged[0]?.branch ?? 'its default branch'} here.`,
-            description: `On ${thisDevice()} only: nothing was pushed.`,
+            title:
+              merged.length > 1
+                ? `Merged ${merged.length} repositories here.`
+                : `Merged into ${merged[0]?.branch ?? 'its default branch'} here.`,
           })
           // Merged, its task is done, as a merged pull request's is, once any others it has are merged too.
           yield* settleIfDone(taskId, { actorId: instance.personId, here: merged })
@@ -2683,7 +2689,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Pushed ${[...new Set(pushed.map((one) => one.branch))].join(', ')} to ${[...new Set(pushed.map((one) => one.remote))].join(', ')}.`,
+            title: pushedWords(pushed.map((one) => one.branch)),
           })
           return pushed
         })
@@ -2737,7 +2743,7 @@ export class Changes extends Context.Service<
             yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
-              title: `Pushed ${pushed.map((one) => `${one.branch} to ${one.remote.slice(0, one.remote.indexOf('/'))}`).join(', ')}.`,
+              title: pushedWords(pushed.map((one) => one.branch)),
             })
           return pushed
         })
@@ -3257,7 +3263,7 @@ export class Changes extends Context.Service<
           if ((hands === null || hands.given) && fixing?.running !== true) return
           if (!(yield* heard(link, 'checks_stuck', `stuck:${sha}`, { sha }))) return
           yield* taken(link.taskId, 'stuck')
-          yield* sayOn(link, `The checks on ${name} have run for ${spanOf(ran)}, so the change is yours now.`)
+          yield* sayOn(link, `The checks on ${name} are still running after ${spanOf(ran)}.`)
         })
 
       /** Whether the task's plan is still under way, as while it publishes, its pull request open already. */
@@ -3278,7 +3284,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'notice', {
             source: 'runtime',
             severity: 'warning',
-            title: `The checks on ${name} still fail after ${FIX_ROUNDS} fixes by its lead, so the change is yours now.`,
+            title: `The checks on ${name} still fail after ${FIX_ROUNDS} fixes.`,
           })
         })
 
@@ -3369,10 +3375,7 @@ export class Changes extends Context.Service<
                           const hands = yield* handsOf(link.taskId)
                           const theirs = (hands !== null && !hands.given) || (yield* fixingOn(link))?.open === true
                           if (theirs) yield* taken(link.taskId, 'unreadable')
-                          yield* sayOn(
-                            link,
-                            `Althar can't read the checks on ${name}: its host refused them (${error.message}). It still listens for what people say on it${theirs ? ', and the change is yours now' : ''}.`,
-                          )
+                          yield* sayOn(link, `Can't read the checks on ${name}.`)
                         }
                         return null
                       }),
@@ -3433,7 +3436,7 @@ export class Changes extends Context.Service<
                 yield* heard(link, 'checks_rerun', `rerun:${sum.sha}`, { sha: sum.sha })
                 yield* sayOn(
                   link,
-                  `Running ${sum.failing.join(', ')} on ${name} again, once, in case ${sum.failing.length === 1 ? 'it' : 'they'} failed by chance.`,
+                  `Running ${sum.failing.length === 1 ? 'a failed check' : `${sum.failing.length} failed checks`} on ${name} again.`,
                 )
                 rerunning = true
               } else if (sum.outcome === 'failed') {
@@ -3854,7 +3857,7 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
-          const { repositories, open, unmerged } = yield* mergeOf(taskId)
+          const { open, unmerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =
             open.length > 0
@@ -3867,14 +3870,16 @@ export class Changes extends Context.Service<
               source: 'runtime',
               severity: 'info',
               title: `Not done yet: ${[
-                ...open.map((name) => `${name} is still open`),
-                ...unmerged.map((name) => `${name} isn't merged`),
-                ...after.map(
-                  (one) =>
-                    `${commitsWord(one.commits.length)} after ${nameOf(one.change)}${repositories.length > 1 ? ` in ${one.name}` : ''} ${one.commits.length === 1 ? "isn't" : "aren't"} in a pull request`,
-                ),
+                ...(open.length === 0
+                  ? []
+                  : [open.length === 1 ? `${open[0]} is still open` : `${open.length} pull requests are still open`]),
+                ...(unmerged.length === 0
+                  ? []
+                  : [unmerged.length === 1 ? `${unmerged[0]} isn't merged` : `${countOf(unmerged.length, 'pull request')} aren't merged`]),
+                ...(after.length === 0
+                  ? []
+                  : [`${commitsWord(after.reduce((sum, one) => sum + one.commits.length, 0))} in no pull request`]),
               ].join(', ')}.`,
-              ...(after.length === 0 ? {} : { description: 'Open a new pull request for them from the task.' }),
             })
             return yield* touchCard(taskId)
           }
@@ -3940,18 +3945,11 @@ export class Changes extends Context.Service<
               })
             }),
           )
-          const several = after.length > 1
           const commits = after.reduce((sum, one) => sum + one.commits.length, 0)
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Abandoned ${after
-              .map(
-                (one) =>
-                  `${commitsWord(one.commits.length)} after ${one.change === null ? 'where its branch started' : nameOf(one.change)}${several ? ` in ${one.name}` : ''}`,
-              )
-              .join(', ')}.`,
-            description: `The task stays merged. ${commits === 1 ? 'The commit stays' : 'They stay'} on ${after.map((one) => one.branch).join(' and ')}, in the task's worktree; what's committed after counts again.`,
+            title: `Abandoned ${commitsWord(commits)}.`,
           })
           if (task.state === 'open') yield* settleIfDone(input.taskId, { actorId: input.envelope.actorId })
           // Done already, it settles again without them: what its lead did since stops.
@@ -4059,17 +4057,15 @@ export class Changes extends Context.Service<
             ORDER BY created_at DESC, rowid DESC LIMIT 1`
           if (latest?.state === 'resolving' || latest?.state === 'checking') return 'resolving'
           // Its run still going, its lead is at work: looked at again once it ends.
-          if (task.run === 'admitted' || task.run === 'running')
-            return { why: 'Its run is still going, so Althar asks its lead once it ends.', shown: false }
-          if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
+          if (task.run === 'admitted' || task.run === 'running') return { why: 'Its run is still going.', shown: false }
+          if (task.run === null) return { why: 'It has no lead yet.', shown: true }
           if (force) return 'yes'
           if (task.run === 'suspended') {
             // Told to go on without its run carried on, its lead is at work all the same: nothing for the person to resolve now.
             const lead = task.threadId === null ? Option.none() : yield* sessions.running(task.threadId)
-            if (Option.exists(lead, (session) => session.turnRunning))
-              return { why: 'Its lead is at work, so Althar doesn’t ask it about a conflict now.', shown: false }
+            if (Option.exists(lead, (session) => session.turnRunning)) return { why: 'Its lead is at work.', shown: false }
             // Whoever stopped it, the person, a command they declined, or Althar: its card says which.
-            return { why: 'It’s stopped, so Althar doesn’t start its lead for a conflict.', shown: true }
+            return { why: 'It’s stopped.', shown: true }
           }
           // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
           if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
@@ -4265,15 +4261,11 @@ export class Changes extends Context.Service<
             // A conflict put to the lead: the work of a task under way.
             { order: 'underway' },
           )
-          const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
-          const as = own?.resolveConflicts === 1 ? 'as you said for this task' : 'as the project’s rules say'
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `${place.change ?? 'It'} conflicts with ${whereLine(conflicts)}.`,
-            description: room
-              ? `Althar asked the lead to resolve it, ${as}.`
-              : `Althar asks the lead to resolve it, ${as}, once an agent is free on this computer.`,
+            description: room ? 'The lead is resolving it.' : 'The lead resolves it once an agent is free.',
           })
           yield* touchCard(task.taskId)
           if (room) yield* askLead({ id, ...task }, 1, body)
@@ -4345,7 +4337,7 @@ export class Changes extends Context.Service<
       const endRound = (
         round: RoundRow,
         ended: Ended | null,
-        notice: { readonly severity?: 'info' | 'warning'; readonly title: string; readonly description: string } | null,
+        notice: { readonly severity?: 'info' | 'warning'; readonly title: string; readonly description?: string } | null,
         payload: Readonly<Record<string, unknown>> = {},
       ) =>
         Effect.gen(function* () {
@@ -4360,7 +4352,7 @@ export class Changes extends Context.Service<
               source: 'runtime',
               severity: notice.severity ?? 'info',
               title: notice.title,
-              description: notice.description,
+              ...(notice.description === undefined ? {} : { description: notice.description }),
             })
         })
 
@@ -4416,7 +4408,7 @@ export class Changes extends Context.Service<
                   fixing === null
                     ? `The lead resolved the conflict with ${whereLine(conflicts)}.`
                     : 'The lead fixed the checks on the merge.',
-                description: `The lead was stopped, so it waits for you to look at it and push it to ${changeOf(place)}.`,
+                description: `Not pushed to ${changeOf(place)}.`,
               })
             return yield* fixing === null ? resolved(round, conflicts, ended, place) : fixed(round, fixing, ended, place)
           }
@@ -4428,7 +4420,7 @@ export class Changes extends Context.Service<
               source: 'runtime',
               severity: 'info',
               title: `The conflict with ${whereLine(conflicts)} isn’t resolved yet: ${failure}`,
-              description: 'Althar asked the lead once more.',
+              description: 'The lead is trying once more.',
             })
             // Asked to commit it where that is all that was left, not to resolve it again.
             const note = noteFor(conflicts, place, failure, uncommitted.length === failures.length ? uncommitted : [])
@@ -4444,7 +4436,7 @@ export class Changes extends Context.Service<
             source: 'runtime',
             severity: 'warning',
             title: `The lead couldn’t ${fixing === null ? 'resolve' : 'fix'} ${what}.`,
-            description: `${failure} It’s yours to settle, or to ask the lead again.`,
+            description: failure,
           })
         })
 
@@ -4484,8 +4476,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: round.projectId, threadId: round.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${said}, and Althar pushed ${what} to ${changeOf(place)}.`,
-            description: 'Althar waits for its checks.',
+            title: `${said}, and pushed ${what} to ${changeOf(place)}.`,
           })
         })
 
@@ -4526,9 +4517,7 @@ export class Changes extends Context.Service<
           if (!alone)
             return yield* endRound(round, ended, {
               title: `${said}.`,
-              description: others
-                ? `The lead was asked something else meanwhile, so the merge waits for you to look at it and push it to ${changeOf(place)}.`
-                : `Its branch has commits besides the merge that ${changeOf(place)} doesn’t have yet, so the merge waits for you to push it with them.`,
+              description: `Not pushed to ${changeOf(place)}.`,
             })
           yield* pushRound(round, round.url, head, ended, said, made === 'merge and fix' ? 'the merge and its fix' : 'the merge', place)
         })
@@ -4551,9 +4540,7 @@ export class Changes extends Context.Service<
           if (!fixes || branch === undefined || round.url === null)
             return yield* endRound(round, ended, {
               title: `${said}.`,
-              description: others
-                ? `The lead was asked something else meanwhile, so the fix waits for you to look at it and push it to ${changeOf(place)}.`
-                : `Its branch has commits besides the fix that ${changeOf(place)} doesn’t have yet, so the fix waits for you to push it with them.`,
+              description: `Not pushed to ${changeOf(place)}.`,
             })
           yield* pushRound(round, round.url, branch.head, ended, said, 'the fix', place)
         })
@@ -4696,13 +4683,13 @@ export class Changes extends Context.Service<
             const since = (yield* Clock.currentTimeMillis) - Date.parse(round.updatedAt)
             if (since < Duration.toMillis(NO_CHECKS_AFTER)) return false
             return yield* Effect.as(
-              endRound(round, null, { title: `No checks ran on what Althar pushed to ${where}.`, description: 'It’s ready to merge.' }),
+              endRound(round, null, { title: `No checks ran on what was pushed to ${where}.`, description: 'Ready to merge.' }),
               false,
             )
           }
           if (sum.outcome === 'passed')
             return yield* Effect.as(
-              endRound(round, null, { title: `The checks passed on what Althar pushed to ${where}.`, description: 'It’s ready to merge.' }),
+              endRound(round, null, { title: `The checks passed on ${where}.`, description: 'Ready to merge.' }),
               false,
             )
           // Failed. The lead committed something else since: the fix goes with it, for the person to push, as failed checks always do.
@@ -4721,8 +4708,7 @@ export class Changes extends Context.Service<
             yield* addItem(thread, 'notice', {
               source: 'runtime',
               severity: 'warning',
-              title: `The checks failed on what Althar pushed to ${where}: ${sum.failing.join(', ')}.`,
-              description: 'The lead had its one more try. It’s yours to settle, or to ask the lead again.',
+              title: `${checksFailed(sum.failing)} on ${where}.`,
             })
             return true
           }
@@ -4755,10 +4741,8 @@ export class Changes extends Context.Service<
           yield* addItem(thread, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `The checks failed on what Althar pushed to ${where}: ${sum.failing.join(', ')}.`,
-            description: room
-              ? 'Althar asked the lead to fix them.'
-              : 'Althar asks the lead to fix them once an agent is free on this computer.',
+            title: `${checksFailed(sum.failing)} on ${where}.`,
+            description: room ? 'The lead is fixing them.' : 'The lead fixes them once an agent is free.',
           })
           if (room) yield* askLead(round, round.attempt + 1, body, why)
           return true
@@ -4774,12 +4758,7 @@ export class Changes extends Context.Service<
           const round = yield* roundOf({ id })
           if (round === undefined || (round.state !== 'resolving' && round.state !== 'checking')) return
           const where = changeOf(yield* placeOf(round.taskId, round.url))
-          const description = `Althar no longer listens to ${where}, so it doesn’t push for the lead there or hear the checks: that’s yours.`
-          if (round.state === 'checking')
-            return yield* endRound(round, null, {
-              title: `Althar no longer follows the checks on what it pushed to ${where}.`,
-              description,
-            })
+          if (round.state === 'checking') return yield* endRound(round, null, { title: `No longer following the checks on ${where}.` })
           const conflicts = yield* decodeConflicts(round.conflicts)
           const failure = `Althar stopped listening to ${where}.`
           yield* reviseRound(
@@ -4791,8 +4770,7 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: round.projectId, threadId: round.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Althar no longer follows the conflict on ${where}.`,
-            description,
+            title: `No longer following the conflict on ${where}.`,
           })
         })
 
@@ -4830,8 +4808,7 @@ export class Changes extends Context.Service<
             }
             const place = changeOf(yield* placeOf(round.taskId, round.url))
             yield* endRound(round, null, {
-              title: `You ${how} the lead, so the checks on what Althar pushed to ${place} are yours.`,
-              description: 'Althar won’t ask the lead to fix them.',
+              title: `You ${how} the lead. The checks on ${place} are yours.`,
             })
           }
         })
@@ -4919,8 +4896,8 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: round.projectId, threadId: round.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Althar stopped while the lead was resolving the conflict with ${whereLine(conflicts)}.`,
-            description: 'Althar asks the lead again once an agent is free on this computer.',
+            title: `Althar quit while the lead was resolving the conflict with ${whereLine(conflicts)}.`,
+            description: 'The lead resumes once an agent is free.',
           })
         })
 
@@ -5810,7 +5787,7 @@ export class Changes extends Context.Service<
           // Heard as a rerun's, so its new outcome is the lead's once it ends, and Althar doesn't run it again by itself.
           if (again.length > 0) {
             yield* leadRanAgain(link, sha)
-            yield* sayOn(link, `Running ${again.join(', ')} on ${name} again, as its lead asked.`)
+            yield* sayOn(link, `Running ${again.length === 1 ? 'a check' : `${again.length} checks`} on ${name} again.`)
             wakeNow(taskId)
           }
           const hostName = products[link.product].name

@@ -111,7 +111,7 @@ describe('a lead whose turn did nothing', () => {
       const task = yield* planned(projectId, 'Stopped soon', 'Do it. [lead:finish]')
       yield* until(
         Effect.map(items(task.threadId), (rows) =>
-          rows.filter((row) => row.kind === 'notice' && String(row.content.title).startsWith('Its turn ended before it could do anything')),
+          rows.filter((row) => row.kind === 'notice' && String(row.content.title).startsWith('Its turn ended without doing anything')),
         ),
         (rows) => rows.length === 1,
       )

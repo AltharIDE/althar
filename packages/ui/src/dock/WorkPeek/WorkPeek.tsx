@@ -37,9 +37,9 @@ export interface WorkPeekText {
 export const workPeekText: WorkPeekText = {
   steps: 'Steps',
   waiting: 'Waiting for',
-  chosenLater: 'Its steps are chosen when it starts, not before.',
+  chosenLater: 'Chosen when it starts',
   lead: 'Lead',
-  unstarted: 'Not started · no agent holds it yet',
+  unstarted: 'Not started',
   added: 'added by rule',
   state: { [TrackStep.Done]: 'done', [TrackStep.Now]: 'now', [TrackStep.Seen]: 'reached, then sent back', [TrackStep.Next]: 'to come' },
 }
@@ -122,7 +122,7 @@ export interface SettledPeekText {
   kept: string
 }
 
-export const settledPeekText: SettledPeekText = { kept: 'Kept by the project. No agent holds it.' }
+export const settledPeekText: SettledPeekText = { kept: 'Kept by the project' }
 
 /** Settled work in the dock: what it came to. */
 export function SettledPeek({ title, meta, text }: { title: string; meta?: string; text?: Partial<SettledPeekText> }) {

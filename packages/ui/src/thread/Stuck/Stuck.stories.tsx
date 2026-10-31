@@ -161,7 +161,7 @@ export const OutOfUsage: Story = {
     output: undefined,
     onTell: undefined,
     onAgain: fn(),
-    what: 'Codex reached its usage limit and didn’t say when it resets.',
+    what: 'Codex reached its usage limit.',
     text: { again: 'Try Codex again' },
   },
   play: async ({ args, canvasElement }) => {

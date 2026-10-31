@@ -50,10 +50,8 @@ describe('the board’s lanes', () => {
         </BoardColumn>
       </Board>,
     )
-    expect(screen.getByText(boardText.empty[BoardLane.Running])).toBeInTheDocument()
     expect(screen.queryByText('Hidden')).toBeNull()
     expect(screen.getByText('Kept for later')).toBeInTheDocument()
-    expect(screen.queryByText(boardText.empty[BoardLane.Settled])).toBeNull()
   })
 
   it('collapses nothing by itself where the board can’t be measured', () => {

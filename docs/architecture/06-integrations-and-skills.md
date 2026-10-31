@@ -254,7 +254,7 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **A pull request shows the review its change had** (ADR-075), unless the
+- **A pull request shows the review its change had** (ADR-076), unless the
   person turned it off in Settings: on GitHub, a seal in its corner, drawn
   by the site from its address, names the reviewer, how many passes, and
   the commit the last pass read. Folded at the description's end, what

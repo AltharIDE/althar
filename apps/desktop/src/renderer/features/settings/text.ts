@@ -33,27 +33,24 @@ export const text = {
   loadOn: 'In the bar',
   /* Work on this computer. */
   awakeTitle: `Keep ${device.this} awake while work runs`,
-  awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  awakeNote: 'The display can still sleep.',
   atOnceNote: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
-    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
-    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
-    if (n < count) return `${n}: fewer than ${device.this} could carry.`
-    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
-    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
+    if (n === count) return `Default for ${memory} GB and ${cores} cores`
+    if (n <= count) return 'Below the default'
+    if (n <= count + 2) return 'Tests may slow down'
+    return 'May run hot'
   },
   atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
   atOnceValue: (n: number, { count }: { count: number }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
   loadTitle: `Show how hard ${device.this} works`,
-  loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   atLoginTitle: 'Open Althar at login, in the background',
-  atLoginNote: `So automations run after a restart, with no window open. Off, they run while Althar is open.`,
+  atLoginNote: 'Off, automations run only while Althar is open.',
   pauseAllTitle: 'Pause all automations',
-  pauseAllNote: 'None starts until you turn this off. Runs under way finish.',
+  pauseAllNote: 'Runs under way finish.',
   /* Reviews and pull requests. */
   postTeamTitle: 'Post reviews of my team’s pull requests without asking',
-  postTeamNote: 'As soon as a review’s lead drafts one. A review of a pull request from outside the team always waits for you to post it.',
+  postTeamNote: 'Pull requests from outside the team still wait for you.',
   coAuthorTitle: 'Althar as co-author',
-  coAuthorNote: 'A line on the commits and pull requests Althar sends, so the code host shows its face beside yours.',
   /** Who the person is on the commit co-author is shown on, without a GitHub account connected. */
   you: 'you',
   /** A commit to show the co-author line on, as GitHub would. */
@@ -74,20 +71,15 @@ export const text = {
   } satisfies ReviewSealSample,
   /* Notifications. */
   badge: `Count them on ${device.count ?? 'the icon'}`,
-  soundNote:
-    platform === 'darwin'
-      ? 'One of this Mac’s alert sounds, with each notification.'
-      : 'The system’s own sound, with each notification, or none.',
   /* Appearance. */
   theme: 'Light or dark',
-  themeNote: `Match ${device.the} turns dark when ${device.the} does.`,
   themeLight: 'Light',
   themeDark: 'Dark',
   themeSystem: `Match ${device.the}`,
   icon: 'App icon',
   edge: 'In other apps',
-  edgeNote: 'Where Althar shows what needs you, while you work in another app.',
-  examples: 'With nothing under way yet, here is how a busy moment would look.',
+  edgeNote: 'Where what needs you shows',
+  examples: 'An example, until work is under way',
   /* The editor. */
   noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
   /* What couldn't be kept. */

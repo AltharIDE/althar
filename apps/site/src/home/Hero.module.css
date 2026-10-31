@@ -293,6 +293,8 @@
 .ways { justify-items: center; }
 /* The download and GitHub keep to one line. */
 .cell.ways > div { flex-wrap: nowrap; }
+/* The other Mac's build, close under the download: the cell's gap is its margin. */
+.cell.ways > p { margin: 0; }
 .agents { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: rgba(255, 248, 240, 0.9); }
 .agents li { display: grid; place-items: center; width: 18px; height: 18px; }
 .command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
@@ -327,7 +329,7 @@
   /* The download and GitHub as the console's full width, a thumb's height each: the download lit, GitHub on the glass. */
   .cell.ways { justify-items: stretch; padding: 12px; }
   .ways > div { display: grid; gap: 8px; }
-  .ways a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
-  .ways a:first-child { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
-  .ways a:last-child { background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+  .ways > div a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
+  .ways > div a:first-child { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
+  .ways > div a:last-child { background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
 }

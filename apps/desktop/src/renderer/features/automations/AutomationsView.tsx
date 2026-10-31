@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import type { AgentStatus, AutomationDefinition, AutomationStep, AutomationSummary } from '@althar/contracts'
 import { type AutomationLimit, AutomationPage, Automations, type AutomationTile } from '@althar/ui/screens'
 
-import { device, platform } from '../../shared/device'
+import { platform } from '../../shared/device'
 import { PartPending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
 import { useNow } from '../../shared/time'
@@ -36,7 +36,7 @@ import s from './Automations.module.css'
 export const text = {
   reading: 'Reading the automations',
   readingOne: 'Reading the automation',
-  where: `They run on ${device.this} while Althar is open.`,
+  where: 'Only while Althar is open.',
   /** Paused itself, where the runtime didn't say why. */
   why: 'Its last runs failed.',
 }

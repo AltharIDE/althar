@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { TaskActivity } from '../../foundations/vocabulary'
 import { AbandonTask } from './AbandonTask'
 
 const meta = {
@@ -9,7 +8,6 @@ const meta = {
   component: AbandonTask,
   parameters: { layout: 'fullscreen' },
   args: {
-    activity: TaskActivity.Working,
     worktree: '~/Althar/meridian/add-a-retry/api',
     branch: 'althar/add-a-retry',
     onAbandon: fn(),
@@ -20,17 +18,13 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** With agents on it: they stop, and its worktree and branch stay. */
-export const Working: Story = {}
-/** Its plan waits to start: it doesn't. */
-export const Planned: Story = { args: { activity: TaskActivity.Planned } }
-/** Stopped, or ready: nothing runs, so nothing is said to stop. */
-export const Still: Story = { args: { activity: TaskActivity.Still } }
+/** Its worktree and branch stay. */
+export const Default: Story = {}
 const PR = { id: 'pr-1206', name: 'pull request #1206', host: 'GitHub' }
 
 /** With a pull request open: closing it on its host is on, deleting its branch there is off. */
 export const WithPullRequest: Story = {
-  args: { activity: TaskActivity.Still, changes: [PR] },
+  args: { changes: [PR] },
   play: async ({ args }) => {
     const page = within(document.body)
     const dialog = await page.findByRole('dialog', { name: 'Abandon this task?' })
@@ -40,38 +34,36 @@ export const WithPullRequest: Story = {
     await expect(args.onAbandon).toHaveBeenCalledWith({ close: ['pr-1206'], deleteBranch: [] })
   },
 }
-/** Its branch deleted on the host too: the branch here stays, and the dialog says so. */
+/** Its branch deleted on the host too: the branch here stays. */
 export const DeletingItsBranch: Story = {
-  args: { activity: TaskActivity.Still, changes: [PR] },
+  args: { changes: [PR] },
   play: async ({ args }) => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Abandon this task?' })
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
-    await expect(dialog).toHaveTextContent('Its branch althar/add-a-retry stays on this computer.')
+    await expect(dialog).toHaveTextContent('Its branch and worktree stay.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
     await expect(args.onAbandon).toHaveBeenCalledWith({ close: ['pr-1206'], deleteBranch: ['pr-1206'] })
   },
 }
 /** Left open: nothing is asked of the host, and its branch there can't be deleted alone. */
 export const LeavingItOpen: Story = {
-  args: { activity: TaskActivity.Still, changes: [PR] },
+  args: { changes: [PR] },
   play: async ({ args }) => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Abandon this task?' })
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Close pull request #1206 on GitHub' }))
     await expect(within(dialog).queryByRole('checkbox', { name: 'Delete its branch on GitHub' })).toBeNull()
-    await expect(dialog).toHaveTextContent('Nothing is pushed or deleted.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
     await expect(args.onAbandon).toHaveBeenCalledWith({ close: [], deleteBranch: [] })
   },
 }
 /** A pull request in each of two repositories, each its own choice. */
 export const TwoPullRequests: Story = {
-  args: { activity: TaskActivity.Still, changes: [PR, { id: 'mr-12', name: 'merge request !12', host: 'GitLab' }] },
+  args: { changes: [PR, { id: 'mr-12', name: 'merge request !12', host: 'GitLab' }] },
 }
 /** Abandoned, but the host wouldn't close it: it says so, and offers to try again. */
 export const CloseFailed: Story = {
   args: {
-    activity: TaskActivity.Still,
     changes: [PR],
     abandoned: true,
     error: 'Pull request #1206 is still open. GitHub won’t let this account do that: Resource not accessible by integration.',
@@ -79,7 +71,7 @@ export const CloseFailed: Story = {
 }
 /** Merged, with commits after its pull request: those are left out, and it stays merged. */
 export const Merged: Story = {
-  args: { activity: TaskActivity.Still, merged: { name: 'Pull request #142', commits: 1 } },
+  args: { merged: { name: 'Pull request #142', commits: 1 } },
   play: async () => {
     const dialog = within(document.body).getByRole('dialog')
     await expect(dialog).toHaveTextContent('Pull request #142 stays merged.')
@@ -87,20 +79,20 @@ export const Merged: Story = {
     await expect(dialog).not.toHaveTextContent('isn’t merged')
   },
 }
-/** Before its worktree was made, it has none to leave. */
+/** Before its worktree was made, it has none to leave: nothing is said but the question. */
 export const NoWorktree: Story = {
-  args: { activity: TaskActivity.Planned, worktree: null, branch: null },
+  args: { worktree: null, branch: null },
   play: async () => {
-    await expect(within(document.body).getByRole('dialog')).toHaveTextContent('You can reopen it later.')
+    await expect(within(document.body).getByRole('dialog')).not.toHaveTextContent('stay')
   },
 }
 /** A plain task, whose lead changed nothing in the repository: its worktree stays, and it has no branch to. */
 export const Plain: Story = {
-  args: { activity: TaskActivity.Still, branch: null },
+  args: { branch: null },
   play: async () => {
     const dialog = within(document.body).getByRole('dialog')
     await expect(dialog).not.toHaveTextContent('branch')
-    await expect(dialog).toHaveTextContent('You can reopen it later, on the same worktree.')
+    await expect(dialog).toHaveTextContent('Its worktree stays.')
   },
 }
 /** A long path and branch wrap inside the dialog. */
@@ -141,8 +133,7 @@ export const Abandoning: Story = {
   play: async ({ args }) => {
     const page = within(document.body)
     const dialog = await page.findByRole('dialog', { name: 'Abandon this task?' })
-    await expect(dialog).toHaveTextContent('Its worktree stays in ~/Althar/meridian/add-a-retry/api, as it is.')
-    await expect(dialog).toHaveTextContent('Its branch althar/add-a-retry stays. Nothing is pushed or deleted.')
+    await expect(dialog).toHaveTextContent('Its branch and worktree stay.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
     await expect(args.onAbandon).toHaveBeenCalledOnce()
   },

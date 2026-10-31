@@ -342,7 +342,7 @@ describe('the API', () => {
         // What the agent already has can't be taken back.
         assert.strictEqual(
           (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: newest.items[0]?.id ?? '' }))).message,
-          "The agent already has that message, so it can't be taken back.",
+          'The agent already has that message.',
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
@@ -841,10 +841,7 @@ describe('the API', () => {
         const plain = mkdtempSync(join(tmpdir(), 'althar-plain-'))
         const error = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: yield* grant(plain) }))
         assert.instanceOf(error, ApiError)
-        assert.deepStrictEqual(
-          [error.reason, error.message],
-          ['NotARepository', `${plain} isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.`],
-        )
+        assert.deepStrictEqual([error.reason, error.message], ['NotARepository', `${plain} isn't a git repository. Choose another folder.`])
         // The window can't name a folder the person didn't choose.
         assert.strictEqual(
           (yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: 'grant_made_up' }))).message,
@@ -853,7 +850,7 @@ describe('the API', () => {
         assert.strictEqual((yield* Effect.flip(client.GetThread({ threadId: 'thr_missing' }))).message, "That task isn't there any more.")
         assert.strictEqual(
           (yield* Effect.flip(client.StopSession({ commandId: commandId(), threadId: 'thr_missing' }))).message,
-          'No agent is working on this task.',
+          'The task isn’t running.',
         )
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Nothing' })
@@ -921,10 +918,7 @@ describe('accounts, through the API', () => {
           yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: null })
           assert.isNull((yield* client.ListProjects()).projects.find((each) => each.id === project.id)?.onlyAccounts)
           const refused = yield* Effect.flip(client.RemoveAccount({ commandId: commandId(), accountId: codex?.accounts[0]?.id ?? '' }))
-          assert.deepStrictEqual(
-            [refused.reason, refused.message],
-            ['AccountRefused', "That's the agent's usual sign-in, its first account: it stays."],
-          )
+          assert.deepStrictEqual([refused.reason, refused.message], ['AccountRefused', "That's the agent's usual sign-in: it stays."])
           // Where nothing can open Terminal, the person is given the line to run.
           const { client: plain } = yield* connected({ noTerminal: true })
           const [main] = (yield* plain.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts ?? []
@@ -1274,10 +1268,7 @@ describe('project rules, through the API', () => {
         )
         assert.deepStrictEqual(
           [allowed.reason, allowed.message],
-          [
-            'RuleOnAnotherList',
-            'Commands starting “bun test” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
-          ],
+          ['RuleOnAnotherList', 'Commands starting “bun test” are on “Never”. Take them off “Never” first.'],
         )
         assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
           { pattern: 'bun test', decision: 'never' },
@@ -1536,7 +1527,7 @@ describe('a project’s menu, through the API', () => {
         assert.strictEqual(
           (yield* Effect.flip(client.LeaveOutRepository({ commandId: commandId(), projectId: project.id, repositoryId: api?.id ?? '' })))
             .message,
-          'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
+          'A project needs a repository. Add another first.',
         )
 
         // Added again, it comes back as it was; a fork comes with where its pull requests open.
@@ -2104,7 +2095,7 @@ describe('the coordinator, through the API', () => {
         )
         assert.strictEqual(
           (yield* Effect.flip(client.AnswerStuck({ ...answering, commandId: commandId() }))).message,
-          'That call was already answered, or the agent took it back.',
+          'That call is closed.',
         )
       }),
     ),
@@ -2128,10 +2119,7 @@ describe('the coordinator, through the API', () => {
         )
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          [
-            'CoordinatorUnavailable',
-            "Fake claude-code isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.",
-          ],
+          ['CoordinatorUnavailable', "Fake claude-code isn't signed in. Sign it in, or pick another agent for the coordinator."],
         )
         // Started on another agent, it waits for what the person says.
         yield* client.StartSession({ commandId: commandId(), threadId: snapshot.threadId, agentId: 'codex', model: 'large', effort: 'low' })
@@ -2345,13 +2333,13 @@ describe('words', () => {
         { _tag: 'InstallFailed', agentId: 'opencode', summary: 'GitHub couldn’t be reached to find OpenCode.' },
         'GitHub couldn’t be reached to find OpenCode.',
       ],
-      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule for this request. Answer it once instead."],
+      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule. Answer it once."],
       [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
-      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more: it carried on, or was stopped."],
+      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more."],
       [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
       [
         { _tag: 'SignOutFailed', line: 'codex logout' },
-        `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`,
+        `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`,
       ],
       [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
       [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
@@ -2367,7 +2355,7 @@ describe('words', () => {
       ],
       [
         { _tag: 'RuleOnAnotherList', exact: true, pattern: 'rm -rf build', list: 'ask' },
-        '“rm -rf build” is on “Always ask me”, which comes first, so nothing changed. Take it off “Always ask me” first.',
+        '“rm -rf build” is on “Always ask me”. Take it off “Always ask me” first.',
       ],
       [
         { _tag: 'PushRefused', remote: 'origin', why: 'refused', said: 'pre-receive hook declined.' },
@@ -2375,19 +2363,19 @@ describe('words', () => {
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: 'src/a.ts' },
-        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them or clear them away, then open the pull request again.',
+        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: '' },
-        'The lead left changes it didn’t commit. Ask it to commit them or clear them away, then open the pull request again.',
+        'The lead left changes it didn’t commit. Ask it to commit them, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'conflicts', detail: 'README.md' },
-        'The new commits don’t apply on the default branch as it is now: they conflict in README.md. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+        'It conflicts with the default branch, in README.md. Ask the lead to merge the default branch in, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'conflicts', detail: '' },
-        'The new commits don’t apply on the default branch as it is now: they conflict. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+        'It conflicts with the default branch. Ask the lead to merge the default branch in, then open the pull request again.',
       ],
       // A reason added since, with no words of its own yet: the general sentence for its kind.
       [{ _tag: 'ProjectRefused', reason: 'new_reason' }, "Althar can't change the project that way."],
@@ -2402,10 +2390,7 @@ describe('words', () => {
 
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
-    assert.strictEqual(
-      said(new NotARepository({ path: '/tmp/x' })),
-      "/tmp/x isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.",
-    )
+    assert.strictEqual(said(new NotARepository({ path: '/tmp/x' })), "/tmp/x isn't a git repository. Choose another folder.")
     assert.strictEqual(
       said(new RepositoriesNeeded({ unknown: [], choices: ['api', 'web'] })),
       "Say which of the project's repositories the task changes: api, web.",
@@ -2417,7 +2402,7 @@ describe('words', () => {
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
     assert.strictEqual(
       said(new NothingToWaitFor({ attentionId: 'a' })),
-      "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again.",
+      "The agent didn't say when its limit resets. Pick another model, or try again.",
     )
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
@@ -2442,21 +2427,21 @@ describe('words', () => {
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
     assert.strictEqual(
       said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: "The agent doesn't offer huge." })),
-      "Codex is still on its old model. The agent doesn't offer huge.",
+      "Codex’s model didn't change. The agent doesn't offer huge.",
     )
-    assert.strictEqual(said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: '' })), 'Codex is still on its old model.')
+    assert.strictEqual(said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: '' })), "Codex’s model didn't change.")
     assert.strictEqual(
       said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: 'It offers no choice of effort.' })),
-      'Codex still thinks as hard as it did. It offers no choice of effort.',
+      "Codex’s effort didn't change. It offers no choice of effort.",
     )
-    assert.strictEqual(said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: '' })), 'Codex still thinks as hard as it did.')
-    assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call was already answered, or the agent took it back.')
+    assert.strictEqual(said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: '' })), "Codex’s effort didn't change.")
+    assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
       "git worktree didn't work: fatal: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
-    assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'That request was already used for something else. Try again.')
+    assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')
     assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Althar is using this profile.')
     assert.strictEqual(said(new TurnInProgress({ sessionId: 's' })), 'The lead is still on its last turn.')
     // What a code host or tracker said, or why it couldn't be asked.
@@ -2465,7 +2450,7 @@ describe('words', () => {
     assert.strictEqual(host('forbidden', 'Resource not accessible'), "GitHub won't let this account do that: Resource not accessible.")
     assert.strictEqual(host('forbidden'), "GitHub won't let this account do that.")
     assert.strictEqual(host('not_found'), "GitHub can't find it any more.")
-    assert.strictEqual(host('rate_limited'), 'GitHub is asking Althar to slow down. Try again in a little while.')
+    assert.strictEqual(host('rate_limited'), 'GitHub is rate limiting. Try again in a little while.')
     assert.strictEqual(host('unreachable'), "Althar couldn't reach GitHub. Try again in a moment.")
     assert.strictEqual(host('invalid_response'), "GitHub answered in a way Althar didn't understand.")
     assert.strictEqual(host('rejected', 'Pull Request is not mergeable'), 'GitHub said no: Pull Request is not mergeable.')
@@ -2480,15 +2465,15 @@ describe('words', () => {
     )
     assert.strictEqual(
       said(new OutwardUncertain({ operation: 'merge' })),
-      "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again.",
+      'That may have gone through. Check on the host before trying again.',
     )
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't' })),
-      'The pull request changed since you looked at it. Have another look before you accept it.',
+      'The pull request changed since you looked. Look again, then accept it.',
     )
     assert.deepStrictEqual(
       (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
-      ["The task's work isn't done yet. Its pull request opens when it is.", 'The task is settled, so its branch stays as it is.'],
+      ["The task's work isn't done yet.", 'The task is settled.'],
     )
     // A refused merge says it in a few words: no path on this computer, a couple of files by name and the rest counted.
     assert.deepStrictEqual(
@@ -2513,14 +2498,8 @@ describe('words', () => {
         'Submodule vendor/library has uncommitted changes, or isn’t at the commit recorded for it.',
       ],
     )
-    assert.strictEqual(
-      said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })),
-      'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
-    )
-    assert.strictEqual(
-      said({ _tag: 'NoChangeToOpen', why: 'something new' }),
-      "The task's work isn't done yet. Its pull request opens when it is.",
-    )
+    assert.strictEqual(said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })), 'web’s main moved meanwhile. Merge again.')
+    assert.strictEqual(said({ _tag: 'NoChangeToOpen', why: 'something new' }), "The task's work isn't done yet.")
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
       (['behind', 'denied', 'moved', 'never'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
@@ -2543,11 +2522,8 @@ describe('words', () => {
     // Refused without a word why: just that it was.
     assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
     // A task's course: a merged task stays done, and one whose worktree and branch went can't be reopened.
-    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged, so it stays done.')
-    assert.strictEqual(
-      said(new TaskRefused({ taskId: 't', why: 'branch_gone' })),
-      'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
-    )
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged.')
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'branch_gone' })), 'The task’s worktree and branch are gone.')
     assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'abandoned' })), 'The task is abandoned. Reopen it to carry on.')
     // One with a reason these words don't know says only that it can't be done.
     assert.strictEqual(said({ _tag: 'TaskRefused', why: 'something new' }), "Althar can't change the task that way.")

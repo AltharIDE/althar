@@ -133,7 +133,6 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     <SettingsLayout
       section={section}
       title={open.title}
-      lede={open.lede}
       side={
         <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
@@ -328,7 +327,6 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
         <SettingSwitch
           title={text.loadTitle}
-          note={text.loadNote}
           glyph={<Icon name="load" size={15} />}
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
@@ -399,7 +397,6 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
         {coAuthor !== null && (
           <SettingSwitch
             title={text.coAuthorTitle}
-            note={text.coAuthorNote}
             glyph={<CoAuthorFace picture={face} size={30} />}
             checked={coAuthor.on}
             onChange={coAuthor.set}
@@ -468,7 +465,6 @@ function NotificationsSection() {
               set('sound', sound)
             }}
             onPlay={sounds.play}
-            text={{ note: text.soundNote }}
           />
         )}
       </SettingList>
@@ -489,7 +485,7 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   return (
     <>
       <SettingList>
-        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+        <SettingRow title={text.theme} glyph={<Icon name="theme" size={15} />}>
           {() => (
             <Segmented<Appearance>
               label={text.theme}

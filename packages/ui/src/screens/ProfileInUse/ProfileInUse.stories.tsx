@@ -27,7 +27,7 @@ export const InUse: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement)
     await expect(page.getByRole('alert')).toHaveTextContent('Another copy of Althar is using this profile.')
-    await expect(page.getByRole('alert')).toHaveTextContent('Once it closes, Althar can open again.')
+    await expect(page.getByRole('alert')).toHaveTextContent('Close it, then try again.')
     await userEvent.click(page.getByRole('button', { name: 'Try again' }))
     await expect(args.onTryAgain).toHaveBeenCalledOnce()
   },

@@ -23,6 +23,32 @@ export const refresh = (feed: string, file: string) => {
   writeFileSync(feed, withFile(readFileSync(feed, 'utf8'), basename(file), sha512, statSync(file).size))
 }
 
+/**
+ * One feed for the Mac's two builds, each packaged on its own: the first's,
+ * with the others' packages added to its list. The updater picks its own
+ * Mac's from the list by name (electron-updater's MacUpdater: on Apple
+ * silicon the files with arm64 in their names, on Intel the others), so
+ * every package keeps its processor in its name. `path`, which only an
+ * updater too old to read the list goes by, stays the first's.
+ */
+export const joinFeeds = (feeds: ReadonlyArray<string>): string => {
+  const [first, ...rest] = feeds
+  if (first === undefined) throw new Error('No feed to join.')
+  const listOf = (feed: string) => {
+    const list = /^files:\n((?: {2}.*\n)+)/m.exec(feed)?.[1]
+    if (list === undefined) throw new Error(`A feed with no files:\n${feed}`)
+    return list
+  }
+  const version = (feed: string) => /^version: (\S+)$/m.exec(feed)?.[1]
+  let joined = first
+  for (const feed of rest) {
+    if (version(feed) !== version(first)) throw new Error(`The feeds are for ${version(first)} and ${version(feed)}.`)
+    const list = listOf(joined)
+    joined = joined.replace(list, () => `${list}${listOf(feed)}`)
+  }
+  return joined
+}
+
 /** A package the feed names, as it says it is. */
 export interface FeedEntry {
   readonly url: string

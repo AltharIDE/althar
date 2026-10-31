@@ -16,7 +16,7 @@ import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 
 export const text = {
   /** Under a card the project always asks about, whatever else would answer. */
-  held: (project: string) => `${project} always asks you about this, so there’s no “always allow”.`,
+  held: (project: string) => `${project} always asks about this.`,
   allowEverything: 'Allow everything on this task',
   rules: 'Change it in Rules',
 }

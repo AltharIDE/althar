@@ -1,4 +1,4 @@
-# ADR-075: A pull request shows the review its change had, as a seal in its corner and the review folded at its end
+# ADR-076: A pull request shows the review its change had, as a seal in its corner and the review folded at its end
 
 - **Status:** Accepted
 - **Date:** 2026-10-31

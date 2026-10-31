@@ -78,7 +78,6 @@ export interface ReviewText {
   verdict: Record<Verdict, string>
   reviewing: (n: number) => string
   combine: string
-  combineNote: (reviewers: number) => string
   tally: {
     yours: (n: number) => string
     toLead: (n: number) => string
@@ -98,17 +97,12 @@ export interface ReviewText {
   reopen: string
   addReason: string
   leftToLead: string
-  leftToLeadNote: string
   /** Fixed by the lead, in a round when the consumer says which. */
   fixedIn: (round?: number) => string
   askedFix: string
-  askedFixNote: string
   toldLead: string
-  toldLeadNote: string
   setAside: string
   dismissed: string
-  dismissedNote: string
-  keptNote: string
   tellPlaceholder: string
   reasonPlaceholder: string
   send: string
@@ -118,7 +112,6 @@ export interface ReviewText {
   emptyTell: string
   emptyReason: string
   leaveRest: (all: boolean) => string
-  leaveRestNote: string
   instructions: (name: string) => string
 }
 
@@ -129,7 +122,6 @@ export const reviewText: ReviewText = {
   verdict: { [Verdict.Pass]: 'Passed', [Verdict.Changes]: 'Changes requested', [Verdict.Blocked]: 'Blocked' },
   reviewing: (n) => `${n} reviewers, then combined`,
   combine: 'Combine',
-  combineNote: (n) => `waits for ${n === 2 ? 'both' : `all ${n}`} · merges duplicates · reports disagreement`,
   tally: {
     yours: (n) => `${n} for you`,
     toLead: (n) => `${n} back to the lead`,
@@ -149,18 +141,13 @@ export const reviewText: ReviewText = {
   reopen: 'Reopen',
   addReason: 'Add a reason',
   leftToLead: 'Left to the lead',
-  leftToLeadNote: '· it fixes or sets aside, and says why',
   fixedIn: (round) => (round ? `Fixed by the lead in round ${round}` : 'Fixed by the lead'),
   askedFix: 'You asked the lead to fix it',
-  askedFixNote: '· in its next round',
   toldLead: 'You told the lead',
-  toldLeadNote: '· instead of the fix it suggests',
   setAside: 'Set aside by the lead',
   dismissed: 'Dismissed by you',
-  dismissedNote: '· sent to the lead',
-  keptNote: ' · kept for future reviews',
   tellPlaceholder: 'What the lead should do instead',
-  reasonPlaceholder: 'Why it does not apply. Next reviews will know',
+  reasonPlaceholder: 'Why it doesn’t apply',
   send: 'Send to the lead',
   save: 'Save',
   cancel: 'Cancel',
@@ -168,7 +155,6 @@ export const reviewText: ReviewText = {
   emptyTell: 'Say what the lead should do',
   emptyReason: 'Write a reason, or skip',
   leaveRest: (all) => `Leave ${all ? 'them' : 'the rest'} to the lead`,
-  leaveRestNote: 'It fixes or sets aside each one, and says why',
   instructions: (name) => `Reviewed with your instructions · ${name}`,
 }
 
@@ -350,7 +336,6 @@ export function Review({
           <div className={cx(s.reviewer, s.queued)}>
             <Icon name="branch" size={10} />
             <span>{t.combine}</span>
-            <span className={s.meta}>{t.combineNote(reviewers.length)}</span>
           </div>
         </div>
       )}
@@ -376,7 +361,6 @@ export function Review({
             {pass && openCount > 0 && (
               <div className={s.rest}>
                 <Button onClick={leaveRest}>{t.leaveRest(openCount === items.length)}</Button>
-                <span>{t.leaveRestNote}</span>
               </div>
             )}
             {(docs || foot) && (
@@ -409,7 +393,7 @@ export const findingsReachMenuText: FindingsReachMenuText = {
   label: 'Findings reach you',
   menu: 'Review findings reach you',
   option: findingsReachText,
-  note: (project) => `For every review in ${project}. Also in the project’s rules.`,
+  note: (project) => `For every review in ${project}`,
 }
 
 const REACHES = [FindingsReach.Stuck, FindingsReach.All, FindingsReach.Learn] as const
@@ -579,7 +563,6 @@ function Settled({
       return (
         <p className={cx(s.line, s.in)}>
           {t.leftToLead}
-          <span className={s.k}>{t.leftToLeadNote}</span>
           {undo}
         </p>
       )
@@ -593,7 +576,6 @@ function Settled({
       return (
         <p className={cx(s.line, s.in)}>
           {t.askedFix}
-          <span className={s.k}>{t.askedFixNote}</span>
           {undo}
         </p>
       )
@@ -602,7 +584,6 @@ function Settled({
         <>
           <p className={cx(s.line, s.in)}>
             {t.toldLead}
-            <span className={s.k}>{t.toldLeadNote}</span>
             {undo}
           </p>
           <p className={s.reason}>{f.told}</p>
@@ -623,10 +604,6 @@ function Settled({
         <>
           <p className={s.line}>
             {t.dismissed}
-            <span className={s.k}>
-              {t.dismissedNote}
-              {f.reason && t.keptNote}
-            </span>
             {!f.reason && !editing && <LinkButton onClick={onReason}>{t.addReason}</LinkButton>}
             {undo}
           </p>

@@ -8,7 +8,7 @@ import { HERO } from '../content/home'
 import { askedSecond, useHydrated } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { AgentMark } from '../shared/AgentMark'
-import { Get } from '../shared/Close'
+import { Get, OtherMac } from '../shared/Close'
 import { LightUnder } from '../shared/lightUnder'
 import { useGrain } from '../shared/grain'
 import { addDisplay } from './display'
@@ -522,6 +522,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
           </div>
           <div className={cx(s.cell, s.ways)}>
             <Get tone="blue" />
+            <OtherMac tone="blue" />
           </div>
         </div>
       </footer>

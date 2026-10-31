@@ -227,16 +227,6 @@ export enum TaskStatus {
   Stopped = 'stopped',
 }
 
-/** What a task has going, for what stops when it is abandoned. */
-export enum TaskActivity {
-  /** Agents are on it, or its run waits on a step. */
-  Working = 'working',
-  /** Its plan waits to start. */
-  Planned = 'planned',
-  /** Nothing runs or waits to start. */
-  Still = 'still',
-}
-
 /**
  * What a task makes, read from what it has (DEV-96): a change ends in a pull
  * request of its own, or has commits; a review reads someone else's; any

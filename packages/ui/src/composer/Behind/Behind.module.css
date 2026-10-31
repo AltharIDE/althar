@@ -169,13 +169,6 @@
   text-transform: none;
   color: var(--t-2);
 }
-.lead {
-  margin: 0 0 4px;
-  padding: 0 9px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--t-2);
-}
 .list {
   margin: 0;
   padding: 0;

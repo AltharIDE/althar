@@ -33,7 +33,7 @@ export const AlwaysAllow: Story = {
   play: async ({ args, canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'More answers' }))
     const menu = within(await within(document.body).findByRole('menu'))
-    await expect(menu.getByText(`An always or a never is kept in ${PROJECT}’s rules`)).toBeInTheDocument()
+    await expect(menu.getByText(`Kept in ${PROJECT}’s rules`)).toBeInTheDocument()
     await userEvent.click(menu.getByRole('menuitem', { name: 'Always allow commands starting “pnpm replay”' }))
     await expect(args.onAnswer).toHaveBeenCalledWith({ decision: Decision.AllowAlways, cmd: STAGING.cmd, scope: PermissionScope.Prefix })
   },

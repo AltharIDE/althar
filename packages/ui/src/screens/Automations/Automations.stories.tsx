@@ -80,7 +80,7 @@ export const PausingAll: Story = {
     await userEvent.click(c.getByRole('button', { name: 'More' }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Pause all automations' }))
     const band = c.getByRole('status', { name: 'Every automation is paused' })
-    await expect(within(band).getByText('None starts until you resume them. Runs under way finish.')).toBeInTheDocument()
+    await expect(within(band).getByText('Runs under way finish.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'More' }))
     await expect(await within(document.body).findByRole('menuitem', { name: 'Resume all' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
@@ -106,7 +106,7 @@ export const WhereTheyRun: Story = {
   args: { where: true, onOpenAtLogin: fn() },
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/They run on this Mac while Althar is open\./)).toBeInTheDocument()
+    await expect(c.getByText(/Only while Althar is open\./)).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Open Althar at login' }))
     await expect(args.onOpenAtLogin).toHaveBeenCalled()
   },
@@ -125,7 +125,7 @@ export const NoneYet: Story = {
     await expect(c.getByRole('heading', { name: 'Nothing runs by itself yet' })).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Start from one of these' })).toBeInTheDocument()
     await expect(c.getByText('“every weekday at 9, review the new pull requests”')).toBeInTheDocument()
-    await expect(c.queryByText(/They run on this Mac/)).toBeNull()
+    await expect(c.queryByText(/Only while Althar is open/)).toBeNull()
     await expect(c.queryByRole('heading', { name: /On a schedule/ })).toBeNull()
     await expect(c.queryByRole('button', { name: 'More' })).toBeNull()
     await expect(c.getAllByRole('button', { name: 'New automation' })).toHaveLength(1)

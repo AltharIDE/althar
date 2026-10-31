@@ -183,11 +183,7 @@ describe('the home', () => {
     withServices(<Home onTask={onTask} />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByText('npm publish')).toBeTruthy()
-    expect(
-      within(needs).getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(within(needs).getByText('Claude Code closed before finishing the step.')).toBeTruthy()
     // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
     expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
     expect(within(needs).getByText('On its branch')).toBeTruthy()
@@ -195,17 +191,13 @@ describe('the home', () => {
     // A change with what stands between it and merging, or how its checks went, then how big, in its one line.
     expect(within(needs).getByText('api #12 · test failed · +12 −3')).toBeTruthy()
     expect(within(needs).getByText('api #13 · No checks ran')).toBeTruthy()
-    expect(
-      within(needs).getByText(
-        'The agent closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(within(needs).getByText('The agent closed before finishing the step.')).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
     // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
     const out = within(needs).getByRole('article', { name: 'Out of it' })
     expect(within(out).getByText('Out of usage')).toBeTruthy()
-    expect(within(out).getByText(new RegExp(`^Codex ran out of usage .*It's back at ${clock('2026-09-29T14:00:00.000Z')}\\.`))).toBeTruthy()
+    expect(within(out).getByText(new RegExp(`^Codex is out of usage until ${clock('2026-09-29T14:00:00.000Z')}\\.`))).toBeTruthy()
 
     // Allowed where it is: the line stays, quiet, with what was said where its buttons were, and has focus.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)
@@ -349,11 +341,7 @@ describe('the home', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [publish] })) })
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
-    expect(
-      within(needs).getByText(
-        'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
-      ),
-    ).toBeTruthy()
+    expect(within(needs).getByText('Paused after Althar restarted twice.')).toBeTruthy()
   })
 
   it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {
@@ -367,7 +355,7 @@ describe('the home', () => {
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     await userEvent.click(within(needs).getByRole('button', { name: 'More answers' }))
-    expect(screen.getByText('An always or a never is kept in halyard’s rules')).toBeTruthy()
+    expect(screen.getByText('Kept in halyard’s rules')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: 'Always allow commands starting “npm test”' }))
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow', always: 'prefix' })
     expect(

@@ -52,7 +52,7 @@ describe('a conflict on a pull request from a fork into the repository it came f
       const threadId = ready?.threadId ?? ''
       // Upstream's main moves on, conflicting with the task's change.
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
       assert.include(note, 'merge upstream/main into it')
       assert.strictEqual(execFileSync('git', ['merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'], { cwd: bare }).toString(), '')

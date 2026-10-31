@@ -140,14 +140,12 @@ export interface KeepAwakeText {
   title: string
   note: string
   battery: string
-  batteryNote: string
 }
 
 export const keepAwakeText: KeepAwakeText = {
   title: `Keep ${device.this} awake while work runs`,
-  note: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  note: 'The display can still sleep.',
   battery: 'On battery too',
-  batteryNote: 'Otherwise only while it’s plugged in.',
 }
 
 export interface KeepAwakeProps {
@@ -171,7 +169,7 @@ export function KeepAwake({ on, onChange, onBattery, onBatteryChange, text }: Ke
       onChange={onChange}
       under={
         <div className={cx(s.well, !on && s.wellOff)}>
-          <SettingSwitch title={t.battery} note={t.batteryNote} checked={onBattery} onChange={onBatteryChange} disabled={!on} />
+          <SettingSwitch title={t.battery} checked={onBattery} onChange={onBatteryChange} disabled={!on} />
         </div>
       }
     />
@@ -189,7 +187,7 @@ export interface AtOnceMachine {
 
 export interface AgentsAtOnceText {
   title: string
-  /** What the number means as it moves: at the default, why; under it or past it, what that does to this Mac. */
+  /** What the number means as it moves: at the default, what it comes from; past it, what that does to this Mac. */
   note: (count: number, machine: AtOnceMachine) => string
   /** Compact, one plain line whatever the number. */
   short: string
@@ -204,13 +202,12 @@ export interface AgentsAtOnceText {
 export const agentsAtOnceText: AgentsAtOnceText = {
   title: 'Agents at once',
   note: (n, { count, memory, cores }) => {
-    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
-    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
-    if (n < count) return `${n}: fewer than ${device.this} could carry.`
-    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
-    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
+    if (n === count) return `Default for ${memory} GB and ${cores} cores`
+    if (n <= count) return 'Below the default'
+    if (n <= count + 2) return 'Tests may slow down'
+    return 'May run hot'
   },
-  short: 'More tasks than this wait their turn.',
+  short: 'The rest wait their turn',
   mark: ({ count }) => `${count} · ${device.this}`,
   value: (n, { count }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
   reset: 'Use the default',
@@ -485,7 +482,7 @@ export function NotificationSettings({ value, onChange, count = true, text }: No
 
 export interface NotificationSoundText {
   title: string
-  note: string
+  note?: string
   none: string
   /** The system's own sound, where there are no named ones to choose from. */
   system: string
@@ -494,7 +491,6 @@ export interface NotificationSoundText {
 
 export const notificationSoundText: NotificationSoundText = {
   title: 'Sound',
-  note: `One of ${device.this}’s alert sounds, with each notification.`,
   none: 'None',
   system: 'The system’s sound',
   play: (sound) => `Play ${sound}`,
@@ -556,7 +552,7 @@ export interface UsageDataText {
 
 export const usageDataText: UsageDataText = {
   title: 'Usage data',
-  note: 'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+  note: 'Anonymous. Never your code or any name.',
   doNotTrack: 'Off while DO_NOT_TRACK is set.',
 }
 
@@ -593,7 +589,7 @@ export interface CrashReportsText {
 
 export const crashReportsText: CrashReportsText = {
   title: 'Crash reports',
-  note: 'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+  note: 'What failed, and where. Never your code or any name.',
   doNotTrack: 'Off while DO_NOT_TRACK is set.',
 }
 
@@ -627,7 +623,7 @@ export interface CrashReportsLineText {
 
 export const crashReportsLineText: CrashReportsLineText = {
   title: 'Crash reports',
-  note: 'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+  note: 'go to Althar’s team. Never your code or any name.',
   doNotTrack: 'are off while DO_NOT_TRACK is set.',
 }
 

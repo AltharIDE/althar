@@ -169,7 +169,7 @@ describe('where an automation stands', () => {
       paused: true,
       words: 'Paused',
     })
-    expect(standingOf(one, true, NOON)).toMatchObject({ tone: 'paused', words: 'Paused', status: 'Paused, as every automation is' })
+    expect(standingOf(one, true, NOON)).toMatchObject({ tone: 'paused', words: 'Paused', status: 'All paused' })
     expect(
       standingOf({ ...one, latest: [automationRun({ state: 'running', at: local(29, 9, 21).toISOString() })] }, false, NOON),
     ).toMatchObject({
@@ -238,7 +238,7 @@ describe('what each run does', () => {
       ['If the Mac is asleep', 'Skip it, and wait for the next time'],
       ['Agent places', text.placesWords],
       ['If it fails', text.failsWords],
-      ['Open pull requests', 'Five at most; past that, a run is skipped.'],
+      ['Open pull requests', 'Five at most'],
     ])
     expect(limitWords(definition())[0]?.[1]).toBe(`On. ${text.allowEverythingNote}`)
   })

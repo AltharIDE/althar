@@ -88,7 +88,7 @@ export const PeekAsItWas: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText('as it was when said, yesterday')).toBeInTheDocument()
-    await expect(c.getByText(/rewritten since/)).toBeInTheDocument()
+    await expect(c.getByText(/rewritten since/i)).toBeInTheDocument()
   },
 }
 
@@ -184,7 +184,7 @@ export const PanelMoved: Story = {
   render: () => <Stateful found={limitsMoved} where={MAIN} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Line 13 then is line 17 now: the file changed above it since.')).toBeInTheDocument()
+    await expect(c.getByText('Line 13 then is line 17 now')).toBeInTheDocument()
     await userEvent.click(c.getByRole('radio', { name: 'When said' }))
     await expect(c.queryByText(/then is line/)).not.toBeInTheDocument()
     await userEvent.click(c.getByRole('radio', { name: 'Now' }))

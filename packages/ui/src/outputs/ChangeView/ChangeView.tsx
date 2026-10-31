@@ -283,7 +283,7 @@ function FileBody({ file, view, t, onRetry }: { file: ViewedFile; view: FileView
       if (view.lines.length === 0) return <p className={s.quiet}>{file.from ? t.moved(file.from) : t.empty}</p>
       return (
         <>
-          <Diff lines={view.lines} label={file.path} oldNumbers fold={3} className={s.diff} />
+          <Diff lines={view.lines} label={file.path} path={file.path} oldNumbers fold={3} className={s.diff} />
           {view.truncated && <p className={s.quiet}>{t.truncated}</p>}
         </>
       )

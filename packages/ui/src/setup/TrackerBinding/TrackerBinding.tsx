@@ -38,13 +38,13 @@ export interface TrackerBindingText {
 
 export const trackerBindingText: TrackerBindingText = {
   title: 'Issues go to',
-  note: 'Drafts go there, and the coordinator lists and finds issues there alone. Unset, it follows where the project’s issues already are.',
+  note: 'Where drafts are filed and issues found',
   learned: 'Where its issues are',
   container: 'Team',
-  containerNote: 'Where its drafts are filed on it.',
+  containerNote: 'Where its drafts are filed',
   anyContainer: 'As its issues say',
   reading: 'Reading its teams',
-  gone: 'Disconnected. Its issues aren’t listed, and drafts aren’t made for another in its place, until it is connected again or another is chosen.',
+  gone: 'Disconnected. Connect it again, or choose another.',
 }
 
 export interface TrackerBindingProps {

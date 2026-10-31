@@ -49,7 +49,6 @@ export const text = {
     settled: 'Review settled',
     answered: (n: number) => (n === 1 ? 'Answered 1 permission ask' : `Answered ${n} permission asks`),
     coordinatorAnswered: (n: number) => (n === 1 ? 'Coordinator answered 1 permission ask' : `Coordinator answered ${n} permission asks`),
-    withinRules: 'within the projects’ rules',
     since: (at: string) => `since ${at}`,
   },
 }
@@ -74,7 +73,6 @@ export const lineOf = (
     return {
       icon: 'lock',
       what: event.by === 'coordinator' ? t.coordinatorAnswered(event.count) : t.answered(event.count),
-      detail: t.withinRules,
       at: t.since(clock(event.at, now)),
     }
   const project = projects.get(event.projectId)

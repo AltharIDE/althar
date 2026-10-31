@@ -45,8 +45,6 @@ import s from './Board.module.css'
 
 export interface BoardText {
   lane: Record<BoardLane, string>
-  /** An empty lane. */
-  empty: Record<BoardLane, string>
   /** The chevron on a lane's head, by the lane's name. */
   collapse: (lane: string) => string
   /** A collapsed lane's rail, by the lane's name and how many it holds. */
@@ -61,12 +59,6 @@ export const boardText: BoardText = {
     [BoardLane.Running]: 'Running',
     [BoardLane.Yours]: 'Needs you',
     [BoardLane.Settled]: 'Settled',
-  },
-  empty: {
-    [BoardLane.Next]: 'Nothing is waiting to start.',
-    [BoardLane.Running]: 'Nothing is running.',
-    [BoardLane.Yours]: 'Nothing needs you.',
-    [BoardLane.Settled]: 'Nothing has settled yet.',
   },
   collapse: (lane) => `Collapse ${lane}`,
   expand: (lane, count) => `Expand ${lane}, ${count}`,
@@ -418,7 +410,8 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
         )}
       </header>
       <div className={s.body} id={bodyId}>
-        {filled ? children : <p className={s.empty}>{t.empty[lane]}</p>}
+        {/* An empty lane is an empty box: its count, 0, says so. */}
+        {filled ? children : <div className={s.empty} aria-hidden="true" />}
       </div>
     </section>
   )

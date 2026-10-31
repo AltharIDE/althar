@@ -45,9 +45,9 @@ export interface CoAuthorText {
 }
 
 export const coAuthorText: CoAuthorText = {
-  line: 'On your commits and pull requests, in place of the agents’ own. You stay the author.',
+  line: 'On your commits and pull requests. You stay the author.',
   ask: 'Althar is free, and we have no marketing budget.',
-  why: 'This line on your commits is how most developers hear about it. If you can, we’d be grateful if you left it on.',
+  why: 'This line is how most developers hear about it. We’d be grateful if you left it on.',
   again: 'Put Althar back on your commits',
   leave: 'Leave it off',
   commit: 'A commit as GitHub shows it',
@@ -55,7 +55,7 @@ export const coAuthorText: CoAuthorText = {
   althar: 'Althar',
   opened: 'Pull requests end with',
   openedBy: 'Opened by',
-  alone: 'Your commits and pull requests go out with only your name.',
+  alone: 'Only your name goes out.',
 }
 
 /** A commit to show it on, as the code host would. */

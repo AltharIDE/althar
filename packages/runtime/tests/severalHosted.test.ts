@@ -148,7 +148,7 @@ describe('a project of two repositories on one connected host', () => {
       assert.strictEqual(attached.kind, 'attached')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        `The task follows PR #1 in ${names[1] ?? ''} now: Fix the nav`,
+        `Following PR #1 in ${names[1] ?? ''}: Fix the nav`,
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -167,7 +167,7 @@ describe('a project of two repositories on one connected host', () => {
       assert.strictEqual(attached.kind === 'attached' ? attached.change.url : '', 'https://github.com/meridian/web/pull/2')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'The task follows PR #2 now: Fix the footer',
+        'Following PR #2: Fix the footer',
       )
     }).pipe(Effect.provide(withQueries(github)))
   })

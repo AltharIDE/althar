@@ -26,7 +26,7 @@ describe('the first screen on Linux', () => {
       />,
     )
 
-    expect(screen.getByText('None is on this computer yet. Download one below, or install one yourself.')).toBeInTheDocument()
+    expect(screen.getByText('None on this computer yet')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /^Not on this computer/ })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Agents not on this computer' })).toBeInTheDocument()
   })
