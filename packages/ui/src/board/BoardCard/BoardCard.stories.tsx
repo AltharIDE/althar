@@ -22,6 +22,7 @@ import {
   REVIEW_DRAFTED,
   REVIEW_RUNNING,
 } from '../../fixtures/kinds'
+import { QUESTION_LONG } from '../../fixtures/home'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
@@ -368,6 +369,15 @@ export const Permission: Story = {
   },
 }
 export const Question: Story = { args: CHANGE_QUESTION }
+/** A lead's free-form question as the board gives it: the headline as the card's line, and Answer. The paragraph it came with is in the task. */
+export const QuestionNoOptions: Story = {
+  args: { ...CHANGE_QUESTION, why: QUESTION_LONG.title, next: <NextStep signal>Answer</NextStep> },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText(QUESTION_LONG.title)).toBeInTheDocument()
+    await expect(card.queryByText(/^ADR-070 says/)).not.toBeInTheDocument()
+  },
+}
 export const Stuck: Story = { args: CHANGE_STUCK }
 export const ReviewRunning: Story = {
   args: REVIEW_RUNNING,

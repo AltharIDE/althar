@@ -14,7 +14,7 @@ import { callWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
-import { Questions, reasonOf } from '../src/Questions'
+import { backgroundOf, headlineOf, Questions, reasonOf } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -448,6 +448,19 @@ describe('questions an agent asks the person', () => {
     assert.isAtMost(reasonOf(long, asked)?.length ?? 0, 200)
     const one = reasonOf(`${'word '.repeat(80)}end`, asked) ?? ''
     assert.isTrue(one.endsWith('…') && one.length <= 200)
+  })
+
+  it('show a long question as its first sentence, and keep the rest as background', () => {
+    const short = 'Open a follow-up PR on its own after a merge?'
+    assert.strictEqual(headlineOf(short), short)
+    assert.strictEqual(backgroundOf(short), '')
+    const long = `${short} ADR-070 says a lead brings failing checks to the person.\n\nNeither says what happens after a merge, so a commit made then is in no pull request.`
+    assert.strictEqual(headlineOf(long), short)
+    assert.strictEqual(backgroundOf(long).startsWith('ADR-070 says'), true)
+    const run = `${'word '.repeat(60)}end`
+    const cut = headlineOf(run)
+    assert.isTrue(cut.endsWith('…') && cut.length <= 110)
+    assert.strictEqual(backgroundOf(run), run.trim())
   })
 
   it('say what they ask when they nudge the person', () => {

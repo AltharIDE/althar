@@ -48,7 +48,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Busy, type Line } from './Busy'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
-import { questionTitle } from './Questions'
+import { backgroundOf, questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
@@ -231,9 +231,11 @@ const questionOf = (payload: unknown) => ({
 
 /** An agent's question as a call shows it: what it asks, why, and who asks. */
 const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; readonly model?: string | null }) => {
-  const why = text(payload, 'why')
+  const asked = questionOf(payload)
+  // What the agent said before, else what its question says past its headline.
+  const why = text(payload, 'why') || backgroundOf(asked.fields[0]?.question ?? asked.message)
   return {
-    ...questionOf(payload),
+    ...asked,
     ...(why === '' ? {} : { why }),
     ...(asker.agentId == null ? {} : { askedBy: { agentId: asker.agentId, model: asker.model ?? null } }),
   }
