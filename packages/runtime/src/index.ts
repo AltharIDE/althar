@@ -10,6 +10,7 @@ export {
   WebCrypto,
 } from './Config'
 export { type AtOnce, Busy } from './Busy'
+export { Launches } from './Launches'
 export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
 export { SignIns } from './SignIns'
 export * from './errors'
