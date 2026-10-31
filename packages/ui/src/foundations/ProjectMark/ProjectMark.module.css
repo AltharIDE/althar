@@ -16,6 +16,9 @@
 .ochre {
   --mark-ink: var(--mark-ochre);
 }
+.sand {
+  --mark-ink: var(--mark-sand);
+}
 .olive {
   --mark-ink: var(--mark-olive);
 }
@@ -28,8 +31,17 @@
 .slate {
   --mark-ink: var(--mark-slate);
 }
+.indigo {
+  --mark-ink: var(--mark-indigo);
+}
+.plum {
+  --mark-ink: var(--mark-plum);
+}
 .rose {
   --mark-ink: var(--mark-rose);
+}
+.brick {
+  --mark-ink: var(--mark-brick);
 }
 .umber {
   --mark-ink: var(--mark-umber);

@@ -13,11 +13,15 @@
 export enum ProjectInk {
   Clay = 'clay',
   Ochre = 'ochre',
+  Sand = 'sand',
   Olive = 'olive',
   Moss = 'moss',
   Teal = 'teal',
   Slate = 'slate',
+  Indigo = 'indigo',
+  Plum = 'plum',
   Rose = 'rose',
+  Brick = 'brick',
   Umber = 'umber',
 }
 

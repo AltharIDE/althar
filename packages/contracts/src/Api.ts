@@ -351,7 +351,20 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 
 /** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
-export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
+export const ProjectInk = Schema.Literals([
+  'clay',
+  'ochre',
+  'sand',
+  'olive',
+  'moss',
+  'teal',
+  'slate',
+  'indigo',
+  'plum',
+  'rose',
+  'brick',
+  'umber',
+])
 export type ProjectInk = typeof ProjectInk.Type
 
 export const ProjectSummary = Schema.Struct({
