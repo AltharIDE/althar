@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters, and on 31 October with OpenAI cancelling the ChatGPT Pro cut; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -237,9 +237,9 @@ export const SHIFTS: readonly Shift[] = [
     date: '2026-09-29',
     kind: ShiftKind.Pricing,
     who: 'OpenAI',
-    title: 'ChatGPT Pro reopens with less usage',
-    what: 'The $200 plan comes back with roughly half its old allowance, beside a new $500 tier. Existing subscribers keep the old allowance until 29 October.',
-    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+    title: 'ChatGPT Pro reopens with less usage, then the cut is undone',
+    what: 'The $200 plan came back at roughly half its allowance beside a $500 tier. On 29 October OpenAI cancelled the cut and doubled Pro Codex and Work limits.',
+    source: { name: 'DataStudios', url: 'https://www.datastudios.org/post/openai-doubles-chatgpt-pro-business-premium-usage-limits-cancels-pro-200-cut' },
   },
   {
     id: 'gpt-6-1-sol',
@@ -399,19 +399,6 @@ export const SHIFTS: readonly Shift[] = [
  * passed; move it into SHIFTS then, with what actually happened.
  */
 export const UPCOMING: readonly Upcoming[] = [
-  {
-    id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-30',
-    announced: '2026-09-29',
-    kind: ShiftKind.Limits,
-    who: 'OpenAI',
-    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
-    source: {
-      name: 'Engadget',
-      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
-    },
-  },
   {
     id: 'usage-policy-takes-effect',
     date: '2026-11-12',
