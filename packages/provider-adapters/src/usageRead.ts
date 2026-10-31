@@ -30,7 +30,14 @@ export type EndpointRead =
   | { readonly kind: 'usage'; readonly usage: AccountUsage; readonly stale: boolean }
   /** The account has no plan sign-in for this read: it is paid another way (a key), or not signed in this way. */
   | { readonly kind: 'none' }
-  | { readonly kind: 'fault'; readonly fault: UsageFault; readonly message: string; readonly last?: AccountUsage }
+  | {
+      readonly kind: 'fault'
+      readonly fault: UsageFault
+      readonly message: string
+      readonly last?: AccountUsage
+      /** Where the provider has just asked Althar to wait: its Retry-After as sent, and when Althar asks again (ISO 8601). */
+      readonly waiting?: { readonly retryAfter: string | null; readonly until: string }
+    }
 
 /** The account a read is for: bound to its agent and provider, so a source is only used for its own pair. */
 export interface UsageAccount {
@@ -73,7 +80,7 @@ export interface UsagePolicy {
 export const MIN_INTERVAL = 60_000
 export const MAX_BACKOFF = 24 * 60 * 60_000
 
-const fault = (kind: UsageFault, message: string, last?: AccountUsage): EndpointRead => ({
+const fault = (kind: UsageFault, message: string, last?: AccountUsage): Extract<EndpointRead, { kind: 'fault' }> => ({
   kind: 'fault',
   fault: kind,
   message,
@@ -105,7 +112,9 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
   const readFile = policy.readFile ?? readTokenField
   const allowed = policy.allowed ?? allowedEndpoints
   const timeout = policy.timeout ?? 10_000
-  const memory = new Map<string, { usage?: AccountUsage; notBefore: number; strikes: number }>()
+  /** `said`: what the last read said where it read no windows, said again while the account isn't asked. */
+  type Memory = { usage?: AccountUsage; notBefore: number; strikes: number; said?: EndpointRead }
+  const memory = new Map<string, Memory>()
   /** A read under way for an account: a second asker gets its answer, not a second call. */
   const inflight = new Map<string, Promise<EndpointRead>>()
 
@@ -121,25 +130,31 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
   const run = async (source: EndpointSource, account: UsageAccount, key: string, now: () => Date): Promise<EndpointRead> => {
     const before = memory.get(key)
     const at = now().getTime()
-    // Within the interval, or waiting as the provider asked: the last windows, not another call.
+    // Within the interval, or waiting as the provider asked: the last windows, or what the last read said, not another call.
     if (before !== undefined && at < before.notBefore)
-      return before.usage === undefined
-        ? fault('unreachable', 'The provider asked Althar to wait before reading again.')
-        : { kind: 'usage', usage: before.usage, stale: true }
+      return before.usage !== undefined
+        ? { kind: 'usage', usage: before.usage, stale: true }
+        : (before.said ?? fault('unreachable', 'The provider asked Althar to wait before reading again.'))
 
     const every = source.every ?? MIN_INTERVAL
     // The interval is taken before anything is awaited, so no second read can start inside it.
-    const remember = (patch: { usage?: AccountUsage; notBefore: number; strikes: number }) => memory.set(key, patch)
+    const remember = (patch: Memory) => memory.set(key, patch)
     remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + every, strikes: before?.strikes ?? 0 })
     const failed = (kind: UsageFault, message: string, strikes = 0, wait = every) => {
-      remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + wait, strikes })
+      // What it said, as it said it: a read failed for another reason isn't shown as a wait the provider asked for.
+      remember({
+        ...(before?.usage === undefined ? {} : { usage: before.usage }),
+        notBefore: at + wait,
+        strikes,
+        said: fault(kind, message),
+      })
       return fault(kind, message, before?.usage)
     }
 
     // The token lives in this call only.
     let token = await stringOf(source.token, account)
     if (token === null) {
-      remember({ notBefore: at + every, strikes: 0 })
+      remember({ notBefore: at + every, strikes: 0, said: { kind: 'none' } })
       return { kind: 'none' }
     }
     const headers: Record<string, string> = { Accept: 'application/json', ...source.headers }
@@ -167,20 +182,20 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
     if (status === 401 || status === 403) return failed('expired', 'Its sign-in has expired.')
     if (status === 429) {
       const strikes = (before?.strikes ?? 0) + 1
-      const asked = retryAfter(answer.headers?.get('retry-after'), at)
-      return failed(
-        'unreachable',
-        'The provider asked Althar to wait before reading again.',
-        strikes,
-        Math.min(MAX_BACKOFF, Math.max(every, asked ?? Math.min(15 * 60_000, MIN_INTERVAL * 2 ** strikes))),
-      )
+      const header = answer.headers?.get('retry-after') ?? null
+      const wait = Math.min(MAX_BACKOFF, Math.max(every, retryAfter(header, at) ?? Math.min(15 * 60_000, MIN_INTERVAL * 2 ** strikes)))
+      return {
+        ...failed('unreachable', 'The provider asked Althar to wait before reading again.', strikes, wait),
+        waiting: { retryAfter: header, until: new Date(at + wait).toISOString() },
+      }
     }
     if (status >= 300 && status < 400) return failed('source_changed', 'The usage address has moved.')
     if (status < 200 || status >= 300) return failed('unreachable', 'The provider answered with an error.')
 
     try {
       const windows = source.parse(await answer.json(), now())
-      const usage: AccountUsage = { windows, source: 'endpoint', observedAt: now().toISOString() }
+      // Stamped when it was asked, not when it came: what a session said on its way here may be the newer, and stays so each time this is given again.
+      const usage: AccountUsage = { windows, source: 'endpoint', observedAt: new Date(at).toISOString() }
       remember({ usage, notBefore: at + every, strikes: 0 })
       return { kind: 'usage', usage, stale: false }
     } catch {

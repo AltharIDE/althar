@@ -1,6 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
@@ -66,9 +67,28 @@ test('a real agent plans a task, leads it and answers', async () => {
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Say hello', level: 1 })).toBeVisible()
     await expect(page.getByText(/^ready\.?$/i)).toBeVisible({ timeout: 120_000 })
-    await expect(page.getByText('Idle', { exact: true })).toBeVisible({ timeout: 60_000 })
+    // Its lead has finished: the task waits on the person.
+    await expect(page.getByText('Ready to accept', { exact: true })).toBeVisible({ timeout: 60_000 })
     await page.screenshot({ path: `test-results/real-${agent}.png` })
+
+    // The plan's windows, read just now: the peek says no age, and Claude Code's are what its own sessions said, not the usage endpoint's.
+    await page.getByRole('button', { name: /^Plan usage/ }).click()
+    const peek = page.getByRole('dialog', { name: 'Plan usage' })
+    await peek.getByRole('button', { name: new RegExp(`^${name}`) }).click()
+    await expect(peek.getByText(/^read /)).toHaveCount(0)
+    await peek.screenshot({ path: `test-results/real-${agent}-plan.png`, scale: 'css' })
   } finally {
     await app.close()
+  }
+  // The store, once the app has let go of it.
+  if (agent === 'claude-code') {
+    const store = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+    try {
+      expect(store.prepare(`SELECT source FROM plan_usage_readings WHERE agent_id = 'claude-code'`).get()).toMatchObject({
+        source: 'acp_extension',
+      })
+    } finally {
+      store.close()
+    }
   }
 })

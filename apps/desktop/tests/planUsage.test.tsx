@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ModelRoom, PlanUsage } from '@althar/contracts'
 
@@ -24,6 +24,15 @@ import { withServices } from './render'
 
 const NOW = new Date('2026-10-15T10:05:00.000Z')
 const RESET = '2026-10-15T15:00:00.000Z'
+const WEEK = '2026-10-19T09:00:00.000Z'
+
+// The window reads its windows at NOW, as the plan's own tests do: a window past its reset is no longer shown.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: NOW })
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const codexWork = usageAccount()
 const codexSide = usageAccount({
@@ -55,6 +64,18 @@ const copilot = usageAccount({
   plan: null,
   windows: [],
   noReading: 'Copilot shares no plan usage with other apps.',
+})
+/** Claude Code with its five hours nearly out until RESET, and 60% of its week left. */
+const claudeBoth = usageAccount({
+  agentId: 'claude-code',
+  agentName: 'Claude Code',
+  accountId: 'acc_claude',
+  accountName: 'personal',
+  source: 'acp_extension',
+  windows: [
+    { kind: 'five_hour', label: null, usedPercent: 97, resetsAt: RESET },
+    { kind: 'weekly', label: null, usedPercent: 40, resetsAt: WEEK },
+  ],
 })
 const claudeKey = usageAccount({
   agentId: 'claude-code',
@@ -203,6 +224,35 @@ describe('what the window says of a plan', () => {
     // Nothing to say of an agent with no plan here.
     expect(roomOf({ id: 'gemini-cli:gemini-3-pro' }, rooms, usage, NOW)).toBeUndefined()
   })
+
+  it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {
+    const rooms: ReadonlyArray<ModelRoom> = [
+      {
+        agentId: 'claude-code',
+        model: 'sonnet',
+        accountId: 'acc_claude',
+        accountName: 'personal',
+        several: false,
+        leftPercent: 3,
+        resetsAt: RESET,
+        kind: 'five_hour',
+        label: null,
+      },
+    ]
+    const usage = planUsage([claudeBoth])
+    const after = new Date('2026-10-15T15:01:00.000Z')
+    expect(planOf(usage, NOW).agents.map((agent) => [agent.left, agent.limit])).toEqual([[3, 'five-hour limit']])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, NOW)).toMatchObject({ left: 3 })
+    // Its five hours have started again, and how much of them is used no one has said yet: the week says, alone.
+    const [agent] = planOf(usage, after).agents
+    expect([agent?.left, agent?.limit, agent?.accounts[0]?.windows.map((window) => window.label)]).toEqual([60, 'weekly limit', ['Week']])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, after)).toBeUndefined()
+    expect(roomOf({ id: 'claude-code:' }, rooms, usage, after)).toEqual({ left: 60, until: clock(WEEK, after), account: null })
+    // With none of its windows still known, it has no figure, and a model's room is no reading, never all of its plan.
+    const fiveHours = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(0, 1) }])
+    expect(planOf(fiveHours, after).agents).toEqual([])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, fiveHours, after)).toBeNull()
+  })
 })
 
 /* The app's places under the tabs, as the finder's tests have them. */
@@ -246,6 +296,19 @@ describe('the plan gauge in the bar', () => {
       expect(screen.getByRole('button', { name: /^Plan usage: / }).getAttribute('aria-label')).toBe(
         `Plan usage: Claude Code has 3% left, until ${clock(RESET)}`,
       ),
+    )
+  })
+
+  it('leaves out a window as its reset passes while it shows, though nothing is read again', async () => {
+    vi.useRealTimers()
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: new Date('2026-10-15T14:59:30.000Z') })
+    windowAt('/', planUsage([claudeBoth]))
+    expect((await gauge()).getAttribute('aria-label')).toBe(`Plan usage: Claude Code has 3% left, until ${clock(RESET)}`)
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(screen.getByRole('button', { name: /^Plan usage: / }).getAttribute('aria-label')).toBe(
+      `Plan usage: Claude Code has 60% left, until ${clock(WEEK)}`,
     )
   })
 

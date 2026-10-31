@@ -331,6 +331,32 @@ describe('the usage reader', () => {
     expect(endpointSources().find((source) => source.id === 'claude-oauth')?.every).toBe(5 * 60_000)
   })
 
+  it('says again inside the interval what the last read said, where it read no windows: never a wait the provider didn’t ask for', async () => {
+    for (const [reply, said] of [
+      [{ status: 500 }, { kind: 'fault', fault: 'unreachable', message: 'The provider answered with an error.' }],
+      [{ throws: true }, { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' }],
+      [{ status: 401 }, { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }],
+      [{ status: 429 }, { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' }],
+    ] as const) {
+      let time = Date.parse('2026-10-15T12:00:00Z')
+      const { seen, fetch } = server(reply)
+      const r = reader({ fetch, now: () => new Date(time) })
+      const home = fakeHome()
+      expect(await r.read('codex-chatgpt', codex(home))).toMatchObject(said)
+      time += MIN_INTERVAL - 1
+      expect(await r.read('codex-chatgpt', codex(home)), JSON.stringify(reply)).toEqual(said)
+      expect(seen).toHaveLength(1)
+    }
+    // An account with no sign-in to read is one still, not one waiting.
+    const { seen, fetch } = server({})
+    const r = reader({ fetch })
+    const missing = mkdtempSync(join(tmpdir(), 'althar-usage-'))
+    homes.push(missing)
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(seen).toHaveLength(0)
+  })
+
   it('makes one call for readers asking together, and none inside the minute after', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
@@ -352,6 +378,26 @@ describe('the usage reader', () => {
     expect(seen).toHaveLength(1)
   })
 
+  it('stamps the windows with when it asked, not when they came, and gives that time again while it waits as a 429 asked', async () => {
+    let time = Date.parse('2026-10-15T12:00:00Z')
+    const asked = new Date(time).toISOString()
+    let reply: Reply = {}
+    const answer = server(() => reply).fetch
+    // Each answer takes two seconds to come.
+    const fetch: typeof answer = async (url, init) => {
+      time += 2000
+      return answer(url, init)
+    }
+    const r = reader({ fetch, now: () => new Date(time) })
+    const home = fakeHome()
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: false, usage: { observedAt: asked } })
+    time += MIN_INTERVAL
+    reply = { status: 429, retryAfter: '3600' }
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', last: { observedAt: asked } })
+    time += 60_000
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true, usage: { observedAt: asked } })
+  })
+
   it('waits as long as a 429 asks, or longer each time where it doesn’t say, showing the last windows meanwhile', async () => {
     let time = Date.parse('2026-10-15T12:00:00Z')
     let reply: Reply = {}
@@ -361,16 +407,25 @@ describe('the usage reader', () => {
     await r.read('codex-chatgpt', codex(home))
     time += MIN_INTERVAL
     reply = { status: 429 }
-    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', fault: 'unreachable', last: { source: 'endpoint' } })
+    // Each time it is asked to wait, it says what the provider sent and when it asks again, for the log.
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      kind: 'fault',
+      fault: 'unreachable',
+      last: { source: 'endpoint' },
+      waiting: { retryAfter: null, until: new Date(time + MIN_INTERVAL * 2).toISOString() },
+    })
     time += MIN_INTERVAL + 1
     expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true })
     expect(seen).toHaveLength(2)
     time += MIN_INTERVAL * 2
     reply = { status: 429, retryAfter: '3600' }
-    await r.read('codex-chatgpt', codex(home))
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      waiting: { retryAfter: '3600', until: new Date(time + 3_600_000).toISOString() },
+    })
     expect(seen).toHaveLength(3)
     time += 59 * 60_000
-    await r.read('codex-chatgpt', codex(home))
+    // Waiting, it isn't asked: the last windows, and nothing to log.
+    expect(await r.read('codex-chatgpt', codex(home))).not.toHaveProperty('waiting')
     expect(seen).toHaveLength(3)
     time += 61_000
     reply = {}

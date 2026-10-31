@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { normalize } from '../src/events'
-import { claudeRateLimitWindow, codexUsage, leftOf, readAgentUsage, tightestWindow, windowKind } from '../src/usage'
+import { claudeRateLimitWindows, codexUsage, leftOf, readAgentUsage, tightestWindow, windowKind } from '../src/usage'
 
 const NOW = new Date('2026-10-15T12:00:00.000Z')
 
@@ -260,7 +260,22 @@ describe('asking Codex’s app-server', () => {
 })
 
 describe('Claude Code’s rate-limit event', () => {
-  const info = (extra: Record<string, unknown>) => ({
+  const at = (seconds: number) => new Date(seconds * 1000).toISOString()
+  /** As the CLI sent it on a Max plan with room, 30 October 2026 (SDK 0.3.312): no use of its own, each window it tracks in `unifiedWindows`. */
+  const seen = {
+    status: 'allowed',
+    resetsAt: 1_793_402_400,
+    rateLimitType: 'five_hour',
+    overageStatus: 'rejected',
+    overageDisabledReason: 'org_level_disabled',
+    isUsingOverage: false,
+    unifiedWindows: {
+      five_hour: { utilization: 0.3, resetsAt: 1_793_402_400, status: 'allowed' },
+      seven_day: { utilization: 0.62, resetsAt: 1_793_617_200, status: 'allowed' },
+    },
+  }
+  /** One that names its own window's use, as the CLI does once it nears its limit, and as older CLIs did alone. */
+  const warning = (extra: Record<string, unknown>) => ({
     status: 'allowed_warning',
     rateLimitType: 'five_hour',
     utilization: 0.42,
@@ -268,59 +283,90 @@ describe('Claude Code’s rate-limit event', () => {
     ...extra,
   })
 
-  it('is one window, its use a fraction of 1 and its reset in epoch seconds', () => {
-    expect(claudeRateLimitWindow(info({}))).toEqual({
-      kind: 'five_hour',
-      usedPercent: 42,
-      resetsAt: new Date(1_760_540_400_000).toISOString(),
-    })
-    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day', utilization: 0.071 }))).toMatchObject({
-      kind: 'weekly',
-      usedPercent: 7.1,
-    })
+  it('is every window the CLI tracks, though the event names no use of its own', () => {
+    expect(claudeRateLimitWindows(seen)).toEqual([
+      { kind: 'five_hour', usedPercent: 30, resetsAt: at(1_793_402_400) },
+      { kind: 'weekly', usedPercent: 62, resetsAt: at(1_793_617_200) },
+    ])
+  })
+
+  it('is the event’s own window where it names its use, a fraction of 1, with its reset in epoch seconds', () => {
+    expect(claudeRateLimitWindows(warning({}))).toEqual([{ kind: 'five_hour', usedPercent: 42, resetsAt: at(1_760_540_400) }])
+    expect(claudeRateLimitWindows(warning({ rateLimitType: 'seven_day', utilization: 0.071 }))).toMatchObject([
+      { kind: 'weekly', usedPercent: 7.1 },
+    ])
+  })
+
+  it('adds the event’s own window where the tracked ones don’t carry it, and keeps theirs where they do', () => {
+    const opus = { ...seen, status: 'allowed_warning', rateLimitType: 'seven_day_opus', utilization: 0.91, resetsAt: 1_793_617_200 }
+    expect(claudeRateLimitWindows(opus).map((window) => [window.kind, window.label, window.usedPercent])).toEqual([
+      ['five_hour', undefined, 30],
+      ['weekly', undefined, 62],
+      ['weekly', 'Opus', 91],
+    ])
+    expect(claudeRateLimitWindows({ ...seen, utilization: 0.31 }).map((window) => window.usedPercent)).toEqual([30, 62])
   })
 
   it('names a window of one model, and extra usage, by what it is', () => {
-    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day_opus' }))).toMatchObject({ kind: 'weekly', label: 'Opus' })
-    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day_sonnet' }))).toMatchObject({ kind: 'weekly', label: 'Sonnet' })
-    expect(claudeRateLimitWindow(info({ rateLimitType: 'overage' }))).toMatchObject({ kind: 'other', label: 'Extra usage' })
+    expect(claudeRateLimitWindows(warning({ rateLimitType: 'seven_day_opus' }))).toMatchObject([
+      { kind: 'weekly', label: 'Opus', model: 'opus' },
+    ])
+    expect(claudeRateLimitWindows(warning({ rateLimitType: 'seven_day_sonnet' }))).toMatchObject([{ kind: 'weekly', label: 'Sonnet' }])
+    expect(claudeRateLimitWindows(warning({ rateLimitType: 'overage' }))).toMatchObject([
+      { kind: 'other', label: 'Extra usage', spend: true },
+    ])
+    expect(claudeRateLimitWindows({ unifiedWindows: { seven_day_overage_included: { utilization: 0.5 } } })).toEqual([
+      { kind: 'weekly', label: 'With extra usage', usedPercent: 50 },
+    ])
   })
 
-  it('keeps a use to the plan and has no window for an event that does not name one', () => {
-    expect(claudeRateLimitWindow(info({ utilization: 1.4 }))).toMatchObject({ usedPercent: 100 })
-    expect(claudeRateLimitWindow(info({ utilization: -1 }))).toMatchObject({ usedPercent: 0 })
-    expect(claudeRateLimitWindow(info({ resetsAt: undefined }))).toEqual({ kind: 'five_hour', usedPercent: 42 })
-    for (const odd of [
+  it('keeps a use to the plan, and leaves out what it doesn’t know', () => {
+    expect(claudeRateLimitWindows(warning({ utilization: 1.4 }))).toMatchObject([{ usedPercent: 100 }])
+    expect(claudeRateLimitWindows(warning({ utilization: -1 }))).toMatchObject([{ usedPercent: 0 }])
+    expect(claudeRateLimitWindows(warning({ resetsAt: undefined }))).toEqual([{ kind: 'five_hour', usedPercent: 42 }])
+    const odd = {
+      new_kind: { utilization: 0.5 },
+      five_hour: { utilization: 'a lot' },
+      seven_day: 'x',
+      seven_day_opus: { utilization: 0.2, resetsAt: 1e20 },
+    }
+    for (const none of [
       null,
       'x',
       {},
-      info({ rateLimitType: undefined }),
-      info({ rateLimitType: 'new_kind' }),
-      info({ utilization: undefined }),
-      info({ utilization: 'a lot' }),
-      info({ resetsAt: 1e20 }),
+      { ...seen, unifiedWindows: odd },
+      { ...seen, unifiedWindows: 'x' },
+      warning({ rateLimitType: undefined }),
+      warning({ rateLimitType: 'new_kind' }),
+      warning({ utilization: undefined }),
+      warning({ utilization: 'a lot' }),
+      warning({ resetsAt: 1e20 }),
     ])
-      expect(claudeRateLimitWindow(odd), JSON.stringify(odd)).toBeNull()
+      expect(claudeRateLimitWindows(none), JSON.stringify(none)).toEqual([])
   })
 
-  it('rides on the context usage the adapter streams, where its _meta carries one', () => {
-    const update = { sessionUpdate: 'usage_update', used: 10, size: 100, _meta: { '_claude/rateLimit': info({}) } } as never
+  it('rides on the context usage the adapter streams, where its _meta carries any', () => {
+    const update = { sessionUpdate: 'usage_update', used: 10, size: 100, _meta: { '_claude/rateLimit': seen } } as never
     expect(normalize(update)).toMatchObject({
       _tag: 'ContextUsage',
       used: 10,
       size: 100,
-      planWindow: { kind: 'five_hour', usedPercent: 42 },
+      planWindows: [
+        { kind: 'five_hour', usedPercent: 30 },
+        { kind: 'weekly', usedPercent: 62 },
+      ],
     })
-    expect(normalize({ sessionUpdate: 'usage_update', used: 10, size: 100, _meta: { other: 1 } } as never)).toEqual({
-      _tag: 'ContextUsage',
-      used: 10,
-      size: 100,
-    })
+    for (const meta of [{ other: 1 }, { '_claude/rateLimit': { status: 'allowed', rateLimitType: 'five_hour' } }])
+      expect(normalize({ sessionUpdate: 'usage_update', used: 10, size: 100, _meta: meta } as never)).toEqual({
+        _tag: 'ContextUsage',
+        used: 10,
+        size: 100,
+      })
   })
 
   it('comes alone, with no context figure, where the adapter has none yet and says 0', () => {
-    const update = { sessionUpdate: 'usage_update', used: 0, size: 200_000, _meta: { '_claude/rateLimit': info({}) } } as never
-    expect(normalize(update)).toEqual({ _tag: 'PlanWindow', window: claudeRateLimitWindow(info({})) })
+    const update = { sessionUpdate: 'usage_update', used: 0, size: 200_000, _meta: { '_claude/rateLimit': seen } } as never
+    expect(normalize(update)).toEqual({ _tag: 'PlanWindows', windows: claudeRateLimitWindows(seen) })
     expect(normalize({ sessionUpdate: 'usage_update', used: 0, size: 100 } as never)).toMatchObject({ _tag: 'ContextUsage', used: 0 })
   })
 })

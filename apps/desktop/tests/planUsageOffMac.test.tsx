@@ -1,6 +1,6 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
 import { fakeClient, fakeHost, planUsage, project } from './fixtures'
@@ -35,6 +35,14 @@ const projectRoute = createRoute({
 })
 
 const peek = () => screen.queryByRole('dialog', { name: 'Plan usage' })
+
+// The fixture's windows read at its own time: one past its reset is no longer shown.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-15T10:05:00.000Z') })
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('the plan gauge in the bar, off a Mac', () => {
   it('opens on Control-U, and closes on the same key', async () => {
