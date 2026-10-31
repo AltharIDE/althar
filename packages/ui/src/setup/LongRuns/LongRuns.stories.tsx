@@ -82,7 +82,7 @@ export const NeverChecksIn: Story = {
 export const AllStates: Story = {
   render: () => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'today’s values', node: <LongRuns value={longRunsDefault} onChange={fn()} /> },
         {

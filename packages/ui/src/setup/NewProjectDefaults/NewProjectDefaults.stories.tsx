@@ -79,7 +79,7 @@ export const OtherAccounts: Story = {
 export const AllStates: Story = {
   render: () => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'starting values', node: <NewProjectDefaults value={newProjectDefault} onChange={fn()} /> },
         {

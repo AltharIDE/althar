@@ -31,7 +31,7 @@ export interface LongRunsValue {
 export const longRunsDefault: LongRunsValue = { countdown: 25, rounds: 3, quiet: 10, checkIn: 6 }
 
 export interface LongRunsText {
-  countdown: { title: string; note: string; label: (seconds: Countdown) => string }
+  countdown: { title: string; note: (seconds: Countdown) => string; label: (seconds: Countdown) => string }
   rounds: { title: string; note: string; label: (rounds: ReviewRounds) => string }
   quiet: { title: string; note: string; label: (minutes: QuietMinutes) => string }
   checkIn: { title: string; note: (hours: CheckIn) => string; label: (hours: CheckIn) => string }
@@ -42,7 +42,7 @@ export interface LongRunsText {
 export const longRunsText: LongRunsText = {
   countdown: {
     title: 'Start a plan after',
-    note: 'You can start or hold it before then.',
+    note: (seconds) => (seconds === 0 ? 'The plan starts as soon as it’s proposed.' : 'You can start or hold it before then.'),
     label: (seconds) => (seconds === 0 ? 'Right away' : seconds === 60 ? '1 minute' : `${seconds} seconds`),
   },
   rounds: {
@@ -117,7 +117,7 @@ export function LongRuns({ value, onChange, text }: LongRunsProps) {
   }
   return (
     <SettingList>
-      {row('countdown', t.countdown.title, t.countdown.note, COUNTDOWNS, t.countdown.label)}
+      {row('countdown', t.countdown.title, t.countdown.note(value.countdown), COUNTDOWNS, t.countdown.label)}
       {row('rounds', t.rounds.title, t.rounds.note, ROUNDS, t.rounds.label)}
       {row('quiet', t.quiet.title, t.quiet.note, QUIETS, t.quiet.label)}
       {row('checkIn', t.checkIn.title, t.checkIn.note(value.checkIn), CHECK_INS, t.checkIn.label)}
