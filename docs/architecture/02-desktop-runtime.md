@@ -233,21 +233,32 @@ said leaves the machine (ADR-017).
 
 Closing a window is not the same as quitting the application. On a Mac,
 closing the last window leaves the runtime and its work running. Elsewhere it
-quits today (`main.ts`, `window-all-closed`); where there is a tray, it will
+quits today (`main.ts`, `window-all-closed`), through the same question; where there is a tray, it will
 keep working there (DEV-122).
 
-Quitting today (`main.ts`, `before-quit`):
+Quitting (`main.ts`, `before-quit`):
 
-1. main posts `shutdown` to the runtime;
-2. the runtime closes its scope, which stops every session as Stop does: the
+1. every quit, from the menu, ⌘Q, the edge or a window closing, is held while
+   main asks the runtime what it would stop (`work`, `runtime/atWork.ts`):
+   the leads and reviews at work as Busy counts them, the project runs still
+   going, and what agents left running. With nothing at work it goes on at
+   once;
+2. otherwise a window asks the person (`QuitWork` in the kit): quit anyway,
+   keep working in the background where the edge keeps Althar in reach (the
+   windows close, the runtime carries on, and closing the last window no
+   longer quits until one opens again), or cancel. An update that waits says
+   quitting installs it now. A second quit while the question is open is the
+   person's yes;
+3. main posts `shutdown` to the runtime;
+4. the runtime closes its scope, which stops every session as Stop does: the
    turn ends, the agent's process group gets TERM, a grace period, then KILL,
    and both are recorded (`Sessions.ts`, `stopProcessGroup` in
    `provider-adapters`);
-3. main waits for the runtime to exit, at most 20 seconds, then kills it.
+5. main waits for the runtime to exit, at most 20 seconds, then kills it.
 
-It doesn't yet check for active work, say what will be interrupted, or offer to
-keep working in the background instead: that is DEV-118, and with it Quit
-records what it stopped and what remains uncertain.
+The turn a quit stopped is recorded as interrupted, and Althar carries the
+task on when it opens again. What remains uncertain after a quit is still
+recovery's to compare (below).
 
 The product should never imply that work survives full application termination
 unless an independent runner/daemon actually exists.

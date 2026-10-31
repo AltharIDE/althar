@@ -1,5 +1,6 @@
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
+import s from './QuitWork.module.css'
 
 /*
  * Quit with work under way (DEV-118): it names what quitting stops, in a few
@@ -95,7 +96,7 @@ export function QuitWork({ work, background = false, update, onQuit, onBackgroun
         </>
       }
     >
-      {update !== undefined && <p>{t.update(update)}</p>}
+      {update !== undefined && <p className={s.update}>{t.update(update)}</p>}
     </Dialog>
   )
 }
