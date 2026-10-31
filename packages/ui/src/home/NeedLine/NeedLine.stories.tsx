@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { DECISION, PUBLISH, QUESTION, READY, STATUS, STUCK } from '../../fixtures/home'
+import { DECISION, PUBLISH, QUESTION, QUESTION_LONG, READY, STATUS, STUCK } from '../../fixtures/home'
 import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
 import { NeedLine, NeedList } from './NeedLine'
@@ -146,6 +146,32 @@ export const Question: Story = {
     await expect(c.getByText(QUESTION.why)).toBeInTheDocument()
     await expect(c.queryByText(QUESTION.options[0]?.label ?? '')).not.toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
+  },
+}
+
+/** A free-form question, no options: its headline and Answer. */
+export const QuestionNoOptions: Story = {
+  render: () => (
+    <NeedList style={{ maxWidth: 760 }}>{question({ title: QUESTION_LONG.title, task: QUESTION_LONG.task, brief: undefined })}</NeedList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: QUESTION_LONG.title })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
+  },
+}
+
+/** The lead sent a paragraph: the headline, and the background clamped to two lines. */
+export const QuestionLong: Story = {
+  render: () => (
+    <NeedList style={{ maxWidth: 760 }}>
+      {question({ title: QUESTION_LONG.title, task: QUESTION_LONG.task, brief: QUESTION_LONG.background })}
+    </NeedList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: QUESTION_LONG.title })).toBeInTheDocument()
+    await expect(c.getByText(/^ADR-070 says/)).toBeInTheDocument()
   },
 }
 

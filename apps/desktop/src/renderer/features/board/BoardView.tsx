@@ -427,6 +427,8 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
     ...(call.kind === 'permission' && call.command !== null
       ? { object: <CommandChip title={call.command}>{call.label ?? call.command}</CommandChip> }
       : {}),
+    // A question's one step is to answer it, in its task.
+    ...(call.kind === 'question' ? { next: <NextStep signal>{text.answer}</NextStep> } : {}),
   }
 }
 
