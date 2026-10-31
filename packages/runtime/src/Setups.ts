@@ -3,7 +3,7 @@ import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { type LaunchSpec, spawnOwned } from '@althar/provider-adapters'
+import { type LaunchSpec, spawnOwned, withoutTrailingSlashes } from '@althar/provider-adapters'
 import { bumpRevision } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -100,7 +100,7 @@ export const shownOf = (recorded: Pick<Recorded, 'copy' | 'commands'>): string =
 
 /** A path a setup copies: from the repository's root, inside it, and never in its `.git`. */
 export const copyablePath = (path: string): string | null => {
-  const tidy = normalize(path.trim()).replaceAll('\\', '/').replace(/\/+$/, '')
+  const tidy = withoutTrailingSlashes(normalize(path.trim()).replaceAll('\\', '/'))
   if (tidy === '' || tidy === '.' || isAbsolute(tidy) || /^[a-z]:/i.test(tidy)) return null
   const parts = tidy.split('/')
   return parts.includes('..') || parts[0] === '.git' ? null : tidy
@@ -396,7 +396,13 @@ export class Setups extends Context.Service<
           const folder = unset.within === null ? unset.worktree : join(unset.worktree, unset.within)
           const recorded = recordedOf(unset.recorded)
           // The install itself, not one that skips a `node_modules` there already: one an install cut short left isn't set up.
-          const command = recorded !== null ? shownOf(recorded) : (unset.kept ?? installIn(folder, unset.worktree))
+          // A recorded setup with nothing in it says the repository needs nothing.
+          const command =
+            recorded !== null
+              ? recorded.commands.length === 0 && recorded.copy.length === 0
+                ? null
+                : shownOf(recorded)
+              : (unset.kept ?? installIn(folder, unset.worktree))
           if (command === null) {
             yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
             return undefined
@@ -595,7 +601,7 @@ export class Setups extends Context.Service<
       const recordTool = {
         name: 'record_setup',
         description:
-          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
+          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Where the folder needs nothing, record that, with no commands and no files. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
         input: {
           type: 'object',
           properties: {
@@ -624,8 +630,6 @@ export class Setups extends Context.Service<
               return yield* new ToolRefused({
                 message: `Name each file to copy from the repository's root, inside it and not in .git: ${outside.join(', ')}.`,
               })
-            if (commands.length === 0 && copy.length === 0)
-              return yield* new ToolRefused({ message: 'Give the commands that got the folder ready, or the files to copy, or both.' })
             if (commands.length > MOST_COMMANDS || commands.some((one) => one.length > LONGEST_COMMAND))
               return yield* new ToolRefused({
                 message: `Give at most ${MOST_COMMANDS} commands, each under ${LONGEST_COMMAND} characters: put a longer one in a script of the repository's.`,
@@ -644,6 +648,8 @@ export class Setups extends Context.Service<
             const recorded: Recorded = { copy, commands, at: yield* provide(timestamp), taskId }
             yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId))
             const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
+            if (commands.length === 0 && copy.length === 0)
+              return `Recorded that ${one.name} needs nothing set up: later tasks' leads won't be asked again.`
             return [
               `Recorded ${one.name}'s setup: Althar gets every later task's folder ready with it before its lead starts.`,
               ...(copied.length === 0 ? [] : [`In your folder now: ${copied.join('; ')}.`]),
@@ -713,7 +719,7 @@ export const toldOf = (
         ? failedSetUp(setUp)
           ? `See why first, then get ${where} ready yourself, and record the setup that works with record_setup: it replaces the one that failed, for every later task.`
           : null
-        : `No setup is recorded for ${several ? name : 'the repository'} yet, so get ${where} ready to work in before anything else: install what it needs, its dependencies and what its tools download (Electron's build, Playwright's browsers), and copy the ignored files it needs from ${from}, such as \`.env\`, by naming them to record_setup. Then record what worked with record_setup, so Althar gets every later task's folder ready the same way before its lead starts.`
+        : `No setup is recorded for ${several ? name : 'the repository'} yet, so get ${where} ready to work in before anything else: install what it needs, its dependencies and what its tools download (Electron's build, Playwright's browsers), and copy the ignored files it needs from ${from}, such as \`.env\`, by naming them to record_setup. Then record what worked with record_setup, or that it needs nothing, so Althar gets every later task's folder ready the same way before its lead starts.`
       return [ran, asked].filter((said) => said !== null)
     })
     .join('\n\n')

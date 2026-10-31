@@ -367,10 +367,17 @@ export interface UpFront {
   readonly writes?: ReadonlyArray<string>
 }
 
+/** A path without the slashes it ends with: a loop, not a pattern, which a long run of slashes would make slow. */
+export const withoutTrailingSlashes = (path: string): string => {
+  let end = path.length
+  while (end > 0 && path[end - 1] === '/') end -= 1
+  return path.slice(0, end)
+}
+
 /** The folders a lead's sandbox writes to beyond its own, without any of, in or over where keys and sign-ins are kept. */
 export const writesOf = (writes: ReadonlyArray<string>): ReadonlyArray<string> =>
   writes.filter((folder) => {
-    const path = folder.replace(/^~\//, '').replace(/\/+$/, '')
+    const path = withoutTrailingSlashes(folder.startsWith('~/') ? folder.slice(2) : folder)
     return (
       folder.startsWith('~/') &&
       path !== '' &&

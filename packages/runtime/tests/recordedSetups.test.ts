@@ -118,13 +118,32 @@ describe('a setup a lead records', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('is refused with nothing in it, a file outside the repository, or off a task', () =>
+  it.live('is refused with a file outside the repository, or off a task', () =>
     Effect.gen(function* () {
       const { lead } = yield* taskIn(withEnv())
-      assert.match(yield* callTool(lead, 'record_setup', { commands: [] }), /^Give the commands that got the folder ready/)
       assert.match(yield* callTool(lead, 'record_setup', { copy: ['../secrets.env'], commands: [] }), /^Name each file to copy/)
       assert.match(yield* callTool(lead, 'record_setup', { copy: ['.git/config'], commands: ['make'] }), /^Name each file to copy/)
       assert.match(yield* callTool({ ...lead, taskId: null }, 'record_setup', { commands: ['make'] }), /^This tool is for a task’s lead/)
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a recorded setup with nothing in it', () => {
+  it.live('says the repository needs nothing: later tasks run nothing, and their leads aren’t asked again', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      assert.strictEqual(
+        yield* callTool(first.lead, 'record_setup', { commands: [] }),
+        `Recorded that ${basename(path)} needs nothing set up: later tasks' leads won't be asked again.`,
+      )
+      const later = yield* taskIn(path, 'Refund over budget')
+      assert.deepInclude(yield* setUpOf(later.task.taskId), { command: null, code: null })
+      assert.lengthOf(yield* setupItems(later.task.threadId), 0)
+      const said = yield* brief(later.task.threadId)
+      assert.notInclude(said, 'No setup is recorded')
+      assert.notInclude(said, 'Althar set it up')
     }).pipe(Effect.provide(runtime())),
   )
 })
