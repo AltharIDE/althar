@@ -183,6 +183,10 @@ that reports and doesn't gate.
 
 - In CI a failed test runs once more, and one that passes only then gets an
   issue labelled `flaky` (#409).
+- While that issue is open, the test is quarantined: it runs in every CI job,
+  but its failures go on its issue and the job's summary rather than failing
+  the job, and it gates again once the issue closes. The summary warns when
+  more than ten are. `stress` and `nightly` don't quarantine.
 - A pull request's new and changed tests run 20 times, on Linux and Windows,
   and its changed end-to-end specs 5 times; a flake fails the pull request.
 - Every night the whole suite runs shuffled, and five times over on Windows.
@@ -260,11 +264,58 @@ fixed where it is.
   jobs per entry (the Linux packages in one job) and three entries at a time
   would keep the queue moving.
 
+## Where it stands (31 October)
+
+- **Done:**
+  - **Phases 0 and 1:** retry, flaky issues, sizes, budgets and one way to wait (#409).
+  - **Phase 2:** end-to-end waits (#423).
+  - **Phase 3:** one clock, a lint rule, 21 timer tests on TestClock and four duration checks (#424).
+  - **Phase 5:** stress and nightly runs (#419).
+  - **Phase 6:** the end-to-end run in the queue, fewer jobs, three entries built at a time (#419); the whole end-to-end run on the pull request (#442); each pull request and queue entry only what its change reaches, and Windows' unit tests after merge (#451).
+  - **Quarantine:** a test with an open flaky issue still runs, but doesn't fail its job (#449).
+  - **The five order races,** and three more the flaky issues found (#418).
+  - **Phase 4, in part:**
+    - free ports, and `gh`'s deadline from the budget (#420);
+    - the fake agent's git asynchronous;
+    - testing-library's waits from the budget (#418).
+  - **The hardening pull request (#459):**
+    - one way to remove a file or folder, retried, which never fails the work it follows (`cleanUp`, `removeFully`), and `althar/one-removal` holding the runtime and the agent adapters to it;
+    - the end-to-end app's own home and PATH, so no spec reads this computer's agents;
+    - `e2eLimits` failing a spec that imports what Node can't load;
+    - the four performance checks out of the unit tests, into a performance run `nightly` reports on;
+    - the fake agent's timed holds and the fake host's merge as gates a test opens;
+    - the queue waiting for a stress run still going;
+    - ADR-074 for how CI gates.
+- **Found on the way, and fixed:**
+  - two catalog reads at once started every agent twice (#418);
+  - a test that depended on the machine having `~/Documents` (#411);
+  - a board class name colliding with the Up next lane's, which broke dragging in Up next (#403);
+  - three tests and a spec that kept state between runs (#402, #411, #418);
+  - a probe's folder Windows still held lost what the probe found, and had the agent asked twice (#431, #434; fixed in #446);
+  - the permission judge's folder the same, which left a judgment the coordinator had made to the person (#448);
+  - a spec that went on at a round's card raced the round's end (#438; fixed in #445);
+  - a process's temporary folder the same, which left its `stopped` signal unset (#459).
+- **Left, none of it a flake the census or the first days of stress and flaky issues saw:**
+  - **Phase 4's git, process and port lookups as services with fakes.** Git has 167 call sites; once phase 3's budget is in, this is about speed on Windows more than flakes. `folderCleanup`'s two flakes were slow git there.
+  - **45 tests that pass short real-time timer options** (`listenEvery: 100 ms`), and with them the fake agent's timings measured against the runtime's own windows in real time (`[lead:resolve-tests*]`, `[lead:serve*]`), which go onto the test's clock together.
+  - **The app's fake agent can't be held from a spec,** so `rounds`, `kinds` and `firstWord` still wait out its timed markers (`[lead:slowly]`, `[answers-after:Ns]`, `ALTHAR_FAKE_SLOW_START`); a held file, as the fake host's merge now is, would do.
+  - **`process.env` writes in eleven runtime test files.** Vitest runs each file in a worker of its own, so they can't reach another file, and each test puts back what it changed.
+
+## Open problems
+
+A running list: each goes when it is fixed, and a new one is added as it is found.
+
+- **#430, `sessionEdges` › "in a task of several repositories, says it carries on in the same worktrees".** It flaked once in the queue: the person's first follow-up was never delivered. It passes 20 runs on a Mac. Its report didn't say which wait timed out; since #433 a wait's report keeps a long prompt's state, so the next one will.
+- **An agent's last words after its turn read as more work (`Sessions.ts`).** An update the agent sends as its turn ends can reach the runtime after the turn's own stream has closed. It then counts as the agent at work outside a turn, busy for `QUIET_FOR` (30 s), and a lead handover due at that break waits for the next one. #429 made `leadHandover`'s test wait for the lead to be done; the cause needs the agent connection to finish handing over a turn's updates before it ends the turn.
+- **A lead's permission asked while a round's review runs shows on the reviewer's card in the graph, and on none once the round ends** (`callsOf` in `graph.ts`). Found with #445; where it belongs is a product call.
+- **Coverage only after merge.** The merge queue doesn't run the coverage gates, or build the Linux packages, so a pull request can pass the queue and still turn main red on either; ADR-074 takes that on, and a release still waits for both. Running coverage in the queue for changes to the gated packages would close it.
+- **Phase 4's rest** (Where it stands, above): git, processes and ports as services with fakes, and the 45 tests on short real-time timer options.
+
 ## Phases
 
 Each is one pull request, through the queue.
 
-0. **Retry and flaky issues** (#409, with #404's index fix). In the queue.
+0. **Retry and flaky issues** (#409, with #404's index fix).
 1. **Waits and budgets (B, C), in the unit tests.** `@althar/testing` gets
    the sizes, the budget and the scale; one `until` and one `waitFor` replace
    the others; the 87 test times, 419 wait times and the loops that gave up

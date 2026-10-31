@@ -233,6 +233,30 @@ export const ReadyChecksFailedNarrow: Story = {
   },
 }
 /**
+ * Where the project pushes its leads' commits on their own (ADR-072), Push shows only for those Althar held, with why: here,
+ * someone pushed to the pull request outside Althar, so the lead's commit waits rather than going on top unseen.
+ */
+export const ReadyPushHeldNarrow: Story = {
+  ...readyFoot(
+    260,
+    true,
+    [
+      { words: '7 checks failed', icon: 'close', tone: 'danger' },
+      { words: 'Someone else pushed to PR #344', icon: 'up', tone: 'warm' },
+    ],
+    'Push 1 commit',
+  ),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      '7 checks failed',
+      'Someone else pushed to PR #344',
+    ])
+    await expect(card.getByRole('button', { name: 'Push 1 commit to #344' })).toBeVisible()
+    await noStrayDots(canvasElement)
+  },
+}
+/**
  * Failing checks its lead brought to the person rather than fixing (ADR-070): only the check that fails, its lead's line being in
  * its task; nothing to ask of the lead, which said what would fix it.
  */
@@ -412,6 +436,16 @@ export const WaitingOverTheNumber: Story = {
   args: { ...CHANGE_QUEUED_MIDWAY, why: '6 of 6 agents busy on this Mac, and 1 more' },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('6 of 6 agents busy on this Mac, and 1 more')).toBeInTheDocument()
+  },
+}
+/** Its folder being set up before its lead starts: under way, saying what holds it, with no step begun and no clock. */
+export const SettingUp: Story = {
+  args: { ...CHANGE_QUEUED, status: TaskStatus.Running, word: 'Installing dependencies', why: undefined },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Installing dependencies')).toBeInTheDocument()
+    await expect(card.queryByText('Stopped')).toBeNull()
+    await expect(card.queryByRole('button', { name: 'Carry on' })).toBeNull()
   },
 }
 /** Stopped, as the board shows it: Carry on, which tells its lead to go on, the strip at its foot. */

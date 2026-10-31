@@ -44,6 +44,8 @@ export interface AcceptPeekText {
   noChecks: string
   /** Said in place of Accept while the lead's later commits aren't on the pull request. */
   unpushed: (n: number) => string
+  /** Said in place of Accept while the lead's later commits go up on their own. */
+  going: (n: number) => string
   push: string
 }
 
@@ -62,6 +64,7 @@ export const acceptPeekText: AcceptPeekText = {
   checksFirst: 'It can be accepted once its checks pass',
   noChecks: 'No checks ran on it.',
   unpushed: (n) => (n === 1 ? 'One commit isn’t on the pull request yet' : `${n} commits aren’t on the pull request yet`),
+  going: (n) => (n === 1 ? 'One commit is going up to the pull request' : `${n} commits are going up to the pull request`),
   push: 'Push',
 }
 
@@ -84,6 +87,8 @@ export interface AcceptPeekProps {
   /** Commits on the task's branch that aren't on the pull request yet: pushed first, with `onPush`. */
   unpushed?: number
   onPush?: () => void
+  /** Commits on the task's branch going up to the pull request on their own: accepted once they're on it. */
+  going?: number
   /** Pushing is under way: Push shows it and ignores presses. */
   pushing?: boolean
   onOpenFile?: (path: string) => void
@@ -111,6 +116,7 @@ export function AcceptPeek({
   onSendBack,
   unpushed = 0,
   onPush,
+  going = 0,
   pushing = false,
   onOpenFile,
   accepting = false,
@@ -186,6 +192,8 @@ export function AcceptPeek({
                 </Button>
                 <span className={s.wait}>{t.unpushed(unpushed)}</span>
               </>
+            ) : going > 0 ? (
+              <span className={s.wait}>{t.going(going)}</span>
             ) : passed ? (
               <Button variant="signal" busy={accepting} onClick={onAccept}>
                 {t.accept}

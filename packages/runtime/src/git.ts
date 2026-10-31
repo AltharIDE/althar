@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFile, type ExecFileException } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
+import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
@@ -95,6 +96,24 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/**
+ * A failed git command as git ended it: what it wrote to stderr, and how it
+ * stopped. Node's own message is only the command line, so it stands in only
+ * where git never ran or its output overflowed, a failure Node names itself.
+ * Stopped by Node with git still running is its time running out.
+ */
+const failedWith = (args: ReadonlyArray<string>, cwd: string, timeout: number, error: ExecFileException, stderr: string): GitFailed => {
+  const ownCode = typeof error.code === 'string'
+  return new GitFailed({
+    args: [...args],
+    cwd,
+    stderr: stderr.trim() || (ownCode ? error.message : ''),
+    ...(typeof error.code === 'number' ? { code: error.code } : {}),
+    ...(typeof error.signal === 'string' ? { signal: error.signal } : {}),
+    ...(error.killed === true && !ownCode ? { timedOut: true, timeout } : {}),
+  })
+}
+
 const run = (
   timeout: number,
   cwd: string,
@@ -117,11 +136,7 @@ const run = (
         env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
-        resume(
-          error === null
-            ? Effect.succeed(trim ? stdout.trim() : stdout)
-            : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
-        ),
+        resume(error === null ? Effect.succeed(trim ? stdout.trim() : stdout) : Effect.fail(failedWith(args, cwd, timeout, error, stderr))),
     )
     if (input === undefined || child.stdin === null) return
     // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
@@ -149,7 +164,8 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     }),
     (copy) =>
       Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
-    (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
+    // The index's copy goes as best it can: a folder git still holds a moment after it exits leaves the tree as it was read.
+    (copy) => cleanUp(dirname(copy), "where a worktree's tree was read"),
   )
 
 /** Commits a tree on top of a parent without touching any branch, as Althar: a snapshot a worktree can check out. */
@@ -306,6 +322,19 @@ export const remoteHeads = (cwd: string, source: FetchSource) =>
       }),
     ),
     Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Where a remote's branch is, asked of it now: its commit, null where the
+ * remote has no such branch, undefined where it can't be asked, as offline.
+ */
+export const branchOn = (cwd: string, source: FetchSource, branch: string) =>
+  run(15_000, cwd, ['ls-remote', '--heads', source.url, `refs/heads/${branch}`], signedIn(source)).pipe(
+    Effect.map((listed): string | null | undefined => {
+      const line = listed.split('\n').find((one) => one.endsWith(`\trefs/heads/${branch}`))
+      return line === undefined ? null : (/^[0-9a-f]{40,64}/.exec(line)?.[0] ?? null)
+    }),
+    Effect.orElseSucceed(() => undefined),
   )
 
 /**
@@ -506,7 +535,7 @@ export const addReadCopy = (repository: string, path: string, commit: string, re
       yield* write(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
       for (const [ref, at] of Object.entries(refs)) yield* git(path, 'update-ref', ref, at)
       yield* git(path, 'checkout', '--quiet', '--detach', commit)
-    }).pipe(Effect.tapError(() => Effect.sync(() => rmSync(path, { recursive: true, force: true }))))
+    }).pipe(Effect.tapError(() => cleanUp(path, 'a read copy that was never finished')))
   })
 
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -281,6 +281,8 @@ describe('accounts', () => {
       const accounts = yield* Accounts
       // As OpenCode's data folder: its sign-in stays the account's, other tools' data is shared.
       const usualFolder = (yield* (yield* Agents).get('opencode')).definition.home.usual({}, '')
+      // The usual folder lasts the run: what an earlier run of this test left there goes first.
+      rmSync(join(usualFolder, 'pnpm'), { recursive: true, force: true })
       mkdirSync(join(usualFolder, 'mise'), { recursive: true })
       writeFileSync(join(usualFolder, 'auth.json'), '{}')
       const own = yield* accounts.add({ agentId: 'opencode', name: 'second' })
@@ -539,7 +541,11 @@ describe('accounts', () => {
         ['codex', work.id],
       ])
       // Codex's last launch, its second account's session, is in that account's home, with whose work it is beside it.
-      assert.deepStrictEqual(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env, {
+      // Beside what git's guard adds to a lead's (pushGuard.ts).
+      const launched = Object.entries(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}).filter(
+        ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
+      )
+      assert.deepStrictEqual(Object.fromEntries(launched), {
         FAKE_HOME: workFolder,
         ALTHAR_WORK: `task:${ran.taskId}`,
       })

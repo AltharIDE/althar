@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
 
 /*
  * A task's Graph face (ADR-054), in a real window with the fake agents and
@@ -77,6 +77,9 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
     await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible()
     await expect(graph.getByRole('button', { name: /^Follow-up/ })).toBeVisible()
+    // Its review passes and the round ends, the task ready again. The marker and the card show as the round opens: what the person
+    // says before it ends is more of this round, which no new round's card holds.
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-follow-up.png', animations: 'disabled', scale: 'css' })
 

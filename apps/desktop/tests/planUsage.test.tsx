@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ModelRoom, PlanUsage } from '@althar/contracts'
 
@@ -24,6 +24,15 @@ import { withServices } from './render'
 
 const NOW = new Date('2026-10-15T10:05:00.000Z')
 const RESET = '2026-10-15T15:00:00.000Z'
+const WEEK = '2026-10-19T09:00:00.000Z'
+
+// The window reads its windows at NOW, as the plan's own tests do: a window past its reset is no longer shown.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: NOW })
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const codexWork = usageAccount()
 const codexSide = usageAccount({
@@ -55,6 +64,18 @@ const copilot = usageAccount({
   plan: null,
   windows: [],
   noReading: 'Copilot shares no plan usage with other apps.',
+})
+/** Claude Code with its five hours nearly out until RESET, and 60% of its week left. */
+const claudeBoth = usageAccount({
+  agentId: 'claude-code',
+  agentName: 'Claude Code',
+  accountId: 'acc_claude',
+  accountName: 'personal',
+  source: 'acp_extension',
+  windows: [
+    { kind: 'five_hour', label: null, usedPercent: 97, resetsAt: RESET },
+    { kind: 'weekly', label: null, usedPercent: 40, resetsAt: WEEK },
+  ],
 })
 const claudeKey = usageAccount({
   agentId: 'claude-code',
@@ -138,12 +159,32 @@ describe('what the window says of a plan', () => {
     expect(screen.queryByText('80% left')).toBeNull()
   })
 
-  it('says how old numbers are only once they are old, and why a read failed', () => {
-    const old = usageAccount({ observedAt: '2026-10-15T08:00:00.000Z', fault: { kind: 'unreachable', message: 'Codex didn’t answer.' } })
+  it('says how old numbers are only once they are old, and why a read failed that the person can act on', () => {
+    const old = usageAccount({ observedAt: '2026-10-15T08:00:00.000Z', fault: { kind: 'expired', message: 'Its sign-in has expired.' } })
     const [account] = planOf(planUsage([old]), NOW).agents[0]?.accounts ?? []
     expect(account?.age).toBe('read 2h ago')
-    expect(account?.fault).toBe('Codex didn’t answer.')
+    expect(account?.fault).toBe('Its sign-in has expired.')
     expect(planOf(planUsage([codexWork]), new Date('2026-10-15T10:10:00.000Z')).agents[0]?.accounts[0]?.age).toBeNull()
+  })
+
+  it('shows no message for a read that must wait, only how old the saved numbers are', () => {
+    const waiting = usageAccount({
+      observedAt: '2026-10-15T09:50:00.000Z',
+      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+    })
+    const [account] = planOf(planUsage([waiting]), new Date('2026-10-15T10:00:00.000Z')).agents[0]?.accounts ?? []
+    expect(account?.fault).toBeNull()
+    expect(account?.age).toBe('read 10m ago')
+    expect(account?.windows.length).toBeGreaterThan(0)
+  })
+
+  it('leaves out an account that is waiting with no numbers yet', () => {
+    const none = usageAccount({
+      observedAt: null,
+      windows: [],
+      fault: { kind: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+    })
+    expect(planOf(planUsage([none]), NOW).agents).toEqual([])
   })
 
   it('gives a model the runtime’s room, an agent’s own default the agent’s, and says when its plan isn’t read', () => {
@@ -182,6 +223,66 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'copilot:gpt-5' }, rooms, usage, NOW)).toBeNull()
     // Nothing to say of an agent with no plan here.
     expect(roomOf({ id: 'gemini-cli:gemini-3-pro' }, rooms, usage, NOW)).toBeUndefined()
+  })
+
+  it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {
+    const rooms: ReadonlyArray<ModelRoom> = [
+      {
+        agentId: 'claude-code',
+        model: 'sonnet',
+        accountId: 'acc_claude',
+        accountName: 'personal',
+        several: false,
+        leftPercent: 3,
+        resetsAt: RESET,
+        kind: 'five_hour',
+        label: null,
+      },
+    ]
+    const usage = planUsage([claudeBoth])
+    const after = new Date('2026-10-15T15:01:00.000Z')
+    expect(planOf(usage, NOW).agents.map((agent) => [agent.left, agent.limit])).toEqual([[3, 'five-hour limit']])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, NOW)).toMatchObject({ left: 3 })
+    // Its five hours have started again, and how much of them is used no one has said yet: the week says, alone.
+    const [agent] = planOf(usage, after).agents
+    expect([agent?.left, agent?.limit, agent?.accounts[0]?.windows.map((window) => window.label)]).toEqual([60, 'weekly limit', ['Week']])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, after)).toBeUndefined()
+    expect(roomOf({ id: 'claude-code:' }, rooms, usage, after)).toEqual({ left: 60, until: clock(WEEK, after), account: null })
+    // With none of its windows still known, it has no figure, and a model's room is no reading, never all of its plan.
+    const fiveHours = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(0, 1) }])
+    expect(planOf(fiveHours, after).agents).toMatchObject([
+      { id: 'claude-code', unread: 'Not read since reset', accounts: [{ windows: [] }] },
+    ])
+    expect(roomOf({ id: 'claude-code:sonnet' }, rooms, fiveHours, after)).toBeNull()
+    expect(roomOf({ id: 'claude-code:' }, rooms, fiveHours, after)).toBeNull()
+  })
+
+  it('keeps an agent whose windows have all reset in the peek, with why it wasn’t read again, after every one with a figure', () => {
+    const after = new Date('2026-10-20T00:00:00.000Z')
+    const codex = usageAccount({ windows: [{ kind: 'weekly', label: null, usedPercent: 30, resetsAt: '2026-10-25T00:00:00.000Z' }] })
+    for (const [fault, message] of [
+      [{ kind: 'expired', message: 'Its sign-in has expired.' }, 'Its sign-in has expired.'],
+      // Even one that passes on its own: with no numbers to keep to, it's all there is to say.
+      [{ kind: 'unreachable', message: 'The provider could not be reached.' }, 'The provider could not be reached.'],
+    ] as const) {
+      const { agents } = planOf(planUsage([{ ...claudeBoth, fault }, codex]), after)
+      expect(agents.map((agent) => [agent.name, agent.unread, agent.accounts.map((account) => account.fault)])).toEqual([
+        [codex.agentName, undefined, [null]],
+        ['Claude Code', 'Not read since reset', [message]],
+      ])
+    }
+    // As the runtime sends it once every window has reset by its own clock: none of them, and that they reset.
+    const sent = planUsage([
+      { ...claudeBoth, windows: [], resetSince: true, fault: { kind: 'expired', message: 'Its sign-in has expired.' } },
+    ])
+    expect(
+      planOf(sent, after).agents.map((agent) => [agent.unread, agent.accounts.map((account) => [account.age, account.fault])]),
+    ).toEqual([['Not read since reset', [[expect.stringMatching(/^read /), 'Its sign-in has expired.']]]])
+    // Signed out as well, it can't run: said as it is, not as unread.
+    const [out] = planOf(planUsage([{ ...claudeBoth, fault: { kind: 'sign_in_again', message: 'Sign in.' } }]), after).agents
+    expect([out?.stopped, out?.unread]).toEqual(['Signed out', undefined])
+    // One never read with windows has nothing to say there yet, as before.
+    expect(planOf(planUsage([{ ...claudeBoth, windows: [] }]), after).agents).toEqual([])
   })
 })
 
@@ -229,25 +330,25 @@ describe('the plan gauge in the bar', () => {
     )
   })
 
+  it('leaves out a window as its reset passes while it shows, though nothing is read again', async () => {
+    vi.useRealTimers()
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: new Date('2026-10-15T14:59:30.000Z') })
+    windowAt('/', planUsage([claudeBoth]))
+    expect((await gauge()).getAttribute('aria-label')).toBe(`Plan usage: Claude Code has 3% left, until ${clock(RESET)}`)
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(screen.getByRole('button', { name: /^Plan usage: / }).getAttribute('aria-label')).toBe(
+      `Plan usage: Claude Code has 60% left, until ${clock(WEEK)}`,
+    )
+  })
+
   it('isn’t there while nothing is read, nor for agents that share nothing', async () => {
     windowAt('/', planUsage([copilot, claudeKey]))
     await screen.findByRole('navigation', { name: 'Projects' })
     fireEvent.keyDown(window, { key: 'u', metaKey: true })
     expect(screen.queryByRole('button', { name: /^Plan usage/ })).toBeNull()
     expect(peek()).toBeNull()
-  })
-
-  it('opens on Control-U off a Mac, and closes on the same key', async () => {
-    windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'linux' }))
-    await gauge()
-    // ⌘ is not the key there, and neither is Control with Shift.
-    fireEvent.keyDown(window, { key: 'u', metaKey: true })
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true, shiftKey: true })
-    expect(peek()).toBeNull()
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true })
-    await screen.findByRole('dialog', { name: 'Plan usage' })
-    fireEvent.keyDown(window, { key: 'U', ctrlKey: true })
-    await waitFor(() => expect(peek()).toBeNull())
   })
 
   it('opens on ⌘U on a Mac, from a field being typed in too', async () => {

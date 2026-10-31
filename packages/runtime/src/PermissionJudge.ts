@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
-import { connect, type PermissionRequest, type TokenUsage } from '@althar/provider-adapters'
+import { cleanUp, connect, type PermissionRequest, type TokenUsage } from '@althar/provider-adapters'
 import { Cause, Clock, Context, type Crypto, Effect, Exit, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -42,6 +42,12 @@ export interface JudgeInput {
 }
 
 type Store = SqlClient.SqlClient | Crypto.Crypto | Instance | Agents | Accounts | Limits | SignIns | RuntimeConfig
+
+/**
+ * Removes the folder a judge ran in, as best it can (`cleanUp`): the judgment stands, where a folder Windows still holds
+ * failing it would leave the request to the person as one the coordinator couldn't decide.
+ */
+const removeFolder = (folder: string) => cleanUp(folder, 'where the coordinator judged a request')
 
 /** A bounded coordinator turn, only on agents with verified settings that remove their tools. Never trusts cwd or read-only mode as isolation. */
 export class PermissionJudge extends Context.Service<
@@ -196,7 +202,7 @@ export class PermissionJudge extends Context.Service<
                     ),
                   )
                 }),
-              (folder) => Effect.sync(() => rmSync(folder, { recursive: true, force: true })),
+              removeFolder,
             )
           })
           const answer = yield* evaluate.pipe(

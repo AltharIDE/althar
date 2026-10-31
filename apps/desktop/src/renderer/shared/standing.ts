@@ -1,6 +1,8 @@
 import type { ChangeSummary } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
+import { kindWords } from './calls'
+
 /*
  * What stands between a ready change's open pull request and merging it,
  * read from the change as Althar last saw it, most pressing first: commits
@@ -12,13 +14,19 @@ import type { IconName } from '@althar/ui'
  * that thing at its end; the home's line, as its brief with that thing as
  * its button. Both say them in the same words, and both do the person's own
  * (push, merge) right there; the lead's (resolve, fix) the card leaves to its
- * task.
+ * task. Where the project's rules push the lead's commits on their own
+ * (ADR-072), commits here are the person's to push only where Althar held
+ * them, and the card says why; the others are on their way, and nothing is
+ * accepted until they're on it.
  */
 
 export type Blocker =
   /** The branch here and the pull request have parted, so a plain push would be refused. */
   | { readonly kind: 'parted' }
-  | { readonly kind: 'unpushed'; readonly commits: number }
+  /** `held`: why they didn't go up on their own, where the project's rules push them so. */
+  | { readonly kind: 'unpushed'; readonly commits: number; readonly held: string | null }
+  /** Going up on their own as the lead's turn ends (ADR-072): not the person's to push, but not on it to accept yet either. */
+  | { readonly kind: 'going'; readonly commits: number }
   | { readonly kind: 'conflict'; readonly target: string | null }
   | { readonly kind: 'failed'; readonly failing: ReadonlyArray<string>; readonly failed: number }
   | { readonly kind: 'running'; readonly passed: number; readonly total: number }
@@ -41,6 +49,7 @@ export const standingText = {
   commits: (n: number) => (n === 1 ? '1 commit' : `${n} commits`),
   parted: (short: string) => `Branch and ${short} have parted`,
   unpushed: (n: number, short: string) => `${standingText.commits(n)} not on the ${short}`,
+  going: (n: number, short: string) => `${standingText.commits(n)} going up to the ${short}`,
   /** Commits to push that bring the branch up to date with the one the pull request conflicts with: pushing them clears the conflict. */
   pushResolves: (target: string | null) => `The push should resolve the conflict${target === null ? '' : ` with ${target}`}`,
   conflict: (target: string | null) => (target === null ? 'Has a merge conflict' : `Conflicts with ${target}`),
@@ -79,12 +88,24 @@ export const standingText = {
   },
 }
 
+/**
+ * Whether the commits here are the person's to push: always, unless the
+ * project's rules push them on their own and nothing held them (ADR-072).
+ */
+export const personPushes = (change: Pick<ChangeSummary, 'pushing'>): boolean =>
+  change.pushing === undefined || change.pushing.held !== null
+
 export const standingOf = (change: ChangeSummary): Standing => {
   const checks = change.checks
   const blockers: Blocker[] = []
-  // Commits here count only once the branch's head here is known, as the task's own Push does.
+  // Commits here count only once the branch's head here is known, as the task's own Push does; going up on their own, they wait.
   if (change.diverged !== null) blockers.push({ kind: 'parted' })
-  else if (change.localHead !== null && change.unpushed > 0) blockers.push({ kind: 'unpushed', commits: change.unpushed })
+  else if (change.localHead !== null && change.unpushed > 0)
+    blockers.push(
+      personPushes(change)
+        ? { kind: 'unpushed', commits: change.unpushed, held: change.pushing?.held ?? null }
+        : { kind: 'going', commits: change.unpushed },
+    )
   if (change.conflicts === true) blockers.push({ kind: 'conflict', target: change.target ?? null })
   // The checks say one thing: one failed, or they're still running, or, once done, one was cancelled.
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
@@ -104,8 +125,9 @@ const nextOf = (first: Blocker | undefined): Next | null => {
       return { kind: 'resolve' }
     case 'failed':
       return { kind: 'fix', failing: first.failing }
-    // Parted, it is sorted out in the task; running, there's nothing to do but wait; cancelled, they're run again on the host.
+    // Parted, it is sorted out in the task; going up or running, there's nothing to do but wait; cancelled, they're run again on the host.
     case 'parted':
+    case 'going':
     case 'running':
     case 'cancelled':
       return null
@@ -125,7 +147,9 @@ export const saidOf = (blocker: Blocker, change: Pick<ChangeSummary, 'short'>): 
     case 'parted':
       return { words: t.parted(change.short), icon: 'branch', tone: 'warm' }
     case 'unpushed':
-      return { words: t.unpushed(blocker.commits, change.short), icon: 'up', tone: 'warm' }
+      return { words: blocker.held ?? t.unpushed(blocker.commits, change.short), icon: 'up', tone: 'warm' }
+    case 'going':
+      return { words: t.going(blocker.commits, change.short), icon: 'up', tone: 'live' }
     case 'conflict':
       return { words: t.conflict(blocker.target), icon: 'branch', tone: 'warm' }
     case 'failed':
@@ -154,26 +178,31 @@ export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
  * content from here, so any commits beside a conflict are taken to be that.
  */
 export const pushResolves = (standing: Standing): boolean =>
-  standing.blockers.some((one) => one.kind === 'conflict') && standing.blockers.some((one) => one.kind === 'unpushed')
+  standing.blockers.some((one) => one.kind === 'conflict') &&
+  standing.blockers.some((one) => one.kind === 'unpushed' || one.kind === 'going')
 
 /** Whether the change is not ready to accept as it stands, and pushing won't make it so: a conflict nothing here resolves, a failed or cancelled check, a branch that parted. */
 export const isBlocked = (standing: Standing): boolean =>
-  standing.blockers.some((one) => (one.kind === 'conflict' ? !pushResolves(standing) : one.kind !== 'unpushed' && one.kind !== 'running'))
+  standing.blockers.some((one) =>
+    one.kind === 'conflict' ? !pushResolves(standing) : one.kind !== 'unpushed' && one.kind !== 'going' && one.kind !== 'running',
+  )
 
 /** How facts read, top to bottom: what blocks, then what to do, then what is fine or on its way. */
-const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, failed: 0, cancelled: 0, unpushed: 1, running: 2 }
+const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, failed: 0, cancelled: 0, unpushed: 1, going: 2, running: 2 }
 
 /**
  * What stands, as facts: what blocks first (a conflict, failed checks), then
  * checks running, or, where nothing is in the way, how its checks went.
  * Commits to push aren't a fact of their own, as the button that pushes them
- * says their count; only that pushing clears a conflict is said, in place of
- * it. Where they were all that was in the way, how the checks went stands.
+ * says their count, unless Althar held them where it pushes a lead's commits
+ * on its own: then why (ADR-072). Only that pushing clears a conflict is said,
+ * in place of it. Where they were all that was in the way, how the checks
+ * went stands.
  */
 export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> => {
   const together = pushResolves(standing)
   const facts = standing.blockers
-    .filter((one) => one.kind !== 'unpushed')
+    .filter((one) => one.kind !== 'unpushed' || one.held !== null)
     .sort((a, b) => readOrder[a.kind] - readOrder[b.kind])
     .map((one): Said => {
       if (together && one.kind === 'conflict') return { words: standingText.pushResolves(one.target), icon: 'up', tone: 'warm' }
@@ -216,4 +245,37 @@ export const nextWords = (next: Next): string => {
     case 'fix':
       return t.fix
   }
+}
+
+/** A ready change's word, where it isn't plainly ready to accept. */
+export const readyText = {
+  /** A conflict its lead couldn't resolve, or that wasn't asked of it, or the checks on the merge it couldn't fix: the person's now. */
+  mergeConflict: 'Merge conflict',
+  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
+  blocked: 'Not ready to accept',
+  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
+  readyOnPush: 'Ready once pushed',
+}
+
+/**
+ * A ready change in a word, as its board card and its header say it: a
+ * conflict that is the person's first; commits after its last pull request,
+ * for a new one; its pull request open with something in its way, or with
+ * what a push puts right; else ready to accept. `change` is its latest pull
+ * request, the open one where there is one.
+ */
+export const readyWordOf = (
+  task: {
+    readonly handedBack?: string | null | undefined
+    readonly conflictUnsent?: string | null | undefined
+    readonly unshipped?: unknown
+  },
+  latest: ChangeSummary | null,
+): string => {
+  const change = task.unshipped == null || latest?.state === 'open' ? latest : null
+  if (task.handedBack != null || task.conflictUnsent != null) return readyText.mergeConflict
+  if (change === null && task.unshipped != null) return kindWords.unshipped
+  if (change?.state === 'open' && isBlocked(standingOf(change))) return readyText.blocked
+  if (change?.state === 'open' && pushResolves(standingOf(change))) return readyText.readyOnPush
+  return kindWords.ready
 }

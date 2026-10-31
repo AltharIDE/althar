@@ -1,6 +1,8 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
 import { doing, type Doing } from './actions'
-import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade } from '@althar/ui'
+import { Failure } from './Failure'
+import type { ErrorMore } from './useTask'
+import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade, modKey } from '@althar/ui'
 import type { ReactNode } from 'react'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
@@ -9,6 +11,7 @@ import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { inMergeQueue } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
+import { personPushes } from '../../shared/standing'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
 
@@ -21,29 +24,33 @@ import { device } from '../../shared/device'
  * accepted, up to the heads shown, and its repositories whose work ended on
  * its branch, which merge here. Each card says where it stands and holds the
  * one thing to press now: accept it, push what the lead committed since,
- * mark a draft ready, open a pull request. Asking for changes is a word to
- * the lead in the conversation. A branch its pull request won't take a plain
- * push of says why, and offers what puts it right. Before it is ready, the
- * same card shows what it has changed so far. A task that went back to work
- * after its pull request merged or closed shows its latest pull request, the
- * earlier ones under it, and offers a new one for the commits that are in
- * none yet (ADR-034).
+ * mark a draft ready, open its draft pull request, or connect the host that
+ * opens one. Asking for changes is a word to the lead in the conversation. A
+ * branch its pull request won't take a plain push of says why, and offers
+ * what puts it right. Work with no pull request is its branch by name, what
+ * of it isn't pushed, and its files, from the first commit; Althar opens its
+ * draft pull request whenever no agent is at work on it, its host connected,
+ * and the host's own page for one is offered only where it isn't, beside
+ * connecting it. A task that went back to
+ * work after its pull request merged or closed shows its latest pull
+ * request, the earlier ones under it, and offers a new one for the commits
+ * that are in none yet (ADR-034). With nothing it made to read beside it,
+ * what it changed is a column as wide as the conversation, in the middle.
  */
 
 export const text = {
   /** Over what it is: a change, or what another task made. */
   story: (change: boolean) => (change ? 'What changed' : 'What it made'),
-  sofar: 'Its branch so far',
-  /** Pushed without a connection: what connecting would add, in the host's name. */
-  connectAfterPush: (host: string) =>
-    `Connected to ${host}, Althar would open the pull request itself, bring its checks and reviews back to the lead, and merge it there when you accept it.`,
+  /** Work with no pull request, its host not connected: what connecting it gives, beside the button that does. */
+  connectFirst: (host: string) => `Althar opens its pull request once ${host} is connected.`,
   connect: (host: string) => `Connect ${host}`,
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   accept: (n: number) => (n > 2 ? `Accept and merge all ${n}` : n === 2 ? 'Accept and merge both' : 'Accept and merge'),
   markReady: 'Mark ready for review',
   markReadyIn: (repository: string) => `Mark ${repository} ready for review`,
-  openChange: 'Open a pull request',
-  openNewChange: 'Open a new pull request',
+  /** Opening a pull request from here opens a draft: its lead's work may not be done. */
+  openChange: 'Open a draft pull request',
+  openNewChange: 'Open a new draft pull request',
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
   earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
     `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
@@ -53,9 +60,12 @@ export const text = {
     `${n === 1 ? 'One commit' : `${n} commits`}${change === undefined ? '' : ` after ${change.short} ${change.prefix}${change.number}`} ${n === 1 ? 'isn’t' : 'aren’t'} in a pull request yet.`,
   push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
   pushTo: (n: number, repository: string) => `${n === 1 ? 'Push 1 commit' : `Push ${n} commits`} to ${repository}`,
-  pushBranch: (remote: string) => `Push the branch to ${remote}`,
+  /** Beside the commits its remote doesn't have: its branch, pushed alone, with the person's own git. */
+  pushBranch: (remote: string) => `Push to ${remote}`,
   openOn: (host: string) => `Open on ${host}`,
-  conflicts: (into: string, files: string) => `It conflicts with ${into} as it is now, in ${files}.`,
+  conflicts: (into: string, files: string) => `It conflicts with ${into} in ${fewOf(files.split(', '))}.`,
+  /** Merging here stays on this computer: the button says so, under what isn't pushed. */
+  mergeHere: (label: string) => `${label} on ${device.this}`,
   /** Merged and pushed, with nothing left between it and its base: said in a line. */
   mergedAll: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
     const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
@@ -86,7 +96,7 @@ export const text = {
   pullRequest: (change: ChangeSummary, several: boolean) =>
     several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
   named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -102,6 +112,12 @@ export const conflictsOf = (conflict: string, here: ReadonlyArray<{ readonly nam
       ? { name: null, branch: here[0]?.branch ?? 'main', files: part }
       : { name: repository.name, branch: repository.branch, files: part.slice(at + 2) }
   })
+
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  return names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
 
 /** A repository by its name alone: `web` for `meridian/web`. */
 const nameOf = (repository: string) => repository.slice(repository.lastIndexOf('/') + 1)
@@ -135,6 +151,7 @@ export function Outputs({
   pending,
   doing: acting = null,
   error,
+  errorMore = null,
   onAccept,
   onMergeHere,
   onOpenChange,
@@ -155,6 +172,8 @@ export function Outputs({
   /** Which action is on its way, where one is: only its button shows as working; the others wait. */
   doing?: Doing | null
   error: string | null
+  /** Where the error is a failed push, or git's: why, for its way out, and all git said, for Details. */
+  errorMore?: ErrorMore | null
   /** The files merging it here conflicts in, after a merge refused for that. */
   conflict?: string | null
   /** Asks the lead to bring its branch up to date, settling the conflict. */
@@ -196,6 +215,14 @@ export function Outputs({
   // Each card is read out by the task's title, as what it changed; and opens what it changed, or a file of it.
   const files = { onReviewDiff: () => onOpenFile(), diffKey: text.diffKey, onOpenFile }
   const label = { label: task.title }
+  // What went wrong, in the card it went wrong in: Try again where that may be all it takes, and all git said behind Details.
+  // Connecting, where it changes how the work goes up, is the branch card's own action already.
+  const failure = (onRetry?: () => void) =>
+    error === null
+      ? {}
+      : {
+          error: <Failure message={error} more={errorMore} onRetry={onRetry} />,
+        }
   // Only the button pressed shows as working; while it does, the others wait.
   const pressed = (key: Doing) => ({ busy: acting === key, disabled: pending && acting !== key })
 
@@ -243,7 +270,8 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = ready && state === ChangeState.Ready && pushes.length === 0
           const actions: ReactNode[] = [
-            ...pushes.map((one) => (
+            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
+            ...pushes.filter(personPushes).map((one) => (
               <Button
                 key={`push-${one.url}`}
                 variant="signal"
@@ -282,7 +310,7 @@ export function Outputs({
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(error === null ? {} : { error })}
+              {...failure()}
               text={{
                 ...label,
                 pr: (n) => `${first.short} ${first.prefix}${n}`,
@@ -327,51 +355,61 @@ export function Outputs({
               ),
             }
           : {})}
-        {...(error === null ? {} : { error })}
+        {...failure(onPushHere)}
         text={label}
       />
     ) : null
 
-  // Where its branch stands on its repositories' remotes, pushed with the person's own git: there, behind, or not yet.
+  // Where its branch stands on its repositories' remotes, pushed with the person's own git: what of it they don't have, once
+  // they have all said.
   const remotes = task.here.flatMap((repo) => (repo.remote == null ? [] : [repo.remote]))
   const remote =
-    remotes.length === 0
+    remotes.length === 0 || remotes.some((one) => one.ahead === null)
       ? undefined
       : {
           name: [...new Set(remotes.map((one) => one.name))].join(', '),
           pushed: remotes.every((one) => one.pushed),
-          ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
+          ahead: remotes.reduce((sum, one) => sum + (one.ahead ?? 0), 0),
         }
-  const pushedSomewhere = remotes.some((one) => one.pushed)
 
   // Work on its branch: the repositories without a pull request, which merge here once it is ready; before that, its branch so far.
   const branchOnly = first === undefined && task.merged.length === 0 && (task.files.length > 0 || task.commits > 0)
-  // A pull request needs its host connected: without, there is nothing a press could open.
-  const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
+  // Its draft pull request opens whenever no agent is at work on it: done, kept, stopped however, or waiting with no turn running.
+  // At work, its run opens it as it ends.
+  const idle =
+    (ready || task.phase === 'kept' || task.phase === 'stopped' || task.phase === 'waiting') && snapshot.session?.turnRunning !== true
+  const opening = idle && first === undefined && task.commits > 0
+  const host = snapshot.host
+  // Opened by Althar on its host, connected; else connecting it is what to do, where Althar knows the host: by its name.
+  const opens = opening && host?.connected === true
+  const connects = opening && host !== null && !host.connected ? host.name : null
   const here =
     task.here.length > 0 || branchOnly
       ? (() => {
           const merging = ready && task.here.length > 0
           const actions: ReactNode[] = [
-            ...(unpublished
+            ...(opens
               ? [
                   <Button key="open" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
-                    {text.openChange}
+                    {closed.length > 0 ? text.openNewChange : text.openChange}
                   </Button>,
                 ]
-              : []),
+              : connects !== null
+                ? [
+                    <Button key="connect" variant="signal" onClick={onConnect}>
+                      {text.connect(connects)}
+                    </Button>,
+                  ]
+                : []),
             ...(merging
               ? [
-                  <Button key="here" variant={unpublished ? 'default' : 'signal'} {...pressed(doing.mergeHere)} onClick={onMergeHere}>
-                    {mergeHereLabel(task.here, first !== undefined)}
-                  </Button>,
-                ]
-              : []),
-            // Without a connection, pushing is the person's own git, as from a terminal: opening a pull request pushes it otherwise.
-            ...(remote !== undefined && !unpublished && (!remote.pushed || remote.ahead > 0)
-              ? [
-                  <Button key="push" {...pressed(doing.pushBranch)} onClick={onPushBranch}>
-                    {text.pushBranch(remote.name)}
+                  <Button
+                    key="here"
+                    variant={opens || connects !== null ? 'default' : 'signal'}
+                    {...pressed(doing.mergeHere)}
+                    onClick={onMergeHere}
+                  >
+                    {text.mergeHere(mergeHereLabel(task.here, first !== undefined))}
                   </Button>,
                 ]
               : []),
@@ -379,48 +417,43 @@ export function Outputs({
           return (
             <ChangeSet
               state={ChangeState.Branch}
-              {...(ready ? {} : { note: text.sofar })}
+              {...(task.branch === null ? {} : { branch: task.branch })}
+              {...(connects === null ? {} : { note: text.connectFirst(connects) })}
               prs={
                 task.here.length > 0
                   ? task.here.map((repo) => ({
                       repo: repo.name,
                       files: filesIn(task.files, repo.repository, several),
-                      // Only where its remote has the branch: one push refused leaves the others' pages.
-                      ...(repo.remote?.newPullRequest == null || !repo.remote.pushed
+                      // Where Althar can't open it, the host's page for one, where its remote has the branch: one push refused leaves the others'.
+                      ...(repo.remote?.newPullRequest == null || !repo.remote.pushed || host?.connected === true
                         ? {}
                         : {
-                            newPullRequest: { url: repo.remote.newPullRequest, ...hostOfPage(repo.remote.newPullRequest, snapshot.host) },
+                            newPullRequest: { url: repo.remote.newPullRequest, ...hostOfPage(repo.remote.newPullRequest, host) },
                           }),
                     }))
                   : [{ repo: snapshot.project.name, files: filesIn(task.files, '', false) }]
               }
               {...(remote === undefined ? {} : { remote })}
+              uncommitted={task.files.filter((file) => file.uncommitted).length}
+              // Pushing it alone, with the person's own git, is quiet, beside the commits it pushes: opening its pull request pushes them too.
+              {...(remote === undefined || remote.ahead === 0
+                ? {}
+                : {
+                    push: (
+                      <Button variant="quiet" size="small" {...pressed(doing.pushBranch)} onClick={onPushBranch}>
+                        {text.pushBranch(remote.name)}
+                      </Button>
+                    ),
+                  })}
               {...(first === undefined && review !== undefined ? { review } : {})}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
-              {...(first !== undefined
-                ? {}
-                : conflict !== null && onResolve !== undefined
-                  ? { error: conflicted }
-                  : error === null
-                    ? {}
-                    : { error })}
+              {...(first !== undefined ? {} : conflict !== null && onResolve !== undefined ? { error: conflicted } : failure(onPushBranch))}
               text={label}
             />
           )
         })()
       : null
-
-  // Pushed with no connection: what connecting would add, said once something is there to have a pull request.
-  const offer =
-    pushedSomewhere && snapshot.host !== null && !snapshot.host.connected ? (
-      <p className={s.offer}>
-        {text.connectAfterPush(snapshot.host.name)}{' '}
-        <Button size="small" onClick={onConnect}>
-          {text.connect(snapshot.host.name)}
-        </Button>
-      </p>
-    ) : null
 
   const made = outcomeOf(snapshot)
   const telling = hasOutcome(made) || made.checked.length > 0 || made.unverified.length > 0
@@ -448,7 +481,6 @@ export function Outputs({
       {local}
       {done && <p className={s.quiet}>{text.mergedAll(task.merged)}</p>}
       {here}
-      {offer}
       {closed.map((one) => (
         <p key={one.url} className={s.quiet}>
           {text.closed(one, productName(one.product))}
@@ -467,14 +499,14 @@ export function Outputs({
           {text.unshipped(task.unshipped.commits, several ? undefined : latest.findLast((one) => one.state !== 'open'))}
         </p>
       )}
-      {/* With no pull request still open to hold it, a new one is pressed from here. */}
-      {first === undefined && openNew}
+      {/* With no pull request still open to hold it, nor its branch's card, a new one is pressed from here. */}
+      {first === undefined && here === null && openNew}
     </>
   )
   const changed = change !== null || local !== null || here !== null || done || closed.length > 0 || earlier.length > 0 || shipping
   return (
     <div className={s.outputs}>
-      <div className={telling && changed ? s.outputsWide : s.outputsAlone}>
+      <div className={telling && changed ? s.outputsWide : telling ? s.outputsAlone : s.outputsChanged}>
         {telling && (
           <WhatItMade
             story={made.story}

@@ -1,10 +1,11 @@
 name: nightly
 
 # Every night, main's whole unit suite in a shuffled order, on Linux once and on Windows five times over: what a pull
-# request's checks and the merge queue can miss by running each test once, in the same order. A test that fails, then
-# passes on its retry, is filed as flaky (.github/actions/flaky); one that fails both times opens or adds to the issue
-# "Nightly tests failed", which closes when a night passes. The seed in each part's log runs its order again
-# (`--sequence.seed`).
+# request's checks, the merge queue and post-merge can miss by running each test once, in the same order. And the
+# tests main added or changed that day, many times over on Windows with no retry, as a pull request's stress run does
+# them on Linux (stress.yml). A test that fails, then passes on its retry, is filed as flaky (.github/actions/flaky);
+# one that fails both times, or in any of its stress runs, opens or adds to the issue "Nightly tests failed", which
+# closes when a night passes. The seed in each part's log runs its order again (`--sequence.seed`).
 on:
   schedule:
     # 03:00 UTC, when no one is merging.
@@ -77,7 +78,7 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
-  # As desktop.yml's Windows parts, each test run five times over: where most flakes have been.
+  # As post-merge.yml's Windows parts, each test run five times over: where most flakes have been.
   windows:
     name: windows (${{ matrix.part }})
     runs-on: windows-2025
@@ -106,12 +107,12 @@ jobs:
       run:
         shell: bash
     env:
-      # As in desktop.yml: the repositories the tests make write LF and compare it.
+      # As in post-merge.yml: the repositories the tests make write LF and compare it.
       GIT_CONFIG_COUNT: '1'
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: 'false'
     steps:
-      # As in desktop.yml: a temporary folder with no short name.
+      # As in post-merge.yml: a temporary folder with no short name.
       - run: |
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -150,9 +151,102 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
+  # The tests main added or changed in the last day (a little more, as a night's run may start late), each run ten times
+  # over on Windows for a few, fewer for many, with no retry (packages/testing/src/stress.ts): the stress run a pull
+  # request does on Linux, here where tests run three or four times slower.
+  stress-windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      # As in post-merge.yml: the repositories the tests make write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      # As in post-merge.yml: a temporary folder with no short name.
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+        with:
+          # The day's history, to tell what it changed.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: |
+          since="$(git rev-list -1 --before='26 hours ago' HEAD)"
+          git diff --name-only --diff-filter=AMR "${since:-HEAD}" HEAD > "$RUNNER_TEMP/changed"
+          cat "$RUNNER_TEMP/changed"
+      - id: plan
+        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed"
+      - if: steps.plan.outputs.any-windows == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - if: steps.plan.outputs.any-windows == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - if: steps.plan.outputs.any-windows == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.plan.outputs.any-windows == 'true'
+        env:
+          PLAN: ${{ steps.plan.outputs.windows }}
+        run: bun packages/testing/src/stress.ts run
+
+  # How fast the paths with a budget are, out of every gate (docs/plans/tests-that-hold.md, F): each package's
+  # `test:performance`, Vitest's benchmarks in its tests/*.bench.ts, reported on the run's summary. One over its budget is
+  # a warning there and nothing fails for it; the job fails only where a benchmark couldn't run, and even then it turns
+  # no night red, as the report below doesn't wait for it.
+  performance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - env:
+          LOG: ${{ runner.temp }}/performance.txt
+        run: |
+          failed=''
+          for package in packages/runtime packages/connectors packages/ui; do
+            echo "::group::$package"
+            (cd "$package" && bun run test:performance --reporter=verbose) 2>&1 | tee -a "$LOG" || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          over="$(grep -h 'over its budget' "$LOG" | sed 's/^[^a-zA-Z]*//' || true)"
+          {
+            echo '## Performance'
+            echo
+            if [ -n "$over" ]; then echo 'Over budget:'; echo; echo "$over" | sed 's/^/- /'; else echo 'Every path within its budget.'; fi
+            [ -z "$failed" ] || printf '\nCould not run:%s\n' "$failed"
+            printf '\n<details><summary>Every benchmark</summary>\n\n```\n'
+            grep -hE '^ *(✓|×) |^ +(name +hz|.* ±[0-9.]+%)' "$LOG" || true
+            printf '```\n\n</details>\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ -z "$over" ] || echo "$over" | while read -r line; do echo "::warning title=Over budget::$line"; done
+          if [ -n "$failed" ]; then
+            echo "::error::Could not run:$failed"
+            exit 1
+          fi
+
   # The night's result as one open issue: opened (or added to) when a night fails, closed when one passes.
   report:
-    needs: [linux, windows]
+    needs: [linux, windows, stress-windows]
     if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

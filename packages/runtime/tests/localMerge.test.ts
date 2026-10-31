@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Schedule } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -14,6 +14,7 @@ import { applyMerge, applyMerges, checkedOut, conflictsOf, planMerge, undoMerge 
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { words } from '../src/words'
 import { notices, repository, runtime } from './support'
 
 /** Windows, where what some tests stand on isn't (each says what). */
@@ -79,6 +80,12 @@ const mergeHere = (taskId: string, heads: ReadonlyArray<{ readonly repository: s
 const cantOf = (error: unknown) => {
   const said = error as { readonly _tag?: string; readonly why?: string; readonly detail?: string }
   return [said._tag, said.why, said.detail]
+}
+
+/** A merge refused for what's in the way in a checkout: why, where, into which branch, and the files. */
+const inTheWayOf = (error: unknown) => {
+  const said = error as { readonly why?: string; readonly detail?: string; readonly into?: string; readonly files?: ReadonlyArray<string> }
+  return [said.why, said.detail, said.into, said.files]
 }
 
 const stateOf = (taskId: string) =>
@@ -177,12 +184,12 @@ describe('merging a task here', () => {
       const head = commit(worktree, 'retry.ts', 'retry\n')
       const queries = yield* Queries
       const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
-      // The pull request opens where the branch goes.
+      // The pull request opens where the branch goes; what of it origin has isn't known here before it is asked or pushed to.
       assert.deepStrictEqual(yield* remoteOf, {
         name: 'origin',
         branch,
         pushed: false,
-        ahead: 1,
+        ahead: null,
         newPullRequest: `https://github.com/alice/api/compare/main...${branch}?expand=1`,
       })
       // Now it pushes to a folder here, and fetches only main, so git wouldn't note the branch there itself.
@@ -214,9 +221,77 @@ describe('merging a task here', () => {
       assert.strictEqual(git(remote, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'))
       assert.notInclude(git(remote, 'log', '-1', '--format=%B', branch), 'noreply@anthropic.com')
       assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+      // A remote that won't let this account push says so by its host's name, with all git said kept aside for Details.
+      const more = commit(worktree, 'again.ts', 'again\n')
+      writeFileSync(
+        join(remote, 'hooks', 'pre-receive'),
+        '#!/bin/sh\necho "You are not allowed to push code to this project." >&2\nexit 1\n',
+        {
+          mode: 0o755,
+        },
+      )
+      const forbidden = yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: more }]))
+      assert.deepInclude(forbidden, { _tag: 'PushRefused', why: 'forbidden', host: 'GitHub' })
+      assert.strictEqual(
+        words(forbidden, String).message,
+        'Your account can’t push to this repository on GitHub, so nothing was pushed. Push to a fork of it, or ask its owners for access.',
+      )
+      assert.include(words(forbidden, String).detail, 'remote: You are not allowed to push code to this project.')
+      rmSync(join(remote, 'hooks', 'pre-receive'))
       // The task stays as it was: pushing isn't merging.
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live(
+    'counts what the remote doesn’t have once it says: not what it has from a push made elsewhere, nor what bringing main in brought',
+    () =>
+      Effect.gen(function* () {
+        const root = repository()
+        const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        git(remote, 'init', '-q', '--bare', '-b', 'main')
+        git(root, 'remote', 'add', 'origin', remote)
+        git(root, 'push', '-q', '-u', 'origin', 'main')
+        const { task, worktrees } = yield* taskIn([root], root)
+        const worktree = worktrees[0]?.path ?? ''
+        const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+        const queries = yield* Queries
+        const changes = yield* Changes
+        const remoteOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+        // As the person looks: origin asked where the branch is, and the task read again once it has said.
+        const asked = Effect.gen(function* () {
+          const head = git(worktree, 'rev-parse', 'HEAD')
+          yield* changes.askRemotes(task.taskId)
+          yield* changes
+            .askedAt(worktree, branch)
+            .pipe(Effect.repeat({ until: (at) => at === head, schedule: Schedule.spaced('25 millis') }), Effect.timeout('10 seconds'))
+          return yield* remoteOf
+        })
+        // Its first commit reaches origin from another clone, so nothing here notes it (git from 2.56 notes a push here even by
+        // origin's address); then the lead commits again.
+        commit(worktree, 'retry.ts', 'retry\n')
+        const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+        git(elsewhere, 'clone', '-q', remote, '.')
+        git(elsewhere, 'fetch', '-q', root, `refs/heads/${branch}:refs/heads/${branch}`)
+        git(elsewhere, 'push', '-q', 'origin', branch)
+        commit(worktree, 'more.ts', 'more\n')
+        // Until origin says, how much of it origin has isn't known: no count.
+        assert.deepInclude(yield* remoteOf, { pushed: false, ahead: null })
+        // Asked: only the commit since is new to it.
+        assert.deepInclude(yield* asked, { pushed: true, ahead: 1 })
+        // Main moves on, on origin too, and the lead brings it in: main's commit origin has, so only the merge is new.
+        commit(root, 'theirs.ts', 'theirs\n')
+        git(root, 'push', '-q', 'origin', 'main')
+        git(worktree, 'merge', '-q', '--no-edit', 'main')
+        assert.deepInclude(yield* asked, { pushed: true, ahead: 2 })
+        // Pushed from here, git notes it: all of it there, known without asking.
+        git(worktree, 'push', '-q', 'origin', branch)
+        assert.deepInclude(yield* remoteOf, { pushed: true, ahead: 0 })
+        // Its branch gone from origin, as once deleted there, and the lead commits again: none of its own commits is there now.
+        git(remote, 'branch', '-q', '-D', branch)
+        commit(worktree, 'last.ts', 'last\n')
+        assert.deepInclude(yield* asked, { pushed: false, ahead: 4 })
+      }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('pushes to origin where the default branch follows a branch here rather than a remote', () =>
@@ -266,11 +341,13 @@ describe('merging a task here', () => {
       // Merged, but following nothing: nowhere to push it, and nothing said of a push.
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
       assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join(' '), 'Pushed')
-      // Following a remote that isn't there any more: git's own failure, not a guess at why.
+      // Following a remote that isn't there any more: git's own words under Details, not a guess at why.
       git(root, 'remote', 'add', 'origin', join(tmpdir(), `althar-gone-${Date.now()}`))
       git(root, 'config', 'branch.main.remote', 'origin')
       git(root, 'config', 'branch.main.merge', 'refs/heads/main')
-      assert.strictEqual(((yield* Effect.flip(changes.pushHere(task.taskId))) as { _tag?: string })._tag, 'GitFailed')
+      const gone = yield* Effect.flip(changes.pushHere(task.taskId))
+      assert.deepInclude(gone, { _tag: 'PushRefused', why: 'failed' })
+      assert.include(words(gone, String).detail ?? '', 'does not appear to be a git repository')
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -333,7 +410,7 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('merges nothing when it conflicts, or the checkout has changes not committed, or the branch moved since it was seen', () =>
+  it.live('merges nothing when it conflicts, or the branch moved since it was seen', () =>
     Effect.gen(function* () {
       const root = repository()
       const { task, worktrees } = yield* taskIn([root], root)
@@ -352,13 +429,77 @@ describe('merging a task here', () => {
       // Asked without the head seen in it, a repository hasn't been seen.
       const unseen = yield* Effect.flip(mergeHere(task.taskId, []))
       assert.strictEqual(cantOf(unseen)[1], 'changed')
-
-      const clean = commit(worktree, 'retry.ts', 'retry\n')
-      writeFileSync(join(root, 'README.md'), '# Not yet\n')
-      const busy = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head: clean }]))
-      assert.deepStrictEqual(cantOf(busy).slice(1), ['busy', realpathSync(root)])
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('moves a checkout past changes to files the merge leaves alone, as git would, and keeps them as they were', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      commit(root, 'notes.md', 'notes\n')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const head = commit(worktree, 'app.ts', 'app, retried\n')
+      // The person's own work, in files the task didn't change: one edited, one staged, one git doesn't track.
+      writeFileSync(join(root, 'notes.md'), 'notes, half written\n')
+      writeFileSync(join(root, 'README.md'), '# Meridian, renamed\n')
+      git(root, 'add', 'README.md')
+      writeFileSync(join(root, 'scratch.txt'), 'scratch\n')
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), git(worktree, 'rev-parse', 'HEAD'))
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, retried\n')
+      assert.strictEqual(readFileSync(join(root, 'notes.md'), 'utf8'), 'notes, half written\n')
+      assert.strictEqual(readFileSync(join(root, 'scratch.txt'), 'utf8'), 'scratch\n')
+      assert.strictEqual(git(root, 'diff', '--cached', '--name-only'), 'README.md')
+      assert.strictEqual(git(root, 'diff', '--name-only'), 'notes.md')
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where the checkout has changes not committed to a file the merge changes, staged or not, and says which', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const slug = worktrees[0]?.slug ?? ''
+      const head = commit(worktree, 'app.ts', 'app, retried\n')
+      const tip = git(root, 'rev-parse', 'main')
+      writeFileSync(join(root, 'app.ts'), 'app, mine\n')
+      writeFileSync(join(root, 'README.md'), '# Not yet\n')
+      const busy = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head }]))
+      assert.deepStrictEqual(inTheWayOf(busy), ['busy', realpathSync(root), 'main', ['app.ts']])
+      git(root, 'add', 'app.ts')
+      const staged = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head }]))
+      assert.deepStrictEqual(inTheWayOf(staged), ['busy', realpathSync(root), 'main', ['app.ts']])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, mine\n')
+      assert.strictEqual(readFileSync(join(root, 'README.md'), 'utf8'), '# Not yet\n')
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where a file not committed since it was planned is one the merge changes, and puts nothing back wrong', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      commit(root, 'app.ts', 'app\n')
+      const { worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'app.ts', 'app, retried\n')
+      const tip = git(root, 'rev-parse', 'main')
+      writeFileSync(join(root, 'README.md'), '# Not yet\n')
+      const plan = yield* planMerge(root, 'main', head, 'Merge')
+      if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+      writeFileSync(join(root, 'app.ts'), 'app, mine\n')
+      assert.deepStrictEqual((yield* applyMerges([{ root, branch: 'main', plan }]))?.problem, {
+        kind: 'busy',
+        checkout: realpathSync(root),
+        files: ['app.ts'],
+        untracked: [],
+      })
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(readFileSync(join(root, 'app.ts'), 'utf8'), 'app, mine\n')
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -568,7 +709,7 @@ describe('merging a task here', () => {
       mkdirSync(join(roots[0] ?? '', 'dist'))
       writeFileSync(join(roots[0] ?? '', 'dist', 'new.ts'), 'built\n')
       const refused = yield* Effect.flip(mergeHere(task.taskId, heads))
-      assert.deepStrictEqual(cantOf(refused).slice(1), ['untracked', `new.ts in ${roots[1] ?? ''}`])
+      assert.deepStrictEqual(inTheWayOf(refused), ['untracked', roots[1] ?? '', 'web’s main', ['new.ts']])
       assert.deepStrictEqual(
         roots.map((root) => git(root, 'rev-parse', 'main')),
         before,
@@ -668,6 +809,51 @@ describe('merging a task here', () => {
         moves.map((move) => git(move.root, 'rev-parse', 'main')),
         moves.map((move) => move.plan.to),
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('puts a checkout back with the person’s changes to other files as they were, staged, partly staged or not', () =>
+    Effect.gen(function* () {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const [web, docs] = ['web', 'docs'].map((name) => {
+        const root = join(folder, name)
+        mkdirSync(root)
+        git(root, 'init', '-q', '-b', 'main')
+        commit(root, 'notes.md', 'notes\n')
+        commit(root, 'todo.md', 'one\ntwo\n')
+        commit(root, 'plan.md', 'plan\n')
+        return root
+      })
+      const planOf = (root: string) =>
+        Effect.gen(function* () {
+          git(root, 'checkout', '-q', '-b', 'task', 'main')
+          const head = commit(root, 'retry.ts', 'retry\n')
+          git(root, 'checkout', '-q', 'main')
+          const plan = yield* planMerge(root, 'main', head, 'Merge task')
+          if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+          return { root, branch: 'main', plan, before: git(root, 'rev-parse', 'main') }
+        })
+      const moves = [yield* planOf(web ?? ''), yield* planOf(docs ?? '')]
+      // In web, the person's own work in files the merge leaves alone: one staged, one partly staged, one not.
+      writeFileSync(join(web ?? '', 'notes.md'), 'notes, staged\n')
+      git(web ?? '', 'add', 'notes.md')
+      writeFileSync(join(web ?? '', 'todo.md'), 'one, staged\ntwo\n')
+      git(web ?? '', 'add', 'todo.md')
+      writeFileSync(join(web ?? '', 'todo.md'), 'one, staged\ntwo, not yet\n')
+      writeFileSync(join(web ?? '', 'plan.md'), 'plan, not yet\n')
+      const diffs = (root: string) => [git(root, 'diff', '--cached'), git(root, 'diff')]
+      const was = diffs(web ?? '')
+      // Web moves first, then docs refuses, a file written where the merge puts one since it was planned: web goes back.
+      writeFileSync(join(docs ?? '', 'retry.ts'), 'mine\n')
+      const refused = yield* applyMerges(moves)
+      assert.strictEqual(refused?.root, docs)
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      assert.deepStrictEqual(diffs(web ?? ''), was)
+      assert.isFalse(existsSync(join(web ?? '', 'retry.ts')))
+      assert.strictEqual(readFileSync(join(web ?? '', 'todo.md'), 'utf8'), 'one, staged\ntwo, not yet\n')
     }).pipe(Effect.provide(runtime())),
   )
 })

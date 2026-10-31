@@ -1,15 +1,16 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
-import { spawnOwned } from '@althar/provider-adapters'
+import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
 import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { copyAt, freshCopy } from './coordinatorFolder'
 import { bringBackThen } from './bringBack'
+import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
@@ -252,13 +253,11 @@ export class Launches extends Context.Service<
         }),
       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not close the cards of earlier runs', cause)))
       // A branch's copy an earlier launch left goes with its run: none outlives Althar.
-      yield* Effect.ignore(
-        Effect.try(() => {
-          if (!existsSync(config.worktreeRoot)) return
-          for (const project of readdirSync(config.worktreeRoot))
-            rmSync(join(config.worktreeRoot, project, BRANCH_COPIES), { recursive: true, force: true })
-        }),
+      const projects = yield* Effect.try(() => (existsSync(config.worktreeRoot) ? readdirSync(config.worktreeRoot) : [])).pipe(
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
       )
+      for (const project of projects)
+        yield* cleanUp(join(config.worktreeRoot, project, BRANCH_COPIES), 'copies of branches earlier runs ran from')
 
       const shown = (launch: Launch): ShownLaunch => ({
         id: launch.id,
@@ -504,7 +503,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'The project has no repository on this computer to run.'
+                            ? `The project has no repository on ${thisDevice()} to run.`
                             : 'The task has no worktree here to run.',
                       })
                     const kept = yield* keptOf(input.projectId)
@@ -516,7 +515,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'Its repository has no copy on this computer to run it in.'
+                            ? `Its repository has no copy on ${thisDevice()} to run it in.`
                             : 'The task has no worktree of its repository here to run it in.',
                       })
                     // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
@@ -584,13 +583,17 @@ export class Launches extends Context.Service<
               ),
             )
 
-      /** Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried again. */
+      /**
+       * Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried
+       * again, and one that stays is logged and left (`cleanUp`).
+       */
       const removeCopy = (copy: string) =>
         Effect.gen(function* () {
-          for (let tries = 0; tries < 3 && existsSync(copy); tries += 1) {
-            yield* Effect.ignore(Effect.try(() => rmSync(copy, { recursive: true, force: true })))
+          for (let tries = 0; tries < 2 && existsSync(copy); tries += 1) {
+            yield* Effect.ignore(removeFully(copy))
             if (existsSync(copy)) yield* Effect.sleep(Duration.millis(300))
           }
+          yield* cleanUp(copy, 'a copy of a branch a run ran from')
         })
 
       /**
@@ -739,7 +742,7 @@ export class Launches extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const places = yield* placesOf(input.projectId, null, input.repository)
             if (places.length === 0)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'The project has no repository on this computer to run.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run.` })
             const kept = yield* keptOf(input.projectId)
             const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
             if (input.runnableId !== undefined && asked === undefined)
@@ -751,7 +754,7 @@ export class Launches extends Context.Service<
                 : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
                   places[0])
             if (place === undefined)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` })
             const { binding } = place
             const key = input.ref.kind === 'branch' ? `branch:${input.ref.name.trim()}` : `pull:${input.ref.which.trim()}`
             return yield* startLocks.withLock(
@@ -894,7 +897,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this computer to keep a way to run.',
+                message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
@@ -955,7 +958,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused(
                 places.length === 0
-                  ? { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' }
+                  ? { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` }
                   : {
                       why: 'which',
                       message: `Say which repository it runs in, as repository: ${places.map((place) => place.binding.name).join(', ')}.`,

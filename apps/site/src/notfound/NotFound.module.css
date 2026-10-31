@@ -1,1 +1,6 @@
-.page { background: var(--n-2); }
+.page { min-height: 100vh; }
+.main { padding-bottom: 16px; }
+
+@media (max-width: 640px) {
+  .main { padding-bottom: 10px; }
+}

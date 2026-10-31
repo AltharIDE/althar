@@ -40,17 +40,7 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import {
-  doingWords,
-  doneHere,
-  factsOf,
-  isBlocked,
-  labelWords,
-  nextWords,
-  pushResolves,
-  standingOf,
-  standingText,
-} from '../../shared/standing'
+import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -97,13 +87,8 @@ export const text = {
     [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
-  stopped: 'No agent is working on it',
-  /** Why a stopped task's lead stopped, in a card's words. */
-  stoppedBy: {
-    declined: 'Stopped when you declined a command',
-    interrupted: 'Stopped when you interrupted it',
-    althar: 'Stopped by Althar',
-  },
+  /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
+  stoppedBy: stepText.stoppedBy,
   carryOn: 'Carry on',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
@@ -115,6 +100,8 @@ export const text = {
   /** Settles a finished task that isn't a change, from its kept row. */
   done: 'Done',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
+  /** Its folder being set up before its lead starts: the install its lockfile names, or the setup kept for its repository. */
+  settingUp: { install: 'Installing dependencies', kept: 'Setting up' } satisfies Record<NonNullable<BoardTask['settingUp']>, string>,
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -122,12 +109,6 @@ export const text = {
   /** A review at work, reading someone else's pull request. */
   reading: 'Reading',
   reviewDrafted: 'Review drafted',
-  /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
-  mergeConflict: 'Merge conflict',
-  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
-  blocked: 'Not ready to accept',
-  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
-  readyOnPush: 'Ready once pushed',
   /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
   resolveNow: 'Resolve now',
   resolvingNow: 'Asking the lead',
@@ -306,8 +287,15 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
         : work.reconnects != null
           ? { status: TaskStatus.Paused, word: text.status[TaskStatus.Paused], why: reconnectsWords(work.reconnects, clock) }
           : work.phase === 'stopped'
-            ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
-            : null
+            ? {
+                status: TaskStatus.Stopped,
+                word: text.status[TaskStatus.Stopped],
+                ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
+              }
+            : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+              work.settingUp != null
+              ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+              : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -371,8 +359,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
     ...rest,
     status: TaskStatus.Stopped,
     word: text.status[TaskStatus.Stopped],
-    why: work.stopped?.by == null ? text.stopped : text.stoppedBy[work.stopped.by],
-    ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
+    // What stopped it, where something says; the word Stopped says the rest.
+    ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
+    // When, where something says; else no time.
+    ...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
       ? {}
       : {
@@ -500,17 +490,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         )
       return {
         ...base,
-        // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
-        word:
-          work.handedBack != null || work.conflictUnsent != null
-            ? text.mergeConflict
-            : change === null && work.unshipped != null
-              ? kindWords.unshipped
-              : change?.state === 'open' && isBlocked(standingOf(change))
-                ? text.blocked
-                : change?.state === 'open' && pushResolves(standingOf(change))
-                  ? text.readyOnPush
-                  : kindWords.ready,
+        // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
+        word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
         // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
         ...(work.handedBack != null || work.conflictUnsent != null

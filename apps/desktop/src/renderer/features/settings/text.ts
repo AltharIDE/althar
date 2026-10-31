@@ -1,4 +1,4 @@
-import type { CoAuthorCommit } from '@althar/ui'
+import { chord, type CoAuthorCommit, keys, modKey } from '@althar/ui'
 
 import { device, platform } from '../../shared/device'
 
@@ -9,11 +9,11 @@ export const text = {
   gear: 'Althar settings',
   /** The quick settings, as a screen reader names them. */
   quick: 'Quick settings',
-  kbd: platform === 'darwin' ? '⌘,' : 'Ctrl+,',
+  kbd: modKey(','),
   /** The Settings tab, and the way to it from the quick settings. */
   settings: 'Settings',
   all: 'All settings',
-  allKbd: platform === 'darwin' ? '⌘⇧,' : 'Ctrl+Shift+,',
+  allKbd: chord(keys.mod, keys.shift, ','),
   agents: 'Agents',
   connecting: `Looking at the agents on ${device.this}…`,
   agentHere: (name: string) => `${name} isn’t on ${device.this}`,

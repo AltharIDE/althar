@@ -5,7 +5,7 @@ import type { ToolKind } from '@althar/domain'
 
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
-import { claudeRateLimitWindow, record, type UsageWindow } from './usage'
+import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -131,11 +131,11 @@ export type SessionEvent =
       readonly used: number
       readonly size: number
       readonly cost?: { readonly amount: number; readonly currency: string }
-      /** Claude Code's adapter sends a plan window with the usage it streams (`usage.ts`): one per event. */
-      readonly planWindow?: UsageWindow
+      /** Claude Code's adapter sends the plan's windows with the usage it streams (`usage.ts`), each it tracks. */
+      readonly planWindows?: ReadonlyArray<UsageWindow>
     }
-  /** A plan window with no context figure to go with it (`usage_update` below): the context is as it was. */
-  | { readonly _tag: 'PlanWindow'; readonly window: UsageWindow }
+  /** Plan windows with no context figure to go with them (`usage_update` below): the context is as it was. */
+  | { readonly _tag: 'PlanWindows'; readonly windows: ReadonlyArray<UsageWindow> }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
@@ -365,9 +365,10 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
     case 'usage_update': {
-      const planWindow = claudeRateLimitWindow(record(update._meta)?.['_claude/rateLimit']) ?? undefined
+      const said = claudeRateLimitWindows(record(update._meta)?.['_claude/rateLimit'])
+      const planWindows = said.length === 0 ? undefined : said
       // Althar's patch of Claude Code's adapter sends a rate limit before the session has a context figure, with 0 for it: a context is never empty once the agent has asked its model, so that 0 is no figure, and the meter and the handover check keep theirs.
-      if (planWindow !== undefined && update.used === 0) return { _tag: 'PlanWindow', window: planWindow }
+      if (planWindows !== undefined && update.used === 0) return { _tag: 'PlanWindows', windows: planWindows }
       return {
         _tag: 'ContextUsage',
         used: update.used,
@@ -376,7 +377,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
           'cost',
           update.cost === null || update.cost === undefined ? undefined : { amount: update.cost.amount, currency: update.cost.currency },
         ),
-        ...defined('planWindow', planWindow),
+        ...defined('planWindows', planWindows),
       }
     }
     case 'config_option_update':

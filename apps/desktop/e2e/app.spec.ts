@@ -50,9 +50,9 @@ test('makes the first project of a repository it found, starts a task, and talks
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // Ready for you; it built nothing, and its Outputs say so, over Althar's light.
+    // Ready to accept, as its card says; it built nothing, and its Outputs say so, over Althar's light.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(page.getByText('Ready for you')).toBeVisible()
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')
@@ -121,7 +121,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     // Asked mid-reload, the page has no context to answer from: still reloading.
     await expect.poll(() => page.evaluate(() => 'beforeCrash' in window).catch(() => true)).toBe(false)
     // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
-    await expect(page.getByText('Ready for you', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await expect(page.getByText(/Althar restarted/)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
     // Nothing to press to start it, and nothing to stop: what the person says next reaches the new runtime and starts it.
@@ -175,8 +175,8 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     // Ready, it opens on what it made: its branch, merged here as the person says, and the review it passed.
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry', level: 1 })).toBeVisible()
-    await expect(page.getByText('On its branch')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
+    await expect(page.getByRole('article', { name: 'Add a retry' }).getByText(/^althar\/add-a-retry/)).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Merge into main on this (Mac|PC|computer)$/ })).toBeVisible()
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
@@ -271,7 +271,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await expect(page.getByText('Opened draft pull request #1.')).toBeVisible()
 
     // What it changed, file by file, read from its worktree: ⌘D opens it.
-    await page.keyboard.press('Meta+d')
+    await page.keyboard.press('ControlOrMeta+d')
     const changes = page.getByRole('dialog', { name: 'Changes' })
     await expect(changes.getByText(/althar\/add-a-retry-to-the-checkout-call into main/)).toBeVisible()
     await expect(changes.getByRole('group', { name: 'change.txt' })).toContainText('change')

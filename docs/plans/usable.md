@@ -102,7 +102,8 @@ One pull request each:
      back: the card shows the lead at work and is ready again after. The
      dock's note goes into that same chat.
    - **Later: always push.** A choice next to Push, per project, for people
-     who want follow-ups pushed as the lead commits them.
+     who want follow-ups pushed as the lead commits them. Built, on by
+     default, as [ADR-072](../decisions/072-a-lead-s-commits-push-as-its-turn-ends.md).
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every

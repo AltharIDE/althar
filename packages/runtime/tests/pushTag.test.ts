@@ -172,12 +172,12 @@ describe('push_tag, where the tag doesn’t go up at once', () => {
   it.live('tells the lead what the remote said where it refuses the tag, and what git said where the push failed otherwise', () =>
     Effect.gen(function* () {
       const { access, worktree, remote } = yield* leadWithRemote()
-      // The remote turns tags down, as a protected one does.
+      // The remote turns tags down, as a protected one does: its own words, not git's "pre-receive hook declined".
       const hook = join(remote, 'hooks', 'pre-receive')
       writeFileSync(hook, '#!/bin/sh\necho "Tags are made by the release job" >&2\nexit 1\n')
       chmodSync(hook, 0o755)
       tagged(worktree, 'v2.0.0')
-      assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: pre-receive hook declined. Tell the person.')
+      assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: Tags are made by the release job. Tell the person.')
       assert.strictEqual(git(remote, 'tag', '--list'), '')
       // The remote gone: git's own last word.
       rmSync(remote, { recursive: true, force: true })

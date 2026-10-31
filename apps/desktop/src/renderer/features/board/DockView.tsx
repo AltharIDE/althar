@@ -12,6 +12,7 @@ import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
+import { personPushes } from '../../shared/standing'
 import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
@@ -172,7 +173,10 @@ export function DockView({
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
-          unpushed={change.localHead === null ? 0 : change.unpushed}
+          // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),
+          // and nothing is accepted until they're on it.
+          unpushed={change.localHead === null || !personPushes(change) ? 0 : change.unpushed}
+          going={change.localHead === null || personPushes(change) ? 0 : change.unpushed}
           onPush={() => void model.push(task.taskId, change.localHead ?? '', change.url)}
           pushing={model.pushing.has(task.taskId)}
           onOpenFile={(path) => onChanges(task, path)}

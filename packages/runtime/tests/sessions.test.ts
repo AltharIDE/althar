@@ -425,8 +425,11 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('describes the session the runtime holds while a handover starts', () =>
-    Effect.gen(function* () {
+  it.live('describes the session the runtime holds while a handover starts', () => {
+    // OpenCode's session is held starting until the test has read what the thread says meanwhile.
+    let goOn = () => {}
+    const up = new Promise<void>((resolve) => (goOn = resolve))
+    return Effect.gen(function* () {
       const sessions = yield* Sessions
       const queries = yield* Queries
       const sql = yield* SqlClient.SqlClient
@@ -445,11 +448,16 @@ describe('sessions', () => {
         [first, 'codex', 'large', 'high', true],
       )
 
+      goOn()
       yield* Fiber.join(switching)
       const after = yield* queries.thread(created.threadId, { limit: 0 })
       assert.deepStrictEqual([after.session?.agentId, after.session?.model, after.session?.held], ['opencode', 'small', true])
-    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
-  )
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { beforeNewSession: () => up } } }))),
+      ),
+    )
+  })
 
   it.live('describes a recorded session the runtime no longer holds as not held', () =>
     Effect.gen(function* () {

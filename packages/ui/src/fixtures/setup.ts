@@ -240,6 +240,13 @@ export const WORKSPACES: ServiceConnection[] = [
   { id: 'conn_5', service: 'linear', account: 'you', workspace: 'Halyard' },
 ]
 
+/** Two of Linear's workspaces, as two people; the second's sign-in stopped working. */
+export const WORKSPACE_TO_SIGN_IN: ServiceConnection[] = [
+  { id: 'conn_1', service: 'github', account: 'you' },
+  { id: 'conn_4', service: 'linear', account: 'you', workspace: 'Meridian' },
+  { id: 'conn_6', service: 'linear', account: 'dana', workspace: 'Halyard', needsSignIn: true },
+]
+
 /** Codex with five accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, one signed out, and a key, billed per use, last. */
 export const ACCOUNTS: AccountEntry[] = [
   {

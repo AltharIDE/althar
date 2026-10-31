@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs'
 
+import { waitFor } from '@althar/testing'
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
@@ -239,8 +240,11 @@ describe('signing in inside Althar', () => {
     try {
       const said = await run(antigravity('subscription'), { way: 'browser' })
       expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
-      await new Promise((resolve) => setTimeout(resolve, 200))
-      expect(readdirSync(folder)).toEqual([])
+      // Its folder goes once it has exited, which the sign-in's end doesn't wait for.
+      await waitFor(
+        () => readdirSync(folder),
+        (left) => left.length === 0,
+      )
     } finally {
       restore()
     }

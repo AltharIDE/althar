@@ -50,6 +50,23 @@ describe('what stands in a change’s way', () => {
     expect(standingOf(change({ localHead: 'def456', unpushed: 4, checks: checks() })).next).toEqual({ kind: 'push', commits: 4 })
   })
 
+  it('offers no Push for commits that go up on their own, and says why where Althar held them (ADR-072)', () => {
+    // Going up as the lead's turn ends: nothing for the person to push, and nothing accepted until they're on it.
+    const going = change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: checks() })
+    expect(standingOf(going)).toEqual({ blockers: [{ kind: 'going', commits: 1 }], next: null })
+    expect(factsOf(going).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([['1 commit going up to the PR', 'up', 'live']])
+    expect(isBlocked(standingOf(going))).toBe(false)
+    const failing = checks({ outcome: 'failed', passed: 1, failed: 1, failing: ['test'] })
+    // Failing as they go up, the checks run again on them: nothing to ask of the lead until they're on it.
+    expect(standingOf(change({ localHead: 'def456', unpushed: 1, pushing: { held: null }, checks: failing })).next).toBeNull()
+    // Held: the person's Push, with why it didn't go up beside it.
+    const held = change({ localHead: 'def456', unpushed: 1, pushing: { held: 'Someone else pushed to PR #1' }, checks: checks() })
+    expect(standingOf(held).next).toEqual({ kind: 'push', commits: 1 })
+    expect(factsOf(held).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([['Someone else pushed to PR #1', 'up', 'warm']])
+    // Where every push is the person's, as before.
+    expect(standingOf(change({ localHead: 'def456', unpushed: 1, checks: checks() })).next).toEqual({ kind: 'push', commits: 1 })
+  })
+
   it('says a conflict with the branch it merges into, by name where it is known, and asks the lead to resolve it', () => {
     const named = change({ conflicts: true, target: 'main', checks: checks() })
     expect(factsOf(named).map((fact) => fact.words)).toEqual(['Conflicts with main'])

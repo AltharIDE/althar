@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { type AgentDefinition, type AgentSession, type ConfigOption, connect, unsupportedNow } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentSession, cleanUp, type ConfigOption, connect, unsupportedNow } from '@althar/provider-adapters'
 import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -146,6 +146,12 @@ const walk = (definition: AgentDefinition, session: AgentSession, images: boolea
     return { ...offered, models: offered.models.map((model): OfferedModel => read.get(model.id) ?? model) }
   })
 
+/**
+ * Removes the folder an agent was asked in, as best it can (`cleanUp`): what asking found is kept all the same, where a
+ * folder Windows still holds failing it would lose it, and have the agent asked again at the next read of the catalog.
+ */
+const removeFolder = (folder: string) => cleanUp(folder, 'where an agent was asked its models')
+
 const settingsIn = (config: string): ReadonlyArray<ConfigOption> => {
   try {
     const parsed: unknown = JSON.parse(config)
@@ -216,7 +222,8 @@ export class Models extends Context.Service<
        */
       const probe = (entry: AgentEntry, asOf = forgotten.get(entry.definition.id) ?? 0) =>
         Effect.acquireUseRelease(
-          Effect.sync(() => {
+          // A folder it can't make fails the asking, as a throw would have it asked again at every read.
+          Effect.try(() => {
             mkdirSync(probeBase, { recursive: true })
             return mkdtempSync(join(probeBase, 'althar-models-'))
           }),
@@ -276,7 +283,7 @@ export class Models extends Context.Service<
               yield* Effect.logWarning(`Could not read ${definition.name}'s models`, read.cause)
               return null
             }),
-          (folder) => Effect.sync(() => rmSync(folder, { recursive: true, force: true })),
+          removeFolder,
         ).pipe(
           Effect.orElseSucceed(() => null),
           Effect.tap((found) => Effect.sync(() => current(entry, asOf) && probed.set(entry.definition.id, found))),

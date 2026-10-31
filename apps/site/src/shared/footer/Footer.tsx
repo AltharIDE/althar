@@ -1,6 +1,7 @@
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from 'react'
 
 import { type Clear, drawLight, type Ground, lightBox, lightOf } from './engrave'
+import { ALTAR_X, ASPECT, engravingUrl, groundAt, LAND_Y } from './engraving'
 import s from './Footer.module.css'
 import { Links, Signature, still, useOnScreen, YEAR } from './parts'
 
@@ -29,23 +30,12 @@ const AHEAD = '0px 0px 150% 0px'
 /** Otherwise it loads this long after the page opens, once the page is idle, so it is ready when it is reached. */
 const ANYWAY = 4500
 
-/** The engraving is 1916 by 821; where things are in it, as shares of its width and height. */
-const ASPECT = 1916 / 821
-const ALTAR_X = 1330 / 1916
-const TABLE_Y = 503 / 821
-const TABLE_W = 100 / 1916
-const WATER_Y = 641 / 821
-/** The top of the landscape, the wooded cliffs at the left: above it is paper. */
-const LAND_Y = 0.4
-/** As high as the light reached where it was engraved. */
-const LIGHT_Y = 0.04
 /** The narrow crop starts this far in, at the far hills: the headland, the altar and the hills at the right. */
 const CROP = 766 / 1916
 /** How much of the water may go under the footer's foot, to keep the trees under the words on a short screen. */
 const DROP = 0.12
 
-const FILES = import.meta.glob<string>('./engraving/*', { eager: true, query: '?url', import: 'default' })
-const url = (file: string) => FILES[`./engraving/${file}`] ?? ''
+const url = engravingUrl
 const srcSet = (narrow: boolean, ext: string) =>
   narrow
     ? `${url(`engraving-narrow-640.${ext}`)} 640w, ${url(`engraving-narrow-1150.${ext}`)} 1150w`
@@ -81,21 +71,7 @@ function placeOf(w: number, h: number, clear: Clear[]): Place {
   const top = h - ih + drop
   // Wider than the screen, the altar sits a little right of the middle; narrower, it keeps its place in the picture.
   const left = iw >= w ? clamp(w * 0.62 - ALTAR_X * iw, w - iw, 0) : (w - iw) * ALTAR_X
-  const altarTop = top + TABLE_Y * ih
-  const g: Ground = {
-    w,
-    h,
-    // The light was made for a table 70 px wide.
-    k: (TABLE_W * iw) / 70,
-    top,
-    tall: h - top,
-    water: top + WATER_Y * ih + 2,
-    ax: left + ALTAR_X * iw,
-    ground: altarTop,
-    altarTop,
-    // Under the words, and no higher than the engraving's own light reached.
-    clear: [...clear, { left: 0, right: w, bottom: top + LIGHT_Y * ih }],
-  }
+  const g = groundAt(left, top, iw, ih, w, h, clear)
   return { left, top, iw, ih, narrow: left + CROP * iw <= 0, g }
 }
 
