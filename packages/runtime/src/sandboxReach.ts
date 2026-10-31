@@ -8,6 +8,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from './Instance'
 import { installIn, managerIn, manifestsIn, runOf, scriptsIn } from './runCommand'
+import { recordedOf } from './Setups'
 import { cachesOf, TOOL_PLACES } from './toolPlaces'
 
 /*
@@ -218,9 +219,11 @@ export const workedOutReach = (projectId: string, taskId: string | null) =>
       repository: string
       runCommand: string | null
       runSetup: string | null
+      recordedSetup: string | null
       remotes: string
     }>`
-      SELECT b.id, b.folder AS within, l.path AS repository, b.run_command, b.run_setup, l.observed_remotes AS remotes
+      SELECT b.id, b.folder AS within, l.path AS repository, b.run_command, b.run_setup, b.recorded_setup,
+        l.observed_remotes AS remotes
       FROM repository_bindings b
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
@@ -259,7 +262,12 @@ export const workedOutReach = (projectId: string, taskId: string | null) =>
         ...places.map(({ binding, folder, root }) => {
           const run = runOf({ command: binding.runCommand, setup: binding.runSetup }, folder, root)
           const setup = binding.runSetup ?? installIn(folder, root)
-          return [...(run === null ? [] : runCommandsOf(run.command)), ...(setup === null ? [] : setupCommandsOf(setup))]
+          const recorded = recordedOf(binding.recordedSetup)?.commands ?? []
+          return [
+            ...(run === null ? [] : runCommandsOf(run.command)),
+            ...(setup === null ? [] : setupCommandsOf(setup)),
+            ...recorded.flatMap(setupCommandsOf),
+          ]
         }),
         ...kept.map((runnable) => runCommandsOf(runnable.command)),
         ALWAYS,

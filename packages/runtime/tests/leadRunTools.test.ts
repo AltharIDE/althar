@@ -130,7 +130,7 @@ describe('install_dependencies', () => {
       yield* until(setUps(bare.task.taskId), (rows) => rows.every((row) => row !== null))
       assert.match(
         yield* callTool(bare.lead, 'install_dependencies', {}),
-        /^The repository has no setup kept, and nothing Althar can tell to install/,
+        /^The repository has no setup recorded, and nothing Althar can tell to install/,
       )
       // A repository named that the task hasn't.
       assert.match(
