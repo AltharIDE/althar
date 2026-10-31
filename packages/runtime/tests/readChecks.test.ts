@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
-import type { CodeHost, Check } from '@althar/connectors'
+import { ConnectorFailed, type CodeHost, type Check } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { ARTIFACT_CAP, LOG_CAP, OUTPUT_CAP, cleanLog, inspectChecks } from '../src/readChecks'
 
@@ -52,6 +52,31 @@ describe('bounded CI inspection', () => {
       assert.include(yield* read({ grep: '(a+)+$' }), 'No matches.')
     }),
   )
+  it.effect('retains the final failure and reports the returned lines in an oversized default tail', () =>
+    Effect.gen(function* () {
+      const log = Array.from({ length: 200 }, (_, i) => `line ${i + 1} ${'界'.repeat(100)}`).join('\n') + '\nFINAL FAILURE'
+      const { host, repository } = setup({ checkLog: () => Effect.succeed(log) })
+      const tail = yield* inspectChecks(host, repository, 'sha', undefined, { check: 'verify' })
+      assert.isAtMost(Buffer.byteLength(tail), OUTPUT_CAP)
+      assert.isTrue(tail.endsWith('201: FINAL FAILURE'))
+      const first = Number(tail.match(/Returned lines (\d+) to 201/)?.[1])
+      assert.isAbove(first, 2)
+      assert.include(tail, `\n${first}: line ${first}`)
+      assert.include(tail, 'earlier text omitted')
+      assert.equal(yield* inspectChecks(host, repository, 'sha', undefined, { check: 'verify', grep: '' }), tail)
+    }),
+  )
+  it.effect('reports a streamed log size limit without suggesting a retry', () =>
+    Effect.gen(function* () {
+      const { host, repository } = setup({
+        checkLog: () =>
+          Effect.fail(new ConnectorFailed({ product: 'github', reason: 'rejected', message: 'Response size cap', sizeLimit: LOG_CAP })),
+      })
+      const result = yield* inspectChecks(host, repository, 'sha', undefined, { check: 'verify' })
+      assert.include(result, 'Log exceeds the 16 MiB size cap')
+      assert.notInclude(result, 'may read it in a while')
+    }),
+  )
   it('strips timestamps, ANSI and group markers while retaining step headings', () => {
     assert.equal(cleanLog('2026-10-31T12:00:00.123Z ##[group]Test\n\x1b[31mFAIL\x1b[0m\n##[endgroup]'), '## Test\nFAIL\n')
   })
@@ -66,7 +91,7 @@ describe('bounded CI inspection', () => {
       assert.equal(execFileSync('git', ['check-ignore', path], { cwd: root, encoding: 'utf8' }).trim(), path)
       assert.include(
         (yield* Effect.flip(inspectChecks(host, repository, 'sha', root, { check: check.id, save: true }))).message,
-        "Couldn't save",
+        `already saved at ${path}`,
       )
     }),
   )
@@ -108,10 +133,12 @@ describe('bounded CI inspection', () => {
   )
   it.effect('caps a huge line and rejects symlink scratch directories', () =>
     Effect.gen(function* () {
-      const { host, repository } = setup({ checkLog: () => Effect.succeed('界'.repeat(OUTPUT_CAP)) })
+      const { host, repository } = setup({ checkLog: () => Effect.succeed('界'.repeat(OUTPUT_CAP) + 'FINAL FAILURE') })
       const result = yield* inspectChecks(host, repository, 'sha', undefined, { check: 'verify' })
       assert.isAtMost(Buffer.byteLength(result), OUTPUT_CAP)
       assert.include(result, 'capped')
+      assert.isTrue(result.endsWith('FINAL FAILURE'))
+      assert.include(result, '[line start omitted]')
       const root = folder()
       symlinkSync(folder(), join(root, '.althar'))
       assert.include((yield* Effect.flip(inspectChecks(host, repository, 'sha', root, { check: 'verify', save: true }))).message, 'symlink')

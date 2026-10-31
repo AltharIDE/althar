@@ -378,8 +378,8 @@ export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
   const working = repository()
   execFileSync('git', ['remote', 'add', 'origin', `${HOST}/${path.join('/')}.git`], { cwd: working })
   const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
-  execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare })
-  execFileSync('git', ['push', '-q', bare, 'main'], { cwd: working })
+  // Seed the local remote without a push to the protected default branch.
+  execFileSync('git', ['clone', '-q', '--bare', working, bare])
   return { working, bare }
 }
 

@@ -212,6 +212,12 @@ const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, statu
   return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
 }
 
+class ResponseTooLarge extends Error {
+  constructor(readonly limit: number) {
+    super(`Response exceeds ${limit} byte size cap`)
+  }
+}
+
 /** The statuses that send a call elsewhere, by their `Location`. */
 const REDIRECTS = new Set([301, 302, 303, 307, 308])
 
@@ -294,7 +300,7 @@ export const makeHttp = (options: HttpOptions): Http => {
           }),
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })
-      const body = yield* Effect.tryPromise({
+      let body = yield* Effect.tryPromise({
         try: async () => {
           const limit = init.maxBytes ?? 16 * 1024 * 1024
           const reader = response.body?.getReader()
@@ -306,7 +312,7 @@ export const makeHttp = (options: HttpOptions): Http => {
               const next = await reader.read()
               if (next.done) break
               size += next.value.byteLength
-              if (size > limit) throw new Error(`Response exceeds ${limit} byte size cap`)
+              if (size > limit) throw new ResponseTooLarge(limit)
               chunks.push(next.value)
             }
           } finally {
@@ -320,9 +326,29 @@ export const makeHttp = (options: HttpOptions): Http => {
           }
           return bytes
         },
-        catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
+        catch: (error) =>
+          new ConnectorFailed({
+            product,
+            reason: error instanceof ResponseTooLarge ? 'rejected' : 'unreachable',
+            message: String(error).slice(0, MESSAGE_KEPT),
+            ...(error instanceof ResponseTooLarge ? { sizeLimit: error.limit } : {}),
+          }),
       })
-      return { status: response.status, headers: response.headers, body: new TextDecoder().decode(body), bytes: body }
+      let text: string | undefined
+      return {
+        status: response.status,
+        headers: response.headers,
+        get body() {
+          if (text === undefined) {
+            text = new TextDecoder().decode(body)
+            body = new Uint8Array()
+          }
+          return text
+        },
+        get bytes() {
+          return text === undefined ? body : new TextEncoder().encode(text)
+        },
+      }
     }).pipe(
       Effect.timeoutOrElse({
         duration: timeout,

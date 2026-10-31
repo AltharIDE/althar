@@ -457,6 +457,8 @@ it.effect('caps streamed downloads even without content-length and preserves bin
     })
     const error = yield* Effect.flip(http.bytes('https://api.test/file', 4))
     assert.include(error.message, 'size cap')
+    assert.equal(error.reason, 'rejected')
+    assert.equal(error.sizeLimit, 4)
     assert.isTrue(cancelled)
     const binary = makeHttp({
       product: 'github',
