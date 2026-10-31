@@ -14,7 +14,19 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { essentials } from '../src/rules'
 import * as Runtime from '../src/Runtime'
-import { ALWAYS, commandsIn, hostsIn, hostsOfRemote, hostsOfTracker, runCommandsOf, setupCommandsOf, withEdits } from '../src/sandboxReach'
+import {
+  ALWAYS,
+  commandsIn,
+  hostsIn,
+  hostsOfRemote,
+  hostsOfTracker,
+  runCommandsOf,
+  setupCommandsOf,
+  withEdits,
+  writesIn,
+} from '../src/sandboxReach'
+import { SECRET_PLACES } from '@althar/provider-adapters'
+import { cachesOf, TOOL_PLACES } from '../src/toolPlaces'
 import { Sessions, upFrontSaid } from '../src/Sessions'
 import { repository, runtime, sessionMetas, turns, until } from './support'
 
@@ -172,6 +184,34 @@ describe('what a project says its leads reach without asking', () => {
   })
 })
 
+describe('what a project’s tools write outside a lead’s folder', () => {
+  it('names the caches of its package managers and of what its packages download, on a Mac and on Linux', () => {
+    const app = folder({ name: 'app', devDependencies: { '@playwright/test': '1', electron: '38' } }, { 'bun.lock': '' })
+    assert.deepStrictEqual(writesIn(app, app, 'darwin'), [
+      '~/.npm',
+      '~/.bun/install/cache',
+      '~/Library/Caches/ms-playwright',
+      '~/Library/Caches/electron',
+    ])
+    assert.deepStrictEqual(writesIn(app, app, 'linux'), ['~/.npm', '~/.bun/install/cache', '~/.cache/ms-playwright', '~/.cache/electron'])
+    // The sandbox doesn't run on Windows: nothing to let through there.
+    assert.deepStrictEqual(writesIn(app, app, 'win32'), [])
+    // A project with no packages or lockfiles names none.
+    const bare = mkdtempSync(join(tmpdir(), 'althar-reach-'))
+    assert.deepStrictEqual(writesIn(bare, bare, 'darwin'), [])
+  })
+
+  it('never names where keys and sign-ins are kept, nor a folder that holds one', () => {
+    for (const tool of TOOL_PLACES)
+      for (const platform of ['darwin', 'linux'] as const)
+        for (const cache of cachesOf(tool, platform)) {
+          const path = cache.slice(2)
+          for (const place of SECRET_PLACES)
+            assert.isFalse(path === place || path.startsWith(`${place}/`) || place.startsWith(`${path}/`), `${tool.name}: ${cache}`)
+        }
+  })
+})
+
 describe('the person’s edits', () => {
   it('take out what they removed and add what they added, each once, over what is worked out', () => {
     assert.deepStrictEqual(withEdits(['ps', 'bunx playwright', 'env -i'], { added: ['make e2e', 'ps'], removed: ['env -i'] }), [
@@ -238,13 +278,14 @@ describe('a lead’s session', () => {
       const sandbox = yield* leading({ permissions: 'rules' })
       // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
       assert.deepStrictEqual(sandbox?.commands, ['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', 'ps', 'env -i'])
-      // Not GitHub's release downloads: the rules read `release-assets` as publishing, which always asks here.
+      // GitHub's release downloads too, where Electron's build comes from: a host, not a release script.
       assert.deepStrictEqual(sandbox?.hosts, [
         'github.com',
         'api.github.com',
         'codeload.github.com',
         'raw.githubusercontent.com',
         'objects.githubusercontent.com',
+        'release-assets.githubusercontent.com',
         'registry.npmjs.org',
         'cdn.playwright.dev',
         'playwright.download.prss.microsoft.com',
@@ -253,6 +294,13 @@ describe('a lead’s session', () => {
         'api.linear.app',
         'uploads.linear.app',
       ])
+      // The caches of npm, Bun, Playwright and Electron, where this platform's sandbox runs.
+      const caches = (name: string) =>
+        cachesOf(
+          TOOL_PLACES.find((tool) => tool.name === name)!,
+          process.platform,
+        )
+      assert.deepStrictEqual(sandbox?.writes, [...caches('npm'), ...caches('Bun'), ...caches('Playwright'), ...caches('Electron')])
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -302,10 +350,14 @@ describe('a lead’s session', () => {
 describe('a lead’s brief', () => {
   it('names what runs outside its sandbox, how one does, and the hosts it reaches', () => {
     assert.strictEqual(
-      upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'] }),
+      upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'], writes: [] }),
       "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
     )
-    assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [] }).includes('hosts'), false)
+    assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [], writes: [] }).includes('hosts'), false)
+    assert.include(
+      upFrontSaid({ commands: [], hosts: [], writes: ['~/Library/Caches/electron'] }),
+      'Your sandbox writes to the caches of the tools the project installs with: ~/Library/Caches/electron,',
+    )
   })
 })
 

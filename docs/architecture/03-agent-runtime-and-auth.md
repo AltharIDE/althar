@@ -906,22 +906,42 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   person or the coordinator decides it, none the project never allows. A
   host is named on its own, never `*.` for every host under one: the rules
   judge a request by the host it names, and a wildcard would let through
-  hosts under it that they ask about or refuse.
+  hosts under it that they ask about or refuse. A request is read as a
+  host, never as a command: `release-assets.githubusercontent.com`, where
+  Electron's build downloads from, is no release script;
+- the caches of the tools the project installs with, which its sandboxed
+  commands write to without asking (`sandbox.filesystem.allowWrite`): what
+  fails in a fresh task folder is rarely the install, but a tool that
+  downloads outside it, as Electron does its build
+  (`~/Library/Caches/electron`), Playwright its browsers
+  (`~/Library/Caches/ms-playwright`) and Bun every package
+  (`~/.bun/install/cache`). One list (`toolPlaces.ts`) holds each tool's
+  caches on a Mac and on Linux and the hosts it downloads from, by the
+  files or packages that say a project uses it. None is where keys and
+  sign-ins are kept, nor holds one (`writesOf` drops it all the same).
+  A sandboxed command reaches the network only through the proxy the
+  sandbox names in `HTTPS_PROXY`, which Node's own `fetch` ignores, so
+  Claude Code starts with `NODE_USE_ENV_PROXY=1`: without it Electron's
+  download (`@electron/get`) fails in the sandbox even to a host it allows. A
+  cache is shared with the person's own installs, so a lead could leave
+  something there that a later install of theirs picks up: the trade made
+  so a task's folder gets ready without anyone.
 
-Both are worked out from the project: the tools its packages bring, its
+All three are worked out from the project: the tools its packages bring, its
 test and end-to-end scripts, what is kept for how it runs and is set up,
 its repositories' code hosts, its package managers' registries and what
 its packages download, and the trackers Althar is connected to (Linear's
-hosts, for one). The person adds to them and takes from them in the
-project's rules, under Sandbox, and those edits hold over what is worked
-out later. A change applies from a lead's next session. Codex's
+hosts, for one). The person adds to the commands and hosts and takes from
+them in the project's rules, under Sandbox, and those edits hold over what
+is worked out later; the caches follow the tools. A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
-modes don't use, so its leads are given neither; OpenCode has no sandbox.
+modes don't use, so its leads are given none of them; OpenCode has no sandbox.
 Every network request keeps its host on the record.
 
-Installing a worktree's dependencies would have to leave it, and needn't:
-Althar does it before the lead starts ([below](#setting-up-a-worktree)).
+A worktree's setup Althar runs before the lead starts
+([below](#setting-up-a-worktree)); what the lead installs beyond it stays
+in its sandbox, writing to its tools' caches.
 
 **What the sandbox holds runs; what crosses meets the rules**
 ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)).
@@ -1015,16 +1035,22 @@ Known gaps:
 
 ### Setting up a worktree
 
-A lead starts in a fresh worktree with nothing installed, and its sandbox
-refuses an install: the package manager writes to its cache and temporary
-folders outside the worktree (Bun's `~/.bun`, npm's `~/.npm`). The lead
-would then ask to install outside the sandbox, a permission request for
-something no one doubts. So Althar sets the worktree up itself, as Superset,
-Conductor and Codex do, and the lead's sandbox stays as strict as it is
-([ADR-023](../decisions/023-althar-runs-the-project.md)):
+A lead starts in a fresh worktree with nothing installed, and nothing of
+what git ignores, such as `.env`. So Althar sets the worktree up itself, as
+Superset, Conductor and Codex do, before the lead starts
+([ADR-023](../decisions/023-althar-runs-the-project.md),
+[ADR-078](../decisions/078-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)):
 
-- **What runs** is the setup kept for the repository (`set_run_command`'s
-  `setup`, the same one a run of the project starts with), else the install
+- **What runs** is the setup a lead recorded for the repository with
+  `record_setup` (`recorded_setup`): the ignored files to copy from the
+  person's checkout, from the repository's root, and the commands, run one
+  after another from the repository's folder until one fails. The files are
+  copied first, only from inside the checkout, and never over or into
+  what the worktree has, nor through a folder of it that is a symbolic
+  link, which a commit can point anywhere. One that couldn't be copied, gone
+  from the checkout say, fails the setup, and the lead is told which. Without one
+  recorded, the setup kept for the repository (`set_run_command`'s `setup`,
+  the same one a run of the project starts with), else the install
   its lockfile names: `bun install --frozen-lockfile`, `pnpm install
   --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`. It never
   changes the lockfile. Its packages are its package.json's own, or, at the
@@ -1033,6 +1059,14 @@ Conductor and Codex do, and the lead's sandbox stays as strict as it is
   install is skipped where `node_modules` is there; in a worktree it runs
   whatever `node_modules` holds, since an install Althar quitting cut short
   leaves one, and whether the worktree is set up is kept on its workspace.
+- **Nobody writes the recorded setup.** Where none is recorded, the lead's
+  brief asks it to get its folder ready first (its dependencies, what its
+  tools download, the ignored files it needs from the person's checkout,
+  whose path it is given) and to record what worked; Althar copies the files
+  it names into its folder at once. A later lead whose replay failed is told
+  what failed and asked to record the setup that works, which replaces the
+  old one. The person reads it in the project's settings, and changes or
+  clears it there. Secret files such as `.env` are copied as any other.
 - **When:** as the task's worktrees are made (a draft's too, so it is ready
   by the time its plan starts), and again for a worktree a reopened task
   puts back, as soon as it is back. How it went is kept on the workspace, so
@@ -1050,8 +1084,11 @@ Conductor and Codex do, and the lead's sandbox stays as strict as it is
   it ended and the end of what it printed, so the lead can deal with it.
   A setup that fails never holds the task up.
 - **The thread shows it,** as Althar's own line: "Installing dependencies
-  in meridian…", then "Installed dependencies in meridian"; failed, the end
-  of what it printed stands under the line, with its exit code.
+  in meridian…", then "Installed dependencies in meridian", with what it
+  copied and the end of what it printed folded under it; failed, that
+  stands open under the line, with its exit code. The card says
+  "Installing dependencies" while it runs, or "Setting up" for a kept
+  setup line.
 
 It runs repository code on the Mac outside any sandbox (the project's own
 install scripts, and those of its dependencies where the package manager

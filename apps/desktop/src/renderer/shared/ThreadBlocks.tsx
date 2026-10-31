@@ -104,6 +104,8 @@ export const text = {
     failed: (setup: SetupContent) =>
       `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}.`,
     stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped when Althar quit.`,
+    /** A recorded setup that ran, but couldn't copy files it names from the person's checkout. */
+    missing: (setup: SetupContent, files: ReadonlyArray<string>) => `Couldn’t copy ${files.join(', ')} into ${setup.repository}’s folder.`,
     timedOut: 'Timed out.',
   },
   /** What passing it on says to the lead, in the person's name. */
@@ -122,15 +124,18 @@ export const text = {
  */
 function SetupView({ setup }: { setup: SetupContent }) {
   const { ended } = setup
-  const failed = ended !== null && !ended.stopped && ended.code !== 0
+  const missing = ended?.missing ?? []
+  const failed = ended !== null && !ended.stopped && (ended.code !== 0 || missing.length > 0)
   const line =
     ended === null
       ? text.setup.running(setup)
       : ended.stopped
         ? text.setup.stopped(setup)
-        : failed
-          ? text.setup.failed(setup)
-          : text.setup.done(setup)
+        : ended.code === 0 && missing.length > 0
+          ? text.setup.missing(setup, missing)
+          : failed
+            ? text.setup.failed(setup)
+            : text.setup.done(setup)
   return (
     <>
       <ThreadDivider icon="terminal">{line}</ThreadDivider>

@@ -2062,8 +2062,9 @@ export const SetupItem = Schema.Struct({
     startedAt: Schema.String,
     /**
      * How it ended: its exit code, 0 for done, null where it didn't end by
-     * itself; out of time; stopped because Althar quit; and the end of what
-     * it printed, where it failed. Null while it runs.
+     * itself; out of time; stopped because Althar quit; what it copied and
+     * the end of what it printed; and the files a recorded setup names that
+     * it couldn't copy, which fail it too (ADR-078). Null while it runs.
      */
     ended: Schema.NullOr(
       Schema.Struct({
@@ -2072,6 +2073,7 @@ export const SetupItem = Schema.Struct({
         timedOut: Schema.Boolean,
         stopped: Schema.Boolean,
         last: Schema.NullOr(Schema.String),
+        missing: Schema.optional(Schema.Array(Schema.String)),
       }),
     ),
   }),

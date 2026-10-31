@@ -44,6 +44,8 @@ describe('the agent registry', () => {
     })
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // Node's fetch takes the proxy a Claude Code sandbox names, so a Node tool's download reaches a host it allows.
+    assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { NODE_USE_ENV_PROXY: '1' })
     // Antigravity's mode is held where it asks, as its others approve without asking.
     assert.deepStrictEqual(agents.antigravity.options.held, { mode: 'default' })
     // None is launched with a flag that approves.
@@ -150,6 +152,7 @@ describe('the agent registry', () => {
       allowUnsandboxedCommands: boolean
       excludedCommands?: Array<string>
       network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+      filesystem?: { allowWrite?: Array<string> }
     }
     const metaOf = agents['claude-code'].sessionMeta
     if (metaOf === undefined) return assert.fail('Claude Code has session options')
@@ -168,6 +171,21 @@ describe('the agent registry', () => {
       'env -i *',
     ])
     assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    // Without caches given, it writes nowhere beyond its folder.
+    assert.isUndefined(lead.sandbox.filesystem)
+    // The tools' caches it writes to, but never where keys and sign-ins are kept, nor anything not from the home folder.
+    const writes = [
+      '~/.bun/install/cache',
+      '~/Library/Caches/ms-playwright',
+      '~/.ssh',
+      '~/.config/gh/hosts.yml',
+      '~/.config',
+      '/etc',
+      '~/../x',
+    ]
+    assert.deepStrictEqual(sandboxOf('lead', { sandbox: { ...upFront, writes } }).sandbox.filesystem, {
+      allowWrite: ['~/.bun/install/cache', '~/Library/Caches/ms-playwright'],
+    })
     // A command outside the sandbox still asks, and meets Althar's rules: nothing else changes.
     assert.include(lead.permissions.ask, 'Bash')
     assert.isTrue(lead.sandbox.autoAllowBashIfSandboxed)

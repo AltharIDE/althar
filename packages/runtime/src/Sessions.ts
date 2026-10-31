@@ -277,6 +277,9 @@ export const upFrontSaid = (upFront: Reach): string =>
       ? ''
       : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
     upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
+    upFront.writes.length === 0
+      ? ''
+      : `Your sandbox writes to the caches of the tools the project installs with: ${upFront.writes.join(', ')}, so an install that downloads into one, such as Electron's build or Playwright's browsers, works inside it.`,
   ]
     .filter((said) => said !== '')
     .join(' ')

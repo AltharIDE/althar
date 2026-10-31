@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
-import { secretReadRules } from './secrets'
+import { SECRET_PLACES, secretReadRules } from './secrets'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -358,7 +358,33 @@ export interface Contained {
 export interface UpFront {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  /**
+   * Folders outside its own it writes to without asking, from the home
+   * folder as `~/…`: the caches of the tools its project installs with, as
+   * Electron's and Playwright's downloads. Never where the person keeps keys
+   * and sign-ins (`SECRET_PLACES`), whatever is given.
+   */
+  readonly writes?: ReadonlyArray<string>
 }
+
+/** A path without the slashes it ends with: a loop, not a pattern, which a long run of slashes would make slow. */
+export const withoutTrailingSlashes = (path: string): string => {
+  let end = path.length
+  while (end > 0 && path[end - 1] === '/') end -= 1
+  return path.slice(0, end)
+}
+
+/** The folders a lead's sandbox writes to beyond its own, without any of, in or over where keys and sign-ins are kept. */
+export const writesOf = (writes: ReadonlyArray<string>): ReadonlyArray<string> =>
+  writes.filter((folder) => {
+    const path = withoutTrailingSlashes(folder.startsWith('~/') ? folder.slice(2) : folder)
+    return (
+      folder.startsWith('~/') &&
+      path !== '' &&
+      !path.split('/').includes('..') &&
+      !SECRET_PLACES.some((place) => path === place || path.startsWith(`${place}/`) || place.startsWith(`${path}/`))
+    )
+  })
 
 /**
  * Claude Code's `sandbox.excludedCommands` for commands by how they start:
@@ -622,10 +648,19 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * asks, and meets Althar's rules, as it would on its second try. Known hosts
  * (`network.allowedDomains`) a command in the sandbox reaches without
  * asking: the project's code hosts, registries and trackers, only where its
- * rules would let them through anyway. Both are settings Claude Code takes
- * only from trusted sources, which these, given as the session's own, are.
+ * rules would let them through anyway. Known caches
+ * (`filesystem.allowWrite`) its commands write to without asking, outside
+ * the worktree: those of the tools its project installs with, so Electron's
+ * build and Playwright's browsers download inside the sandbox, never where
+ * keys and sign-ins are kept (`writesOf`). These are settings Claude Code
+ * takes only from trusted sources, which these, given as the session's own,
+ * are.
  */
-const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = claudeSandboxStarts()) => ({
+const claudeAsks = (
+  sandbox: UpFront = { commands: [], hosts: [] },
+  starts = claudeSandboxStarts(),
+  writes = writesOf(sandbox.writes ?? []),
+) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
@@ -640,6 +675,7 @@ const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = cla
           failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
           network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
+          ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
         },
       },
     },
@@ -785,9 +821,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     name: 'Claude Code',
     service: { name: 'Anthropic', url: 'https://api.anthropic.com' },
     source: 'bundled',
+    /*
+     * `NODE_USE_ENV_PROXY`: a sandboxed command reaches the network only
+     * through the proxy its sandbox names in `HTTPS_PROXY`, which Node's own
+     * `fetch` ignores without it, so a Node tool's download (Electron's
+     * build, through `@electron/get`) fails inside the sandbox even to a host
+     * it allows. Where no proxy is named it changes nothing.
+     */
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
+      env: { NODE_USE_ENV_PROXY: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
