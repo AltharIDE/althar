@@ -57,6 +57,7 @@ import {
   Policies,
   type ProjectRules,
   resolvesConflicts,
+  pushesCommits,
   ruleSetOf,
   usageLimitOf,
 } from './Policies'
@@ -370,6 +371,7 @@ export const handlers = Api.toLayer(
         commands: set.commands,
         end: rules.end ?? null,
         resolveConflicts: resolvesConflicts(rules),
+        pushCommits: pushesCommits(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -1359,6 +1361,8 @@ export const handlers = Api.toLayer(
               const kept = yield* policies.current(projectId as ProjectId)
               // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
+              if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),
           ),
