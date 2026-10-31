@@ -100,6 +100,9 @@ describe('what stands in a change’s way', () => {
     expect(factsOf(one).map((fact) => [fact.words, fact.icon])).toEqual([['deploy cancelled', 'stop']])
     expect(standingOf(one).next).toBeNull()
     expect(said({ checks: checks({ passed: 0, list: list('deploy', 'e2e') }) })).toEqual([['2 checks cancelled', 'warm']])
+    // Run again by Althar, they are running before the host shows them so (DEV-173).
+    const again = change({ checks: checks({ outcome: 'running', passed: 1, list: list('deploy') }) })
+    expect(standingOf(again).blockers.map((one) => one.kind)).toEqual(['running'])
   })
 
   it('reads what blocks first, then what to do, and offers the push first, as it runs the checks again', () => {

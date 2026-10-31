@@ -27,7 +27,8 @@ export const byItself = (change: ChangeSummary | null): ByItself | null => {
   if (unpushed) return change.pushing !== undefined && change.pushing.held === null ? 'pushing' : null
   const checks = change.checks
   if (change.conflicts === true || checks === null || checks.failed > 0) return null
-  return checks.running > 0 ? 'checks_running' : null
+  // Run again by Althar (a cancelled check), they are running before its host shows them so.
+  return checks.running > 0 || checks.outcome === 'running' ? 'checks_running' : null
 }
 
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */

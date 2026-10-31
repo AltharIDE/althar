@@ -51,6 +51,9 @@ describe('a ready change that goes on by itself (DEV-173)', () => {
 
   it('has its checks running, with nothing before them', () => {
     assert.strictEqual(byItself(change({ checks: running })), 'checks_running')
+    // A cancelled check Althar ran again, before its host shows it running.
+    const again = checks({ outcome: 'running', list: [{ name: 'test', state: 'cancelled', summary: null }] })
+    assert.strictEqual(byItself(change({ checks: again })), 'checks_running')
   })
 
   it("is the person's where a conflict, a failure or a parted branch comes before the checks running", () => {
