@@ -9,7 +9,7 @@
   text-decoration: none;
 }
 .trigger:hover:not(:disabled),
-.trigger[data-state='open'] {
+.trigger[aria-expanded='true'] {
   color: var(--t-1);
 }
 .lines {
@@ -96,7 +96,7 @@
   font-size: 10px;
 }
 /* left out: the picture steps back */
-.thumb[data-state='unchecked'] .frame {
+.out .frame {
   opacity: 0.38;
 }
 
@@ -112,7 +112,7 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1.5px var(--t-3);
 }
-.thumb[data-state='checked'] .box {
+.thumb:not(.out) .box {
   background: var(--ink-fill);
   box-shadow: none;
   color: var(--on-ink);

@@ -66,8 +66,16 @@ describe('PostScreenshots', () => {
     const { rerender } = render(<PostScreenshots {...base} standing="posted" defaultOpen />)
     expect(screen.queryByRole('button', { name: /Update|Post \d/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    rerender(<PostScreenshots {...base} standing="posted" defaultOpen host="GitHub" commentUrl="https://github.com/acme/web/pull/142#issuecomment-1" />)
-    const link = screen.getByRole('link', { name: 'Open on GitHub (opens in a new tab)' })
+    rerender(
+      <PostScreenshots
+        {...base}
+        standing="posted"
+        defaultOpen
+        host="GitHub"
+        commentUrl="https://github.com/acme/web/pull/142#issuecomment-1"
+      />,
+    )
+    const link = screen.getByRole('link', { name: /^Open on GitHub ?\(opens in a new tab\)$/ })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noreferrer')
     rerender(<PostScreenshots {...base} standing="posted" defaultOpen host="GitHub" commentUrl="javascript:alert(1)" />)

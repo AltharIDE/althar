@@ -9,12 +9,21 @@ import { PostScreenshots, type PostScreenshotsShot } from './PostScreenshots'
 const SHOTS: PostScreenshotsShot[] = [
   { ...SHOT_BEFORE, key: 'refund-form', caption: 'A1 · The refund form, a key reused: the reason under the button' },
   { ...SHOT_AFTER, key: 'refund-again', caption: 'A2 · The same refund, sent again: refused, with a link to the first' },
-  ...SHOT_RUN.slice(0, 2).map((shot, i) => ({ ...shot, key: `refunds-${i}`, caption: `B${i + 1} · The refunds list, ${shot.label ?? ''}` })),
+  ...SHOT_RUN.slice(0, 2).map((shot, i) => ({
+    ...shot,
+    key: `refunds-${i}`,
+    caption: `B${i + 1} · The refunds list, ${shot.label ?? ''}`,
+  })),
 ]
 
 const MANY: PostScreenshotsShot[] = Array.from({ length: 12 }, (_, i) => {
   const shot = [SHOT_BEFORE, SHOT_AFTER, ...SHOT_RUN][i % (SHOT_RUN.length + 2)] ?? SHOT_AFTER
-  return { ...shot, id: `many-${i}`, key: `view-${i}`, caption: `${String.fromCharCode(65 + Math.floor(i / 4))}${(i % 4) + 1} · A view of the refunds, ${i + 1} of 12` }
+  return {
+    ...shot,
+    id: `many-${i}`,
+    key: `view-${i}`,
+    caption: `${String.fromCharCode(65 + Math.floor(i / 4))}${(i % 4) + 1} · A view of the refunds, ${i + 1} of 12`,
+  }
 })
 
 /* where it sits: at the end of a heading row, at the Outputs column's width */
@@ -58,11 +67,15 @@ export const Unposted: Story = {}
 /** On the pull request, and nothing has changed since. */
 export const Posted: Story = { args: { standing: 'posted', commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' } }
 /** Two screenshots differ from what the pull request shows. */
-export const Changed: Story = { args: { standing: 'changed', changed: 2, commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' } }
+export const Changed: Story = {
+  args: { standing: 'changed', changed: 2, commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' },
+}
 /** The project keeps the comment up to date itself. */
 export const Synced: Story = { args: { standing: 'synced', commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' } }
 /** One left out of this pull request: said quietly on the line, and unticked in the sheet. */
-export const LeftOut: Story = { args: { standing: 'posted', leftOut: ['refunds-1'], commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' } }
+export const LeftOut: Story = {
+  args: { standing: 'posted', leftOut: ['refunds-1'], commentUrl: 'https://github.com/acme/web/pull/142#issuecomment-1' },
+}
 
 /** The sheet: what goes where, each screenshot ticked or left out, and the press beside the comment's link. */
 export const Open: Story = {

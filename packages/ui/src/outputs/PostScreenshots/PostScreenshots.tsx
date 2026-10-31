@@ -221,14 +221,12 @@ export function PostScreenshots({
                   checked={on}
                   onCheckedChange={(next) => toggle(shot.key, next === true)}
                   aria-label={t.include(shot.caption)}
-                  className={s.thumb}
+                  className={cx(s.thumb, !on && s.out)}
                 >
                   <span
                     className={s.frame}
                     style={
-                      shot.width !== undefined && shot.height !== undefined
-                        ? { aspectRatio: `${shot.width} / ${shot.height}` }
-                        : undefined
+                      shot.width !== undefined && shot.height !== undefined ? { aspectRatio: `${shot.width} / ${shot.height}` } : undefined
                     }
                   >
                     <ImageView image={shot} size="thumb" fit="cover" text={t.image} />
