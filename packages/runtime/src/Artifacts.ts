@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { type ArtifactKind, Ids, newId, type ProjectId, type Sensitivity } from '@althar/domain'
+import { cleanUp } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -96,7 +97,8 @@ export class Artifacts extends Context.Service<
             await mkdir(dirname(target), { recursive: true })
             await rename(aside, target)
           } finally {
-            await rm(aside, { force: true })
+            // Gone already once it is in place; one a failed write left goes as best it can, and the write's own failure stands.
+            await Effect.runPromise(cleanUp(aside, "an artifact's bytes written aside"))
           }
         })
 

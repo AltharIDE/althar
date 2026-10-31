@@ -1,5 +1,7 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 
+import { Effect } from 'effect'
+
 import { adapterNode, asNode, privateTemp, removeTemp } from './process'
 import type { AgentDefinition, LaunchSpec } from './registry'
 
@@ -131,8 +133,8 @@ export const startSignInFlow = (
   const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
   const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   // Its temporary folder goes once it has stopped, or where it never started.
-  child.on('exit', () => removeTemp(temp?.folder))
-  child.on('error', () => removeTemp(temp?.folder))
+  child.on('exit', () => Effect.runFork(removeTemp(temp?.folder)))
+  child.on('error', () => Effect.runFork(removeTemp(temp?.folder)))
   let over = false
   const end = (event?: SignInFlowEvent, grace = 0) => {
     if (over) return

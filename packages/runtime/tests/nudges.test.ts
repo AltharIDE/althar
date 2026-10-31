@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
+import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -23,7 +24,8 @@ import { repository, runtime, until } from './support'
  * need them, and how many things wait, never progress.
  */
 
-const withNudges = (database = ':memory:') => Nudges.layer.pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(runtime(database)))
+const withNudges = (database = ':memory:', agents: FakeAgentOptions = {}) =>
+  Nudges.layer.pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(runtime(database, agents)))
 
 /** Every event the nudges give, as they come. */
 const heard = Effect.gen(function* () {
@@ -147,8 +149,9 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
-  it.live('go quiet while the lead works on what the person said after, and say the task is ready again once it is done', () =>
-    Effect.gen(function* () {
+  it.live('go quiet while the lead works on what the person said after, and say the task is ready again once it is done', () => {
+    const lead = holds()
+    return Effect.gen(function* () {
       const { events, stop } = yield* heard
       const task = yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
@@ -163,19 +166,20 @@ describe('nudges', () => {
         body,
         disposition: 'after_current',
       })
-      // Mid-turn, the task isn't ready.
+      // Mid-turn, the task isn't ready; once the lead is done with it, it is again.
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 0,
       )
+      lead.open('[lead:wait]')
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 2,
       )
       assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.'])
       yield* stop
-    }).pipe(Effect.provide(withNudges())),
-  )
+    }).pipe(Effect.provide(withNudges(':memory:', { holds: lead })))
+  })
 
   it.live('say whether work runs: an agent on a step, or the lead talking after its run, and not once it is stuck, stopped or done', () =>
     Effect.gen(function* () {

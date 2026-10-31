@@ -81,5 +81,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md) | The sandbox is the boundary: what it holds runs unread, what crosses meets the rules, and git stops what can't be undone |
 | [072](072-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
 | [073](073-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |
-| [074](074-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [075](075-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
+| [075](075-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [076](076-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |

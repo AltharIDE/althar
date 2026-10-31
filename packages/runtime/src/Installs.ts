@@ -21,12 +21,14 @@ import type { Fetch } from '@althar/connectors'
 import {
   type AgentDefinition,
   type AgentDownload,
+  cleanUp,
   isMusl,
   type LaunchSpec,
   locate,
   type Located,
   type PinnedDownload,
   programName,
+  removeFully,
 } from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 import { Unzip, UnzipInflate } from 'fflate'
@@ -93,7 +95,7 @@ export interface InstallsOptions {
   /** A Linux on musl, as Alpine is, which takes the release's musl build where it has one. */
   readonly musl?: boolean
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
-  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
+  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> } | undefined
   /**
    * The device outside a sandbox that cannot see it (a Flatpak): the person's
    * own commands are found and run out there, before any copy that is here;
@@ -374,7 +376,9 @@ export class Installs extends Context.Service<
               const { release, command, whole } = yield* download(definition, cli.name, spec, folder)
               // The version's folder holds the command alone, or all a pinned archive held; `current` moves to it in one step.
               const version = join(home, release.tag)
-              rmSync(version, { recursive: true, force: true })
+              yield* removeFully(version).pipe(
+                Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
+              )
               if (whole !== undefined) renameSync(whole, version)
               else {
                 mkdirSync(version)
@@ -385,20 +389,19 @@ export class Installs extends Context.Service<
               if (platform === 'win32') symlinkSync(version, next, 'junction')
               else symlinkSync(release.tag, next)
               // Windows can't rename over a junction, so the old one goes first; elsewhere the rename replaces it in one step.
+              // The link alone, never recursively, so nothing of the version it points at goes with it; a step of the install's own.
+              // oxlint-disable-next-line althar/one-removal
               if (platform === 'win32') rmSync(join(home, 'current'), { force: true })
               renameSync(next, join(home, 'current'))
-              // Versions before the one in use go, with what any earlier download left.
+              // Versions before the one in use go, with what any earlier download left; one an agent still runs from stays.
               for (const entry of readdirSync(home))
-                if (entry !== release.tag && entry !== 'current') rmSync(join(home, entry), { recursive: true, force: true })
+                if (entry !== release.tag && entry !== 'current')
+                  yield* cleanUp(join(home, entry), `an earlier ${definition.name} Althar downloaded`)
             }).pipe(
               Effect.catchDefect((defect) =>
                 Effect.fail(fail(definition.id, `${definition.name} couldn't be kept on this computer.`, defect)),
               ),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  if (existsSync(folder)) rmSync(folder, { recursive: true, force: true })
-                }),
-              ),
+              Effect.ensuring(cleanUp(folder, `where ${definition.name} was downloaded`)),
               Effect.ensuring(Ref.update(installing, (now) => new Set([...now].filter((id) => id !== definition.id)))),
             )
           })

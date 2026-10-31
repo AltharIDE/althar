@@ -1,4 +1,4 @@
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
@@ -76,8 +76,11 @@ export interface FakeServiceOptions {
   readonly saysHead?: boolean
   /** What of an issue it updates: as its product's adapter does, unless a test says. */
   readonly changes?: ReadonlyArray<IssueField>
-  /** How long each call takes, in milliseconds, by method, as a host far away answers: at once unless said. */
-  readonly latency?: (method: string) => number
+  /**
+   * What each call waits for before it answers, by method, as a host far away takes its time: a gate the test opens when
+   * it has seen what it looks for meanwhile, never a time of the fake's. At once unless said.
+   */
+  readonly waitsFor?: (method: string) => Effect.Effect<void>
 }
 
 /** What each product's adapter changes of an issue, as the fake takes them. */
@@ -278,12 +281,12 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const inQueue = new Set<number>()
   const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
 
-  /** Records a call, taking as long as the test said, and fails it if a test asked. */
+  /** Records a call, held until what the test said it waits for, and fails it if a test asked. */
   const called = (method: string) =>
     Effect.suspend(() => {
       calls.push(method)
-      const takes = options.latency?.(method) ?? 0
-      return takes > 0 ? Effect.andThen(Effect.sleep(Duration.millis(takes)), failing(method)) : failing(method)
+      const waits = options.waitsFor?.(method)
+      return waits === undefined ? failing(method) : Effect.andThen(waits, failing(method))
     })
   const failing = (method: string) =>
     Effect.suspend(() => {

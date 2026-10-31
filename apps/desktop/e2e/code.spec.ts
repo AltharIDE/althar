@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { appPath, launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * The code an agent names, in a real window with the fake agents, which say
@@ -28,7 +28,7 @@ const standIn = (home: string) => {
   mkdirSync(bin)
   const log = join(home, 'opened.log')
   for (const name of ['open', 'cursor']) writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`, { mode: 0o755 })
-  return { path: `${bin}:${process.env.PATH ?? ''}`, asked: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') }
+  return { path: `${bin}:${appPath(home)}`, asked: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') }
 }
 
 /** The panel's button to the person's editor, or to the file manager where there is none; not the one to another editor. */

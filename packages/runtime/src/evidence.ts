@@ -1,7 +1,8 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import type { Evidence, ShownPicture } from '@althar/contracts'
+import { cleanUp } from '@althar/provider-adapters'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -378,7 +379,8 @@ export const evidenceForReview = (taskThreadId: string, folder: string) =>
   Effect.gen(function* () {
     const artifacts = yield* Artifacts
     const { evidence, unverified } = yield* taskShown(taskThreadId)
-    yield* Effect.promise(() => rm(folder, { recursive: true, force: true }))
+    // What an earlier review was given goes as best it can: what this one is given is written over it, and its words say what is.
+    yield* cleanUp(folder, 'the evidence an earlier review was given')
     if (evidence.length > 0) yield* Effect.promise(() => mkdir(folder, { recursive: true }))
     const lines: Array<string> = []
     for (const [index, piece] of evidence.entries()) {

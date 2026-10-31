@@ -11,6 +11,7 @@
     "./vitest": "./src/vitest.ts",
     "./setup": "./src/setup.ts",
     "./effect": "./src/effect.ts",
+    "./performance": "./src/performance.ts",
     "./reporter": "./src/reporter.ts",
     "./playwright": "./src/playwright.ts"
   },

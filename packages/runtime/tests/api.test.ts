@@ -14,7 +14,7 @@ import {
   OptionUnavailable,
   TurnInProgress,
 } from '@althar/provider-adapters'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -608,10 +608,12 @@ describe('the API', () => {
     ),
   )
 
-  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () =>
-    Effect.scoped(
+  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () => {
+    // Its answer is held until the test has read the turn running.
+    const coordinator = holds()
+    return Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant } = yield* connected()
+        const { client, grant } = yield* connected({ agents: fakeAgents({ holds: coordinator }) })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
         const sent = Date.now()
@@ -630,6 +632,7 @@ describe('the API', () => {
         assert.isAtMost(started, Date.now())
         // Before its first turn ends, none has.
         assert.isNull(thinking.session?.turnEndedAt)
+        coordinator.open('[answers-after:1s]')
         const answered = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => snapshot.session !== null && !snapshot.session.turnRunning,
@@ -638,8 +641,8 @@ describe('the API', () => {
         // Between turns, when the last ended: what was said before it has been answered.
         assert.isAtLeast(Date.parse(answered.session?.turnEndedAt ?? ''), started)
       }),
-    ),
-  )
+    )
+  })
 
   it.live('asks the person, and takes their answer', () =>
     Effect.scoped(

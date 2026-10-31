@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
+import { cleanUp } from '@althar/provider-adapters'
 import { Duration, Effect } from 'effect'
 
 import { GitFailed } from './errors'
@@ -283,7 +284,8 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     }),
     (copy) =>
       Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
-    (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
+    // The index's copy goes as best it can: a folder git still holds a moment after it exits leaves the tree as it was read.
+    (copy) => cleanUp(dirname(copy), "where a worktree's tree was read"),
   )
 
 /** Commits a tree on top of a parent without touching any branch, as Althar: a snapshot a worktree can check out. */
@@ -653,7 +655,7 @@ export const addReadCopy = (repository: string, path: string, commit: string, re
       yield* write(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
       for (const [ref, at] of Object.entries(refs)) yield* git(path, 'update-ref', ref, at)
       yield* git(path, 'checkout', '--quiet', '--detach', commit)
-    }).pipe(Effect.tapError(() => Effect.sync(() => rmSync(path, { recursive: true, force: true }))))
+    }).pipe(Effect.tapError(() => cleanUp(path, 'a read copy that was never finished')))
   })
 
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
