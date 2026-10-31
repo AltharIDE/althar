@@ -276,10 +276,16 @@ export type AgentsAtOnce = typeof AgentsAtOnce.Type
 export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
 export type FolderWait = typeof FolderWait.Type
 
+/** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
+export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
+export type SealStyle = typeof SealStyle.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+  /** A pull request Althar opens says how its change was reviewed, on unless turned off: a seal in its corner, in `style`, and what the review changed and kept. */
+  reviewSeal: Schema.Struct({ on: Schema.Boolean, style: SealStyle }),
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
@@ -649,7 +655,7 @@ export const ProjectRulesView = Schema.Struct({
   resolveConflicts: Schema.Boolean,
   /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-072). */
   pushCommits: Schema.Boolean,
-  /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-076). */
+  /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
   postScreenshots: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
@@ -942,7 +948,7 @@ export type ChecksSummary = typeof ChecksSummary.Type
 
 /** A task's pull request (GitLab's merge request), as last seen, in its host's words. */
 /**
- * Where a task's screenshots stand on one of its pull requests (ADR-076):
+ * Where a task's screenshots stand on one of its pull requests (ADR-077):
  * none posted yet; posted, and as Outputs shows them now; or posted, with so
  * many changed since, or gone or new. `synced` where the project's rules
  * post them on their own as they change. The views the person left out of
@@ -1017,7 +1023,7 @@ export const ChangeSummary = Schema.Struct({
     }),
   ),
   /**
-   * Where the task's screenshots stand on it (ADR-076): the one comment that
+   * Where the task's screenshots stand on it (ADR-077): the one comment that
    * shows them, as Outputs does. Absent where its host takes no pictures, or
    * it isn't open.
    */
@@ -3249,6 +3255,10 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
+  command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
+  /** How the review seal looks. */
+  command('SetReviewSealStyle', { style: SealStyle }, Schema.Void),
   /** A project's automations, for its Automations tab. */
   call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
   /** One automation, for its own page: its definition, its limits and its runs. */
@@ -3483,7 +3493,7 @@ export const Api = RpcGroup.make(
   command('MarkReady', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /**
    * Puts the task's screenshots, as its Outputs show them now, in one comment
-   * on its pull request at `url`, or writes that comment anew (ADR-076):
+   * on its pull request at `url`, or writes that comment anew (ADR-077):
    * without the views `leftOut` names, which stay out of it from then on,
    * whoever posts. Fails, saying why, where its host takes no pictures.
    */

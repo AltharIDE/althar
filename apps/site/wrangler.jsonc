@@ -1,13 +1,17 @@
 {
-  // The site on Cloudflare: static assets only, no Worker code. `bun run build`
+  // The site on Cloudflare: static assets, and one Worker route. `bun run build`
   // writes dist/ with an HTML file per page (index.html, shifts.html), each
   // served at its path with no trailing slash, and 404.html, served with a 404
-  // for any address that isn't a page or a file.
+  // for any address that isn't a page or a file. Only /seal/ reaches the
+  // Worker (worker/index.ts), which draws the review seal pull requests show.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "althar-site",
   "compatibility_date": "2026-09-26",
+  "main": "worker/index.ts",
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/seal/*"],
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page",
   },

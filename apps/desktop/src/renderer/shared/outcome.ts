@@ -14,7 +14,7 @@ import { pieceOf, piecesOf } from './evidence'
  * those since it became one, so a prototype's rounds before don't count; any
  * other task, its last round that showed pictures and those after: as
  * `screenshotsNow` works them out, which the runtime posts to its pull
- * request by too (ADR-076). And what its lead last checked of it, and what
+ * request by too (ADR-077). And what its lead last checked of it, and what
  * it couldn't.
  */
 

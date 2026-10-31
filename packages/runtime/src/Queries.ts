@@ -1571,7 +1571,7 @@ export class Queries extends Context.Service<
           })()
           // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
           const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
-          // How its screenshots stand on each open pull request whose host takes them (ADR-076).
+          // How its screenshots stand on each open pull request whose host takes them (ADR-077).
           const screenshots = links.some((link) => link.kind === 'change')
             ? yield* Effect.flatMap(PullRequestScreenshots, (all) => all.onChanges(taskId))
             : new Map<string, ScreenshotsOnChange>()

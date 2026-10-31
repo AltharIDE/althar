@@ -1040,6 +1040,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      reviewSeal: { on: true, style: 'ring' as const },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
       automationsPaused: false,
@@ -1047,6 +1048,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setReviewSeal: vi.fn(async () => {}),
+    setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
     getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
     makeAutomation: vi.fn(async () => 'auto2'),

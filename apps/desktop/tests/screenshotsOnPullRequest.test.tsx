@@ -9,7 +9,7 @@ import { change, fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
- * A task's screenshots on its pull request, from its Outputs (ADR-076): a
+ * A task's screenshots on its pull request, from its Outputs (ADR-077): a
  * quiet line beside What it looks like, where its host takes pictures,
  * which opens what Outputs shows, each to keep or leave out, and posts it.
  */

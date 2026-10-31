@@ -3,7 +3,7 @@ import type { Evidence, Picture } from './Api'
 /*
  * The screenshots a task's Outputs show as it is now (What it looks like),
  * worked out in one place: the window draws them, and the runtime puts the
- * same ones in a comment on the task's pull request (ADR-076), so what the
+ * same ones in a comment on the task's pull request (ADR-077), so what the
  * person sees is what goes there. A view taken again shows once, where it
  * was last taken: a view is a picture's name, A1, from its caption, and a
  * picture with no name is a view of its own.
@@ -28,13 +28,24 @@ export interface ScreenshotNow {
 }
 
 /** "A1 · One quiet line: the first message lands", or "T1 Today: …": a picture's name, where its caption starts with one. */
-const NAMED = /^([A-Z])(\d*)\s*[·:]\s*(.+)$|^([A-Z])(\d+)\s+(.+)$/s
+const NAMED = /^([A-Z])(\d*)/
+const SPACE = /\s/
 
 /** A picture's name, from its caption, where it has one: A1, Z. A later picture of the same name is the same view taken again. */
 export const viewOf = (caption: string): string | null => {
   const found = NAMED.exec(caption)
   if (found === null) return null
-  return `${found[1] ?? found[4] ?? ''}${found[2] ?? found[5] ?? ''}`
+  const end = found[0].length
+  let separator = end
+  while (separator < caption.length && SPACE.test(caption.charAt(separator))) separator++
+  // The old trailing .+ also accepts whitespace: leave at least one character
+  // after punctuation, or after the first whitespace of a numbered name.
+  if (
+    ((caption[separator] === '·' || caption[separator] === ':') && separator + 1 < caption.length) ||
+    (found[2] !== '' && separator > end && end + 1 < caption.length)
+  )
+    return found[0]
+  return null
 }
 
 /**

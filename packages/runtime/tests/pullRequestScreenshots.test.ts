@@ -17,7 +17,7 @@ import { HOST, hosted, until } from './support'
 import { ask, cards, connect, pushByHand, runtimeWith, tipOf } from './changesSupport'
 
 /*
- * A task's screenshots on its pull request (ADR-076): the ones its Outputs
+ * A task's screenshots on its pull request (ADR-077): the ones its Outputs
  * show, in one comment Althar writes and writes anew as they change, by the
  * person's hand or, where the project's rules say, on its own. Here the
  * lead hands one screenshot as it finishes (`[lead:evidence]`), its pull

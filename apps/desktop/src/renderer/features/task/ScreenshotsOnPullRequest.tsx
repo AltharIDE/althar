@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { productName } from '../../shared/products'
 
 /*
- * The task's screenshots on its pull request (ADR-076), beside What it looks
+ * The task's screenshots on its pull request (ADR-077), beside What it looks
  * like: a quiet line saying where they stand there, which opens the
  * screenshots Outputs shows, each to leave out or keep, and the button that
  * posts them, or writes the comment anew. Where the project's rules post

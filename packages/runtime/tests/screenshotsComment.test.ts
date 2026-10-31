@@ -16,7 +16,7 @@ import {
   updatedNote,
 } from '../src/screenshotsComment'
 
-/* The comment that shows a task's screenshots on its pull request, and where they stand against it (ADR-076). */
+/* The comment that shows a task's screenshots on its pull request, and where they stand against it (ADR-077). */
 
 const picture = (digest: string | null, name: string | null = null, mediaType = 'image/png') => ({
   digest,

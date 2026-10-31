@@ -28,7 +28,7 @@ import {
 } from './screenshotsComment'
 
 /*
- * A task's screenshots on its pull request (ADR-076): the ones its Outputs
+ * A task's screenshots on its pull request (ADR-077): the ones its Outputs
  * show as it is now (`screenshotsNow`, which the window draws by too), in
  * one comment Althar writes, and writes anew as they change. The person
  * posts them, leaving out the views they choose, which stay out of that
@@ -149,9 +149,9 @@ export class PullRequestScreenshots extends Context.Service<
             ...(set.failed === undefined ? {} : { failed: set.failed }),
             updatedAt: at,
           }
-          const [had] = yield* sql<{ revision: number }>`SELECT revision FROM pull_request_pictures WHERE link_id = ${linkId}`
+          const [had] = yield* sql<{ linkId: string }>`SELECT link_id FROM pull_request_pictures WHERE link_id = ${linkId}`
           if (had === undefined) yield* sql`INSERT INTO pull_request_pictures ${sql.insert({ linkId, projectId, ...columns })}`
-          else yield* sql`UPDATE pull_request_pictures SET ${sql.update(columns)}, revision = revision + 1 WHERE link_id = ${linkId}`
+          else yield* sql`UPDATE pull_request_pictures SET ${sql.update(columns)} WHERE link_id = ${linkId}`
         })
 
       /** Whether the project's rules post screenshots on their own. */

@@ -46,7 +46,7 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
   readonly setPushCommits: (on: boolean) => void
-  /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-076). */
+  /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
   readonly setPostScreenshots: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void

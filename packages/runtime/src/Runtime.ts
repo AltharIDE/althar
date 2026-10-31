@@ -116,7 +116,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
-  // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-076).
+  // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-077).
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).

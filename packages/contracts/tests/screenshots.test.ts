@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Evidence } from '../src/Api'
 import { type PictureReport, screenshotsNow, viewOf } from '../src/screenshots'
 
-/* The screenshots a task's Outputs show as it is now, which its pull request's comment shows too (ADR-076). */
+/* The screenshots a task's Outputs show as it is now, which its pull request's comment shows too (ADR-077). */
 
 const shot = (caption: string, digest: string | null = caption): Evidence => ({
   kind: 'screenshot',
@@ -27,10 +27,20 @@ const report = (id: string, sequence: number, createdAt: string, evidence: Reado
 describe('a picture’s view', () => {
   it('is its name, from its caption, where it starts with one', () => {
     expect(viewOf('A1 · One quiet line')).toBe('A1')
-    expect(viewOf('B: the board')).toBe('B')
-    expect(viewOf('T1 Today, at a glance')).toBe('T1')
+    expect(viewOf('Z: the board')).toBe('Z')
+    expect(viewOf('T1 Today: at a glance')).toBe('T1')
     expect(viewOf('The retry button')).toBeNull()
     expect(viewOf('a1 · lower case')).toBeNull()
+  })
+  it('handles long whitespace runs and empty suffixes', () => {
+    const spaces = ' '.repeat(100_000)
+    expect(viewOf('A:' + spaces)).toBe('A')
+    expect(viewOf('A0 ' + spaces)).toBe('A0')
+    expect(viewOf('A' + spaces)).toBeNull()
+    expect(viewOf('A:')).toBeNull()
+    expect(viewOf('A1 ')).toBeNull()
+    expect(viewOf('A1  ')).toBe('A1')
+    expect(viewOf('A1 ·')).toBe('A1')
   })
 })
 

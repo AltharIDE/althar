@@ -34,6 +34,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -840,6 +841,7 @@ export const handlers = Api.toLayer(
             const atOnce = yield* busy.atOnce
             return {
               coAuthor: { on, line: coAuthorLine },
+              reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
@@ -852,6 +854,9 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSealStyle: ({ commandId, style }) =>
+        once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       GetTaskFolders: () => api(cleanup.list),
@@ -1377,7 +1382,7 @@ export const handlers = Api.toLayer(
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
               // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
               if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
-              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-076).
+              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-077).
               if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* screenshots.syncNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),

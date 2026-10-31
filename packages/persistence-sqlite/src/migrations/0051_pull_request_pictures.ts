@@ -1,7 +1,7 @@
-import { at, json, project, revision, sameProject, table } from './0001_initial/columns'
+import { at, json, project, sameProject, table } from './0001_initial/columns'
 
 /*
- * The screenshots a task's pull request shows (ADR-076): one comment on it,
+ * The screenshots a task's pull request shows (ADR-077): one comment on it,
  * which Althar wrote and writes anew as they change. For each pull request,
  * by its link: that comment, once there is one; what it shows now, each by
  * its view and picture, with where the host serves it; what it showed
@@ -25,7 +25,6 @@ export const statements: ReadonlyArray<string> = [
       at('posted_at', { nullable: true }),
       'failed TEXT',
       at('updated_at'),
-      revision,
     ],
     [sameProject('link_id', 'external_links')],
   ),

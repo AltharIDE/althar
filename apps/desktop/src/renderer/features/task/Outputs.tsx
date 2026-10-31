@@ -200,7 +200,7 @@ export function Outputs({
   onMarkReady: (url: string) => void
   /**
    * Puts the screenshots What it looks like shows in the comment on the pull
-   * request at `url`, without the views left out (ADR-076): null once
+   * request at `url`, without the views left out (ADR-077): null once
    * they're up, else what went wrong. Without it, nothing is offered.
    */
   onPostScreenshots?: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>

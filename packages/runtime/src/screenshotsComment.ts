@@ -5,7 +5,7 @@ import { signed } from './pullRequestWords'
 
 /*
  * The comment that shows a task's screenshots on its pull request
- * (ADR-076), and what Althar keeps of it: one comment, written anew as the
+ * (ADR-077), and what Althar keeps of it: one comment, written anew as the
  * screenshots change, rather than a new one each time, so the conversation
  * isn't buried in pictures and the comment is always the one to read. What
  * a view showed before stays in it, folded away under the views as they are

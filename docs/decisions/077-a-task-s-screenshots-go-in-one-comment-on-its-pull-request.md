@@ -1,4 +1,4 @@
-# ADR-076: A task's screenshots go in one comment on its pull request
+# ADR-077: A task's screenshots go in one comment on its pull request
 
 - **Status:** Accepted
 - **Date:** 2026-10-31

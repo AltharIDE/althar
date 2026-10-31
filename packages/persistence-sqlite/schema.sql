@@ -1329,6 +1329,5 @@ CREATE TABLE pull_request_pictures (
   posted_at TEXT CHECK (posted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   failed TEXT,
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   FOREIGN KEY (link_id, project_id) REFERENCES external_links (id, project_id)
 ) STRICT;
