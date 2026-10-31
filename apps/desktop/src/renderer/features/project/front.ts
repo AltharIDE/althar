@@ -1,4 +1,12 @@
-import type { BoardTask, ConnectionList, CoordinatorSnapshot, Product, ProjectRepository, ProjectRulesView } from '@althar/contracts'
+import type {
+  BoardTask,
+  ConnectionList,
+  CoordinatorSnapshot,
+  Product,
+  ProjectRepository,
+  ProjectRulesView,
+  ProjectTracker,
+} from '@althar/contracts'
 import { type MarkGlance, PermissionPolicy, permissionPolicyText, type ProjectPart, RuleKind } from '@althar/ui'
 import { projectRulesText } from '@althar/ui/screens'
 
@@ -49,7 +57,16 @@ export interface Tracker {
   readonly url: string | null
   /** The connections its issues are read and moved through, the one most of them use first: Althar's standing there is theirs. */
   readonly connections: ReadonlyArray<string>
+  /** Whether it is the one the project is bound to: where its drafts go. */
+  readonly bound?: true
 }
+
+/**
+ * What tells a tracker from the rest: its server, its workspace there (in its link), its team's key, and whether it is the bound one. Trello's bound
+ * board and the cards learned from its issues share the first three (a card names no board), so the bound one is told apart by that.
+ */
+export const trackerIdOf = (tracker: Tracker): string =>
+  `${tracker.product}:${tracker.at ?? ''}:${tracker.url ?? ''}:${tracker.key ?? ''}${tracker.bound === true ? ':bound' : ''}`
 
 /** A key's space on the web, from the link of one of its issues: linear.app/acme/team/MER, acme.atlassian.net/browse/MER. */
 export const trackerUrlOf = (product: Product, key: string | null, issueUrl: string): string | null => {
@@ -68,6 +85,18 @@ export const trackerUrlOf = (product: Product, key: string | null, issueUrl: str
   }
 }
 
+/** The workspace an issue is in, where its product has them: its connection's, else the first part of its link's path, as Linear's. */
+const workspaceOf = (issue: NonNullable<BoardTask['issue']>, list: ConnectionList | null): string => {
+  if (list?.products.find((product) => product.product === issue.product)?.workspaces !== true) return ''
+  const named = list.connections.find((each) => each.id === issue.connectionId)?.workspace?.key
+  if (named !== undefined) return named
+  try {
+    return new URL(issue.url).pathname.split('/')[1] ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * The trackers a project's tasks name, the one most of them name first: one
  * a key their issues share, else one a tracker whose issues share none, as
@@ -81,7 +110,9 @@ export const trackersOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList
     if (issue === null || !trackers.has(issue.product)) continue
     const key = /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1] ?? null
     const at = hostNameOf(issue.url)
-    const id = `${issue.product}:${at ?? ''}:${key ?? ''}`
+    // Another workspace on the same server is another tracker, though a team there shares the key.
+    const workspace = workspaceOf(issue, list)
+    const id = `${issue.product}:${at ?? ''}:${workspace}:${key ?? ''}`
     const was = counted.get(id)
     const through = was?.through ?? new Map<string, number>()
     if (issue.connectionId !== undefined) through.set(issue.connectionId, (through.get(issue.connectionId) ?? 0) + 1)
@@ -138,8 +169,16 @@ export const partsOf = (input: {
     product === null || url === null || !/^https?:\/\//i.test(url)
       ? {}
       : { openLabel: text.openOn(productName(product)), onOpen: () => input.open(url) }
-  const shown = input.trackers.slice(0, TRACKERS_SHOWN)
-  const more = input.trackers.length - shown.length
+  // The header names a tracker once: a learned one that reads the same as the bound (Trello's cards, whose board they don't name) folds into it.
+  const named = input.trackers.filter(
+    (tracker) =>
+      tracker.bound === true ||
+      !input.trackers.some(
+        (each) => each.bound === true && each.product === tracker.product && each.url === tracker.url && each.key === tracker.key,
+      ),
+  )
+  const shown = named.slice(0, TRACKERS_SHOWN)
+  const more = named.length - shown.length
   return [
     ...(input.repositories === null
       ? input.names.map((name) => ({ id: name, name, ...(input.host === null ? {} : { brand: productBrand(input.host.product) }) }))
@@ -154,7 +193,7 @@ export const partsOf = (input: {
           }
         })),
     ...shown.map((tracker) => ({
-      id: `tracker:${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`,
+      id: `tracker:${trackerIdOf(tracker)}`,
       name: text.issues(tracker),
       brand: productBrand(tracker.product),
       ...opening(tracker.product, tracker.url),
@@ -213,4 +252,48 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
         ? text.nothingAsks
         : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
+}
+
+/**
+ * The trackers a project is on, as the person sees them: the one it is bound
+ * to first, by hand or learned, then those its tasks' issues are on that
+ * differ. The binding is the learned tracker on its connection, when its
+ * issues are on one; otherwise a tracker of its own, from its connection (or,
+ * disconnected since, the one it was bound to, which Althar can't reach).
+ */
+/** A tracker's page on the web: its server's, or the workspace's on it where the connection reaches one. */
+const spaceOf = (webUrl: string | null, workspace: string | undefined): string | null => {
+  if (webUrl === null) return null
+  const origin = trackerUrlOf('trello', null, webUrl)
+  return origin === null || workspace === undefined ? origin : `${origin}/${workspace}`
+}
+
+export const trackersWithBinding = (
+  learned: ReadonlyArray<Tracker>,
+  binding: Pick<ProjectTracker, 'connectionId' | 'container' | 'gone'> | null,
+  list: ConnectionList | null,
+  /** The key of the team the binding files to, where it is read: a team's name alone can't be matched to the key its issues carry. */
+  containerKey: string | null = null,
+): Tracker[] => {
+  if (binding === null) return [...learned]
+  const connection = list?.connections.find((each) => each.id === binding.connectionId)
+  const product = connection?.product ?? (binding.gone?.product as Product | undefined)
+  const webUrl = connection?.webUrl ?? binding.gone?.webUrl ?? null
+  if (product === undefined) return [...learned]
+  const at = hostNameOf(webUrl)
+  const space = spaceOf(webUrl, connection?.workspace?.key)
+  // The same only where it is the same workspace and a team is bound, that team: another team's issues on the same connection are another tracker.
+  const sameSpace = (tracker: Tracker) =>
+    tracker.connections.includes(binding.connectionId) ||
+    (tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`))
+  // Only issues on the bound team's key are it. Bound to a workspace alone, no team is: its drafts' team is chosen with each, so none learned is the
+  // destination. Issues with no key (Trello's cards), or while the key can't be read (pending, failed, or signed out), can't be told to be on it either.
+  const sameTeam = (tracker: Tracker) => binding.container != null && containerKey !== null && tracker.key === containerKey
+  const matched = learned.find((tracker) => sameSpace(tracker) && sameTeam(tracker))
+  // Its standing is the bound connection's alone, whatever else its issues were read through.
+  const first: Tracker =
+    matched !== undefined
+      ? { ...matched, connections: [binding.connectionId], bound: true }
+      : { product, at, key: null, url: space, connections: [binding.connectionId], bound: true }
+  return [first, ...learned.filter((tracker) => tracker !== matched)]
 }

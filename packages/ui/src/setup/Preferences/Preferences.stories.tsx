@@ -7,6 +7,7 @@ import { Logo } from '../../foundations/Logo/Logo'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { EdgeSpot } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { States } from '../../storybook/States'
 import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
@@ -581,6 +582,16 @@ export const Groups: Story = {
               </Button>
             )}
           </SettingRow>
+          <SettingRow title="Linear · FNT issues" note="Signed out as mate" mark={<BrandMark brand={Brand.Linear} size={18} />}>
+            {() => (
+              <>
+                <Button size="small" variant="signal">
+                  Sign in again
+                </Button>
+                <LinkButton>Open on Linear</LinkButton>
+              </>
+            )}
+          </SettingRow>
         </SettingList>
       </SettingGroup>
       <SettingGroup title="How its tasks work">
@@ -599,5 +610,8 @@ export const Groups: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('region', { name: 'Trackers' })).toBeVisible()
     await expect(c.getByRole('heading', { name: 'How its tasks work', level: 2 })).toBeVisible()
+    const signIn = c.getByRole('button', { name: 'Sign in again' }).getBoundingClientRect()
+    const open = c.getByRole('button', { name: 'Open on Linear' }).getBoundingClientRect()
+    await expect(open.left - signIn.right).toBeGreaterThanOrEqual(8)
   },
 }
