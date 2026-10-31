@@ -5,9 +5,9 @@ import { device } from '../../shared/device'
 /*
  * Althar's settings, by what each is about, as the Settings tab lists them
  * down its side and its address names them: the agents and the code hosts
- * Althar works with; then its own ways (work on this computer, reviews and
- * how long it goes on alone, what a new project starts with, reviews and
- * pull requests, notifications, how it looks, the editor); then which
+ * Althar works with; then its own ways (work on this computer, how long it
+ * goes on alone, what a new project starts with, reviews and pull requests,
+ * notifications, how it looks, the editor); then which
  * Althar this is. A setting to come goes in the section it is about, and a
  * section to come between those it sits among.
  */
