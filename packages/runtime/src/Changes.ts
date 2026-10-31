@@ -16,7 +16,7 @@ import {
   products,
   type Repository,
 } from '@althar/connectors'
-import { PushRequestItem } from '@althar/contracts'
+import { knownModelName, PushRequestItem, standsFor } from '@althar/contracts'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, type Ledger } from '@althar/persistence-sqlite'
@@ -43,6 +43,8 @@ import { Busy } from './Busy'
 import { touchCard, touchTask } from './cards'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
+import { Models } from './Models'
+import { detailsOf, reviewRecordOf, reviewSeal, sealOf, type SessionNamer } from './pullRequestReview'
 import { Connections, NotConnected } from './Connections'
 import {
   ATTEMPTS,
@@ -471,6 +473,7 @@ type Store =
   | Busy
   | IssueChanges
   | LeftBehind
+  | Models
 
 /** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
 export type ConflictStanding =
@@ -780,6 +783,7 @@ export class Changes extends Context.Service<
       const busy = yield* Busy
       const toolServer = yield* ToolServer
       const agents = yield* Agents
+      const models = yield* Models
       const live = yield* Live
       const scope = yield* Scope.Scope
       const issueChanges = yield* IssueChanges
@@ -814,6 +818,20 @@ export class Changes extends Context.Service<
       }
       /* What the agents Althar runs call themselves, so their credit lines are known by name too. */
       const agentNames = agents.list.map((entry) => entry.definition.name)
+      /** Names a session's model as people know it ("GPT-6.1 Sol"), its agent's own default as the model it stands for; else its id, or its agent. */
+      const sessionNamer = Effect.map(
+        Effect.orElseSucceed(models.catalog, () => []),
+        (catalog): SessionNamer =>
+          (session) => {
+            const agent = {
+              id: session.agentId,
+              name: agents.list.find((one) => one.definition.id === session.agentId)?.definition.name ?? session.agentId,
+            }
+            const offered = catalog.find((one) => one.agentId === session.agentId)?.models ?? []
+            const model = offered.find((one) => one.id === standsFor(offered, session.model))
+            return model === undefined ? (session.model ?? agent.name) : knownModelName(agent, model)
+          },
+      )
 
       /**
        * A worktree's branch with the commits not sent yet credited as the
@@ -916,6 +934,7 @@ export class Changes extends Context.Service<
         issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
+        review: { readonly seal: string | null; readonly details: string } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -945,8 +964,30 @@ export class Changes extends Context.Service<
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
             credit: yield* coAuthorOn,
             automation: automated?.name ?? null,
+            review,
           })
         })
+
+      /**
+       * What the pull request says of the review its change had, where the
+       * person has it on and the run had one: the folded section, and the
+       * seal where the host shows one (pullRequestReview.ts). Nothing it
+       * can't read holds the pull request up: it opens without it.
+       */
+      const reviewFor = (input: {
+        readonly runId: string
+        readonly workspaceId: string
+        readonly cwd: string
+        readonly end: string
+        readonly github: boolean
+      }) =>
+        Effect.gen(function* () {
+          const setting = yield* reviewSeal
+          if (!setting.on) return null
+          const record = yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall })
+          if (record === null) return null
+          return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record) }
+        }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review', cause), null)))
 
       /** The hosts of a project's repositories, or of those a task changes, the first first: null for each on none Althar knows. */
       const hostsFor = (projectId: string, taskId?: string) =>
@@ -1229,7 +1270,8 @@ export class Changes extends Context.Service<
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE workspace_id = ${task.workspaceId} ORDER BY updated_at DESC LIMIT 1`
-          const { head, settle } = yield* credited(task.path, task.branch, yield* commitOf(task.path, 'HEAD'), [
+          const end = yield* commitOf(task.path, 'HEAD')
+          const { head, settle } = yield* credited(task.path, task.branch, end, [
             task.baseCommit,
             sent?.head ?? null,
             yield* remoteTip(task.path, pushTarget, task.branch),
@@ -1264,6 +1306,7 @@ export class Changes extends Context.Service<
             issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
+            yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
           )
           const opened = yield* outward({
             projectId: input.projectId,

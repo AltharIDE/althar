@@ -116,6 +116,8 @@ export interface SettingSwitchProps {
   title: string
   note?: ReactNode
   glyph?: ReactNode
+  /** A picture with its own colours before the name, in place of a glyph, as SettingRow takes one. */
+  mark?: ReactNode
   checked: boolean
   onChange: (checked: boolean) => void
   disabled?: boolean | undefined
@@ -124,9 +126,9 @@ export interface SettingSwitchProps {
 }
 
 /** A setting that is on or off, taking effect at once. */
-export function SettingSwitch({ title, note, glyph, checked, onChange, disabled, indent, under }: SettingSwitchProps) {
+export function SettingSwitch({ title, note, glyph, mark, checked, onChange, disabled, indent, under }: SettingSwitchProps) {
   return (
-    <SettingRow title={title} note={note} glyph={glyph} indent={indent} under={under}>
+    <SettingRow title={title} note={note} glyph={glyph} mark={mark} indent={indent} under={under}>
       {(ids) => <Switch checked={checked} onChange={onChange} {...(disabled === undefined ? {} : { disabled })} {...ids} />}
     </SettingRow>
   )

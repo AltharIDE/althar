@@ -6,6 +6,7 @@ import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
 import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
 import type { CoAuthorCommit } from '../setup/CoAuthor/CoAuthor'
+import type { ReviewSealSample } from '../setup/ReviewSeal/ReviewSeal'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
 import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
@@ -348,6 +349,14 @@ export const MAP_HALYARD: MapRepository[] = [
     fork: { upstream: 'halyard/api', target: ChangeTarget.Upstream },
   },
 ]
+
+/** The pull request that commit went up in, reviewed twice before it opened, to show the seal on. */
+export const REVIEW_SEAL_SAMPLE: ReviewSealSample = {
+  title: 'Retry the checkout call with backoff',
+  number: '#212',
+  text: 'The checkout call failed the whole order on one dropped connection. It now retries with jittered backoff, three tries at most, and only for 502, 503 and timeouts.',
+  facts: { model: 'GPT-6.1 Sol', sha: '4e1c07a', passes: 2, date: '2026-10-31' },
+}
 
 /** A commit as it went to GitHub this afternoon, from Meridian's task, to show the line on. */
 export const CO_AUTHOR_COMMIT: CoAuthorCommit = {

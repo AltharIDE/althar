@@ -254,6 +254,12 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
+- **A pull request shows the review its change had** (ADR-075), unless the
+  person turned it off in Settings: on GitHub, a seal in its corner, drawn
+  by the site from its address, names the reviewer, how many passes, and
+  the commit the last pass read. Folded at the description's end, what
+  changed after review, with the commits that made it, and what the lead
+  kept, with why. Never how many findings there were.
 - **After the first push, a lead's commits go up as its turn ends** (ADR-072),
   where the project's rules say so (`pushCommits`, "Push the lead's commits
   automatically", on unless the person turns it off). When a plan's steps are

@@ -960,7 +960,9 @@ const playRole = async (
         if (!aside) await commitIn(session.cwd, 'settled.txt', 'Settle the review')
         // What became of each finding, by the ids Althar gave them.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
-          aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
+          aside
+            ? { id, outcome: 'set_aside', reason: 'It reads as intended.' }
+            : { id, outcome: 'fixed', reason: 'The heading names the retry.' },
         )
         // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
         const shown = session.markers.has('[lead:evidence]')
