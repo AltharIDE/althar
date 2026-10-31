@@ -4,6 +4,7 @@ import { expect, userEvent, within } from 'storybook/test'
 import { EvidenceKind } from '../../foundations/vocabulary'
 import { SHOT_AFTER, SHOT_BEFORE, SHOT_RUN } from '../../fixtures/shots'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { PostScreenshots } from '../PostScreenshots/PostScreenshots'
 import type { GalleryShot } from '../../thread/Gallery/Gallery'
 import { WhatItMade } from './WhatItMade'
 
@@ -81,3 +82,22 @@ export const SeventySixPictures: Story = {
 export const NoPictures: Story = { args: { shots: [] } }
 /** Its lead said nothing of what it is: its pictures lead. */
 export const PicturesOnly: Story = { args: { story: null, checked: [], unverified: [] } }
+/** What can be done with the pictures, at the end of their heading's row: here, posting them to the pull request. */
+export const WithPostScreenshots: Story = {
+  args: {
+    shots: SHOTS.slice(0, 4),
+    looksAction: (
+      <PostScreenshots
+        standing="changed"
+        changed={2}
+        pullRequest="PR #142"
+        shots={SHOTS.slice(0, 4).map((shot) => ({ ...shot, key: shot.id }))}
+        leftOut={['state-1']}
+        destination="a comment on acme/web #142"
+        host="GitHub"
+        commentUrl="https://github.com/acme/web/pull/142#issuecomment-1"
+        onPost={() => {}}
+      />
+    ),
+  },
+}

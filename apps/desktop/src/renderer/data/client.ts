@@ -411,6 +411,12 @@ export interface Client {
   readonly listIssues: (projectId: string) => Promise<IssueList>
   /** Marks a task's draft pull request ready for review: in a task of several repositories, the one at `url`. */
   readonly markReady: (taskId: string, url?: string) => Promise<void>
+  /** Puts the task's screenshots, as its Outputs show them, in the comment on its pull request at `url`, without the views left out (ADR-077). */
+  readonly postScreenshots: (input: {
+    readonly taskId: string
+    readonly url: string
+    readonly leftOut: ReadonlyArray<string>
+  }) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
@@ -750,6 +756,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),
     listIssues: (projectId) => settle(api.ListIssues({ projectId })),
     markReady: (taskId, url) => command((commandId) => api.MarkReady({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
+    postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
     merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

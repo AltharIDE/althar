@@ -995,6 +995,7 @@ export function TaskView({
                 })
               }
               onMarkReady={(url) => void model.markReady(url)}
+              onPostScreenshots={model.postScreenshots}
               onOpenFile={changes.show}
               conflict={model.conflict}
               onPushHere={() => void model.pushHere()}

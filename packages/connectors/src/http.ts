@@ -27,6 +27,8 @@ export interface HttpOptions {
 export interface Http {
   /** A JSON call, its answer read by `schema`. */
   json<A>(schema: Schema.Codec<A, unknown>, method: string, url: string, body?: unknown): Effect.Effect<A, ConnectorFailed>
+  /** A POST of bytes, such as a picture, of their type; its JSON answer read by `schema`. */
+  upload<A>(schema: Schema.Codec<A, unknown>, url: string, bytes: Uint8Array, mediaType: string): Effect.Effect<A, ConnectorFailed>
   /** A JSON GET, answered from the cache when its ETag says nothing changed. */
   cached<A>(schema: Schema.Codec<A, unknown>, url: string): Effect.Effect<A, ConnectorFailed>
   /**
@@ -270,6 +272,8 @@ export const makeHttp = (options: HttpOptions): Http => {
     url: string,
     init: {
       readonly body?: unknown
+      /** Bytes sent as they are, of their type, in place of a JSON body. */
+      readonly raw?: { readonly bytes: Uint8Array; readonly type: string }
       readonly accept?: string
       readonly etag?: string
       readonly manual?: boolean
@@ -288,6 +292,7 @@ export const makeHttp = (options: HttpOptions): Http => {
               authorization: yield* options.authorization,
             }
       if (init.body !== undefined) headers['content-type'] = 'application/json'
+      if (init.raw !== undefined) headers['content-type'] = init.raw.type
       if (init.etag !== undefined) headers['if-none-match'] = init.etag
       const response = yield* Effect.tryPromise({
         try: (signal) =>
@@ -297,6 +302,8 @@ export const makeHttp = (options: HttpOptions): Http => {
             signal,
             ...(init.manual === true ? { redirect: 'manual' as const } : {}),
             ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+            // A copy on an ArrayBuffer of its own, which `fetch` takes as a body wherever it runs.
+            ...(init.raw === undefined ? {} : { body: Uint8Array.from(init.raw.bytes) }),
           }),
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })
@@ -406,6 +413,11 @@ export const makeHttp = (options: HttpOptions): Http => {
   return {
     json: (schema, method, url, body) =>
       call(method, url, { body }).pipe(
+        Effect.flatMap(success),
+        Effect.flatMap((answer) => decode(schema, answer.body)),
+      ),
+    upload: (schema, url, bytes, mediaType) =>
+      call('POST', url, { raw: { bytes, type: mediaType } }).pipe(
         Effect.flatMap(success),
         Effect.flatMap((answer) => decode(schema, answer.body)),
       ),
