@@ -19,6 +19,14 @@
   text-transform: uppercase;
   color: var(--t-3);
 }
+/* the heading, and what can be done with the pictures at the row's end */
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  min-width: 0;
+}
 .count {
   font: 500 11px/1 var(--font);
   letter-spacing: 0;
