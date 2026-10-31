@@ -65,7 +65,9 @@ export const Changed: Story = {
 export const NoCountdown: Story = {
   render: () => <Rows start={{ ...longRunsDefault, countdown: 0 }} />,
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('Right away')
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('Right away')
+    await expect(c.getByText(/The plan starts as soon as it’s proposed\./)).toBeVisible()
   },
 }
 
