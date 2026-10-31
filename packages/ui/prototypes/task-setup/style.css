@@ -1,0 +1,32 @@
+body { margin: 0; background: var(--n-0); color: var(--t-1); font: 13px var(--font); }
+* { box-sizing: border-box; }
+.preview { max-width: 1320px; margin: auto; background: var(--n-2); min-height: calc(100vh - 114px); padding-bottom: 140px; }
+.preview.narrow { max-width: 720px; }
+.narrow [class*="columns"] { grid-template-columns: minmax(0, 1fr); }
+.narrow [class*="side"] { position: static; }
+.top { display: flex; align-items: center; gap: 24px; padding: 18px 28px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.top strong { font-size: 18px; }
+.top > :last-child { margin-left: auto; }
+.repohead, .actions, .tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.repohead { justify-content: space-between; }
+h1 { font-size: 24px; margin: 18px 0 28px; }
+h2 { font-size: 17px; margin: 8px 0; }
+h3 { font-size: 14px; margin: 8px 0; }
+.note { color: var(--t-3); font-size: 12px; line-height: 1.6; }
+.facts { color: var(--t-2); font-size: 12px; line-height: 1.6; }
+.facts p { margin: 4px 0; }
+code, pre, .mono { font-family: var(--mono); font-size: 12px; }
+.mono { width: 100%; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; background: var(--well); padding: 16px; border-radius: 8px; }
+.actions { border-top: 1px solid var(--line); padding-top: 16px; justify-content: flex-end; }
+.actions > span { margin-right: auto; }
+.thread { max-width: 800px; margin: 32px auto; padding: 0 24px; }
+.threadbody { padding: 0 22px 22px; display: grid; gap: 16px; }
+.summary { margin: 16px 0; }
+.switcher { position: fixed; bottom: 0; left: 0; right: 0; z-index: var(--z-float); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 16px; background: var(--n-1); border-top: 1px solid var(--line-2); }
+.tools { justify-content: center; }
+.tools label { display: flex; align-items: center; gap: 6px; color: var(--t-2); font-size: 12px; }
+.repositoryPicker { overflow-x: auto; padding-bottom: 8px; }
+details { padding: 16px 0; }
+summary { cursor: pointer; color: var(--t-2); }
+@media (max-width: 740px) { .top { gap: 12px; padding: 16px; } .top > :last-child { display: none; } .switcher { align-items: stretch; overflow-x: auto; } }
