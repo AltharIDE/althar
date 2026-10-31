@@ -3,6 +3,7 @@ import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { relative, sep } from 'node:path'
 
 import {
   type Account,
@@ -117,6 +118,7 @@ import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
@@ -2368,7 +2370,8 @@ export class Changes extends Context.Service<
             SELECT k.state, k.title, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
-          const cant = (why: CantMerge['why'], detail = '') => new CantMerge({ taskId, why, detail })
+          const cant = (why: CantMerge['why'], detail = '', said: { into?: string; files?: ReadonlyArray<string> } = {}) =>
+            new CantMerge({ taskId, why, detail, ...said })
           if (task.state !== 'open') return yield* cant('settled')
           const all = yield* repositoriesHere(taskId)
           // A plain task with no branch yet has nothing the person could have seen to merge.
@@ -2377,6 +2380,11 @@ export class Changes extends Context.Service<
           if (repositories.length === 0) return yield* cant('pull_request')
           const several = all.length > 1
           const named = (repository: (typeof repositories)[number], what: string) => (several ? `${repository.name}: ${what}` : what)
+          // The branch it merges into, in a few words: by its repository's name in a task of several.
+          const into = (repository: (typeof repositories)[number]) =>
+            several ? `${repository.name}’s ${repository.base}` : repository.base
+          // A submodule by its path in the repository, not where it is on this computer.
+          const submoduleIn = (checkout: string, submodule: string) => relative(checkout, submodule).split(sep).join('/')
           // Worked out for every repository first: one that can't be merged stops them all.
           const plans = yield* Effect.forEach(repositories, (repository) =>
             Effect.gen(function* () {
@@ -2397,25 +2405,33 @@ export class Changes extends Context.Service<
           )
           const conflicts = conflicting.map(({ repository, files }) => named(repository, files.join(', ')))
           if (conflicts.length > 0) {
+            const said = {
+              into: conflicting.length === 1 && conflicting[0] !== undefined ? into(conflicting[0].repository) : 'their default branches',
+              files: conflicting.flatMap(({ files }) => files),
+            }
             // Where the project says so, the lead resolves it unasked, and the person merges again after.
             const asked = yield* askable(taskId, null)
-            if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '))
+            if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '), said)
             if (asked === 'yes') {
               const found = yield* Effect.forEach(conflicting, ({ repository, files }) => conflictHere(repository, files))
               yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
-              return yield* cant('resolving', conflicts.join('; '))
+              return yield* cant('resolving', conflicts.join('; '), said)
             }
-            return yield* cant('conflicts', conflicts.join('; '))
+            return yield* cant('conflicts', conflicts.join('; '), said)
           }
           const missing = plans.find(({ plan }) => plan.kind === 'missing')
           if (missing !== undefined) return yield* cant('missing', missing.repository.base)
-          for (const { plan } of plans)
+          for (const { repository, plan } of plans)
             if (plan.kind === 'busy')
               return yield* plan.untracked.length > 0
-                ? cant('untracked', `${plan.untracked.join(', ')} in ${plan.checkout}`)
-                : cant('busy', plan.checkout)
+                ? cant('untracked', plan.checkout, { into: into(repository), files: plan.untracked })
+                : cant('busy', plan.checkout, { into: into(repository), files: plan.files })
           for (const { repository, plan } of plans)
-            if (plan.kind === 'submodule') return yield* cant('submodule', named(repository, plan.submodule))
+            if (plan.kind === 'submodule')
+              return yield* cant('submodule', named(repository, plan.submodule), {
+                into: into(repository),
+                files: [submoduleIn(plan.checkout, plan.submodule)],
+              })
           const refused = yield* applyMerges(
             plans.flatMap(({ repository, plan }) =>
               plan.kind === 'move' ? [{ root: repository.root, branch: repository.base, plan, repository }] : [],
@@ -2423,11 +2439,18 @@ export class Changes extends Context.Service<
           )
           if (refused?.problem?.kind === 'unreadable')
             return yield* cant('unreadable', named(refused.repository, `${refused.problem.checkout}\n${refused.problem.detail}`))
-          if (refused?.problem?.kind === 'submodule') return yield* cant('submodule', named(refused.repository, refused.problem.submodule))
+          if (refused?.problem?.kind === 'submodule')
+            return yield* cant('submodule', named(refused.repository, refused.problem.submodule), {
+              into: into(refused.repository),
+              files: [submoduleIn(refused.problem.checkout, refused.problem.submodule)],
+            })
           if (refused !== null)
             return yield* refused.plan.checkout === null || refused.problem?.kind === 'moved'
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)
-              : cant('busy', refused.plan.checkout)
+              : cant('busy', refused.plan.checkout, {
+                  into: into(refused.repository),
+                  files: refused.problem?.kind === 'busy' ? refused.problem.files : [],
+                })
           for (const { settle } of plans) yield* settle
           const merged = plans.map(({ repository, plan }) => ({
             repository: repository.name,
@@ -2447,16 +2470,23 @@ export class Changes extends Context.Service<
           return merged
         })
 
-      /** Why a push the person's git made failed, in its words where the remote gave some: else git's own failure. */
-      const refusal = (taskId: string, remote: string, failed: GitFailed): Effect.Effect<never, GitFailed | PushRefused> => {
-        // The remote said no on its own terms, such as a protected branch: what it said, not a guess.
-        const refused = /\[remote rejected\][^(]*\(([^)]*)\)/i.exec(failed.stderr)
-        if (refused !== null) return Effect.fail(new PushRefused({ taskId, why: 'refused', remote, said: refused[1] ?? '' }))
-        if (/! \[rejected\].*\((fetch first|non-fast-forward)\)/i.test(failed.stderr))
-          return Effect.fail(new PushRefused({ taskId, why: 'behind', remote }))
-        if (/authentication|permission denied|could not read (username|password)|terminal prompts disabled/i.test(failed.stderr))
-          return Effect.fail(new PushRefused({ taskId, why: 'denied', remote }))
-        return Effect.fail(failed)
+      /**
+       * Why a push failed, in its words where git's output says (pushFailure.ts), with all it said kept
+       * for Details. `host` names the code host the remote is on, where known.
+       */
+      const refusal = (taskId: string, remote: string, failed: GitFailed, host?: string): Effect.Effect<never, PushRefused> => {
+        // One none of these names still says it in a sentence of its own, and keeps all git said, and how it ended, for Details.
+        const known = pushFailureOf(failed) ?? { why: 'failed' as const }
+        return Effect.fail(
+          new PushRefused({
+            taskId,
+            why: known.why,
+            remote,
+            ...(known.said === undefined ? {} : { said: known.said }),
+            ...(host === undefined ? {} : { host }),
+            detail: pushDetailOf(failed),
+          }),
+        )
       }
 
       /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
@@ -2537,8 +2567,10 @@ export class Changes extends Context.Service<
             worktree: string
             branch: string
             baseCommit: string | null
+            remotes: string
           }>`
-            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit,
+              b.remote_fingerprints AS remotes
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2559,7 +2591,11 @@ export class Changes extends Context.Service<
             if (!(yield* onHead(repository.worktree, head)) && !(yield* onHead(repository.worktree, sent)))
               return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
             yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
-              Effect.catchTag('GitFailed', (failed) => refusal(taskId, `${remote}/${repository.branch}`, failed)),
+              Effect.catchTag('GitFailed', (failed) =>
+                Effect.flatMap(hostOfRemotes(remotesOf(repository)), (host) =>
+                  refusal(taskId, `${remote}/${repository.branch}`, failed, host?.name),
+                ),
+              ),
             )
             yield* settle
             // What the remote has now, as a fetch would say: git notes it itself only where the remote's fetch takes every branch.
@@ -2584,8 +2620,9 @@ export class Changes extends Context.Service<
           const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
             SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
-          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null }>`
-            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit
+          const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null; remotes: string }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit,
+              b.remote_fingerprints AS remotes
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2615,7 +2652,11 @@ export class Changes extends Context.Service<
               '--',
               remote.slice(0, at),
               `refs/heads/${repository.base}:refs/heads/${remote.slice(at + 1)}`,
-            ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)))
+            ).pipe(
+              Effect.catchTag('GitFailed', (failed) =>
+                Effect.flatMap(hostOfRemotes(remotesOf(repository)), (host) => refusal(taskId, remote, failed, host?.name)),
+              ),
+            )
             pushed.push({ branch: repository.base, remote })
           }
           if (pushed.length > 0)
@@ -2707,11 +2748,12 @@ export class Changes extends Context.Service<
                       Effect.succeed(
                         refused.why === 'denied'
                           ? `${remote} didn't take the person's sign-in, so ${tag} wasn't pushed. Tell the person.`
-                          : `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`,
+                          : refused.why === 'refused'
+                            ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
+                            : refused.why === 'failed'
+                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
-                    ),
-                    Effect.catchTag('GitFailed', (other) =>
-                      Effect.succeed(`Pushing ${tag} failed: ${other.stderr.trim().split('\n').at(-1) ?? ''}`),
                     ),
                   ),
             ),
@@ -3516,7 +3558,7 @@ export class Changes extends Context.Service<
         openedAt: string | null
       }
 
-      const remotesOf = (repository: ShippingRow) =>
+      const remotesOf = (repository: { readonly remotes: string }) =>
         Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(repository.remotes), () => [])
 
       /**

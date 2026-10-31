@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react'
 
 /*
  * Times as the thread says them: "just now", "4m ago", "2h ago", then the
- * date. The kit's components take them already written.
+ * date. The kit's components take them already written. A time that isn't
+ * one, such as an empty one, says nothing: never "Invalid Date" or "NaN".
  */
 
+/** Whether each is a time a date can be read from. */
+const known = (...isos: ReadonlyArray<string>) => isos.every((iso) => !Number.isNaN(new Date(iso).getTime()))
+
 export const ago = (iso: string, now: Date = new Date()): string => {
+  if (!known(iso)) return ''
   const then = new Date(iso)
   const seconds = Math.max(0, Math.round((now.getTime() - then.getTime()) / 1000))
   if (seconds < 45) return 'just now'
@@ -18,6 +23,7 @@ export const ago = (iso: string, now: Date = new Date()): string => {
 
 /** When something comes back, as a clock says it: the time, and the day where it isn't today. */
 export const clock = (iso: string, now: Date = new Date()): string => {
+  if (!known(iso)) return ''
   const at = new Date(iso)
   const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   if (at.toDateString() === now.toDateString()) return time
@@ -27,6 +33,7 @@ export const clock = (iso: string, now: Date = new Date()): string => {
 
 /** How long something took, from two instants: "12s", "3m 5s", "1h 4m". */
 export const took = (from: string, to: string): string => {
+  if (!known(from, to)) return ''
   const seconds = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000))
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
@@ -36,6 +43,7 @@ export const took = (from: string, to: string): string => {
 
 /** How long something has run, as a board's card says it: "40s", "6m", "1h 4m", "6d 3h". */
 export const running = (from: string, now: string): string => {
+  if (!known(from, now)) return ''
   const minutes = Math.floor(Math.max(0, new Date(now).getTime() - new Date(from).getTime()) / 60_000)
   if (minutes < 1) return took(from, now)
   if (minutes < 60) return `${minutes}m`

@@ -13,20 +13,6 @@
   text-align: center;
 }
 
-/* ---- a Mac's screen ---- */
-.screenWrap { max-width: min(1320px, calc((100svh - 60px) * 1.6 + 2 * var(--gut) + 20px)); margin: 70px auto 0; padding: 0 var(--gut); }
-/* The bezel: black, thin, rounded as a MacBook's screen is. */
-.bezel {
-  padding: 10px;
-  border-radius: 30px;
-  background: #0c0c10;
-  box-shadow:
-    inset 0 0 0 1px #2a2a30,
-    0 40px 90px rgba(18, 20, 40, 0.22),
-    0 12px 30px rgba(18, 20, 40, 0.12);
-}
-.screen { border-radius: 20px; }
-
 /* ---- the edge of the screen: a dark scene ---- */
 /* A dark panel, set in as the light one before it is. */
 .ink { position: relative; margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
@@ -34,27 +20,35 @@
 .ink > .under { top: 0; bottom: 0; }
 .ink .head h2 { color: #fff; }
 .ink .head p { color: rgba(255, 255, 255, 0.7); }
-.ink .head p:first-child i { background: #9aa6ff; }
-.ink .bezel { background: #000; box-shadow: inset 0 0 0 1px #2a2a32, 0 40px 120px rgba(0, 0, 0, 0.6); }
+/* Lit: the warm near-black a drawing lit by one light stands on, so the drawing has no edge. */
+.lit { background: #0e0b09; }
+/* The cabin: warm as the first screen, the sky's blue faint at its head and the fire's glow at its foot. */
+.cabin {
+  overflow: hidden;
+  padding-bottom: 130px;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 138, 60, 0.24), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(80, 120, 255, 0.12), transparent 70%),
+    #0d0a08;
+}
+.cabin .head p { color: rgba(255, 248, 240, 0.72); }
 
 /* ---- the end: one line and the download, between hairlines, as the systems' band opens the page; the footer's words are the last large ones ---- */
 .end { margin-top: 170px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
 .endRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 40px; max-width: var(--max); margin: 0 auto; padding: 30px var(--gut); }
 .endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(22px, 2.3vw, 30px); font-weight: 300; line-height: 1.15; letter-spacing: -0.035em; color: var(--t-1); }
 .endLine b { font-weight: 680; letter-spacing: -0.04em; }
-
-/* ---- a phone: the app's narrow window, in place of a screen ---- */
-.narrowWrap { margin-top: 40px; }
+/* Each sentence on a line of its own, where the line wraps. */
+.phoneBreak { display: none; }
 
 @media (max-width: 700px) {
   .scene { padding-top: 96px; }
-  .screenWrap { max-width: none; margin-top: 40px; }
-  .bezel { padding: 6px; border-radius: 18px; }
-  .screen { border-radius: 12px; }
   .ink { margin: 96px 12px 0; padding-bottom: 96px; border-radius: 24px; }
+  .cabin { padding-bottom: 72px; }
   .end { margin-top: 110px; }
   .endRow { flex-direction: column; align-items: stretch; gap: 22px; padding: 34px var(--gut) 36px; }
   .endLine { font-size: 30px; line-height: 1.08; }
+  .phoneBreak { display: inline; }
   .endRow > div { display: grid; gap: 10px; }
   .endRow > div > a { justify-content: center; height: 50px; }
 }
