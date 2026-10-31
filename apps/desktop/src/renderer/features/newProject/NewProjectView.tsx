@@ -56,6 +56,7 @@ export function NewProjectView({
         folders={model.folders}
         onRemove={model.leaveOut}
         onChoose={() => void model.choose()}
+        onStartFresh={() => void model.startFresh()}
         onDrop={(files) => void model.drop(files)}
         found={model.found}
         onAdd={(id) => void model.add(id)}

@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('althar', {
   },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   pickFolders: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:pick-folders'),
+  pickPlace: (name: string): Promise<string | null> => ipcRenderer.invoke('althar:pick-place', name),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)

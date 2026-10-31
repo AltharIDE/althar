@@ -29,7 +29,9 @@ import s from './NewProject.module.css'
  * one press away. Each folder is shown as it was read, as a repository with
  * where it is and where its code is hosted, and what reading them found is
  * said under them. Folders come from the system's picker, several at once,
- * or dropped anywhere on the page.
+ * or dropped anywhere on the page. A project that starts from nothing has
+ * a new repository instead, or beside them: named after the project, in a
+ * folder the person chooses, and made only as the project is.
  */
 
 /** A folder added, as it was read: its repository, where it is, and where its remote is. */
@@ -43,6 +45,15 @@ export type NewProjectFolder =
   | {
       readonly id: string
       readonly reading?: false
+      /** A new repository, made as the project is: where it will be, with no host and no remote yet. */
+      readonly fresh: true
+      readonly name: string
+      readonly where: string
+    }
+  | {
+      readonly id: string
+      readonly reading?: false
+      readonly fresh?: false
       readonly name: string
       /** Where it is, as the person knows the place: ~/code/northwind/app. */
       readonly where: string
@@ -109,6 +120,14 @@ export interface NewProjectText {
   leaveOut: (name: string) => string
   choose: string
   chooseNote: string
+  /** Starts a project from nothing: a new git repository, named after it. */
+  fresh: string
+  /** Said of a new repository in its row, where a read one says its remote. */
+  freshFact: string
+  /** Before anything is added: where the folders will be. */
+  zone: string
+  /** Under it, what New repository makes: named after the project, by the folder its name makes, null before it is named. */
+  freshNote: (folder: string | null) => string
   found: string
   foundLike: (name: string) => string
   add: string
@@ -126,6 +145,8 @@ export interface NewProjectText {
   /** Said when Create is pressed without a name, or without a folder. */
   needsName: string
   needsFolder: string
+  /** The same, where a new repository can be started here too. */
+  needsFolderOrFresh: string
   swatches: Partial<InkSwatchesText>
 }
 
@@ -141,6 +162,10 @@ export const newProjectText: NewProjectText = {
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
   chooseNote: 'or drop them here',
+  fresh: 'New repository…',
+  freshFact: 'new repository',
+  zone: 'Drop a git repository here',
+  freshNote: (folder) => `New repository makes an empty one named ${folder ?? 'after the project'}, in a folder you choose.`,
   found: `On ${device.this}`,
   foundLike: (name) => `On ${device.this}, named like ${name}`,
   add: 'Add',
@@ -169,6 +194,7 @@ export const newProjectText: NewProjectText = {
   createKbd: modKey(keys.enter),
   needsName: 'Name the project first.',
   needsFolder: 'Add a folder first.',
+  needsFolderOrFresh: 'Add a folder, or start a new repository.',
   swatches: {},
 }
 
@@ -187,6 +213,11 @@ export type NewProjectProps = RootProps<
     onRemove: (id: string) => void
     /** Opens the system's folder picker. */
     onChoose: () => void
+    /**
+     * Asks where a new repository named after the project goes. Without it,
+     * or with one in the folders already, there is no way to from here.
+     */
+    onStartFresh?: () => void
     /** Folders dropped on the page. Without it, a drop does nothing. */
     onDrop?: (files: readonly File[]) => void
     /** What is on this computer to add; null while it is still being looked for. */
@@ -206,6 +237,20 @@ export type NewProjectProps = RootProps<
     text?: Partial<NewProjectText>
   }
 >
+
+/**
+ * The folder a new repository named after the project gets, as the runtime
+ * names it (`slugify` in @althar/runtime): northwind-ops, for Northwind Ops.
+ */
+export const repositoryFolder = (name: string) =>
+  name
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/, '')
 
 /** What is missing when Create is pressed. */
 type Missing = 'name' | 'folder' | null
@@ -227,6 +272,7 @@ export function NewProject({
   folders,
   onRemove,
   onChoose,
+  onStartFresh,
   onDrop,
   found,
   onAdd,
@@ -252,6 +298,18 @@ export function NewProject({
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
   const reading = read.length < folders.length
+  const fresh = onStartFresh !== undefined && !folders.some((folder) => folder.reading !== true && folder.fresh === true)
+
+  // A new repository is named after the project, so it asks for the name first.
+  const startFresh = () => {
+    if (named === '') {
+      setMissing('name')
+      nameField.current?.focus()
+      return
+    }
+    if (missing === 'folder') setMissing(null)
+    onStartFresh?.()
+  }
 
   const create = () => {
     if (creating || reading) return
@@ -281,6 +339,15 @@ export function NewProject({
     const buttons = side.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
     ;(buttons[Math.min(was.at, buttons.length - 1)] ?? chooseButton.current)?.focus()
   })
+
+  // The first folder takes the place of the empty state, and the last gives it back: its buttons go with it, so focus goes to Choose a folder.
+  const empty = folders.length === 0
+  const wasEmpty = useRef(empty)
+  useEffect(() => {
+    if (wasEmpty.current === empty) return
+    wasEmpty.current = empty
+    if (document.activeElement === null || document.activeElement === document.body) chooseButton.current?.focus()
+  }, [empty])
 
   // Escape makes nothing, and ⌘↵ makes it, from anywhere on the page; what is open over it, a tooltip too, hears Escape first.
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -354,7 +421,7 @@ export function NewProject({
               <p className={s.made}>
                 {read.map((folder) => (
                   <span key={folder.id} className={s.repo}>
-                    <HostMark host={folder.host} size={12} />
+                    <HostMark host={folder.fresh === true ? null : folder.host} size={12} />
                     {folder.name}
                   </span>
                 ))}
@@ -369,7 +436,7 @@ export function NewProject({
           <h2 id={ids.folders} className={s.title}>
             {t.folders}
           </h2>
-          {over && <div className={s.empty} aria-hidden="true" />}
+          {over && !empty && <div className={s.empty} aria-hidden="true" />}
           {folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
               {folders.map((folder, at) => (
@@ -385,24 +452,62 @@ export function NewProject({
               ))}
             </ul>
           )}
-          <div className={s.chooseRow}>
-            <Button
-              ref={chooseButton}
-              size="small"
-              icon="folder"
-              onClick={onChoose}
-              aria-describedby={missing === 'folder' ? ids.missing : undefined}
-            >
-              {t.choose}
-            </Button>
-            {missing === 'folder' ? (
-              <span id={ids.missing} className={s.missing} role="alert">
-                {t.needsFolder}
+          {empty ? (
+            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+            <div className={cx(s.zone, over && s.zoneOver)}>
+              <span className={s.zoneIcon} aria-hidden="true">
+                <Icon name="folder" size={18} />
               </span>
-            ) : (
-              <span className={s.note}>{t.chooseNote}</span>
-            )}
-          </div>
+              <p className={s.zoneTitle}>{t.zone}</p>
+              <div className={s.zoneButtons}>
+                <Button
+                  ref={chooseButton}
+                  size="small"
+                  icon="folder"
+                  onClick={onChoose}
+                  aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                >
+                  {t.choose}
+                </Button>
+                {fresh && (
+                  <Button size="small" icon="plus" onClick={startFresh}>
+                    {t.fresh}
+                  </Button>
+                )}
+              </div>
+              {missing === 'folder' ? (
+                <p id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </p>
+              ) : (
+                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+              )}
+            </div>
+          ) : (
+            <div className={s.chooseRow}>
+              <Button
+                ref={chooseButton}
+                size="small"
+                icon="folder"
+                onClick={onChoose}
+                aria-describedby={missing === 'folder' ? ids.missing : undefined}
+              >
+                {t.choose}
+              </Button>
+              {fresh && (
+                <Button size="small" icon="plus" onClick={startFresh}>
+                  {t.fresh}
+                </Button>
+              )}
+              {missing === 'folder' ? (
+                <span id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </span>
+              ) : (
+                <span className={s.note}>{t.chooseNote}</span>
+              )}
+            </div>
+          )}
           {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
@@ -449,6 +554,22 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
           <Spinner size="small" />
         </span>
         <span className={s.folderMain}>{folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}</span>
+      </li>
+    )
+  if (folder.fresh === true)
+    return (
+      <li className={s.folder}>
+        <span className={s.folderIcon}>
+          <Icon name="branch" size={14} />
+        </span>
+        <span className={s.folderMain}>
+          <span className={s.folderName}>{folder.name}</span>
+          <span className={s.facts}>
+            <span className={s.mono}>{folder.where}</span>
+            <span className={s.fact}>{t.freshFact}</span>
+          </span>
+        </span>
+        <IconButton icon="close" size="small" label={t.leaveOut(folder.name)} data-refocus="folders" onClick={() => onRemove(folder.id)} />
       </li>
     )
   return (
