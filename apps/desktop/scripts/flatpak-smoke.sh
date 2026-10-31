@@ -37,7 +37,7 @@ echo "$perms" | grep -q 'filesystems=host' && bad "no host filesystem in permiss
 
 # The device outside the sandbox: a command runs there, and the person's own OpenCode and Codex are found and run there.
 run 'flatpak-spawn --host true' && ok "a command runs on the device" || bad "a command runs on the device"
-# No SSH agent in the sandbox, by its variable or at the path --socket=ssh-auth would put it (ADR-011, ADR-072).
+# No SSH agent in the sandbox, by its variable or at the path --socket=ssh-auth would put it (ADR-011, ADR-073).
 run '{ [ -z "${SSH_AUTH_SOCK:-}" ] || [ ! -S "$SSH_AUTH_SOCK" ]; } && [ ! -e /run/flatpak/ssh-auth ]' && ok "the ssh agent socket is unavailable" || bad "the ssh agent socket is unavailable"
 run 'test -x /app/bin/althar-host-codex' && ok "the Codex host bridge is installed" || bad "the Codex host bridge"
 device_bin() { run "flatpak-spawn --host sh -c 'command -v $1'"; }
@@ -57,7 +57,7 @@ else
   echo "SKIP: no Codex on this device"
 fi
 
-# git over SSH (ADR-072). In the sandbox ssh trusts the pinned code hosts and
+# git over SSH (ADR-073). In the sandbox ssh trusts the pinned code hosts and
 # never asks, and has no agent to sign in with, as an agent's git doesn't;
 # Althar's own git runs the device's ssh, which signs in with the person's
 # agent. A host nobody pinned or accepted fails at once, with a sentence

@@ -1,4 +1,4 @@
-# ADR-073: Skills are one store on the computer, from a curated catalog, given to each lead for its session
+# ADR-074: Skills are one store on the computer, from a curated catalog, given to each lead for its session
 
 - **Status:** Accepted
 - **Date:** 2026-10-18
@@ -84,7 +84,7 @@
     default behaviour change.
   - **Skill text is not a boundary.** The catalog's patches keep its skills
     from telling an agent to push, but a person's own install may; the push
-    guard ([ADR-074](074-skill-and-openspec-files-stay-off-the-repository.md))
+    guard ([ADR-075](075-skill-and-openspec-files-stay-off-the-repository.md))
     and the project's rules are what hold.
   - **A catalog update needs an app release** until `althar-skills` and its
     update channel exist.

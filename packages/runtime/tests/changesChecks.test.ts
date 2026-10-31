@@ -11,7 +11,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
-import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
+import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -271,6 +271,7 @@ describe('a change whose checks Althar sees through', () => {
       const projectId = yield* ask(
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+        pushByHand,
       )
       const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running')
       const threadId = running?.threadId ?? ''
@@ -283,6 +284,39 @@ describe('a change whose checks Althar sees through', () => {
       const [asked] = yield* until(pushRequests(threadId), (all) => all.length === 1)
       assert.strictEqual(asked?.content.count, 2)
       assert.lengthOf(fixesOn(bare), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leaves a fix to the person, saying why, where someone else pushed what failed (ADR-072)', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: byCommit((index) => (index === 0 ? [{ ...failing, state: 'running' as const }] : index === 1 ? [failing] : [passing])),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running')
+      const threadId = running?.threadId ?? ''
+      // The person commits in the task's folder and pushes it themselves, outside Althar; its checks fail, and the lead is told.
+      const sql = yield* SqlClient.SqlClient
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${running?.taskId ?? ''}`
+      const path = worktree?.path ?? ''
+      git(path, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '--allow-empty', '-m', 'Mine')
+      git(path, 'push', '-q', bare, 'HEAD:refs/heads/althar/add-a-retry')
+      const theirs = git(path, 'rev-parse', 'HEAD')
+      // The lead's fix waits for the person rather than going up on top of what they pushed, unseen.
+      const [asked] = yield* until(pushRequests(threadId), (all) => all.length === 1)
+      assert.strictEqual(asked?.content.count, 1)
+      assert.lengthOf(fixesOn(bare), 0)
+      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), theirs)
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.change?.pushing?.held != null)
+      assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

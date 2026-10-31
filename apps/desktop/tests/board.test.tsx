@@ -1176,6 +1176,20 @@ describe('the board', () => {
     expect(push).toHaveBeenLastCalledWith('t4', 'def456', 'https://github.com/meridian/api/pull/12')
   })
 
+  it('offers neither Push nor Accept while what the lead committed goes up on its own (ADR-072)', async () => {
+    const later = board().tasks.map((work) =>
+      work.taskId === 't4' && work.change !== null
+        ? { ...work, change: { ...work.change, unpushed: 1, localHead: 'def456', pushing: { held: null } } }
+        : work,
+    )
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: later })) })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    expect(await within(dock).findByText('One commit is going up to the pull request')).toBeTruthy()
+    expect(within(dock).queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+    expect(within(dock).queryByRole('button', { name: 'Push' })).toBeNull()
+  })
+
   it('opens work ready on its branch to review its changes, and its task', async () => {
     const onTask = vi.fn()
     const onChanges = vi.fn()

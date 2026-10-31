@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { agents as registry } from '@althar/provider-adapters'
-import { Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -46,7 +46,7 @@ const withUsage = (
     readonly readAgent?: () => Promise<UsageRead>
     readonly readCredentials?: () => Promise<CredentialsRead>
     readonly readVersion?: () => Promise<string | null>
-    readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
+    readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
   },
   more: { readonly perUse?: ReadonlyArray<string>; readonly signedOut?: ReadonlyArray<string>; readonly database?: string } = {},
 ) =>
@@ -260,7 +260,7 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
           [30],
         )
         // A session says its windows: the endpoint isn't asked again for a while.
-        yield* usage.heard(account!.id, 'claude-code', used(35))
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
         const before = asked
         assert.isNull(accountOf(yield* usage.now(true), 'claude-code').fault)
         assert.strictEqual(asked, before)
@@ -274,9 +274,9 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
       const accounts = yield* Accounts
       const [account] = yield* accounts.of('claude-code')
       assert.strictEqual(accountOf(yield* usage.now(true), 'claude-code').fault?.kind, 'no_data_yet')
-      yield* usage.heard(account!.id, 'claude-code', used(20))
-      yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 5, resetsAt: '2026-10-20T00:00:00.000Z' })
-      yield* usage.heard(account!.id, 'claude-code', used(25))
+      yield* usage.heard(account!.id, 'claude-code', [used(20)])
+      yield* usage.heard(account!.id, 'claude-code', [{ kind: 'weekly', usedPercent: 5, resetsAt: '2026-10-20T00:00:00.000Z' }])
+      yield* usage.heard(account!.id, 'claude-code', [used(25)])
       const view = accountOf(yield* usage.now(true), 'claude-code')
       assert.isNull(view.fault)
       assert.strictEqual(view.source, 'acp_extension')
@@ -290,12 +290,280 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
     }).pipe(Effect.provide(withUsage({}))),
   )
 
+  it.effect('isn’t asked of its endpoint while sessions say their windows, and is again once they have been quiet a while', () =>
+    Effect.gen(function* () {
+      let asked = 0
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) =>
+          sourceId === 'claude-oauth'
+            ? (asked++,
+              { kind: 'usage', stale: false, usage: { windows: [used(40)], source: 'endpoint', observedAt: now().toISOString() } })
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        yield* usage.heard(account!.id, 'claude-code', [used(35), { kind: 'weekly', usedPercent: 62, resetsAt: RESET }])
+        yield* TestClock.adjust(Duration.minutes(14))
+        const heard = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual([asked, heard.source, heard.windows.map((window) => window.usedPercent)], [0, 'acp_extension', [35, 62]])
+        // A quarter of an hour without a word: no one is working on it, or its windows have barely moved, and the endpoint says.
+        yield* TestClock.adjust(Duration.minutes(2))
+        const read = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual([asked, read.source, read.windows.map((window) => window.usedPercent)], [1, 'endpoint', [40]])
+        // A session says again, and the endpoint waits again.
+        yield* usage.heard(account!.id, 'claude-code', [used(45)])
+        yield* TestClock.adjust(Duration.minutes(5))
+        assert.deepStrictEqual([asked, accountOf(yield* usage.now(true), 'claude-code').source], [1, 'acp_extension'])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('reads the endpoint again for a window no session says, as a model’s own week, and says how old it is meanwhile', () =>
+    Effect.gen(function* () {
+      const opus = (usedPercent: number) => used(usedPercent, { kind: 'weekly', label: 'Opus', model: 'opus' })
+      let asked = 0
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) =>
+          sourceId === 'claude-oauth'
+            ? (asked++,
+              {
+                kind: 'usage',
+                stale: false,
+                usage: { windows: [used(10), opus(20 + asked)], source: 'endpoint', observedAt: now().toISOString() },
+              })
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        const first = accountOf(yield* usage.now(true), 'claude-code')
+        // Sessions say the plan's own windows every few minutes, never Opus's week.
+        for (const minutes of [4, 4, 4, 2]) {
+          yield* TestClock.adjust(Duration.minutes(minutes))
+          yield* usage.heard(account!.id, 'claude-code', [used(30 + minutes)])
+        }
+        const heard = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual(
+          [asked, heard.source, heard.windows.map((window) => [window.label, window.usedPercent]), heard.observedAt],
+          [
+            1,
+            'acp_extension',
+            [
+              ['Opus', 21],
+              [null, 32],
+            ],
+            first.observedAt,
+          ],
+        )
+        // Opus's week is a quarter of an hour old, though sessions keep saying theirs: the endpoint is asked again for it.
+        yield* TestClock.adjust(Duration.minutes(2))
+        yield* usage.heard(account!.id, 'claude-code', [used(40)])
+        const read = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual(
+          [asked, read.windows.map((window) => [window.label, window.usedPercent]), read.observedAt],
+          [
+            2,
+            [
+              [null, 10],
+              ['Opus', 22],
+            ],
+            new Date(Duration.toMillis(Duration.minutes(16))).toISOString(),
+          ],
+        )
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('reads the endpoint again for a window only it says once that window resets, though sessions keep saying theirs', () =>
+    Effect.gen(function* () {
+      // Opus's week resets five minutes in; the plan's own windows sessions say much later.
+      const opusResets = new Date(Duration.toMillis(Duration.minutes(5))).toISOString()
+      let asked = 0
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) => {
+          if (sourceId !== 'claude-oauth') return { kind: 'none' }
+          asked++
+          const resetsAt = asked === 1 ? opusResets : '2026-10-25T00:00:00.000Z'
+          const opus = used(asked === 1 ? 90 : 0, { kind: 'weekly', label: 'Opus', model: 'opus', resetsAt })
+          return { kind: 'usage', stale: false, usage: { windows: [used(10), opus], source: 'endpoint', observedAt: now().toISOString() } }
+        },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        yield* usage.now(true)
+        const opusOf = (view: PlanUsageView) =>
+          accountOf(view, 'claude-code').windows.find((window) => window.label === 'Opus')?.usedPercent
+        // A session says the plan's own windows each minute, never Opus's week: it isn't due before its reset.
+        for (const _ of [1, 2, 3, 4]) {
+          yield* TestClock.adjust(Duration.minutes(1))
+          yield* usage.heard(account!.id, 'claude-code', [used(30)])
+        }
+        const before = opusOf(yield* usage.now(true))
+        assert.deepStrictEqual([asked, before], [1, 90])
+        // Past it, though the session's windows are a minute old, Opus's week is unknown: the endpoint is asked again for it.
+        yield* TestClock.adjust(Duration.minutes(2))
+        yield* usage.heard(account!.id, 'claude-code', [used(31)])
+        const after = opusOf(yield* usage.now(true))
+        assert.deepStrictEqual([asked, after], [2, 0])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('keeps, of an answer the endpoint gave while a session said its windows, the windows the session didn’t say', () =>
+    Effect.gen(function* () {
+      let called!: () => void
+      const asking = new Promise<void>((resolve) => (called = resolve))
+      let reply!: () => void
+      const answered = new Promise<void>((resolve) => (reply = resolve))
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) => {
+          if (sourceId !== 'claude-oauth') return { kind: 'none' }
+          const observedAt = now().toISOString()
+          called()
+          await answered
+          const windows = [used(10), used(20, { kind: 'weekly', label: 'Opus', model: 'opus' })]
+          return { kind: 'usage', stale: false, usage: { windows, source: 'endpoint', observedAt } }
+        },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        const reading = yield* Effect.forkChild(usage.now(true))
+        yield* Effect.promise(() => asking)
+        yield* TestClock.adjust(Duration.seconds(1))
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
+        yield* TestClock.adjust(Duration.seconds(1))
+        reply()
+        const view = accountOf(yield* Fiber.join(reading), 'claude-code')
+        assert.deepStrictEqual(
+          [view.source, view.windows.map((window) => [window.label, window.usedPercent])],
+          [
+            'acp_extension',
+            [
+              [null, 35],
+              ['Opus', 20],
+            ],
+          ],
+        )
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('keeps what a session said while the endpoint was asked, though the endpoint answers after it', () =>
+    Effect.gen(function* () {
+      const answers: ReadonlyArray<EndpointRead> = [
+        { kind: 'usage', stale: false, usage: { windows: [used(10)], source: 'endpoint', observedAt: new Date(1000).toISOString() } },
+        { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' },
+      ]
+      for (const answer of answers) {
+        let called!: () => void
+        const asking = new Promise<void>((resolve) => (called = resolve))
+        let reply!: (read: EndpointRead) => void
+        const answered = new Promise<EndpointRead>((resolve) => (reply = resolve))
+        const layer = withUsage({
+          readEndpoint: async (sourceId) => (sourceId === 'claude-oauth' ? (called(), answered) : { kind: 'none' }),
+        })
+        yield* Effect.gen(function* () {
+          const usage = yield* PlanUsage
+          const [account] = yield* (yield* Accounts).of('claude-code')
+          const reading = yield* Effect.forkChild(usage.now(true))
+          yield* Effect.promise(() => asking)
+          // A session says its windows while the endpoint is asked, and the endpoint answers a second later.
+          yield* usage.heard(account!.id, 'claude-code', [used(35)])
+          yield* TestClock.adjust(Duration.seconds(1))
+          reply(answer)
+          const view = accountOf(yield* Fiber.join(reading), 'claude-code')
+          assert.deepStrictEqual(
+            [view.source, view.windows.map((window) => window.usedPercent), view.fault],
+            ['acp_extension', [35], null],
+            answer.kind,
+          )
+        }).pipe(Effect.provide(layer))
+      }
+    }),
+  )
+
+  it.effect('keeps what a session said while the endpoint was asked each time the reader gives that answer again, as after a 429', () =>
+    Effect.gen(function* () {
+      let called!: () => void
+      const asking = new Promise<void>((resolve) => (called = resolve))
+      let reply!: () => void
+      const answered = new Promise<void>((resolve) => (reply = resolve))
+      const answers: Array<EndpointRead> = []
+      // As the reader answers: its windows stamped when it asked; then a 429 with them as its last, and them again while it waits.
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) => {
+          if (sourceId !== 'claude-oauth') return { kind: 'none' }
+          const next = answers.shift()
+          if (next !== undefined) return next
+          const usage = { windows: [used(10)], source: 'endpoint', observedAt: now().toISOString() } as const
+          answers.push(
+            { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.', last: usage },
+            { kind: 'usage', stale: true, usage },
+          )
+          called()
+          await answered
+          return { kind: 'usage', stale: false, usage }
+        },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        const reading = yield* Effect.forkChild(usage.now(true))
+        yield* Effect.promise(() => asking)
+        // A session says its windows a second after the endpoint is asked, and the endpoint answers a second after that.
+        yield* TestClock.adjust(Duration.seconds(1))
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
+        yield* TestClock.adjust(Duration.seconds(1))
+        reply()
+        const views = [accountOf(yield* Fiber.join(reading), 'claude-code')]
+        // No session says more for a quarter hour: the endpoint is asked again, and asks Althar to wait.
+        yield* TestClock.adjust(Duration.minutes(16))
+        views.push(accountOf(yield* usage.now(true), 'claude-code'))
+        // Meanwhile the reader gives its last answer again, the one the session's windows were newer than.
+        yield* TestClock.adjust(Duration.minutes(1))
+        views.push(accountOf(yield* usage.now(true), 'claude-code'))
+        assert.deepStrictEqual(
+          views.map((view) => [view.source, view.windows.map((window) => window.usedPercent)]),
+          [
+            ['acp_extension', [35]],
+            ['acp_extension', [35]],
+            ['acp_extension', [35]],
+          ],
+        )
+        assert.strictEqual(answers.length, 0)
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('keeps what a session said over an older answer from the endpoint, as the reader’s own from before it was asked to wait', () =>
+    Effect.gen(function* () {
+      const layer = withUsage({
+        readEndpoint: async (sourceId) =>
+          sourceId === 'claude-oauth'
+            ? { kind: 'usage', stale: true, usage: { windows: [used(10)], source: 'endpoint', observedAt: new Date(0).toISOString() } }
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        yield* TestClock.adjust(Duration.minutes(1))
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
+        yield* TestClock.adjust(Duration.minutes(16))
+        const view = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual([view.source, view.windows.map((window) => window.usedPercent), view.fault], ['acp_extension', [35], null])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
   it.effect('names a window of one model apart from the plan’s own', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
-      yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 10 })
-      yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', label: 'Opus', usedPercent: 60 })
+      yield* usage.heard(account!.id, 'claude-code', [{ kind: 'weekly', usedPercent: 10 }])
+      yield* usage.heard(account!.id, 'claude-code', [{ kind: 'weekly', label: 'Opus', usedPercent: 60 }])
       const windows = accountOf(yield* usage.now(true), 'claude-code').windows
       assert.deepStrictEqual(
         windows.map((window) => window.label),
@@ -306,18 +574,55 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
 })
 
 describe('a window as it resets, and what a restart reads back', () => {
-  it.effect('shows a window whose reset has passed with all of its plan left', () =>
+  it.effect('leaves out a window whose reset has passed, in the view and in an account’s room: unknown, not all of its plan left', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
+      const limits = yield* Limits
       const [account] = yield* (yield* Accounts).of('claude-code')
-      // The test clock starts at 0: this window resets a second in.
-      yield* usage.heard(account!.id, 'claude-code', used(95, { resetsAt: new Date(1000).toISOString() }))
-      assert.strictEqual(accountOf(yield* usage.now(true), 'claude-code').windows[0]?.usedPercent, 95)
+      // The test clock starts at 0: the five hours reset a second in, the week much later.
+      yield* usage.heard(account!.id, 'claude-code', [
+        used(95, { resetsAt: new Date(1000).toISOString() }),
+        { kind: 'weekly', usedPercent: 46, resetsAt: RESET },
+      ])
+      const room = () => Effect.map(limits.room(account!.id), (found) => Option.map(found, (one) => [one.kind, one.leftPercent]))
+      assert.deepStrictEqual(
+        accountOf(yield* usage.now(true), 'claude-code').windows.map((window) => window.usedPercent),
+        [95, 46],
+      )
+      assert.deepStrictEqual(yield* room(), Option.some(['five_hour', 5]))
       yield* TestClock.adjust(Duration.seconds(2))
       assert.deepStrictEqual(accountOf(yield* usage.now(true), 'claude-code').windows, [
-        { kind: 'five_hour', label: null, usedPercent: 0, resetsAt: null },
+        { kind: 'weekly', label: null, usedPercent: 46, resetsAt: RESET },
       ])
+      assert.deepStrictEqual(yield* room(), Option.some(['weekly', 54]))
     }).pipe(Effect.provide(withUsage({}))),
+  )
+
+  it.effect('says an account all of whose windows have reset since was read, with how old that reading is and why it is no newer', () =>
+    Effect.gen(function* () {
+      const layer = withUsage({
+        readEndpoint: async (sourceId) =>
+          sourceId === 'claude-oauth'
+            ? { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' }
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        yield* usage.heard(account!.id, 'claude-code', [
+          used(95, { resetsAt: new Date(1000).toISOString() }),
+          { kind: 'weekly', usedPercent: 46, resetsAt: new Date(2000).toISOString() },
+        ])
+        const before = accountOf(yield* usage.now(false), 'claude-code')
+        assert.deepStrictEqual([before.windows.length, before.resetSince], [2, false])
+        yield* TestClock.adjust(Duration.seconds(3))
+        const view = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual(
+          [view.windows, view.resetSince, view.observedAt, view.fault?.message],
+          [[], true, new Date(0).toISOString(), 'The provider asked Althar to wait before reading again.'],
+        )
+      }).pipe(Effect.provide(layer))
+    }),
   )
 
   it.effect('keeps what it last read in the store, which is all a restart reads back', () =>
@@ -325,13 +630,14 @@ describe('a window as it resets, and what a restart reads back', () => {
       const sql = yield* SqlClient.SqlClient
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
-      yield* usage.heard(account!.id, 'claude-code', used(80))
+      yield* usage.heard(account!.id, 'claude-code', [used(80)])
       const [kept] = yield* sql<{
         source: string
         windows: string
       }>`SELECT source, windows FROM plan_usage_readings WHERE account_id = ${account!.id}`
       assert.strictEqual(kept?.source, 'acp_extension')
-      assert.deepStrictEqual(JSON.parse(kept?.windows ?? '[]'), [used(80)])
+      // Each window with when it was read, as an account's may be read at different times.
+      assert.deepStrictEqual(JSON.parse(kept?.windows ?? '[]'), [{ ...used(80), observedAt: new Date(0).toISOString() }])
     }).pipe(Effect.provide(withUsage({}))),
   )
 })
@@ -548,8 +854,8 @@ describe('telling the window', () => {
       const [account] = yield* (yield* Accounts).of('claude-code')
       const events = yield* (yield* Live).subscribe
       // What heard them goes on at once: the clock has not moved, so nothing waited for the telling.
-      yield* usage.heard(account!.id, 'claude-code', used(80))
-      yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 30 })
+      yield* usage.heard(account!.id, 'claude-code', [used(80)])
+      yield* usage.heard(account!.id, 'claude-code', [{ kind: 'weekly', usedPercent: 30 }])
       yield* TestClock.adjust(Duration.millis(250))
       const heard = yield* plans(events)
       assert.strictEqual(accountOf(heard, 'claude-code').windows.length, 2)

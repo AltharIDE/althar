@@ -882,7 +882,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
+      'The adapter forwards the plan’s rate-limit event in usage_update `_meta["_claude/rateLimit"]`, whose windows are in the CLI’s internal `unifiedWindows`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
       "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
       "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox; Althar lets it run there without reading it (ADR-071).",
       "Its sandbox reaches the keychain's service on macOS: a credential helper git is told to use inside it could read what that helper stored.",

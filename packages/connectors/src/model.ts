@@ -316,8 +316,10 @@ export interface CodeHost {
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * A change as the host has it now. With `queue`, whether an open one is in
-   * its target branch's merge queue too, and why the queue last took it out:
-   * asked only of one Althar put there, since it takes another call.
+   * its target branch's merge queue too, and why the queue last took it out,
+   * however it got there: asked only where that branch has a queue, as the
+   * host learns once a while per branch, so one without costs nothing more.
+   * Absent where the branch has none, or the host couldn't say.
    */
   change(repository: Repository, number: number, ask?: { readonly queue?: boolean }): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**

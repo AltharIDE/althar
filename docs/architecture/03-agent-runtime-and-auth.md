@@ -453,13 +453,20 @@ in two layers:
       ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
 
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
-   - Claude Code: live, `claude-agent-acp` forwards one window per event in
-     `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
-     `rate_limit_event`), and drops it if it arrives before a turn's first
-     usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
+   - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
+     `rate_limit_event` in `usage_update` `_meta["_claude/rateLimit"]`, and
+     drops it if it arrives before a turn's first usage figure
+     ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
      so Althar carries a patch for that (`patches/`, on the pinned version).
-     Any account, idle ones too: Anthropic's `/api/oauth/usage`, at most
-     every five minutes, and not while a session has just said.
+     The event's own window has a use only near its limit; each window the
+     CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
+     percentage moves. Where no session has said for a quarter of an hour, as
+     on an idle account, or a window only it says (a model's own week) is
+     that old or has reset: Anthropic's `/api/oauth/usage`, at most every five minutes,
+     waiting as long as it asks. Each window is dated when it was read, and
+     the endpoint's answer when it was asked, so it never replaces a window a
+     session said after that, however often the reader gives it again; its
+     others it does. An account's age is its oldest window's.
    - Codex: app-server's `account/rateLimits/read` and
      `account/rateLimits/updated` (`usage.ts`), started in the account's
      home; ChatGPT's `wham/usage` where it can't answer.
@@ -488,9 +495,13 @@ type AccountStatus = {
 With the windows, the scheduler moves or holds new work before the limit is
 reached rather than after ([05](05-workflow-engine.md), Usage limits): an
 account's room is its tightest window left, as last read (a window past its
-reset has started again; a model's own window counts for that model; money
-spent past the plan doesn't), and under 5% it is nearly out. Warnings fire at
-50, 25, 10 and 5% remaining (once per account, window and reset).
+reset is unknown until it is read again, and left out, as the window's gauge
+and pickers leave it out by their own clock; an account with none left is
+sent as reset since, with its age and fault, and its agent says it hasn't
+been read since; a model's own window counts for
+that model; money spent past the plan doesn't), and under 5% it is nearly out.
+Warnings fire at 50, 25, 10 and 5% remaining (once per account, window and
+reset).
 
 ## Provider session lifecycle
 

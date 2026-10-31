@@ -254,10 +254,24 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **After the first push, pushing is the person's.** When a plan's steps are
+- **After the first push, a lead's commits go up as its turn ends** (ADR-072),
+  where the project's rules say so (`pushCommits`, "Push the lead's commits
+  automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
-  commits after, answering the person, a review or failed checks, waits on the
-  task's branch until the person has looked at it and pushes it: the task
+  commits after, answering the person, a review or failed checks, Althar
+  pushes to the task's open pull request once the lead's turn has ended and
+  it is done, as a plain push to that pull request's own branch, never the
+  default branch and never forced; `push_to_pull_request` pushes at once.
+  It waits for the person instead, the card's Push saying why, where the
+  pull request's branch isn't where Althar last pushed it (someone pushed
+  there outside Althar), where the person stopped or interrupted the lead
+  since, where the push would need forcing, or where it, or asking the host
+  before it, failed; a fix for failing checks doesn't go past such a hold.
+  Until they're on the pull request, commits going up offer no Push and no
+  Accept: the card says they're going up.
+- **Where the project leaves pushing to the person, it is theirs after the
+  first push.** What the lead commits waits on the task's branch until the
+  person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead never pushes:
   when the person asks it to, or what it committed should go up, it asks them
@@ -317,7 +331,7 @@ service's model.
   - Nothing is pushed by the merge. Once merged, the task says whether each
     default branch's remote has it yet, and Push sends it there with the
     person's own git sign-in (their keychain or SSH agent), as they would from
-    a terminal; in the Flatpak, over SSH, through the device's ssh (ADR-072).
+    a terminal; in the Flatpak, over SSH, through the device's ssh (ADR-073).
     Nothing it runs asks: a password or a new host key fails rather than
     waits. A remote that
     has moved on refuses, and the task says to pull first.
@@ -842,7 +856,7 @@ Agents reach code hosts and trackers only through Althar:
   git's environment), git's prompts off, and no SSH agent. Althar pushes
   for them. The environment is the boundary; in the Flatpak the agent's
   socket isn't in the sandbox at all, and the rules refuse the device's ssh
-  Althar's own git runs (ADR-072).
+  Althar's own git runs (ADR-073).
 - **Nor with the MCP servers the person set up for them** (ADR-016). Claude
   Code loads only the servers it is given. Codex and OpenCode load every one
   their config names, so each of the person's is switched off by name as the
@@ -940,9 +954,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-073](../decisions/073-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-074](../decisions/074-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-074](../decisions/074-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-075](../decisions/075-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

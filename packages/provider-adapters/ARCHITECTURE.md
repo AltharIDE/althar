@@ -10,7 +10,7 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 
 | Module | What it does |
 | --- | --- |
-| `registry.ts` | One entry per agent: how to launch it, its asking and read-only modes, its option ids and what its permission options mean, what keeps it asking, its sign-in commands, how it is given a session's skills (`skills.via`, ADR-073) and whether it can be counted on for subagents, its known gaps |
+| `registry.ts` | One entry per agent: how to launch it, its asking and read-only modes, its option ids and what its permission options mean, what keeps it asking, its sign-in commands, how it is given a session's skills (`skills.via`, ADR-074) and whether it can be counted on for subagents, its known gaps |
 | `AgentConnection.ts` | Connects over a process or in this process; starts and closes sessions; runs turns one at a time; answers permissions and questions; sets options; cancels |
 | `process.ts` | Starts an agent as a process Althar owns, in its own group, with an allowlisted environment; captures the raw protocol; hands on its stderr as it comes, for the app's log, keeping the last few kilobytes for errors; stops it in stages and reports survivors |
 | `events.ts` | Normalizes the agent's updates into Althar's events: words, what a message or a tool call hands back (pictures, links, resources), the files a call writes (a path, and whether it is new, never the text), and a command's output and exit from `_meta` |

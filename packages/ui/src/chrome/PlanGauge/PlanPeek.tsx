@@ -25,6 +25,8 @@ export interface PlanPeekText {
     out: (agent: string) => string
     /** Every agent read is stopped: no work can start on any. */
     stopped: (agent: string) => string
+    /** No agent has a figure, and one can run: its windows have reset since they were read. */
+    unread: (agent: string) => string
   }
   /** An agent's figure: 62% left, Out. */
   left: (percent: number) => string
@@ -47,6 +49,7 @@ export const planPeekText: PlanPeekText = {
     nearly: (agent) => `${agent} is nearly out`,
     out: (agent) => `${agent} is out`,
     stopped: (agent) => `${agent} can’t start work`,
+    unread: (agent) => `${agent} not read since reset`,
   },
   left: (n) => `${n}% left`,
   out: 'Out',
@@ -59,7 +62,11 @@ export const planPeekText: PlanPeekText = {
 /** How the plans stand, by the agent with least room that work can start on. */
 export const levelOf = (agents: readonly PlanAgent[], t: PlanPeekText = planPeekText): string => {
   const first = firstRunning(agents)
-  if (first === undefined) return agents[0] === undefined ? t.level.nothing : t.level.stopped(agents[0].name)
+  if (first === undefined) {
+    const unread = agents.find((agent) => agent.unread !== undefined)
+    if (unread !== undefined) return t.level.unread(unread.name)
+    return agents[0] === undefined ? t.level.nothing : t.level.stopped(agents[0].name)
+  }
   if (first.left > 50) return t.level.plenty
   if (first.left === 0) return t.level.out(first.name)
   if (first.left <= SAY_UNDER) return t.level.nearly(first.name)
@@ -116,12 +123,13 @@ function Account({ account, t }: { account: PlanAccount; t: PlanPeekText }) {
 function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
   const [open, setOpen] = useState(false)
   const detail = useId()
+  const instead = agent.stopped ?? agent.unread
   return (
     <li>
       <button
         type="button"
         className={s.agent}
-        data-tone={agent.stopped === undefined ? usageTone(agent.left) : undefined}
+        data-tone={instead === undefined ? usageTone(agent.left) : undefined}
         aria-expanded={open}
         aria-controls={detail}
         onClick={() => setOpen(!open)}
@@ -131,15 +139,15 @@ function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
           {agent.brand !== undefined && <BrandMark brand={agent.brand} size={13} />}
           {agent.name}
         </span>
-        {agent.stopped === undefined ? (
+        {instead === undefined ? (
           <>
             <span className={s.agentLeft}>{agent.left === 0 ? t.out : t.left(agent.left)}</span>
             <Bar left={agent.left} className={s.agentBar} />
             <span className={s.agentOf}>{ofWords(agent, t)}</span>
           </>
         ) : (
-          // Its saved numbers are in the detail, each account saying why it runs nothing.
-          <span className={s.agentLeft}>{agent.stopped}</span>
+          // Its saved numbers or their age are in the detail, each account saying why it runs nothing or wasn't read again.
+          <span className={s.agentLeft}>{instead}</span>
         )}
       </button>
       <div id={detail} className={s.detail} hidden={!open}>
