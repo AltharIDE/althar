@@ -41,14 +41,14 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
-import { Clock, Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
-import { Changes } from './Changes'
+import { Changes, STUCK_AFTER } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
@@ -56,6 +56,7 @@ import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverified
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { betweenAgents, byItself } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -1729,6 +1730,24 @@ export class Queries extends Context.Service<
        * one long unread is read from git again.
        */
       const settledKinds = new Map<string, { readonly as: string; readonly kind: TaskCard['kind'] }>()
+
+      /** Whether the checks on a task's pull request's head have run longer than Althar waits for them, or it gave up on them so. */
+      const ranTooLong = (taskId: string, head: string | null) =>
+        Effect.gen(function* () {
+          if (head === null) return false
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ since: string | null; stuck: number }>`
+            SELECT
+              (SELECT min(o.observed_at) FROM observations o JOIN external_links l ON l.id = o.subject_id
+                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change' AND o.kind = 'checks_running'
+                AND json_extract(o.payload, '$.id') = ${`running:${head}`}) AS since,
+              EXISTS (SELECT 1 FROM observations o JOIN external_links l ON l.id = o.subject_id
+                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change' AND o.kind = 'checks_stuck'
+                AND json_extract(o.payload, '$.id') = ${`stuck:${head}`}) AS stuck`
+          if (row === undefined) return false
+          const limit = Duration.toMillis(config.checksStuck ?? STUCK_AFTER)
+          return row.stuck === 1 || (row.since !== null && (yield* Clock.currentTimeMillis) - Date.parse(row.since) >= limit)
+        })
       const SETTLED_KEPT = 1_000
 
       /** Whether a task has made something on its branch: commits, or changes not committed yet, its evidence aside. */
@@ -1813,6 +1832,7 @@ export class Queries extends Context.Service<
             leadModel: string | null
             leadEffort: string | null
             firstSession: string | null
+            lastEnded: string | null
             turns: number
             settingUp: number | null
             starting: number
@@ -1849,6 +1869,9 @@ export class Queries extends Context.Service<
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
               (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
+              -- When its last agent went: for a moment after, with nothing that says why, the next is on its way (DEV-173).
+              (SELECT max(s.ended_at) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = k.id)
+                AS last_ended,
               -- Whether its lead has had a turn yet: before its first, no agent has worked on it.
               (SELECT count(*) FROM turn_deliveries d WHERE d.thread_id = t.id) AS turns,
               -- Its folder being set up (Setups.ts): whether by the setup kept for its repository (1), else the install its
@@ -1923,6 +1946,24 @@ export class Queries extends Context.Service<
           // under way, its lead on its way, never stopped. Its first turn waits for the setup.
           const settingUp = task.turns === 0 && task.settingUp !== null
           const unstarted = task.turns === 0 && (task.planState === 'accepted' || task.runState === 'running')
+          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
+          // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
+          const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
+          // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
+          const going = task.runState === 'succeeded' ? byItself(shown) : null
+          // Not checks that ran too long, or that Althar gave up on as so (ADR-041): those are the person's.
+          const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
+          // Its last agent gone a moment ago, no turn of its cut short and nothing that says why: the next is on its way, as a step
+          // is started again or the call that says why comes, not stopped. Sessions reads its card again once the moment is over.
+          const between =
+            !busy &&
+            !queued &&
+            Option.isNone(lead) &&
+            (task.runState === null || task.runState === 'running') &&
+            betweenAgents(task.lastEnded, yield* Clock.currentTimeMillis) &&
+            (yield* sql<{ state: string }>`
+              SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`)[0]
+              ?.state !== 'interrupted'
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -1935,10 +1976,11 @@ export class Queries extends Context.Service<
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            if (task.runState === 'succeeded') return checksRun ? 'running' : 'ready'
+            // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173).
+            if (task.runState === 'succeeded') return checksRun || fixing?.withLead === true || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
-            return (working && !cutShort) || task.held !== null || settingUp || unstarted ? 'running' : 'stopped'
+            return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
           })()
           // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it.
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null ? 'kept' : ready
@@ -2002,8 +2044,6 @@ export class Queries extends Context.Service<
           const implement = planned.find((step) => step.key === 'implement')
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
-          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
-          const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
           // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
           // until it opens again.
@@ -2075,7 +2115,7 @@ export class Queries extends Context.Service<
                     ? busy || !checksRun
                       ? 'checks'
                       : 'checks_running'
-                    : null),
+                    : goes),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),

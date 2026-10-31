@@ -414,6 +414,8 @@ export interface Fixing {
   readonly open: boolean
   /** While so, the checks on its fix run, or haven't shown yet: it is under way. */
   readonly running: boolean
+  /** While so, the checks on its head fail: its lead is told them, or at them, so it is under way, not the person's (DEV-173). */
+  readonly withLead: boolean
   /** Why the checks that fail on its head are the person's, as its card says: its lead's words, or that its tries are spent. */
   readonly why: string | null
 }
@@ -6131,6 +6133,7 @@ export class Changes extends Context.Service<
         mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
         pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
         // Once at a time for a task, whoever looks.
+                    withLead: all.some((one) => one.open && one.failing),
         askRemotes: (taskId) =>
           Effect.suspend(() => {
             if (asking.has(taskId)) return Effect.void

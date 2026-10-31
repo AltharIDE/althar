@@ -66,6 +66,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
@@ -1923,7 +1924,21 @@ export class Sessions extends Context.Service<
                   Scope.close(running.scope, Exit.void),
                   ended === undefined
                     ? Effect.void
-                    : live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state: ended }),
+                    : Effect.andThen(
+                        live.publish({
+                          _tag: 'SessionEnded',
+                          threadId: running.thread.threadId,
+                          sessionId: running.sessionId,
+                          state: ended,
+                        }),
+                        // Its task is between agents a moment (`betweenAgents`), under way: once that is over, its card is read again.
+                        running.thread.role === 'coordinator'
+                          ? Effect.void
+                          : Effect.forkIn(
+                              run(Effect.ignore(Effect.delay(touchCard(running.thread.taskId), Duration.millis(BETWEEN_AGENTS_MS)))),
+                              sessionsScope,
+                            ),
+                      ),
                 ),
                 Deferred.succeed(running.ended, undefined),
               ),
