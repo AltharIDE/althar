@@ -52,7 +52,8 @@ import { statements as taskRequestInputs } from './0047_task_request_inputs'
 import { statements as threadItemsByInput } from './0048_thread_items_by_input'
 import { statements as decisionKind } from './0049_decision_kind'
 import { statements as moreInks } from './0050_more_inks'
-import { statements as recordedSetups } from './0051_recorded_setups'
+import { statements as pullRequestPictures } from './0051_pull_request_pictures'
+import { statements as recordedSetups } from './0052_recorded_setups'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -122,7 +123,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0048_thread_items_by_input', statements: threadItemsByInput },
   { key: '0049_decision_kind', statements: decisionKind },
   { key: '0050_more_inks', statements: moreInks },
-  { key: '0051_recorded_setups', statements: recordedSetups },
+  { key: '0051_pull_request_pictures', statements: pullRequestPictures },
+  { key: '0052_recorded_setups', statements: recordedSetups },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -131,7 +131,7 @@ const placeOf = async (worktree: string, path: string): Promise<'out' | 'there' 
  * each that is there and stays inside the checkout, never over or into
  * what the worktree has, nor through a link out of it. It says, a line each, what it
  * copied and what it couldn't, and gives those it couldn't, which fail the
- * setup (ADR-077).
+ * setup (ADR-078).
  */
 export const copyInto = (checkout: string | null, worktree: string, paths: ReadonlyArray<string>) =>
   Effect.promise(async () => {

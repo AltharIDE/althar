@@ -83,4 +83,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
 | [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
-| [077](077-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md) | A task folder's setup is recorded by a lead and replayed by Althar, and a lead's sandbox writes to its tools' caches |
+| [077](077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md) | A task's screenshots go in one comment on its pull request, written anew as they change, by hand or by a project rule |
+| [078](078-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md) | A task folder's setup is recorded by a lead and replayed by Althar, and a lead's sandbox writes to its tools' caches |

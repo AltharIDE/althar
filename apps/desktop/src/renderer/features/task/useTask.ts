@@ -159,6 +159,12 @@ export interface TaskModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
   readonly markReady: (url?: string) => Promise<void>
+  /**
+   * Puts the screenshots Outputs shows in the comment on the pull request at
+   * `url`, without the views `leftOut` names: null once they're up, else
+   * what went wrong, for the sheet that posted them to say.
+   */
+  readonly postScreenshots: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>
   /** Marks each of these draft pull requests ready for review, in turn: as its menu does, for all of them. */
   readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
@@ -638,6 +644,13 @@ export const useTask = (threadId: string): TaskModel => {
       ),
     markReady: (url) =>
       act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url)), doing.markReady(url ?? '')),
+    postScreenshots: (url, leftOut) =>
+      snapshot === null
+        ? Promise.resolve(null)
+        : client.postScreenshots({ taskId: snapshot.task.id, url, leftOut }).then(
+            () => null,
+            (failure: unknown) => messageOf(failure),
+          ),
     markAllReady: (urls) =>
       onTask(async (taskId) => {
         for (const url of urls) await client.markReady(taskId, url)

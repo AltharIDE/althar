@@ -1,6 +1,6 @@
 # ADR-023: Althar runs the project itself, with no agent
 
-- **Status:** Accepted; one way per repository widened to a list per project by [ADR-044](044-a-project-runs-many-things.md); run on any branch or pull request, fetched by Althar, by [ADR-066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md); a new worktree set up with the setup a lead recorded, and the lead's sandbox given its tools' caches, by [ADR-077](077-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)
+- **Status:** Accepted; one way per repository widened to a list per project by [ADR-044](044-a-project-runs-many-things.md); run on any branch or pull request, fetched by Althar, by [ADR-066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md); a new worktree set up with the setup a lead recorded, and the lead's sandbox given its tools' caches, by [ADR-078](078-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** To see the project running, the person asked an agent: the

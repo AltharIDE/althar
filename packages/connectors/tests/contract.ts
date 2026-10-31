@@ -83,6 +83,19 @@ export const hostContract = (subject: HostSubject) =>
             })
             assert.isNotEmpty(posted.id)
           }
+          // Where the host takes pictures: one uploads, and Althar's own comment is written anew to show it.
+          if (host.capabilities.pictures && host.uploadPicture !== undefined && host.editComment !== undefined) {
+            const url = yield* host.uploadPicture(repository, { bytes: ONE_PIXEL, name: 'contract.png', mediaType: 'image/png' })
+            assert.match(url, /^https:\/\//)
+            const edited = yield* host.editComment(
+              repository,
+              opened.number,
+              reply.id,
+              `A picture from the contract.\n\n![contract](${url})`,
+            )
+            assert.strictEqual(edited.id, reply.id)
+            assert.include(edited.body, url)
+          }
         } finally {
           if (subject.cleanup !== undefined) yield* Effect.ignore(subject.cleanup(opened))
         }
@@ -114,3 +127,9 @@ export const trackerContract = (subject: TrackerSubject) =>
       }),
     )
   })
+
+/** The smallest PNG there is: one transparent pixel. */
+const ONE_PIXEL = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  (char) => char.charCodeAt(0),
+)
