@@ -1,29 +1,47 @@
-import { AcceptCard, BoardLane, ChromeButton, NextRow, Outcome, Room, RoomSwitch, SettledRow, Wait, WorkCard, WorkStatus } from '@althar/ui'
+import {
+  AcceptCard,
+  BoardLane,
+  ChromeButton,
+  NextRow,
+  Outcome,
+  Room,
+  RoomSwitch,
+  SettledRow,
+  TaskStatus,
+  Wait,
+  WorkCard,
+  WorkStatus,
+} from '@althar/ui'
 import { type CSSProperties, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { askedSecond, useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
-import { BoardAtWork, type BoardStory, Tabs } from '../kit/app'
+import { BoardAtWork, type BoardStory, OUT_OF_USAGE, Tabs, type UsageOut } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
 import { useInView, usePageShown } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
-import { GEMINI_PRO, NEXT, OPUS, READY_TWO_REPOS, SONNET } from '../kit/world'
+import { CODEX, GEMINI_PRO, NEXT, OPUS, QWEN, READY_TWO_REPOS } from '../kit/world'
 import s from './AtWork.module.css'
 
 /*
- * Tally's board, in Althar's light on the dark of the panel: four tasks
- * running at once, each led by another lab. While it is watched the work
- * goes on: a beat every couple of seconds, a minute on each task's clock
- * and, at its own pace, a step on.
+ * Tally's board, in Althar's light on the dark of the panel, under "Usage
+ * gets cut. Models get pulled. Althar stays.": tasks running at once, each
+ * led by another lab. While it is watched the work goes on: a beat every
+ * couple of seconds, a minute on each task's clock and, at its own pace, a
+ * step on.
  *
- * On a phone, a lane at a time, and the board follows one task all the way
- * through, as a motion graphic: the backfill waiting in Up next starts, and
- * flies into Running; it goes through its steps, and flies on to Needs you,
- * ready to accept; it is accepted, and flies on to Settled, merged. The view
- * follows it from lane to lane, the cards where it lands slide down to make
- * room, and at the end it fades back to Up next and goes round again. Still,
- * on the task running, with motion reduced or a moment held (`?t=`).
+ * And it follows one task all the way through, as a motion graphic: the
+ * backfill waiting in Up next starts, and flies into Running, on Opus.
+ * Claude Code runs out of usage: the backfill and the other task on it
+ * pause, then move on, as a project's rules can have them do, the backfill
+ * to Codex and the other to Gemini, and carry on. The backfill goes through
+ * its steps, flies on to Needs you, ready to accept; it is accepted, and
+ * flies on to Settled, merged. The cards where it lands slide down to make
+ * room, and at the end the picture fades back to the start and goes round
+ * again. On a phone, a lane at a time, the view following it from lane to
+ * lane. Still, on the backfill moved on and running, with motion reduced or
+ * a moment held (`?t=`).
  */
 
 const none = () => {}
@@ -32,7 +50,7 @@ const none = () => {}
 const BEAT = 2400
 
 const LABEL =
-  'Tally’s board: four tasks running at once, led by Opus, Codex, Gemini and Qwen, beside what is next, what needs you and what has settled'
+  'Tally’s board, following one task through: it starts on Opus, moves on to Codex when Claude Code runs out of usage, then waits on you and is merged, while tasks led by Codex, Gemini and Qwen run beside it'
 
 /** The board's design size, in px. */
 const W = 1440
@@ -51,18 +69,12 @@ export function AtWork() {
   }, [watched])
   return (
     <div ref={box} className={s.wrap}>
-      {phone ? (
-        <Flow beat={beat} watched={watched} />
-      ) : (
-        <Shot w={W} h={H} label={LABEL} frame={s.frame}>
-          <Window beat={beat} />
-        </Shot>
-      )}
+      <Flow beat={beat} watched={watched} phone={phone} />
     </div>
   )
 }
 
-function Window({ beat, story }: { beat: number; story?: BoardStory }) {
+function Window({ beat, story, out }: { beat: number; story: BoardStory; out?: UsageOut }) {
   return (
     <div className={app.window}>
       <Tabs
@@ -76,13 +88,13 @@ function Window({ beat, story }: { beat: number; story?: BoardStory }) {
         }
       />
       <div className={app.board}>
-        <BoardAtWork beat={beat} {...(story ? { story } : {})} />
+        <BoardAtWork beat={beat} story={story} {...(out ? { out } : {})} />
       </div>
     </div>
   )
 }
 
-/* ---- on a phone: one task's way through the board ---- */
+/* ---- one task's way through the board ---- */
 
 /** The task it follows: the backfill waiting for an agent to be free, the one the coordinator plans further down. */
 const WAITING = NEXT.find((x) => x.wait === Wait.Workers) ?? NEXT[0]!
@@ -92,20 +104,23 @@ const PR = { repo: 'tally-api', number: 1192, add: 84, del: 9 }
 
 const LANES = [BoardLane.Next, BoardLane.Running, BoardLane.Yours, BoardLane.Settled] as const
 
-/** The task as each lane draws it. */
-function heroIn(lane: BoardLane, at = 0): ReactNode {
+/** The task as each lane draws it: in Running, on Opus (`hand` 0), paused out of usage (1), moved on to Codex (2), and carrying on (3). */
+function heroIn(lane: BoardLane, at = 0, hand = 0): ReactNode {
   switch (lane) {
     case BoardLane.Next:
       return <NextRow {...WAITING} place={NEXT.indexOf(WAITING) + 1} />
     case BoardLane.Running:
-      return (
+      return hand === 1 ? (
+        <WorkCard {...HERO} status={TaskStatus.Paused} steps={STEPS} at={0} elapsed="4m" lead={OPUS} note={OUT_OF_USAGE} />
+      ) : (
         <WorkCard
           {...HERO}
           steps={STEPS}
           at={at}
-          elapsed={`${4 + at * 7}m`}
-          lead={OPUS}
-          {...(at === 1 ? { onStep: [SONNET, GEMINI_PRO] } : {})}
+          elapsed={`${4 + at * 7 + (hand > 1 ? 1 : 0)}m`}
+          lead={hand > 1 ? CODEX : OPUS}
+          {...(at === 1 ? { onStep: [GEMINI_PRO, QWEN] } : {})}
+          {...(hand === 2 ? { note: 'Moved to Codex' } : {})}
         />
       )
     case BoardLane.Yours:
@@ -127,7 +142,10 @@ const TURN = 320
 /** When each thing happens, in ms from the start of a round: in Up next a moment, then on its way. */
 const TO_RUNNING = 1300
 const STEP = 1250
-const TO_YOURS = TO_RUNNING + TRAVEL + STEPS.length * STEP
+/** How long it stands paused, out of usage, before it moves on. */
+const OUT = 1700
+const RUNS = TO_RUNNING + TRAVEL
+const TO_YOURS = RUNS + OUT + (STEPS.length + 1) * STEP
 const PRESS = TO_YOURS + TRAVEL + 1300
 const TO_SETTLED = PRESS + 600
 const FADE = TO_SETTLED + TRAVEL + 1500
@@ -140,7 +158,9 @@ function frameAt(ms: number) {
   return {
     lane,
     flying: lane > 0 && since < TRAVEL,
-    at: Math.min(STEPS.length - 1, Math.max(0, Math.floor((ms - TO_RUNNING - TRAVEL) / STEP))),
+    // On Opus a step, paused, on Codex the rest of that step, then on through its steps.
+    hand: ms - RUNS < STEP ? 0 : ms - RUNS < STEP + OUT ? 1 : ms - RUNS < 2 * STEP + OUT ? 2 : 3,
+    at: ms - RUNS < 2 * STEP + OUT ? 0 : Math.min(STEPS.length - 1, Math.floor((ms - RUNS - OUT - STEP) / STEP)),
     pressed: ms >= PRESS && ms < TO_SETTLED,
     fading: ms >= FADE,
     // Just round again: back at Up next at once, with no glide across.
@@ -149,8 +169,8 @@ function frameAt(ms: number) {
 }
 type Frame = ReturnType<typeof frameAt>
 const same = (a: Frame, b: Frame) => (Object.keys(a) as (keyof Frame)[]).every((k) => a[k] === b[k])
-/** Still: the task running, on its second step. */
-const STILL = frameAt(TO_RUNNING + TRAVEL + STEP)
+/** Still: the task moved on and running, on its second step. */
+const STILL = frameAt(RUNS + OUT + 2 * STEP)
 const FIRST = frameAt(TURN)
 
 /** The round's frame while `on`, carrying on where it stopped when it comes back. */
@@ -191,7 +211,8 @@ const TOP = 56
 const TALL = 480
 const SIDE = 8
 
-function Flow({ beat, watched }: { beat: number; watched: boolean }) {
+/** The board following the task; on a `phone`, a lane at a time, the view gliding along with it. */
+function Flow({ beat, watched, phone }: { beat: number; watched: boolean; phone: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const still = useStill()
   const shown = usePageShown()
@@ -217,10 +238,11 @@ function Flow({ beat, watched }: { beat: number; watched: boolean }) {
   const story: BoardStory = {
     task: HERO.task,
     lane,
-    card: heroIn(lane, frame.at),
+    card: heroIn(lane, frame.at, frame.hand),
     arriving: frame.flying,
-    className: cx(s.hero, frame.pressed && s.pressed),
+    className: cx(s.hero, frame.pressed && s.pressed, frame.hand === 1 && s.paused, frame.hand > 1 && s.moved),
   }
+  const out: UsageOut | null = frame.hand === 1 ? 'paused' : frame.hand > 1 ? 'moved' : null
   const view = lanes[frame.lane] ?? { left: 22 + frame.lane * 356, width: 346 }
   return (
     <div
@@ -228,15 +250,21 @@ function Flow({ beat, watched }: { beat: number; watched: boolean }) {
       className={cx(s.lanes, frame.fading && s.fading, (frame.cut || lanes.length === 0) && s.cut)}
       style={{ '--glide': `${GLIDE}ms`, '--follow': `${FOLLOW}ms`, '--turn': `${TURN}ms` } as CSSProperties}
     >
-      <Shot w={W} h={H} phone={{ x: view.left - SIDE, y: TOP, w: view.width + 2 * SIDE, h: TALL }} label={LABEL} frame={s.lane}>
-        <Window beat={beat} story={story} />
+      <Shot
+        w={W}
+        h={H}
+        phone={{ x: view.left - SIDE, y: TOP, w: view.width + 2 * SIDE, h: TALL }}
+        label={LABEL}
+        frame={phone ? s.lane : s.frame}
+      >
+        <Window beat={beat} story={story} {...(out ? { out } : {})} />
         {frame.flying && (
           <Flight
             key={frame.lane}
             lane={frame.lane}
             stood={stood}
-            leaving={heroIn(LANES[frame.lane - 1]!, STEPS.length - 1)}
-            arriving={heroIn(lane, 0)}
+            leaving={heroIn(LANES[frame.lane - 1]!, STEPS.length - 1, 3)}
+            arriving={heroIn(lane, 0, 0)}
           />
         )}
       </Shot>

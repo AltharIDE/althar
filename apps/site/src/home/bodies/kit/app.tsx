@@ -13,6 +13,8 @@ import {
   SettledRow,
   TaskLaunch,
   type LaunchStep,
+  type ModelInfo,
+  TaskStatus,
   WorkCard,
   type WorkCardProps,
   ModelPick,
@@ -120,10 +122,11 @@ export function Growing({ children, whole }: { children: ReactNode; whole: React
 
 /* ---- at work: Tally's board with four tasks running at once, each led by another lab ---- */
 
-/** A task running, and how it goes on: a step every `every` beats, and a minute a beat. */
+/** A task running, and how it goes on: a step every `every` beats, and a minute a beat. One on Claude Code `movesTo` another lab when it runs out of usage. */
 interface AtWork extends Omit<WorkCardProps, 'elapsed' | 'onOpen' | 'text' | 'current'> {
   minutes: number
   every: number
+  movesTo?: ModelInfo
 }
 
 const AT_WORK: readonly AtWork[] = [
@@ -138,6 +141,7 @@ const AT_WORK: readonly AtWork[] = [
     onStep: [SONNET],
     added: 1,
     every: 3,
+    movesTo: GEMINI_PRO,
   },
   {
     task: '419',
@@ -189,8 +193,17 @@ export interface BoardStory {
   className?: string
 }
 
-/** Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
-export function BoardAtWork({ beat, story }: { beat: number; story?: BoardStory }) {
+/** Why a task on Claude Code stands still, while it is out of usage. */
+export const OUT_OF_USAGE = 'Claude Code is out of usage'
+
+/** Claude Code out of usage, for the tasks on it: paused, then moved on to another lab. */
+export type UsageOut = 'paused' | 'moved'
+
+/**
+ * Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. While
+ * Claude Code is `out`, the tasks on it pause, then move on, each to another lab, with Codex on a review.
+ */
+export function BoardAtWork({ beat, story, out }: { beat: number; story?: BoardStory; out?: UsageOut }) {
   // With a story, each card is keyed by its task, so it slides when one comes in above it.
   const keyed = (task: string, item: ReactNode) => (story ? <div data-move={task}>{item}</div> : item)
   const first = (lane: BoardLane) =>
@@ -223,14 +236,20 @@ export function BoardAtWork({ beat, story }: { beat: number; story?: BoardStory 
       </BoardColumn>
       <BoardColumn lane={BoardLane.Running} count={AT_WORK.length + extra(BoardLane.Running)}>
         {first(BoardLane.Running)}
-        {AT_WORK.map(({ minutes, every, ...x }) => (
-          <Fragment key={x.task}>
-            {keyed(
-              x.task,
-              <WorkCard {...x} at={Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)} elapsed={ran(minutes + beat)} />,
-            )}
-          </Fragment>
-        ))}
+        {AT_WORK.map(({ minutes, every, movesTo, ...x }) => {
+          const at = Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)
+          const elapsed = ran(minutes + beat)
+          const { onStep, ...own } = x
+          const card =
+            !movesTo || !out ? (
+              <WorkCard {...x} at={at} elapsed={elapsed} />
+            ) : out === 'paused' ? (
+              <WorkCard {...own} at={at} elapsed={elapsed} status={TaskStatus.Paused} note={OUT_OF_USAGE} />
+            ) : (
+              <WorkCard {...own} at={at} elapsed={elapsed} lead={movesTo} {...(onStep ? { onStep: [CODEX] } : {})} />
+            )
+          return <Fragment key={x.task}>{keyed(x.task, movesTo ? <div data-out={out}>{card}</div> : card)}</Fragment>
+        })}
       </BoardColumn>
       <BoardColumn lane={BoardLane.Yours} count={CALLS.length + extra(BoardLane.Yours)}>
         {first(BoardLane.Yours)}
