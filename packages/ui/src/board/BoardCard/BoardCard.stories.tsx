@@ -22,6 +22,7 @@ import {
   REVIEW_DRAFTED,
   REVIEW_RUNNING,
 } from '../../fixtures/kinds'
+import { QUESTION_LONG } from '../../fixtures/home'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
@@ -368,6 +369,17 @@ export const Permission: Story = {
   },
 }
 export const Question: Story = { args: CHANGE_QUESTION }
+/** A free-form question with no options: its headline and Answer. */
+export const QuestionNoOptions: Story = {
+  args: { ...CHANGE_QUESTION, why: QUESTION_LONG.title, next: <NextStep signal>Answer</NextStep> },
+}
+/** A lead that sent a paragraph: whatever runs past two lines is cut; the whole of it is in the task. */
+export const QuestionLong: Story = {
+  args: { ...CHANGE_QUESTION, why: QUESTION_LONG.background, next: <NextStep signal>Answer</NextStep> },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText(/^ADR-070 says/)).toBeInTheDocument()
+  },
+}
 export const Stuck: Story = { args: CHANGE_STUCK }
 export const ReviewRunning: Story = {
   args: REVIEW_RUNNING,
