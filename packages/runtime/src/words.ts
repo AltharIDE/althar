@@ -273,6 +273,7 @@ export const words = (
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
         return text(error, 'message')
@@ -468,6 +469,7 @@ const reviewIncomplete = {
 export const expected = new Set([
   'LaunchRefused',
   'AttachRefused',
+  'ScreenshotsRefused',
   'DraftClosed',
   'DraftUntitled',
   'ChangesClosed',

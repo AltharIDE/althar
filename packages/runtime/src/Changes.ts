@@ -485,6 +485,16 @@ type Store =
   | IssueChanges
   | LeftBehind
 
+/** A task's pull request on its host, to act on: its link, as last seen, and the host, repository and account it is reached by. */
+export interface OnHost {
+  readonly linkId: string
+  readonly projectId: ProjectId
+  readonly change: ChangeSummary
+  readonly host: CodeHost
+  readonly repository: Repository
+  readonly account: Account
+}
+
 /** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
 export type ConflictStanding =
   | { readonly state: 'resolving'; readonly checks: boolean }
@@ -683,6 +693,12 @@ export class Changes extends Context.Service<
     read(taskId: string): Effect.Effect<string, unknown>
     /** The task's changes, as last seen. */
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
+    /**
+     * The task's pull request at `url`, with its host and repository, as the
+     * person's actions on it reach them: fails where Althar isn't connected
+     * to its host.
+     */
+    pullRequest(taskId: string, url: string): Effect.Effect<OnHost, unknown>
     /**
      * Attaches the task to an open pull request it didn't open, by its link
      * or number, and follows it from then on (ADR-052); or says what starting
@@ -6189,6 +6205,20 @@ export class Changes extends Context.Service<
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
+        pullRequest: (taskId, url) =>
+          provide(
+            Effect.gen(function* () {
+              const { link, host, repository, account } = yield* current(taskId, url)
+              return {
+                linkId: link.id,
+                projectId: link.projectId,
+                change: yield* summaryOf(link),
+                host,
+                repository,
+                account,
+              } satisfies OnHost
+            }),
+          ),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
         leadStopped: (where, how = 'stopped') =>

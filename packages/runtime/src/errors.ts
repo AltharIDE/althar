@@ -297,3 +297,13 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   tool: Schema.String,
   message: Schema.String,
 }) {}
+
+/**
+ * A task's screenshots can't go in a comment on its pull request as asked
+ * (ADR-076): its host takes no pictures, there are none to post, or a
+ * picture of them is no longer kept. Said in words for the person.
+ */
+export class ScreenshotsRefused extends Schema.TaggedError<ScreenshotsRefused>()('ScreenshotsRefused', {
+  why: Schema.Literals(['no_pictures', 'none', 'unkept']),
+  message: Schema.String,
+}) {}
