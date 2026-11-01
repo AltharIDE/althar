@@ -8,6 +8,7 @@ import { RuntimeState } from '../../foundations/vocabulary'
 import { Connections, type ServiceConnection, type ServiceOption } from '../../setup/Connections/Connections'
 import { CrashReportsLine } from '../../setup/Preferences/Preferences'
 import type { RepositoryChoice } from '../../setup/RepositoryPick/RepositoryPick'
+import type { RuntimeEntry } from '../../setup/Runtimes/Runtimes'
 import { Welcome, type WelcomeProps, type WelcomeStep } from './Welcome'
 
 /* The repositories a first run finds where people keep code, most recently worked on first. */
@@ -134,6 +135,36 @@ export const Walking: Story = {
 
 /** The agents on this computer: one signed in, one signed out, one to download. One is enough to go on. */
 export const Agents: Story = { args: { toured: true } }
+
+/* Every agent Althar runs on a first run: two on this computer, two it can fetch, and two only their own installers put there. */
+const EVERY_AGENT = [
+  ...FIRST_RUN.slice(0, 2),
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Missing, download: '45 MB' },
+  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, state: RuntimeState.Installing, download: '110 MB' },
+  { id: 'junie', name: 'Junie', brand: Brand.Junie, state: RuntimeState.Missing },
+  { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing },
+] satisfies RuntimeEntry[]
+
+/** Every agent Althar runs: those on this computer a row each, the others under them, quieter, a tile each. */
+export const EveryAgent: Story = {
+  args: { toured: true, runtimes: EVERY_AGENT },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(within(c.getByRole('list', { name: /Agents on/ })).getAllByRole('listitem')).toHaveLength(2)
+    await expect(within(c.getByRole('list', { name: /Agents not on/ })).getAllByRole('listitem')).toHaveLength(4)
+  },
+}
+
+/** None on this computer yet: said where the rows would be, every agent offered under it, and going on is the lesser choice. */
+export const NoneHere: Story = {
+  args: { toured: true, runtimes: EVERY_AGENT.slice(2) },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/None on .* yet/)).toBeVisible()
+    await expect(c.queryByRole('list', { name: /Agents on/ })).toBeNull()
+    await expect(c.getByRole('button', { name: 'Continue without one' })).toBeVisible()
+  },
+}
 
 /** None signed in yet: going on is the lesser choice, and the project can still be made. */
 export const NoneReady: Story = { args: { toured: true, runtimes: NONE_READY } }

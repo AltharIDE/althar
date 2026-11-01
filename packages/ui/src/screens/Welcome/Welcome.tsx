@@ -14,6 +14,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import { AgentsAway, type AgentsAwayText } from '../../setup/AgentsAway/AgentsAway'
 import { RepositoryPick, type RepositoryChoice, type RepositoryPickText } from '../../setup/RepositoryPick/RepositoryPick'
 import { Runtimes, type RuntimeEntry, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
 import { AgentsScene, CallsScene, ReviewScene, TaskScene, type SceneProps } from './scenes'
@@ -70,7 +71,7 @@ export interface WelcomeText {
   /** The tour's last page goes on to the setup. */
   setUp: string
   tour: Record<TourStep, WelcomePageText>
-  agents: { label: string; title: string; line: string; list: string; asking: string; go: string; without: string }
+  agents: { label: string; title: string; line: string; list: string; asking: string; noneHere: string; go: string; without: string }
   project: {
     label: string
     title: string
@@ -124,6 +125,7 @@ export const welcomeText: WelcomeText = {
     line: 'Althar runs the agents you already use, on your own plans. One signed in is enough to start.',
     list: `Agents on ${device.this}`,
     asking: 'Asking the agents',
+    noneHere: `None on ${device.this} yet`,
     go: 'Continue',
     without: 'Continue without one',
   },
@@ -167,6 +169,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   runtimes: readonly RuntimeEntry[] | null
   /** The agents' rows' own words, such as what this computer is called. */
   runtimesText?: Partial<RuntimesText>
+  /** The tiles' own words, for the agents not on this computer. */
+  awayText?: Partial<AgentsAwayText>
   /** The repositories found, and any added; null while they are still being looked for. */
   repositories: readonly RepositoryChoice[] | null
   /** The repositories ticked, by id. */
@@ -212,6 +216,7 @@ export function Welcome({
   onToured,
   runtimes,
   runtimesText,
+  awayText,
   repositories,
   picked,
   onPick,
@@ -289,6 +294,10 @@ export function Welcome({
 
   const label = (one: WelcomeStep) => (isTour(one) ? t.tour[one].label : t[one].label)
   const ready = runtimes?.filter((r) => r.state === RuntimeState.Ready).length ?? 0
+  // On this computer, a row each, with who it is signed in as; the others, quieter, a tile each.
+  const isAway = (r: RuntimeEntry) => r.state === RuntimeState.Missing || r.state === RuntimeState.Installing
+  const here = runtimes?.filter((r) => !isAway(r)) ?? []
+  const away = runtimes?.filter(isAway) ?? []
   const make = () => {
     if (picked.length === 0) return setNothing(true)
     setNothing(false)
@@ -352,12 +361,24 @@ export function Welcome({
                     <Skeleton height={36} />
                   </div>
                 ) : (
-                  <Runtimes
-                    label={t.agents.list}
-                    runtimes={runtimes}
-                    {...rows}
-                    {...(runtimesText === undefined ? {} : { text: runtimesText })}
-                  />
+                  <div className={s.agents}>
+                    {here.length > 0 ? (
+                      <Runtimes
+                        label={t.agents.list}
+                        runtimes={here}
+                        {...rows}
+                        {...(runtimesText === undefined ? {} : { text: runtimesText })}
+                      />
+                    ) : (
+                      <p className={s.quiet}>{t.agents.noneHere}</p>
+                    )}
+                    <AgentsAway
+                      agents={away}
+                      {...(rows.onInstall === undefined ? {} : { onInstall: rows.onInstall })}
+                      {...(rows.onHelp === undefined ? {} : { onHelp: rows.onHelp })}
+                      {...(awayText === undefined ? {} : { text: awayText })}
+                    />
+                  </div>
                 ))}
               {step === 'project' && (
                 <>
