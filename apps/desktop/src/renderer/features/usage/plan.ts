@@ -29,6 +29,8 @@ export const text = {
   read: (age: string) => `read ${age}`,
   /** An agent all of whose accounts read are signed out: no work starts on it. */
   signedOut: 'Signed out',
+  /** An agent every window read of which has reset since: how much is used no one has said yet. */
+  unread: 'Not read since reset',
 }
 
 /** Numbers older than this say how old they are. */
@@ -90,8 +92,12 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAcco
 export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[] } => {
   const agents: PlanAgent[] = []
   const byAgent = new Map<string, AccountUsage[]>()
+  // The accounts that had windows when they were read, though every one may have reset since: by the runtime's clock, which
+  // then sends none, or by the window's own, which leaves out what has reset since it was sent.
+  const wasRead = new Set<string>()
   for (const read of usage?.accounts ?? []) {
     const account = current(read, now)
+    if (read.resetSince || read.windows.length > 0) wasRead.add(account.accountId)
     byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
   }
   for (const [agentId, accounts] of byAgent) {
@@ -101,9 +107,26 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
     })
     const [first] = accounts
     if (first === undefined) continue
-    if (read.length === 0) continue
     const several = accounts.length > 1
     const brand = brandOf(agentId)
+    if (read.length === 0) {
+      // Every window read has reset since: no figure, never all of its plan left, and each account says how old and why.
+      const reset = accounts.filter((account) => wasRead.has(account.accountId))
+      if (reset.length === 0) continue
+      const out = reset.every((account) => account.fault?.kind === 'sign_in_again')
+      agents.push({
+        id: agentId,
+        name: first.agentName,
+        ...(brand === undefined ? {} : { brand }),
+        left: 0,
+        limit: '',
+        until: null,
+        account: null,
+        accounts: reset.map((account) => ({ ...accountOf(account, several, now), fault: account.fault?.message ?? null })),
+        ...(out ? { stopped: text.signedOut } : { unread: text.unread }),
+      })
+      continue
+    }
     const each = read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now))
     // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
     const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
@@ -134,8 +157,8 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       accounts: each,
     })
   }
-  // Least room first, an agent that can't run after every one that can.
-  const stopped = (agent: PlanAgent) => (agent.stopped === undefined ? 0 : 1)
+  // Least room first, an agent that can't run, or has no figure, after every one that can.
+  const stopped = (agent: PlanAgent) => (agent.stopped === undefined && agent.unread === undefined ? 0 : 1)
   return { agents: agents.toSorted((a, b) => stopped(a) - stopped(b) || a.left - b.left) }
 }
 
@@ -168,7 +191,7 @@ export const roomOf = (
     const agent = planOf({ accounts }, now).agents[0]
     // Signed out, it has no room to give: the picker says nothing of it, as the runtime starts nothing there.
     if (agent?.stopped !== undefined) return undefined
-    if (agent !== undefined) return { left: agent.left, until: agent.until, account: agent.account }
+    if (agent !== undefined && agent.unread === undefined) return { left: agent.left, until: agent.until, account: agent.account }
   }
   return accounts.every((account) => account.windows.length === 0) ? null : undefined
 }

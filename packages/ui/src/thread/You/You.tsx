@@ -28,8 +28,8 @@ export interface YouText {
 export const youText: YouText = {
   you: 'You',
   youQueued: 'You, queued',
-  queued: 'Queued · the lead reads it next',
-  interrupting: 'Sent now · the lead is stopping to read it',
+  queued: 'Queued',
+  interrupting: 'Sent now',
   view: (name) => `View ${name}`,
   open: (name) => `Open ${name}`,
   showPaste: (name) => `Show pasted text, ${name}`,

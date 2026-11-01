@@ -27,6 +27,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, listTools, notices, repository, runtime, until } from './support'
+import { withoutReview } from './changesSupport'
 
 /*
  * A plain task (DEV-96, ADR-035): what the coordinator starts with
@@ -288,7 +289,7 @@ describe('a plain task', () => {
       // Said in its thread, and recorded.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        [`This task’s work is on a branch of its own now, ${worktree.branch}, which stays on ${thisDevice()}.`, 'aside'],
+        [`This task’s work is on its branch ${worktree.branch}.`, 'aside'],
       )
       const [fact] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(fact?.payload ?? '{}'), { from: null, to: worktree.branch })
@@ -573,7 +574,7 @@ describe('a plain task of several repositories', () => {
       assert.strictEqual(gitIn(web.path, 'symbolic-ref', '--short', 'HEAD'), `${web.branch}-2`)
       assert.include(
         (yield* notices(created.threadId)).map((notice) => notice.title),
-        `This task’s work is on branches of its own now, ${api.branch}, ${web.branch}-2, which stay on ${thisDevice()}.`,
+        'This task’s work is on 2 branches.',
       )
       // Once made, nothing more happens.
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
@@ -625,10 +626,7 @@ describe('a plain task of several repositories', () => {
       yield* sql`UPDATE workspaces SET branch = 'althar/no..dots' WHERE id = ${web.id}`
       writeFileSync(join(api.path, 'header.md'), 'A header.\n')
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [api.branch])
-      assert.include(
-        yield* said,
-        `This task’s work is on a branch of its own now, ${api.branch}, which stays on ${thisDevice()}. Althar couldn’t make its branch in web yet, and tries again as its lead’s turn ends.`,
-      )
+      assert.include(yield* said, `This task’s work is on its branch ${api.branch}. Couldn’t branch in web yet.`)
       // Tried again at the next check, though nothing is written in web; still refused, it isn't said twice.
       const before = (yield* said).length
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
@@ -814,7 +812,7 @@ describe('making a quick task a change', () => {
         github.changes.map((change) => [change.title, change.draft]),
         [['Settings, for real', false]],
       )
-      assert.isTrue(github.changes[0]?.body.startsWith('Settings were a sketch; this makes them real.'))
+      assert.isTrue(withoutReview(github.changes[0]?.body ?? '').startsWith('Settings were a sketch; this makes them real.'))
       yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
     }).pipe(Effect.provide(withGitHub(github)))
   })
@@ -842,8 +840,7 @@ describe('making a quick task a change', () => {
       assert.deepInclude(said, {
         source: 'runtime',
         severity: 'info',
-        title: 'This task is a change now: with no review, it ends on its branch, as its repository isn’t on a code host Althar knows.',
-        description: `Its work is on its branch ${worktree.branch}.`,
+        title: 'This task is a change now: with no review, it ends on its branch.',
         // Althar's own housekeeping, kept with the lead's work.
         role: 'aside',
       })
@@ -897,10 +894,7 @@ describe('making a quick task a change', () => {
       )
       // With no host Althar knows, it ends on its branch, and says so.
       const said = (yield* notices(task.threadId)).map((notice) => notice.title)
-      assert.include(
-        said,
-        "This task is a change now: reviewed by Fake codex's default model, it ends on its branch, as its repository isn’t on a code host Althar knows.",
-      )
+      assert.include(said, "This task is a change now: reviewed by Fake codex's default model, it ends on its branch.")
       assert.include(said, 'The task ends on its branch.')
       assert.strictEqual(gitIn((yield* worktreeOf(task.id)).path, 'log', '-1', '--format=%s'), 'Change it')
     }).pipe(Effect.provide(withQueries())),

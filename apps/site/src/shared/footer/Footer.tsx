@@ -69,8 +69,9 @@ function placeOf(w: number, h: number, clear: Clear[]): Place {
   }
   const drop = clamp(sky - (h - ih + LAND_Y * ih), 0, DROP * ih)
   const top = h - ih + drop
-  // Wider than the screen, the altar sits a little right of the middle; narrower, it keeps its place in the picture.
-  const left = iw >= w ? clamp(w * 0.62 - ALTAR_X * iw, w - iw, 0) : (w - iw) * ALTAR_X
+  // Wider than the screen, the altar sits a little right of the middle, or in the middle where the words stand over each other; narrower, it keeps its place in the picture.
+  const at = w < 900 ? 0.5 : 0.62
+  const left = iw >= w ? clamp(w * at - ALTAR_X * iw, w - iw, 0) : (w - iw) * ALTAR_X
   const g = groundAt(left, top, iw, ih, w, h, clear)
   return { left, top, iw, ih, narrow: left + CROP * iw <= 0, g }
 }

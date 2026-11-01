@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
-import { lstat, readdir, statfs } from 'node:fs/promises'
+import { existsSync, readdirSync } from 'node:fs'
+import { lstat, readdir, rmdir, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
+import { cleanUp, removeFully } from '@althar/provider-adapters'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
@@ -269,14 +270,14 @@ const gone = (path: string) => Effect.suspend(() => (existsSync(path) ? Effect.f
 
 /**
  * Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. Fails unless nothing of it is left.
- * Tried again a few times, over a second or so, where Windows says it is busy: a process that just ended, or a scanner
- * reading what was just written, still holds it a moment.
+ * Tried again over a second or so where Windows says it is busy (`removeFully`): a process that just ended, or a
+ * scanner reading what was just written, still holds it a moment.
  */
 const erase = (path: string) =>
-  Effect.try({
-    try: () => rmSync(path, { recursive: true, force: true, maxRetries: 5 }),
-    catch: () => new FolderStayed({ path }),
-  }).pipe(Effect.andThen(gone(path)))
+  removeFully(path).pipe(
+    Effect.mapError(() => new FolderStayed({ path })),
+    Effect.andThen(gone(path)),
+  )
 
 /** Removes a worktree, or, where git won't, whatever is in its folder. Fails unless nothing of it is left. */
 const removeWorktree = (repository: string, path: string) =>
@@ -298,14 +299,13 @@ const keep = (checkout: string, ref: string) =>
  * person sent its lead (`.althar/attachments`, ADR-064), goes with it.
  */
 const eraseEmpty = (path: string) =>
-  Effect.sync(() => {
-    try {
-      const own = join(path, '.althar')
-      if (existsSync(own) && readdirSync(path).length === 1) rmSync(own, { recursive: true, force: true })
-      if (existsSync(path) && readdirSync(path).length === 0) rmdirSync(path)
-    } catch {
-      // Something else is in it, or it went already: it stays.
-    }
+  Effect.gen(function* () {
+    const own = join(path, '.althar')
+    const alone = yield* Effect.try(() => existsSync(own) && readdirSync(path).length === 1).pipe(Effect.orElseSucceed(() => false))
+    if (alone) yield* cleanUp(own, "what Althar kept in a finished task's folder")
+    // Only an empty folder goes: one something else is in, or that went already, stays as it is, by design and unlogged.
+    // oxlint-disable-next-line althar/one-removal
+    yield* Effect.ignore(Effect.tryPromise(() => rmdir(path)))
   })
 
 export class FolderCleanup extends Context.Service<

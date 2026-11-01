@@ -81,9 +81,7 @@ describe('a round of work a restart stopped', () => {
           SELECT a.state, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
           JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL`
         assert.deepStrictEqual([attempt?.state, JSON.parse(attempt?.output ?? '{}')], ['succeeded', { quiet: true }])
-        assert.isFalse(
-          (yield* notices(task.threadId)).some((notice) => notice.title === 'Althar restarted; the step carried on from here.'),
-        )
+        assert.isFalse((yield* notices(task.threadId)).some((notice) => notice.title === 'Carried on after Althar restarted.'))
       }).pipe(Effect.provide(withQueries(file)))
     }),
   )

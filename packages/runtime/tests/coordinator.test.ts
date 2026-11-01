@@ -930,6 +930,36 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('starts a lead that goes on its own mid-step again, once, and asks nothing when it carries on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task } = yield* planned('Crashes once', '[lead:gone-once] [lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+      ])
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.strictEqual(card?.summary, 'Did the task.')
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      const notices = yield* sql<{ title: string }>`
+        SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
+      assert.include(
+        notices.map((notice) => notice.title),
+        'Started again after its agent stopped on its own.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person when the lead it started again goes on its own again soon after', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Crashes twice', '[lead:gone-twice] [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'session_ended'])
+      // Started again once only: two sessions, the second gone too.
+      const sessions = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      assert.lengthOf(sessions, 2)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -1282,10 +1312,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       // Althar's own housekeeping, kept with the lead's work: it asks nothing of the person.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        [
-          'Fake codex showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn and told it to carry on.',
-          'aside',
-        ],
+        ['Fake codex went quiet for a minute. Told it to carry on.', 'aside'],
       )
       const told = (yield* turns(task.threadId)).map((turn) => turn.prompt ?? '')
       assert.isTrue(
@@ -1305,7 +1332,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       assert.deepStrictEqual((call as unknown as { tried: ReadonlyArray<string> }).tried, ['carried_on', 'restarted'])
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Fake codex showed no sign of work again, so Althar started it afresh.',
+        'Fake codex went quiet again. Started it afresh.',
       )
       // Nothing is left running while the call waits.
       yield* until(
@@ -1323,7 +1350,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        "Fake codex didn't stop its turn when asked, so Althar started it afresh.",
+        "Fake codex didn't stop when asked. Started it afresh.",
       )
     }).pipe(
       Effect.provide(
@@ -1342,7 +1369,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       )
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        ['Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.', 'aside'],
+        ['Fake codex ran the same command 3 times. Told it to try another way.', 'aside'],
       )
       // Only its turn stops: it keeps what it knows for what the person says.
       yield* idleOn(task.threadId)
@@ -1401,13 +1428,13 @@ describe('a step whose agent stalls or goes round in circles', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Serve it. [lead:hang]' })
       const [last] = yield* until(
         Effect.map(notices(task.threadId), (said) => said.slice(-1)),
-        (said) => said[0]?.title?.endsWith('so Althar stopped it.') === true,
+        (said) => said[0]?.title?.endsWith('Stopped.') === true,
       )
       assert.deepStrictEqual(last, {
         source: 'runtime',
         severity: 'warning',
-        title: 'Fake codex showed no sign of work again after Althar started it afresh, so Althar stopped it.',
-        description: 'Start the lead again to carry on; it picks up from the thread.',
+        title: 'Fake codex went quiet again after a fresh start. Stopped.',
+        description: 'Start the lead again to carry on.',
         // The home reads it as something the loop dealt with.
         about: 'stall',
       })

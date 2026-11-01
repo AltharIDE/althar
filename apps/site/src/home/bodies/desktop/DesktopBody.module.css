@@ -49,6 +49,7 @@
   .endRow { flex-direction: column; align-items: stretch; gap: 22px; padding: 34px var(--gut) 36px; }
   .endLine { font-size: 30px; line-height: 1.08; }
   .phoneBreak { display: inline; }
-  .endRow > div { display: grid; gap: 10px; }
-  .endRow > div > a { justify-content: center; height: 50px; }
+  .endGet > div { display: grid; gap: 10px; }
+  .endGet > div > a { justify-content: center; height: 50px; }
+  .endGet > p { text-align: center; }
 }

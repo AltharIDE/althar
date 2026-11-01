@@ -1,0 +1,102 @@
+/* A pull request as the host shows it, its seal in the corner; and the seal's looks, or what goes out, under it. */
+.reviewSeal {
+  display: grid;
+  gap: 14px;
+}
+
+/* a pull request as GitHub shows it: its title, then the start of its description */
+.pullRequest {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.head {
+  padding: 10px 14px;
+  background: var(--n-1);
+  box-shadow: inset 0 -1px var(--line);
+  font-size: 13.5px;
+}
+.title {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.number {
+  color: var(--t-3);
+}
+.body {
+  display: flow-root;
+  padding: 12px 14px 14px;
+}
+/* in its corner, as GitHub floats an image aligned right */
+.seal {
+  float: right;
+  display: block;
+  width: 96px;
+  height: 96px;
+  margin: 0 0 6px 14px;
+  object-fit: contain;
+}
+/* off, only where it would be */
+.ghost {
+  box-sizing: border-box;
+  border: 1px dashed var(--line-3);
+  border-radius: 99px;
+}
+.text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-1);
+}
+.folded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--t-1);
+  transition: color var(--base) var(--ease);
+}
+.folded code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--sunk);
+  font: 11.5px var(--mono);
+}
+/* a <details>' closed triangle */
+.caret {
+  width: 0;
+  height: 0;
+  border-block: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+/* off, the line is what would be added */
+.off .folded {
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-3);
+}
+.after {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.pick {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+.glyph {
+  display: block;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folded {
+    transition: none;
+  }
+}

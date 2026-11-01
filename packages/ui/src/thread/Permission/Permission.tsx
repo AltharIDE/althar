@@ -155,7 +155,6 @@ export interface PermissionText {
   keys: (n: number) => string
   undo: string
   stackDone: (allowed: number, denied: number) => string
-  stackNote: string
   allowedCount: (n: number) => string
   allowedWho: (byRules: number, byLead: number, project: string) => string
   /** After an answer someone else gave. */
@@ -195,7 +194,6 @@ export const permissionText: PermissionText = {
   keys: (n) => `1–${n} to choose`,
   undo: 'Undo',
   stackDone: (allowed, denied) => `Allowed ${allowed}${denied > 0 ? `, denied ${denied}` : ''}`,
-  stackNote: 'each answer went back to its own step',
   allowedCount: (n) => `Allowed ${n} requests`,
   allowedWho: (rules, lead, project) =>
     [rules > 0 && `${rules} by ${project}’s rules`, lead > 0 && `${lead} by the lead`].filter(Boolean).join(', '),
@@ -702,9 +700,7 @@ export function Permissions({ items, project, onAnswer, onUndo, focusOnMount, cl
             setAnsweredHere(false)
           })
         }
-      >
-        <AskNote>· {t.stackNote}</AskNote>
-      </AskAnswered>
+      />
     )
   }
   const pos = items.length - waiting.length + 1

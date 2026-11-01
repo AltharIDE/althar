@@ -252,7 +252,7 @@ describe('files sent with a message', () => {
           )
         assert.strictEqual(
           yield* refused([{ grant: yield* grant(join(from, 'spec.pdf')) }, { grant: yield* grant(huge) }]),
-          "huge.zip is larger than 50 MB, so it can't be sent.",
+          'huge.zip is over 50 MB.',
         )
         assert.strictEqual(yield* refused([{ grant: 'grant_gone' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ kept: 'input_0:1' }]), "A file isn't there any more. Add it again.")

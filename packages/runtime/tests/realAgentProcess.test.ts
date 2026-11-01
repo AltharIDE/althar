@@ -57,10 +57,7 @@ describe('an agent run as its own process', () => {
         Effect.map(notices(created.threadId), (said) => said.filter((notice) => notice.about === 'stall')),
         (said) => said.length > 0,
       )
-      assert.match(
-        told?.title ?? '',
-        /^process showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn/,
-      )
+      assert.match(told?.title ?? '', /^process went quiet for a minute\. Told it to carry on/)
     }).pipe(Effect.provide(runtime(':memory:', {}, { stalls: FAST }))),
   )
 

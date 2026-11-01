@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
-import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT } from '../../fixtures/plan'
+import { CLAUDE_PLENTY, CLAUDE_TWO, CLAUDE_UNREAD, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT } from '../../fixtures/plan'
 import { LOAD_BUSY, LOAD_SLOTS } from '../../fixtures/load'
 import { LoadMeter } from '../LoadMeter/LoadMeter'
 import { PlanGauge } from './PlanGauge'
@@ -78,6 +78,27 @@ export const AllSignedOut: Story = {
     await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeInTheDocument()
     await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()
     await expect(within(document.body).queryByText('Plenty left')).toBeNull()
+  },
+}
+
+/** Claude Code's windows all reset since it was read: no figure, never all of its plan left, and its detail says why it wasn't read again. */
+export const Unread: Story = {
+  args: { agents: [CODEX_PLENTY, CLAUDE_UNREAD], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await expect(within(canvasElement).getByRole('button', { name: /^Plan usage: Codex has / })).toBeInTheDocument()
+    await expect(page.getByText('Not read since reset')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: /Claude Code/ }))
+    await expect(page.getByText('read 2 days ago')).toBeInTheDocument()
+    await expect(page.getByText(/Its sign-in has expired/)).toBeInTheDocument()
+  },
+}
+
+/** Every agent read unread since its reset: the gauge unlit, and the peek says which. */
+export const AllUnread: Story = {
+  args: { agents: [CLAUDE_UNREAD], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code not read since reset' })).toBeInTheDocument()
   },
 }
 

@@ -87,6 +87,24 @@ export const CODEX_SIGNED_OUT: PlanAgent = {
   ],
 }
 
+/** Claude Code's windows all reset since it was last read, and its sign-in has expired since: no figure, its age and why in the detail. */
+export const CLAUDE_UNREAD: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 0,
+  limit: '',
+  until: null,
+  unread: 'Not read since reset',
+  accounts: [
+    {
+      id: 'claude-personal',
+      name: null,
+      age: 'read 2 days ago',
+      fault: 'Its sign-in has expired. Claude Code renews it the next time it runs on this account.',
+      windows: [],
+    },
+  ],
+}
+
 /** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. */
 export const CLAUDE_TWO: PlanAgent = {
   ...CLAUDE_PLENTY,

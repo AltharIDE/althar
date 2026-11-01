@@ -185,7 +185,7 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     const thinking = thinkingIn(conversation)
     await expect(thinking).toBeVisible()
     await say(page, 'Then the changelog. [answers-after:1s]')
-    const queue = page.getByRole('region', { name: 'Queued; the coordinator reads it next' })
+    const queue = page.getByRole('region', { name: 'Queued' })
     await expect(queue).toBeVisible()
     await expect(queue).toContainText('Then the changelog.')
     await expect(thinking).toHaveCount(1)

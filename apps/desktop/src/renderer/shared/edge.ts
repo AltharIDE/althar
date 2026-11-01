@@ -14,7 +14,7 @@ import type { EdgePlace } from '../../main/edge'
 export type { EdgePlace }
 
 export const edgePlaces: ReadonlyArray<{ readonly value: EdgePlace; readonly title: string; readonly note: string }> = [
-  { value: 'island', title: 'Round the notch', note: 'Point at it to see what needs you and what runs.' },
+  { value: 'island', title: 'Round the notch', note: 'Point at it to open it.' },
   { value: 'menu', title: 'In the menu bar', note: 'Click Althar’s mark to see what needs you and what runs.' },
 ]
 
@@ -48,12 +48,12 @@ export interface EdgeWords {
   readonly why?: string
 }
 
-const menuNote = 'Click Althar’s mark to see what needs you and what runs.'
+const menuNote = 'Click Althar’s mark to open it.'
 
 export const edgeWords = (spot: EdgeSpot): EdgeWords => {
   switch (spot) {
     case EdgeSpot.Island:
-      return { word: 'Round the notch', title: 'Round the notch', note: 'Point at it to see what needs you and what runs.' }
+      return { word: 'Round the notch', title: 'Round the notch', note: 'Point at it to open it.' }
     case EdgeSpot.MenuBesideNotch:
       return { word: 'Menu bar', title: 'In the menu bar', note: menuNote }
     case EdgeSpot.MenuBar:
@@ -61,14 +61,14 @@ export const edgeWords = (spot: EdgeSpot): EdgeWords => {
         word: 'Menu bar',
         title: 'In the menu bar',
         note: menuNote,
-        why: 'This Mac’s screen has no notch, so Althar shows in the menu bar.',
+        why: 'This screen has no notch.',
       }
     case EdgeSpot.WindowsTray:
       return {
         word: 'System tray',
         title: 'In the system tray',
-        note: 'Click Althar’s mark beside the clock to see what needs you and what runs.',
-        why: 'Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.',
+        note: 'Click Althar’s mark beside the clock to open it.',
+        why: 'Windows may tuck it under the ^. Drag it onto the taskbar to keep it in sight.',
       }
     case EdgeSpot.LinuxTray:
       // A desktop may take the mark and not show it, which nothing tells Althar: said, in case.
@@ -76,13 +76,13 @@ export const edgeWords = (spot: EdgeSpot): EdgeWords => {
         word: 'System tray',
         title: 'In the system tray',
         note: menuNote,
-        why: 'Where the desktop has no tray, Althar shows only in its window.',
+        why: 'Without a tray, Althar shows only in its window.',
       }
     case EdgeSpot.WindowOnly:
       return {
         word: 'No tray',
         title: 'Only in Althar’s window',
-        note: 'This desktop has no system tray, so Althar shows only in its own window.',
+        note: 'This desktop has no system tray.',
       }
     default:
       return unreachable(spot)

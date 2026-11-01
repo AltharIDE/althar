@@ -174,7 +174,7 @@ describe('a usage-limit call made without the account that ran out, as an earlie
       assert.deepInclude(JSON.parse(held?.output ?? '{}'), { heldFor: 'claude-code', account: null, why: 'asked' })
       assert.include(
         yield* said(task.threadId),
-        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), yield* Clock.currentTimeMillis)}, when Fake claude-code is back, as you said.`,
+        `The work waits until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), yield* Clock.currentTimeMillis)}.`,
       )
       // At the reset, its lead carries on, on the agent's first account, and finishes.
       yield* atReset(back)

@@ -1,4 +1,4 @@
-import { definePlugin, defineRule } from 'vite-plus/lint/plugins'
+import { defineRule } from 'vite-plus/lint/plugins'
 
 /*
  * One clock (docs/plans/tests-that-hold.md, A). The runtime, and the packages it uses, read the time and wait only
@@ -22,7 +22,7 @@ const memberOf = (node) =>
     ? `${node.object.name}.${node.computed ? (node.property.type === 'Literal' ? node.property.value : '') : node.property.name}`
     : undefined
 
-const oneClock = defineRule({
+export const oneClock = defineRule({
   meta: {
     type: 'problem',
     messages: {
@@ -55,5 +55,3 @@ const oneClock = defineRule({
     }
   },
 })
-
-export default definePlugin({ meta: { name: 'althar' }, rules: { 'one-clock': oneClock } })

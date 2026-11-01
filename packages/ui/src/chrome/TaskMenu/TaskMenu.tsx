@@ -37,41 +37,27 @@ export interface TaskMenuText {
   label: string
   /** Opening the folder, in the editor named. */
   open: (editor: string) => string
-  openAbout: string
   rename: string
-  renameAbout: string
   startNow: string
-  startNowAbout: string
   markReady: string
-  markReadyAbout: string
   attach: string
-  attachAbout: string
   skipReview: string
-  skipReviewAbout: string
   stop: string
-  stopAbout: string
   resume: string
-  resumeAbout: string
   abandon: string
-  abandonAbout: string
   /** For a merged task, which abandons only what came after its pull request. */
   abandonMergedAbout: string
   reopen: string
-  reopenAbout: string
   conflicts: string
-  /** Going by the project, with what the project says now: the choice, and what it means. */
+  /** Going by the project, with what the project says now. */
   conflictsProject: (on: boolean) => string
-  conflictsProjectAbout: (on: boolean) => string
   conflictsOn: string
-  conflictsOnAbout: string
   conflictsOff: string
-  conflictsOffAbout: string
   /** On the button, where the task says otherwise than its project. */
   conflictsHint: (on: boolean) => string
-  /** Allowing everything its agents ask on the task: the switch, what it does, and, while its project allows everything, why it is on and where that is changed. */
+  /** Allowing everything its agents ask on the task: the switch, what it leaves out, and, while its project allows everything, where that is changed. */
   allowAll: string
   allowAllAbout: string
-  allowAllProject: string
   allowAllHeld: string
 }
 
@@ -79,37 +65,23 @@ export const taskMenuText: TaskMenuText = {
   trigger: 'More for this task',
   label: 'This task',
   open: (editor) => `Open in ${editor}`,
-  openAbout: 'The task’s folder, on its branch.',
   rename: 'Rename',
-  renameAbout: 'Give it another title. Its branch and folder keep their names.',
   startNow: 'Start now',
-  startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
-  markReadyAbout: 'Its draft pull request is no longer a draft.',
   attach: 'Attach a pull request…',
-  attachAbout: 'Follow an open pull request it didn’t open. Its work goes there, with no new one.',
   skipReview: 'Skip the review',
-  skipReviewAbout: 'Its work is ready once its lead is done, unreviewed this time. A review under way stops.',
   stop: 'Stop the task',
-  stopAbout: 'Every agent on it stops. The branch and what it found stay, and you can resume it.',
   resume: 'Resume',
-  resumeAbout: 'The lead carries on from the step it was on, in a fresh session.',
   abandon: 'Abandon',
-  abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
-  abandonMergedAbout: 'Its pull request stays merged. The commits after it stay on its branch, in no pull request.',
+  abandonMergedAbout: 'Its pull request stays merged.',
   reopen: 'Reopen',
-  reopenAbout: 'It opens again, on the same worktree and branch.',
   conflicts: 'Resolve conflicts automatically',
   conflictsProject: (on) => `Project (${on ? 'on' : 'off'})`,
-  conflictsProjectAbout: (on) => `As the project setting, which is ${on ? 'on' : 'off'}.`,
   conflictsOn: 'On',
-  conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
   conflictsOff: 'Off',
-  conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
   conflictsHint: (on) => `Resolve conflicts automatically: ${on ? 'on' : 'off'}`,
   allowAll: 'Allow everything on this task',
-  allowAllAbout: 'Nothing its agents ask waits for you but what can’t be undone, such as a force push. Never still holds.',
-  allowAllProject: 'On for every task in this project, from its Rules.',
+  allowAllAbout: 'Except what can’t be undone.',
   allowAllHeld: 'On for the project, in its Rules',
 }
 
@@ -183,27 +155,27 @@ export function TaskMenu({
   // What moves it on where it stands, then what you do with it.
   const work = [
     onStartNow && (
-      <MenuItem key="start" icon="play" description={t.startNowAbout} onSelect={onStartNow}>
+      <MenuItem key="start" icon="play" onSelect={onStartNow}>
         {t.startNow}
       </MenuItem>
     ),
     onMarkReady && (
-      <MenuItem key="ready" icon="pr" description={t.markReadyAbout} onSelect={onMarkReady}>
+      <MenuItem key="ready" icon="pr" onSelect={onMarkReady}>
         {t.markReady}
       </MenuItem>
     ),
     onSkipReview && (
-      <MenuItem key="skip-review" icon="after" description={t.skipReviewAbout} onSelect={onSkipReview}>
+      <MenuItem key="skip-review" icon="after" onSelect={onSkipReview}>
         {t.skipReview}
       </MenuItem>
     ),
     onResume && (
-      <MenuItem key="resume" icon="arrow" description={t.resumeAbout} onSelect={onResume}>
+      <MenuItem key="resume" icon="arrow" onSelect={onResume}>
         {t.resume}
       </MenuItem>
     ),
     onReopen && (
-      <MenuItem key="reopen" icon="corner" description={t.reopenAbout} onSelect={onReopen}>
+      <MenuItem key="reopen" icon="corner" onSelect={onReopen}>
         {t.reopen}
       </MenuItem>
     ),
@@ -211,7 +183,6 @@ export function TaskMenu({
       <MenuItem
         key="rename"
         icon="pencil"
-        description={t.renameAbout}
         onSelect={() => {
           renaming.current = true
           onRename()
@@ -221,12 +192,12 @@ export function TaskMenu({
       </MenuItem>
     ),
     onOpen && editor !== undefined && (
-      <MenuItem key="open" icon="external" description={t.openAbout} onSelect={onOpen}>
+      <MenuItem key="open" icon="external" onSelect={onOpen}>
         {t.open(editor)}
       </MenuItem>
     ),
     onAttach && (
-      <MenuItem key="attach" icon="clip" description={t.attachAbout} onSelect={onAttach}>
+      <MenuItem key="attach" icon="clip" onSelect={onAttach}>
         {t.attach}
       </MenuItem>
     ),
@@ -240,9 +211,9 @@ export function TaskMenu({
         value={conflicts.choice}
         onChange={(choice) => conflicts.onChange(choice as TaskConflicts)}
         options={[
-          { value: 'project', label: t.conflictsProject(conflicts.project), description: t.conflictsProjectAbout(conflicts.project) },
-          { value: 'on', label: t.conflictsOn, description: t.conflictsOnAbout },
-          { value: 'off', label: t.conflictsOff, description: t.conflictsOffAbout },
+          { value: 'project', label: t.conflictsProject(conflicts.project) },
+          { value: 'on', label: t.conflictsOn },
+          { value: 'off', label: t.conflictsOff },
         ]}
       />
     ),
@@ -254,8 +225,7 @@ export function TaskMenu({
         // Its project's switch holds over the task's: that one is turned off in the project's rules, which it opens.
         held={allowEverything.project}
         {...(onRules === undefined ? {} : { onHeld: onRules })}
-        {...(allowEverything.project ? { note: t.allowAllHeld } : {})}
-        description={allowEverything.project ? t.allowAllProject : t.allowAllAbout}
+        {...(allowEverything.project ? { note: t.allowAllHeld } : { description: t.allowAllAbout })}
       >
         {t.allowAll}
       </MenuSwitchItem>
@@ -264,7 +234,7 @@ export function TaskMenu({
   // What stops or ends it, last; abandoning grey among the rest until pointed at.
   const end = [
     onStop && (
-      <MenuItem key="stop" icon="hold" description={t.stopAbout} onSelect={onStop}>
+      <MenuItem key="stop" icon="hold" onSelect={onStop}>
         {t.stop}
       </MenuItem>
     ),
@@ -274,7 +244,7 @@ export function TaskMenu({
         icon="close"
         tone="danger"
         quiet
-        description={merged ? t.abandonMergedAbout : t.abandonAbout}
+        {...(merged ? { description: t.abandonMergedAbout } : {})}
         onSelect={onAbandon}
       >
         {t.abandon}

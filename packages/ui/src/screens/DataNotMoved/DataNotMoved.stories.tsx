@@ -29,7 +29,7 @@ type Story = StoryObj<typeof meta>
 export const Stopped: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement)
-    await expect(page.getByRole('alert')).toHaveTextContent('Your data is safe. Althar made a copy of it before the update.')
+    await expect(page.getByRole('alert')).toHaveTextContent('A copy from before the update is kept.')
     await expect(page.getByRole('region', { name: 'Copy from before the update' })).toHaveTextContent(
       'althar-0018-2026-10-11-103248.sqlite',
     )
@@ -59,7 +59,7 @@ export const NothingCopied: Story = {
   args: { backup: null },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement)
-    await expect(page.getByRole('alert')).toHaveTextContent('Your data is safe: the update left it as it was.')
+    await expect(page.getByRole('alert')).toHaveTextContent('Your data is as it was.')
     await expect(page.queryByRole('region', { name: 'Copy from before the update' })).toBeNull()
   },
 }
@@ -73,7 +73,7 @@ export const CopyNotMade: Story = {
   },
   play: async ({ canvasElement }) => {
     const page = within(canvasElement)
-    await expect(page.getByRole('alert')).toHaveTextContent('Althar couldn’t make a copy of it first, so the update left it as it was.')
+    await expect(page.getByRole('alert')).toHaveTextContent('Your data is as it was.')
     await expect(page.getByRole('region', { name: 'What stopped it' })).toHaveTextContent('ENOSPC')
   },
 }

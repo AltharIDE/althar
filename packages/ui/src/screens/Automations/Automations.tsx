@@ -31,7 +31,6 @@ export type { AutomationRunMark, AutomationTone } from './marks'
 
 export interface AutomationsText {
   title: string
-  lede: string
   new: string
   more: string
   pauseAll: string
@@ -46,7 +45,6 @@ export interface AutomationsText {
   scheduled: string
   /** None yet: what they are for. */
   emptyTitle: string
-  emptyLede: string
   /** The few to start from. */
   starters: string
   /** Beside New automation: what to say to the coordinator instead. */
@@ -62,18 +60,16 @@ export interface AutomationsText {
 
 export const automationsText: AutomationsText = {
   title: 'Automations',
-  lede: 'Work that starts by itself, on a schedule. Make one here, or ask the coordinator.',
   new: 'New automation',
   more: 'More',
   pauseAll: 'Pause all automations',
   resumeAll: 'Resume all',
   allPaused: 'Every automation is paused',
-  allPausedNote: 'None starts until you resume them. Runs under way finish.',
-  where: 'They run on this Mac while Althar is open.',
+  allPausedNote: 'Runs under way finish.',
+  where: 'Only while Althar is open.',
   atLogin: 'Open Althar at login',
   scheduled: 'On a schedule',
   emptyTitle: 'Nothing runs by itself yet',
-  emptyLede: 'An automation starts a task on a schedule, as you would ask the coordinator, and keeps what came of each run here.',
   starters: 'Start from one of these',
   empty: (example) => <>or ask the coordinator, as in {example}</>,
   example: '“every weekday at 9, review the new pull requests”',
@@ -220,7 +216,6 @@ function NoneYet({
           <Heading level={level} id={id} className={s.noneTitle}>
             {t.emptyTitle}
           </Heading>
-          <p className={s.noneLede}>{t.emptyLede}</p>
         </div>
       </div>
       {starters.length > 0 && onNew !== undefined && (
@@ -281,8 +276,6 @@ export function Automations({
             <Heading level={headingLevel} className={s.title}>
               {t.title}
             </Heading>
-            {/* With none yet, what they are for is said below, with the way to make one. */}
-            {!none && <p className={s.lede}>{t.lede}</p>}
           </div>
           {!none && onNew !== undefined && (
             <Button icon="plus" onClick={() => onNew()}>

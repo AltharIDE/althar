@@ -103,9 +103,9 @@ export const reviewDraftText: ReviewDraftText = {
   kept: 'Kept',
   dropped: 'Dropped',
   keep: (where) => `Keep the comment on ${where}`,
-  note: (source, as, kept, total) => {
+  note: (_source, as, kept, total) => {
     const posts = [...(as === null ? [] : [`as ${as}`]), ...(total === 0 ? [] : [`${kept} of ${total} comments`])]
-    return `Nothing is on ${source} until you post it.${posts.length === 0 ? '' : ` It posts ${posts.join(', ')}.`}`
+    return posts.length === 0 ? '' : `Posts ${posts.join(', ')}`
   },
   posting: (source) => `Posting on ${source}…`,
   failed: (source) => `Couldn’t post it on ${source}.`,

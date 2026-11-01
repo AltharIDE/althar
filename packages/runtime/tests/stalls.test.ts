@@ -118,14 +118,14 @@ describe('outside a step', () => {
       assert.deepStrictEqual(stopped, {
         source: 'runtime',
         severity: 'warning',
-        title: 'aider kept repeating `npm test`, so Althar stopped its turn.',
-        description: 'Say what to do instead, and it carries on from there.',
+        title: 'aider kept repeating a command. Stopped its turn.',
+        description: 'Say what to do instead.',
         about: 'stall',
       })
       // It was told to try another way first, as Althar's own housekeeping.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        ['aider ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.', 'aside'],
+        ['aider ran the same command 3 times. Told it to try another way.', 'aside'],
       )
       // Only its turn stops: the session waits for what the person says.
       const [idle] = yield* until(
@@ -161,7 +161,7 @@ describe('outside a step', () => {
       const sessions = yield* Sessions
       yield* sessions.start({ threadId: task.threadId, agentId: 'codex', model: 'large', effort: 'high' })
       yield* tell(task.threadId, 'Serve it. [lead:hang]')
-      yield* noticeWhere(task.threadId, (title) => title === 'Fake codex showed no sign of work again, so Althar started it afresh.')
+      yield* noticeWhere(task.threadId, (title) => title === 'Fake codex went quiet again. Started it afresh.')
       // Each as it took the thread, once it started.
       const started = yield* until(
         sql<{ model: string | null; effort: string | null; state: string }>`
@@ -189,13 +189,10 @@ describe("on the coordinator's thread", () => {
       const threadId = yield* coordinator.thread(project.projectId)
       const body = 'Look into the dev server. [lead:hang]'
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-      const stopped = yield* noticeWhere(threadId, (title) => title.endsWith('so Althar stopped it.'))
+      const stopped = yield* noticeWhere(threadId, (title) => title.endsWith('Stopped.'))
       assert.deepStrictEqual(
         [stopped.title, stopped.description],
-        [
-          'Fake claude-code showed no sign of work again after Althar started it afresh, so Althar stopped it.',
-          'Say something to start the coordinator again; it picks up from the thread.',
-        ],
+        ['Fake claude-code went quiet again after a fresh start. Stopped.', 'Say something to start it again.'],
       )
       yield* gone(threadId)
     }).pipe(

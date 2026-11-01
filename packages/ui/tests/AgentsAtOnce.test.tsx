@@ -79,7 +79,7 @@ describe('AgentsAtOnce kept at the default’s own number', () => {
 describe('AgentsAtOnce, compact', () => {
   it('says one plain line whatever the number, a step for each number, and no scale', () => {
     const { container } = render(<AgentsAtOnce compact count={9} machine={MACHINE} onChange={vi.fn()} />)
-    expect(screen.getByText('More tasks than this wait their turn.')).toBeTruthy()
+    expect(screen.getByText('The rest wait their turn')).toBeTruthy()
     expect(screen.queryByText(/well past|a little more/)).toBeNull()
     expect(screen.queryByText('4 · this Mac')).toBeNull()
     expect(container.querySelectorAll('[class*="step"]:not([class*="steps"])')).toHaveLength(16)

@@ -53,11 +53,9 @@ export interface StartRepository {
 
 export interface StartText {
   looking: string
-  lookingNote: string
   pick: string
   nowhere: string
   over: string
-  ready: (count: number) => string
   pickNote: string
   agents: string
   agentsLabel: string
@@ -93,29 +91,19 @@ export interface StartText {
 
 export const startText: StartText = {
   looking: `Looking around ${device.this}…`,
-  lookingNote: 'Asking each agent who it is signed in as, and looking for repositories where code is usually kept.',
   pick: 'Where should they work?',
   nowhere: 'Where is your code?',
   over: 'Let go to add it',
-  ready: (count) =>
-    count === 0
-      ? 'No agent is signed in yet; a project can wait for one.'
-      : count === 1
-        ? 'One agent is ready.'
-        : `${count} agents are ready.`,
-  pickNote: 'Pick the repositories your first project works in. One is fine; a project can hold several.',
+  pickNote: 'One or more repositories',
   agents: 'Agents',
   agentsLabel: `Agents on ${device.this}`,
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
-  noneHere: `None is on ${device.this} yet. Download one below, or install one yourself.`,
+  noneHere: `None on ${device.this} yet`,
   away: `Not on ${device.this}`,
   awayLabel: `Agents not on ${device.this}`,
   downloadNamed: (name, size) => `Download ${name}, ${size}`,
-  downloadFrom: (pinned) =>
-    pinned === undefined
-      ? 'Its latest release from GitHub, checked against it, in a folder of its own'
-      : `${pinned.version} from ${pinned.from}, checked against what it was pinned with, in a folder of its own`,
+  downloadFrom: (pinned) => (pinned === undefined ? 'Its latest release, from GitHub' : `${pinned.version}, from ${pinned.from}`),
   downloading: (size) => `Downloading, ${size}…`,
   install: 'How to install',
   installNamed: (name) => `How to install ${name}`,
@@ -314,7 +302,7 @@ export function Start({
           ) : (
             <>
               <h1 className={s.title}>{title}</h1>
-              <p className={s.note}>{asking ? t.lookingNote : `${t.ready(ready)} ${t.pickNote}`}</p>
+              {!asking && <p className={s.note}>{t.pickNote}</p>}
             </>
           )}
           {error !== undefined && (

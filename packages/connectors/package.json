@@ -14,6 +14,7 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
+    "test:performance": "vp test bench --run",
     "test:real": "vp test run --config vite.real.config.ts",
     "verify": "bun run check && bun run test:coverage"
   },

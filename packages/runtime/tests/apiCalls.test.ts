@@ -318,7 +318,7 @@ describe('what can’t be done, from the window', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { client, task } = yield* connected
-        const notHeld = "The step isn't waiting for its usage limit any more: it carried on, or was stopped."
+        const notHeld = "The step isn't waiting for its usage limit any more."
         assert.strictEqual(yield* refused(client.HandOverHeld({ commandId: commandId(), taskId: task.id, agentId: 'codex' })), notHeld)
         assert.strictEqual(
           yield* refused(

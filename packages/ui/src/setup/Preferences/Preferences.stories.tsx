@@ -225,7 +225,7 @@ export const GeneralSettings: Story = {
     const c = within(canvasElement)
     const awake = c.getByRole('switch', { name: 'Keep this Mac awake while work runs' })
     const battery = c.getByRole('switch', { name: 'On battery too' })
-    await expect(awake).toHaveAccessibleDescription('Work stops when the Mac sleeps. The display can still sleep.')
+    await expect(awake).toHaveAccessibleDescription('The display can still sleep.')
     await userEvent.click(awake)
     await expect(onAwake).toHaveBeenCalledWith(false)
     await expect(battery).toBeDisabled()
@@ -242,9 +242,7 @@ export const UsageDataSwitch: Story = {
   play: async ({ canvasElement }) => {
     const usage = within(canvasElement).getByRole('switch', { name: 'Usage data' })
     await expect(usage).toBeChecked()
-    await expect(usage).toHaveAccessibleDescription(
-      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
-    )
+    await expect(usage).toHaveAccessibleDescription('Anonymous. Never your code or any name.')
     await userEvent.click(usage)
     await expect(onUsage).toHaveBeenCalledWith(false)
     await expect(usage).not.toBeChecked()
@@ -257,9 +255,7 @@ export const CrashReportsSwitch: Story = {
   play: async ({ canvasElement }) => {
     const crashes = within(canvasElement).getByRole('switch', { name: 'Crash reports' })
     await expect(crashes).toBeChecked()
-    await expect(crashes).toHaveAccessibleDescription(
-      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
-    )
+    await expect(crashes).toHaveAccessibleDescription('What failed, and where. Never your code or any name.')
     await userEvent.click(crashes)
     await expect(onCrashes).toHaveBeenCalledWith(false)
     await expect(crashes).not.toBeChecked()
@@ -273,9 +269,7 @@ export const CrashReportsFirstScreen: Story = {
   play: async ({ canvasElement }) => {
     const crashes = within(canvasElement).getByRole('switch', { name: 'Crash reports' })
     await expect(crashes).toBeChecked()
-    await expect(crashes).toHaveAccessibleDescription(
-      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
-    )
+    await expect(crashes).toHaveAccessibleDescription('go to Althar’s team. Never your code or any name.')
     await userEvent.click(crashes)
     await expect(onCrashes).toHaveBeenCalledWith(false)
   },
@@ -310,15 +304,15 @@ export const AgentsAtOnceSetting: Story = {
     const c = within(canvasElement)
     const count = c.getByRole('slider', { name: 'Agents at once' })
     await expect(count).toHaveAttribute('aria-valuenow', '4')
-    await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
+    await expect(c.getByText('Default for 16 GB and 10 cores')).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
     count.focus()
     await userEvent.keyboard('{ArrowRight}{ArrowRight}')
     await expect(onAtOnce).toHaveBeenLastCalledWith(6)
     await expect(count).toHaveAttribute('aria-valuenow', '6')
-    await expect(c.getByText(/^6: a little more than this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await expect(c.getByText('Tests may slow down')).toBeInTheDocument()
     await userEvent.keyboard('{End}')
-    await expect(c.getByText(/^16: well past what this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await expect(c.getByText('May run hot')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
     await expect(onAtOnce).toHaveBeenLastCalledWith(null)
     await expect(count).toHaveAttribute('aria-valuenow', '4')
@@ -346,12 +340,12 @@ export const AgentsAtOnceCompact: Story = {
     const c = within(canvasElement)
     const count = c.getByRole('slider', { name: 'Agents at once' })
     await expect(count).toHaveAttribute('aria-valuetext', '4, this Mac’s default')
-    await expect(c.getByText('More tasks than this wait their turn.')).toBeInTheDocument()
+    await expect(c.getByText('The rest wait their turn')).toBeInTheDocument()
     count.focus()
     await userEvent.keyboard('{ArrowRight}{ArrowRight}')
     await expect(count).toHaveAttribute('aria-valuenow', '6')
     // Past the default the line stays the same; the way back follows it.
-    await expect(c.getByText('More tasks than this wait their turn.')).toBeInTheDocument()
+    await expect(c.getByText('The rest wait their turn')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
     await expect(count).toHaveAttribute('aria-valuenow', '4')
   },
@@ -490,14 +484,7 @@ export const AllStates: Story = {
           node: (
             <SettingList>
               <NotificationSettings value={ALL_ON} onChange={fn()} count={false} />
-              <NotificationSound
-                sounds={[]}
-                system="default"
-                value="default"
-                onChange={fn()}
-                onPlay={fn()}
-                text={{ note: 'The system’s own sound, with each notification, or none.' }}
-              />
+              <NotificationSound sounds={[]} system="default" value="default" onChange={fn()} onPlay={fn()} />
             </SettingList>
           ),
         },

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, shown, sizeWindow, startTask, still } from './support'
+import { connectGitHub, launch, openFirstProject, pushByHand, shown, sizeWindow, startTask, still } from './support'
 
 /*
  * A task's outputs in a real window, with the fake agent and the fake GitHub,
@@ -168,8 +168,9 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
     await shoot(electronApp, page, 'branch-pushed')
 
-    // A pull request: opened as the lead finishes, then four more files the lead committed, pushed.
+    // A pull request: opened as the lead finishes, then four more files the lead committed, pushed by the person.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await pushByHand(page)
     await startTask(page, 'Rate-limit refunds per partner', '[lead:finish] [lead:edit]')
     await expect(page.getByText('PR #1')).toBeVisible()
     const refunds = worktreeOf(repo, /branch refs\/heads\/althar\/rate-limit/)

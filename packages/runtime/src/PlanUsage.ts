@@ -83,11 +83,15 @@ export interface PlanUsageOptions {
   readonly kept?: Duration.Duration
 }
 
+/** A window as it is held: with when it was read, as an account's windows may come from a session and its endpoint at different times. */
+type Dated = UsageWindow & { readonly observedAt: string }
+
 interface Held {
   readonly agentId: string
   readonly source: UsageSource | null
   readonly plan: string | null
-  readonly windows: ReadonlyArray<UsageWindow>
+  readonly windows: ReadonlyArray<Dated>
+  /** When the newest of its windows was read. */
   readonly observedAt: string | null
   readonly fault: { readonly kind: UsageFaultKind; readonly message: string } | null
   /** How the account is paid for where the agent's status can't say (OpenCode's can't, by account). */
@@ -98,6 +102,10 @@ interface Held {
 
 const keyOf = (window: UsageWindow) => (window.label === undefined ? window.kind : `${window.kind}:${window.label}`)
 
+/** Windows read together, each with when they were. */
+const dated = (windows: ReadonlyArray<UsageWindow>, observedAt: string): ReadonlyArray<Dated> =>
+  windows.map((window) => ({ ...window, observedAt }))
+
 /** The message a failed Codex read is shown as, and whether the person should sign in again. */
 const faultOfRead = (message: string): { kind: UsageFaultKind; message: string } =>
   /not (logged|signed) in|sign in|log in|unauthori[sz]ed|auth/i.test(message)
@@ -107,6 +115,18 @@ const faultOfRead = (message: string): { kind: UsageFaultKind; message: string }
 /** Whether a reset time has passed: the window it belongs to has started again. */
 const past = (resetsAt: string | null | undefined, now: number) =>
   resetsAt !== null && resetsAt !== undefined && Date.parse(resetsAt) <= now
+
+/**
+ * When the numbers shown were read: the oldest of their windows, as one only the endpoint says (a model's own week) may not
+ * have been read again since a session said the others.
+ */
+const readAt = (held: Held, now: number) =>
+  held.windows
+    .filter((window) => !past(window.resetsAt, now))
+    .reduce<string | null>(
+      (oldest, window) => (oldest === null || Date.parse(window.observedAt) < Date.parse(oldest) ? window.observedAt : oldest),
+      null,
+    ) ?? held.observedAt
 
 /** The windows as the view shows them: one whose reset has passed is unknown until it is read again, so it isn't shown. */
 const shown = (windows: ReadonlyArray<UsageWindow>, now: number) =>
@@ -171,6 +191,8 @@ export class PlanUsage extends Context.Service<
         const asked = new Map<string, number>()
         /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
         const sayings = new Map<string, number>()
+        /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
+        const saidIn = new Map<string, Map<string, number>>()
         let hydrated = false
 
         /* What the store kept of the accounts' last readings, once. */
@@ -191,7 +213,11 @@ export class PlanUsage extends Context.Service<
               agentId: row.agentId,
               source: row.source as UsageSource,
               plan: row.plan,
-              windows: JSON.parse(row.windows) as ReadonlyArray<UsageWindow>,
+              // Each with its own time, as kept; one kept before windows had their own, with the reading's.
+              windows: (JSON.parse(row.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>).map((window) => ({
+                ...window,
+                observedAt: window.observedAt ?? row.observedAt,
+              })),
               observedAt: row.observedAt,
               fault: null,
             })
@@ -267,7 +293,7 @@ export class PlanUsage extends Context.Service<
                 agentId: definition.id,
                 source: usage.source,
                 plan: usage.plan ?? before?.plan ?? null,
-                windows: usage.windows,
+                windows: dated(usage.windows, usage.observedAt),
                 observedAt: usage.observedAt,
                 fault: null,
               })
@@ -303,15 +329,33 @@ export class PlanUsage extends Context.Service<
                 // Kept one at a time with what sessions say, and against what is held by then: a session may have said its windows meanwhile.
                 yield* hearing.withPermits(1)(
                   Effect.gen(function* () {
-                    // One did while the endpoint was asked: what it said is fresher than the answer, which may yet come with a later time.
-                    if ((sayings.get(account.id) ?? 0) !== said) return
                     if (got.kind === 'usage') {
-                      // An answer no newer than what is held, as the reader's own from before it was asked to wait, leaves that as it is.
+                      // Window by window, the newer stays: one a session said while the endpoint was asked, which may yet answer with a
+                      // later time, or since the answer's time, as when the reader gives its own from before it was asked to wait. The
+                      // answer's others replace theirs, as a model's own week a session doesn't say; and a window it no longer has goes.
                       const last = held.get(account.id)
-                      if (last?.observedAt != null && Date.parse(got.usage.observedAt) <= Date.parse(last.observedAt))
-                        return yield* keep(account.id, { ...last, fault: null })
-                      return yield* read(got.usage)
+                      const at = Date.parse(got.usage.observedAt)
+                      const saying = saidIn.get(account.id)
+                      const newer = (last?.windows ?? []).filter(
+                        (window) => Date.parse(window.observedAt) > at || (saying?.get(keyOf(window)) ?? 0) > said,
+                      )
+                      if (newer.length === 0) return yield* read(got.usage)
+                      const kept = new Set(newer.map(keyOf))
+                      const windows = [
+                        ...newer,
+                        ...dated(got.usage.windows, got.usage.observedAt).filter((window) => !kept.has(keyOf(window))),
+                      ]
+                      return yield* keep(account.id, {
+                        agentId: definition.id,
+                        source: last?.source ?? got.usage.source,
+                        plan: got.usage.plan ?? last?.plan ?? null,
+                        windows,
+                        observedAt: last?.observedAt ?? got.usage.observedAt,
+                        fault: null,
+                      })
                     }
+                    // A session said its windows while the endpoint was asked: they are fresher than why it couldn't answer.
+                    if ((sayings.get(account.id) ?? 0) !== said) return
                     if (got.kind === 'none') return yield* keep(account.id, none)
                     yield* keep(
                       account.id,
@@ -338,9 +382,18 @@ export class PlanUsage extends Context.Service<
             }
             if (definition.id === 'claude-code') {
               if (check.paidBy === 'key') return yield* keep(account.id, key)
-              // A session said its windows lately: fresher than the endpoint, which limits how often it is asked.
-              const lately = (yield* Clock.currentTimeMillis) - Duration.toMillis(HEARD_LATELY)
-              if (before?.source === 'acp_extension' && before.observedAt !== null && Date.parse(before.observedAt) > lately) return
+              // A session said its windows lately: fresher than the endpoint, which limits how often it is asked. Unless it holds
+              // a window no session has said as lately, or one whose reset has passed, as a model's own week only the endpoint
+              // says: that is read again, no more often than the reader asks, and waiting as long as the endpoint says.
+              const now = yield* Clock.currentTimeMillis
+              const lately = now - Duration.toMillis(HEARD_LATELY)
+              const windows = before?.windows ?? []
+              if (
+                before?.source === 'acp_extension' &&
+                windows.length > 0 &&
+                windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
+              )
+                return
               return yield* fromEndpoint('claude-oauth', 'anthropic', unfound)
             }
             if (definition.id === 'opencode') {
@@ -408,6 +461,7 @@ export class PlanUsage extends Context.Service<
               const paidBy = mine?.paidBy ?? check.paidBy
               const key = paidBy === 'key'
               const noReading = mine?.noReading ?? null
+              const windows = shown(key ? [] : (mine?.windows ?? []), now)
               // No window and no fault yet, where there is a reading to have, is a fault too: the agent has not been read yet.
               const fault =
                 mine?.fault ??
@@ -421,11 +475,13 @@ export class PlanUsage extends Context.Service<
                 accountName: account.name,
                 paidBy,
                 source: mine?.source ?? null,
-                observedAt: mine?.observedAt ?? null,
+                observedAt: mine === undefined ? null : readAt(mine, now),
                 plan: mine?.plan ?? null,
-                windows: shown(key ? [] : (mine?.windows ?? []), now),
+                windows,
                 fault,
                 noReading,
+                // Read with windows, every one of which has reset since: said so, as no window shown isn't the same as none read.
+                resetSince: !key && (mine?.windows.length ?? 0) > 0 && windows.length === 0,
               })
             }
           }
@@ -476,12 +532,16 @@ export class PlanUsage extends Context.Service<
               .withPermits(1)(
                 Effect.gen(function* () {
                   yield* hydrate
-                  sayings.set(accountId, (sayings.get(accountId) ?? 0) + 1)
+                  const saying = (sayings.get(accountId) ?? 0) + 1
+                  sayings.set(accountId, saying)
+                  const byWindow = saidIn.get(accountId) ?? new Map<string, number>()
+                  for (const window of said) byWindow.set(keyOf(window), saying)
+                  saidIn.set(accountId, byWindow)
                   const before = held.get(accountId)
                   const at = yield* timestamp
-                  // Each window said replaces its own, and the others stay as last said.
+                  // Each window said replaces its own, and the others stay as last said, each with when it was.
                   const named = new Set(said.map(keyOf))
-                  const windows = [...(before?.windows ?? []).filter((each) => !named.has(keyOf(each))), ...said]
+                  const windows = [...(before?.windows ?? []).filter((each) => !named.has(keyOf(each))), ...dated(said, at)]
                   yield* keep(accountId, {
                     agentId,
                     source: 'acp_extension',

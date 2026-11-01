@@ -264,7 +264,7 @@ export const NoneHere: Story = {
   args: { runtimes: EVERY_AGENT.slice(2) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('None is on this Mac yet. Download one below, or install one yourself.')).toBeVisible()
+    await expect(canvas.getByText('None on this Mac yet')).toBeVisible()
     await expect(canvas.queryByRole('list', { name: 'Agents on this Mac' })).toBeNull()
   },
 }

@@ -75,7 +75,7 @@ export interface SourceMapText {
 
 export const sourceMapText: SourceMapText = {
   label: 'Sources',
-  reading: 'Reading it. Nothing in the folder is changed',
+  reading: 'Reading…',
   noRemote: 'no remote',
   origin: `On ${device.this}`,
   clone: 'Clone it here',
@@ -83,7 +83,7 @@ export const sourceMapText: SourceMapText = {
   laterNote: `Tasks that need it wait until it is on ${device.this}`,
   role: (name) => `Role of ${name}`,
   remove: (name) => `Remove ${name}`,
-  empty: 'No repositories. The project can plan, research and write; add one when it needs code.',
+  empty: 'No repositories',
   folders: 'Choose folders',
   url: 'Clone from a URL',
   urlField: 'Repository URL',

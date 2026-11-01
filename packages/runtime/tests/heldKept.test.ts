@@ -1,4 +1,5 @@
 import type { ActorId, ProjectId } from '@althar/domain'
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -123,6 +124,8 @@ const ranOn = (threadId: string) =>
 describe('a step waiting for a place, as an earlier Althar kept it', () => {
   it.effect('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () => {
     const back = later()
+    // OpenCode's lead keeps the place until the test lets its turn end.
+    const place = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -140,11 +143,12 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({ place: { how: 'next' }, since })} WHERE id = ${review.id}`
       // The other's lead finishes: the review takes the place, on the plan's reviewer.
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
+      place.open('[lead:wait]')
       yield* readyIs(projectId, task.taskId)
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.strictEqual(reviewer?.agentId, 'codex')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } }, opencode: { holds: place } } })), onTestClock)
   })
 
   it.effect('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () => {
@@ -169,8 +173,10 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
     }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
   })
 
-  it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () =>
-    Effect.gen(function* () {
+  it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () => {
+    // OpenCode's lead keeps the place until the test lets its turn end.
+    const place = holds()
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const projectId = yield* opened
@@ -181,10 +187,11 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       yield* sql`UPDATE node_attempts SET output = NULL WHERE id = ${waiting.id}`
       assert.isFalse(yield* planWaits(task.taskId))
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: holding.threadId, body: '[lead:finish]' })
+      place.open('[lead:wait]')
       yield* readyIs(projectId, task.taskId)
       assert.deepStrictEqual(yield* ranOn(task.threadId), ['claude-code'])
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { opencode: { holds: place } } })))
+  })
 })
 
 describe('a step held for a usage limit, as an earlier Althar kept it', () => {

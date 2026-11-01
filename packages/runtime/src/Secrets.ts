@@ -1,6 +1,7 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { removeFully } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 
 /*
@@ -125,7 +126,12 @@ export class Secrets extends Context.Service<
               return sealed === null ? null : yield* sealer.open(sealed)
             }).pipe(Effect.retry(AGAIN)),
           ),
-        remove: (name) => Effect.flatMap(pathOf(name), (path) => attempt('remove the secret', () => rmSync(path, { force: true }))),
+        remove: (name) =>
+          Effect.flatMap(pathOf(name), (path) =>
+            removeFully(path).pipe(
+              Effect.mapError((failed) => new SecretsUnavailable({ reason: `Couldn't remove the secret: ${failed.reason}` })),
+            ),
+          ),
       })
     })
 }

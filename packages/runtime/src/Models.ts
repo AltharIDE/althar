@@ -1,11 +1,10 @@
 import { mkdirSync, mkdtempSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { type AgentDefinition, type AgentSession, type ConfigOption, connect } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentSession, cleanUp, type ConfigOption, connect } from '@althar/provider-adapters'
 import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -148,17 +147,10 @@ const walk = (definition: AgentDefinition, session: AgentSession, images: boolea
   })
 
 /**
- * Removes the folder an agent was asked in. Windows can still hold it a
- * moment after the agent has gone, as the agent's tree goes only once its
- * keeper has and a scanner may be reading it, so it is tried again over a
- * second or so, and one that stays is left in the temporary folder. It never
- * fails: what asking found is kept all the same, where a throw here would
- * lose it, and have the agent asked again at the next read of the catalog.
+ * Removes the folder an agent was asked in, as best it can (`cleanUp`): what asking found is kept all the same, where a
+ * folder Windows still holds failing it would lose it, and have the agent asked again at the next read of the catalog.
  */
-const removeFolder = (folder: string) =>
-  Effect.tryPromise(() => rm(folder, { recursive: true, force: true, maxRetries: 5 })).pipe(
-    Effect.catch((error) => Effect.logWarning(`Could not remove ${folder}, where an agent was asked its models`, error)),
-  )
+const removeFolder = (folder: string) => cleanUp(folder, 'where an agent was asked its models')
 
 const settingsIn = (config: string): ReadonlyArray<ConfigOption> => {
   try {

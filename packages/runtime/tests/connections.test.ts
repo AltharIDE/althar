@@ -1181,6 +1181,33 @@ describe('the agents', () => {
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
+  it.effect('applies project web tools after review hardening, without changing coordinator defaults', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const cwd = mkdtempSync(join(tmpdir(), 'althar-web-cwd-'))
+      const home = mkdtempSync(join(tmpdir(), 'althar-web-home-'))
+      const envOf = (id: string, web: boolean, offline: boolean) => {
+        const transport = agents.list
+          .find((entry) => entry.definition.id === id)
+          ?.transport(cwd, { CODEX_HOME: home, XDG_CONFIG_HOME: home }, { web, offline, untrusted: true })
+        return transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+      }
+      for (const [web, offline] of [
+        [true, false],
+        [false, false],
+        [true, true],
+      ]) {
+        const codex = JSON.parse(envOf('codex', web!, offline!).CODEX_CONFIG ?? '{}')
+        assert.strictEqual(codex.web_search, web && !offline ? 'live' : 'disabled')
+        assert.isFalse(codex['features.hooks'])
+        const open = JSON.parse(envOf('opencode', web!, offline!).OPENCODE_CONFIG_CONTENT ?? '{}')
+        assert.strictEqual(open.permission.webfetch, web && !offline ? 'allow' : 'ask')
+        assert.strictEqual(open.permission.websearch, web && !offline ? 'allow' : 'ask')
+        assert.isFalse(open.lsp)
+      }
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
+  )
+
   it('leave a review’s lead’s git out of a bare repository the pull request carries, unless it is named', () => {
     // A repository a pull request could carry under any name, whose config names a program for git to run.
     const folder = mkdtempSync(join(tmpdir(), 'althar-carried-'))

@@ -39,6 +39,7 @@ export interface NewProjectModel {
   readonly rename: (name: string) => void
   readonly colour: (ink: ProjectInk) => void
   readonly choose: () => Promise<void>
+  readonly startFresh: () => Promise<void>
   readonly drop: (files: ReadonlyArray<File>) => Promise<void>
   readonly add: (id: string) => Promise<void>
   readonly leaveOut: (path: string) => void
@@ -151,6 +152,9 @@ export const useNewProject = (): NewProjectModel => {
       ? []
       : [
           ...draft.folders.map((folder) => folderOf(folder, list)),
+          ...(draft.fresh === null
+            ? []
+            : [{ id: draft.fresh.path, fresh: true as const, name: draft.fresh.name, where: draft.fresh.where }]),
           ...draft.reading.map((reading): NewProjectFolder => ({
             id: reading.key,
             reading: true,
@@ -201,13 +205,19 @@ export const useNewProject = (): NewProjectModel => {
       if (draft !== null) store.change(draft.id, (now) => ({ ...now, ink: contractInk(chosen) }))
     },
     choose: actions.choose,
+    startFresh: actions.startFresh,
     drop: actions.drop,
     add: (id) => {
       const repository = found.data?.repositories.find((one) => one.id === id)
       return repository === undefined ? Promise.resolve() : actions.addFound(id, { name: repository.name, where: repository.where })
     },
     leaveOut: (path) => {
-      if (draft !== null) store.change(draft.id, (now) => ({ ...now, folders: now.folders.filter((folder) => folder.path !== path) }))
+      if (draft !== null)
+        store.change(draft.id, (now) => ({
+          ...now,
+          folders: now.folders.filter((folder) => folder.path !== path),
+          fresh: now.fresh?.path === path ? null : now.fresh,
+        }))
     },
     create: () => (draft === null ? Promise.resolve(null) : actions.create(inkOf(draft, projects))),
   }

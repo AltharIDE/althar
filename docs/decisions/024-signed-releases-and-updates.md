@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-11
+- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): when the person asks for a release, the coordinator tags it, approves the run's `release` environment, and publishes the draft on their word to publish; `release.yml` doesn't change.
 - **Owner:** Repository maintainers
 - **Context:** Althar goes to its first testers on 11 October (DEV-12, DEV-47,
   DEV-62, DEV-81). Until now `bun run package` made an app signed ad hoc, which opens
@@ -42,9 +43,10 @@
     before the dmg and the zip are made of it; then the dmg is notarized and
     stapled too. Every submission's log is kept in `out/notary/`. Without
     credentials nothing is notarized, and the packaging says so.
-  - **What a release holds.** For Apple silicon: a dmg to install from, a
-    zip with `latest-mac.yml` for the updater, and their blockmaps for
-    smaller downloads later. For Linux: an AppImage with `latest-linux.yml`,
+  - **What a release holds.** For Apple silicon, and for Intel since
+    [ADR-075](075-an-intel-mac-build-beside-apple-silicon.md): a dmg to
+    install from, a zip for the updater, their blockmaps for smaller
+    downloads later, and one `latest-mac.yml` for both. For Linux: an AppImage with `latest-linux.yml`,
     a deb and an rpm (ADR-028). For Windows on x64 (DEV-78): an NSIS
     installer, `Althar-<version>-x64-setup.exe`, which installs for the
     person alone with no administrator's prompt, with a Start menu entry and
@@ -150,8 +152,8 @@
     the environment's reviewers. Revoking either means a new secret.
   - A Mac that releases needs the private key in its keychain, which asks
     once before codesign may use it.
-  - Apple silicon only on a Mac; Intel Macs, ARM Linux and ARM Windows
-    (which runs the x64 build emulated) have no build of their own.
+  - ARM Linux and ARM Windows (which runs the x64 build emulated) have no
+    build of their own. Intel Macs have one since ADR-075.
   - Windows' releases are unsigned until Althar has a certificate: each
     person gets past SmartScreen once, and an update isn't checked against
     a publisher.

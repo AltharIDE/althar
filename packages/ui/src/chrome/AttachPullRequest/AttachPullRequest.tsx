@@ -28,29 +28,23 @@ export interface AttachPullRequestText {
   startDescription: (name: string) => string
   /** Where its branch starts, by the pull request's branch. */
   startFrom: (name: string, source: string) => string
-  /** What it keeps: its own commits, by how many, on top; or none to lose. */
+  /** Its own commits, by how many, which go on top; said only where it has some. */
   keeps: (own: number) => string
-  kept: string
   start: string
 }
 
 export const attachPullRequestText: AttachPullRequestText = {
   title: 'Attach a pull request',
-  description:
-    'The task follows an open pull request it didn’t open: what people say on it and its checks come here, and its work goes to that pull request’s branch, with no new one.',
+  description: 'Its work goes to that pull request.',
   label: 'Its link or number',
   placeholder: 'https://github.com/owner/repo/pull/123, or #123',
   empty: 'Give the pull request’s link, or its number.',
   attach: 'Attach',
   cancel: 'Cancel',
   startTitle: (name) => `Start from ${name}’s head?`,
-  startDescription: (name) => `The task’s branch isn’t based on ${name}’s head, so its work can’t go there as it is.`,
+  startDescription: (name) => `The task’s branch isn’t based on ${name}’s head.`,
   startFrom: (name, source) => `Its branch starts again from ${name}’s head, on ${source}.`,
-  keeps: (own) =>
-    own === 0
-      ? 'It has no commits of its own, so none is lost.'
-      : `Its ${own === 1 ? 'own commit goes' : `${own} own commits go`} on top, one by one.`,
-  kept: 'Where it was is kept. If its commits conflict with the head, it stays as it was.',
+  keeps: (own) => `Its ${own === 1 ? 'own commit goes' : `${own} own commits go`} on top.`,
   start: 'Start from its head',
 }
 
@@ -111,8 +105,7 @@ export function AttachPullRequest({
       >
         <ul className={s.list}>
           <li>{t.startFrom(start.name, start.source)}</li>
-          <li>{t.keeps(start.own)}</li>
-          <li>{t.kept}</li>
+          {start.own > 0 && <li>{t.keeps(start.own)}</li>}
         </ul>
         {failed}
       </Dialog>

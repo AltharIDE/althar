@@ -25,7 +25,7 @@ describe('the words for an agent out of usage', () => {
     assert.strictEqual(outWords({ from: 'Codex', resetsAt: later, now }), `Codex ran out of usage, until ${whenWords(later, now)}.`)
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, waits: 'step' }),
-      'Codex ran out of usage. The step waits until Codex is back. To carry on now, pick another model on the task.',
+      'Codex ran out of usage. The step waits until Codex is back.',
     )
   })
 

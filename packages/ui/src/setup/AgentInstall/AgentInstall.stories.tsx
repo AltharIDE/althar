@@ -61,7 +61,7 @@ export const FromItsMaker: Story = {
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/Althar can fetch Google Antigravity 1\.3\.0 from Google, about 115 MB/)).toBeInTheDocument()
+    await expect(c.getByText(/Google Antigravity 1\.3\.0, from Google, about 115 MB/)).toBeInTheDocument()
     await expect(c.queryByText(/GitHub/)).toBeNull()
   },
 }

@@ -165,7 +165,8 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
 
 /*
  * The menu bar, for a Mac without a notch: the top right corner of a screen
- * at the size it is, a terminal behind. The pointer comes up to Althar's
+ * at the size it is, a terminal behind; on a phone, nearer, only the part
+ * the list drops into. The pointer comes up to Althar's
  * mark, clicks, and the same list drops from it; it reads down it, clicks
  * the mark again, and it closes, round and round while it is on screen.
  */
@@ -195,6 +196,8 @@ function MenuBarNote() {
         <Shot
           w={620}
           h={600}
+          // On a phone, the corner the list drops into, from the mark down to where the pointer comes from, so the list is whole and reads.
+          phone={{ x: 192, y: 0, w: 428, h: 470 }}
           maxScale={1}
           label="Althar in the menu bar: its mark clicked, and the list dropped open under it"
           frame={s.sceneFrame}

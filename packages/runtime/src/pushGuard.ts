@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { type RemoveFailed, removeFully } from '@althar/provider-adapters'
+import { Effect } from 'effect'
 
 import type { GitRun } from './rules'
 
@@ -288,8 +291,9 @@ const whereRuns = (run: GitRun): string | undefined => {
   return `${top}\t${or(() => git('remote', 'get-url', '--push', remote)) || remote}`
 }
 
-/** Takes a session's pass away, as when it has ended. */
-export const dropPass = (sessionId: string, at: Guard | undefined = made): void => {
-  if (at === undefined) return
-  rmSync(passOf(sessionId, at), { force: true })
-}
+/**
+ * Takes a session's pass away, as when it has ended: tried again where Windows still holds it, and a failure if it
+ * stays, as a pass left behind would still let the session push.
+ */
+export const dropPass = (sessionId: string, at: Guard | undefined = made): Effect.Effect<void, RemoveFailed> =>
+  at === undefined ? Effect.void : removeFully(passOf(sessionId, at))

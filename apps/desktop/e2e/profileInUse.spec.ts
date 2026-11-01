@@ -53,7 +53,7 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
   try {
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
     await expect(page.getByRole('alert')).toContainText('Another copy of Althar is using this profile.')
-    await expect(page.getByRole('alert')).toContainText('Once it closes, Althar can open again.')
+    await expect(page.getByRole('alert')).toContainText('Close it, then try again.')
     await page.screenshot({ path: 'test-results/profile-in-use.png' })
 
     // Main makes none of the restarts it would have: the runtime started once, found the profile held, and hasn't exited.

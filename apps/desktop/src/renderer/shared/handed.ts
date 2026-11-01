@@ -67,7 +67,7 @@ export const text = {
   size: (width: number, height: number) => `${width} × ${height}`,
   unkept: {
     too_large: 'Not kept: larger than 20 MB',
-    unsupported: 'Not kept: a kind of image Althar doesn’t show',
+    unsupported: 'Not kept: unsupported image',
     unkept: 'Not kept',
   } satisfies Record<NonNullable<Picture['unkept']>, string>,
   kinds: { md: 'Markdown', markdown: 'Markdown', mdx: 'MDX', csv: 'CSV', json: 'JSON', txt: 'Text', pdf: 'PDF', html: 'HTML' } as Readonly<

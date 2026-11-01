@@ -18,7 +18,7 @@ export default defineConfig({
       'packages/skills/catalog/**',
     ],
     plugins: ['typescript', 'unicorn', 'oxc', 'react', 'jsx-a11y', 'import'],
-    jsPlugins: ['./lint/clock.js'],
+    jsPlugins: ['./lint/althar.js'],
     options: { typeAware: true, typeCheck: true },
     rules: {
       'no-console': ['error', { allow: ['warn', 'error'] }],
@@ -35,6 +35,16 @@ export default defineConfig({
       {
         files: ['packages/provider-adapters/src/testing/**'],
         rules: { 'althar/one-clock': 'off' },
+      },
+      /* The runtime and the agent adapters remove files and folders only through cleanUp and removeFully (lint/removal.js). */
+      {
+        files: ['packages/{runtime,provider-adapters}/src/**'],
+        rules: { 'althar/one-removal': 'error' },
+      },
+      /* But where those two are made, and the fake agent, whose scratch files are a test's. */
+      {
+        files: ['packages/provider-adapters/src/removal.ts', 'packages/provider-adapters/src/testing/**'],
+        rules: { 'althar/one-removal': 'off' },
       },
     ],
   },

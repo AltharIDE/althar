@@ -202,6 +202,48 @@ jobs:
           PLAN: ${{ steps.plan.outputs.windows }}
         run: bun packages/testing/src/stress.ts run
 
+  # How fast the paths with a budget are, out of every gate (docs/plans/tests-that-hold.md, F): each package's
+  # `test:performance`, Vitest's benchmarks in its tests/*.bench.ts, reported on the run's summary. One over its budget is
+  # a warning there and nothing fails for it; the job fails only where a benchmark couldn't run, and even then it turns
+  # no night red, as the report below doesn't wait for it.
+  performance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - env:
+          LOG: ${{ runner.temp }}/performance.txt
+        run: |
+          failed=''
+          for package in packages/runtime packages/connectors packages/ui; do
+            echo "::group::$package"
+            (cd "$package" && bun run test:performance --reporter=verbose) 2>&1 | tee -a "$LOG" || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          over="$(grep -h 'over its budget' "$LOG" | sed 's/^[^a-zA-Z]*//' || true)"
+          {
+            echo '## Performance'
+            echo
+            if [ -n "$over" ]; then echo 'Over budget:'; echo; echo "$over" | sed 's/^/- /'; else echo 'Every path within its budget.'; fi
+            [ -z "$failed" ] || printf '\nCould not run:%s\n' "$failed"
+            printf '\n<details><summary>Every benchmark</summary>\n\n```\n'
+            grep -hE '^ *(✓|×) |^ +(name +hz|.* ±[0-9.]+%)' "$LOG" || true
+            printf '```\n\n</details>\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ -z "$over" ] || echo "$over" | while read -r line; do echo "::warning title=Over budget::$line"; done
+          if [ -n "$failed" ]; then
+            echo "::error::Could not run:$failed"
+            exit 1
+          fi
+
   # The night's result as one open issue: opened (or added to) when a night fails, closed when one passes.
   report:
     needs: [linux, windows, stress-windows]

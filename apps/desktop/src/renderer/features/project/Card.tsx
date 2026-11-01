@@ -160,13 +160,10 @@ function PlanCard({
   )
 }
 
-/** Its pull requests in a few words: the latest, and those of its earlier rounds of work before it (ADR-034). */
-const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSummary>) => {
-  const name = (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`
-  return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
-}
+/** Its latest pull request; those of its earlier rounds of work (ADR-034) are on its own view. */
+const pullRequestOf = (latest: ChangeSummary) => `${latest.short} ${latest.prefix}${latest.number}`
 
-/** A task's card, with, while it waits for a free agent and is the newest to, who holds the places. */
+/** A task's card, with, while it waits for a free agent and is the newest to, the servers that keep a place. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const holders = card.queued?.holders
   if (holders === undefined || holders.length === 0 || (actions.holdersOn !== undefined && actions.holdersOn !== card.threadId))
@@ -232,7 +229,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}
-      {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
+      {...(card.change === null ? {} : { pr: pullRequestOf(card.change) })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
     />

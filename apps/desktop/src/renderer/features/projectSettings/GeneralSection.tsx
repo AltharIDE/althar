@@ -29,20 +29,30 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 
 export const text = {
   tasks: 'Tasks',
+  leadsReachWeb: {
+    title: 'Leads can reach the web',
+    line: 'Search and read websites without asking. Pages could steer a lead into sending private code in a URL. Outside pull request reviews stay offline. Applies to new sessions.',
+  },
   conflicts: {
     title: 'Resolve merge conflicts automatically',
-    line: 'When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.',
     /** Looks at every open task now, rather than as each default branch moves. */
     look: 'Look for conflicts now',
-    looking: 'Looking at each open task now.',
+    looking: 'Looking…',
+  },
+  pushCommits: {
+    title: 'Push the lead’s commits automatically',
+    line: 'When a lead’s turn ends, what it committed goes up to its pull request, even after you’ve looked. If someone else pushed there, it waits for you.',
+  },
+  postScreenshots: {
+    title: 'Post screenshots to pull requests automatically',
+    line: 'A task’s Outputs screenshots go in one comment on its pull request, updated as they change. Off, you post them from Outputs.',
   },
   moveIssues: {
     title: 'Move issues along with their tasks',
-    line: 'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
+    line: 'To In Progress, In Review, then Done',
   },
   changeIssues: {
     title: 'Change issues without asking',
-    line: 'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
   },
   repositoryFiles: 'Repository files',
 }
@@ -51,11 +61,16 @@ export const text = {
 const filesText = repositoryFilesWords(device.this)
 
 /** A switch's note: when it acts, what it does now where it can, and why it didn't hold where it didn't. */
-function SwitchNote({ line, now, failed }: { line: string; now?: ReactNode; failed: string | null }) {
+function SwitchNote({ line, now, failed }: { line?: string; now?: ReactNode; failed: string | null }) {
   return (
     <>
       {line}
-      {now !== undefined && <> {now}</>}
+      {now !== undefined && (
+        <>
+          {line === undefined ? '' : ' '}
+          {now}
+        </>
+      )}
       {failed !== null && (
         <span className={s.failedLine} role="alert">
           {failed}
@@ -74,7 +89,7 @@ function LookNow({ model }: { model: ProjectSettingsModel }) {
 /** A switch, in the order they are shown: its rule, its words, and how it stands. */
 interface Shown {
   readonly rule: RuleSwitch
-  readonly words: { readonly title: string; readonly line: string }
+  readonly words: { readonly title: string; readonly line?: string }
   readonly on: boolean
   readonly set: (on: boolean) => void
 }
@@ -90,7 +105,10 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
     rules === null
       ? []
       : [
+          { rule: 'leadsReachWeb', words: text.leadsReachWeb, on: rules.leadsReachWeb, set: model.setLeadsReachWeb },
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
+          { rule: 'pushCommits', words: text.pushCommits, on: rules.pushCommits, set: model.setPushCommits },
+          { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },
           { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
           { rule: 'changeIssues', words: text.changeIssues, on: rules.changeIssues, set: model.setChangeIssues },
         ]
@@ -114,7 +132,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
                 title={one.words.title}
                 note={
                   <SwitchNote
-                    line={one.words.line}
+                    {...(one.words.line === undefined ? {} : { line: one.words.line })}
                     {...(one.rule === 'resolveConflicts' && one.on ? { now: <LookNow model={model} /> } : {})}
                     failed={
                       model.ruleFailed?.rule === one.rule

@@ -40,7 +40,7 @@ export const namingRuleText: NamingRuleText = {
   field: 'Pattern',
   example: (name) => `Makes ${name}`,
   found: (from, pattern) => `${from} says ${pattern}`,
-  none: (pattern) => `Its docs don’t say, so Althar’s own, ${pattern}`,
+  none: (pattern) => `Althar’s own, ${pattern}`,
   overridden: 'Yours is used instead.',
   clear: 'Follow the repository',
 }
@@ -138,7 +138,7 @@ export interface TemplateSourcesText {
 
 export const templateSourcesText: TemplateSourcesText = {
   found: (path) => `${path}, filled in by the lead`,
-  none: 'No template, so Althar’s own description',
+  none: 'Althar’s own description',
 }
 
 export type TemplateSourcesProps = RootProps<

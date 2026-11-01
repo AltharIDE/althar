@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -174,6 +174,9 @@ describe('a turn Althar’s word waited for when it stopped', () => {
   it.live('starts its lead again once there is a place, and lets it go once its turn is under way', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-waiting-')), 'althar.sqlite')
+      // The lead's answer is held until the test has seen its turn under way.
+      const told = holds()
+      const leads = { each: { codex: { holds: told } } }
       const before = yield* Effect.gen(function* () {
         const sessions = yield* Sessions
         const instance = yield* Instance
@@ -196,17 +199,20 @@ describe('a turn Althar’s word waited for when it stopped', () => {
           (rows) => rows.length === 1,
         )
         return { first, second, turns: (yield* turnsOn(first.threadId)).length }
-      }).pipe(Effect.provide(oneAtOnce({}, file)))
+      }).pipe(Effect.provide(oneAtOnce({}, file, leads)))
 
       yield* Effect.gen(function* () {
         const tasks = yield* Tasks
         const { first, second, turns } = before
         yield* until(attempts(second.taskId), (rows) => rows.at(-1)?.state === 'running')
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
-        const told = yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed')
-        assert.include(told.at(-1)?.prompt, 'Look again.')
+        yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'delivered')
         assert.isNull(yield* waitsOn(first.threadId))
-      }).pipe(Effect.provide(oneAtOnce({}, file)))
+        told.open('[answers-after:1s]')
+        const answered = yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed')
+        assert.include(answered.at(-1)?.prompt, 'Look again.')
+        assert.isNull(yield* waitsOn(first.threadId))
+      }).pipe(Effect.provide(oneAtOnce({}, file, leads)))
     }),
   )
 })
@@ -262,7 +268,8 @@ describe('a task under way whose next turn waits for a place', () => {
       assert.strictEqual(going?.phase, 'running')
       assert.isUndefined(going?.continues)
       assert.isUndefined(going?.place)
-    }).pipe(Effect.provide(oneAtOnce())),
+      // Its answer held, the turn is still under way as the card is read.
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { holds: holds() } } }))),
   )
 })
 

@@ -4,7 +4,15 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type ProjectTracker, type Service } from '@althar/contracts'
+import {
+  ApiError,
+  type BoardTask,
+  type ConnectionSummary,
+  type ProjectSummary,
+  type ProjectTracker,
+  type RepositorySetup,
+  type Service,
+} from '@althar/contracts'
 
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -72,7 +80,7 @@ const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}
       <RouterProvider router={router} />
     </ServicesProvider>,
   )
-  return { ...fake, router }
+  return { ...fake, router, cache: services.cache }
 }
 
 /** A project's tab, by its name, in the window's tabs. */
@@ -169,6 +177,117 @@ describe('a project’s settings', () => {
     expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
   })
 
+  it('shows how each repository’s new task folders get ready, in Running, and keeps a change as the person leaves the lines', async () => {
+    const { client } = windowAt('/projects/p1?room=settings&section=running')
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    expect(commands).toHaveProperty('value', 'bun install --frozen-lockfile')
+    expect(screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })).toHaveProperty('value', '.env')
+    expect(screen.getByText('~/code/meridian-api')).toBeTruthy()
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nbunx playwright install chromium')
+    await userEvent.tab()
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryId: repositories[0]?.id,
+        setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
+      }),
+    )
+    // A repository no lead has set up yet says who fills it in.
+    await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
+    expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
+      'placeholder',
+      'The first task’s lead fills this in.',
+    )
+  })
+
+  it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    const { cache } = windowAt('/projects/p1?room=settings&section=running', {
+      setRepository,
+      getRepositories: vi.fn(async () => kept),
+    })
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    const files = screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n.env.local')
+    await userEvent.tab()
+    // A read while the first is on its way says what was kept before; the newest change still shows.
+    await act(() => cache.refetchQueries({ queryKey: ['repositories', 'p1'] }))
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty('value', 'bun install --frozen-lockfile\nmake')
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(2))
+    expect(setRepository).toHaveBeenLastCalledWith({
+      projectId: 'p1',
+      repositoryId: repositories[0]?.id,
+      setup: { copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] },
+    })
+    await waitFor(() =>
+      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] }),
+    )
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+  })
+
+  it('keeps a repository’s changes to its setup in order across leaving Running and coming back', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=running', { setRepository, getRepositories: vi.fn(async () => kept) })
+    const commandsOf = () => screen.getByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(await screen.findByRole('textbox', { name: 'meridian-api: commands' }))
+    await userEvent.type(commandsOf(), '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake test')
+    await userEvent.tab()
+    const side = screen.getByRole('navigation', { name: 'Project settings' })
+    await userEvent.click(within(side).getByRole('button', { name: 'General' }))
+    await userEvent.click(within(side).getByRole('button', { name: 'Running' }))
+    // Back in Running, the change still on its way is what shows, and the next one waits behind it.
+    expect(await screen.findByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty(
+      'value',
+      'bun install --frozen-lockfile\nmake\nmake test',
+    )
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake lint')
+    await userEvent.tab()
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(3))
+    expect(setRepository.mock.calls.map(([input]) => input.setup?.commands.at(-1))).toEqual(['make', 'make test', 'make lint'])
+    await waitFor(() => expect(kept[0]?.setup?.commands.at(-1)).toBe('make lint'))
+    expect(commandsOf()).toHaveProperty('value', 'bun install --frozen-lockfile\nmake\nmake test\nmake lint')
+  })
+
+  it('says why a change to a setup didn’t hold', async () => {
+    windowAt('/projects/p1?room=settings&section=running', {
+      setRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'ProjectRefused', message: 'Name each file from the repository’s root.' })
+      }),
+    })
+    const files = await screen.findByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n../secrets')
+    await userEvent.tab()
+    expect((await screen.findByRole('alert')).textContent).toBe('Name each file from the repository’s root.')
+    await waitFor(() => expect(files).toHaveProperty('value', '.env'))
+  })
+
   it('renames the project in place: its front page and its tab take the new name, without a restart', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
@@ -218,7 +337,7 @@ describe('a project’s settings', () => {
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(conflicts)).toBe('When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.')
+    expect(descriptionOf(conflicts)).toBe('')
     await userEvent.click(conflicts)
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
@@ -226,7 +345,7 @@ describe('a project’s settings', () => {
     // On, every open task can be looked at now, rather than as each default branch moves.
     await userEvent.click(tasks.getByRole('button', { name: 'Look for conflicts now' }))
     expect(client.lookForConflicts).toHaveBeenCalledWith('p1')
-    expect(descriptionOf(conflicts)).toContain('Looking at each open task now.')
+    expect(descriptionOf(conflicts)).toContain('Looking…')
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
@@ -239,9 +358,7 @@ describe('a project’s settings', () => {
       name: 'Move issues along with their tasks',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toBe(
-      'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
-    )
+    expect(descriptionOf(move)).toBe('To In Progress, In Review, then Done')
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
@@ -249,14 +366,41 @@ describe('a project’s settings', () => {
     expect(move.getAttribute('aria-checked')).toBe('false')
   })
 
+  it('pushes the lead’s commits by itself unless switched off', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const push = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Push the lead’s commits automatically',
+    })
+    expect(push.getAttribute('aria-checked')).toBe('true')
+    expect(descriptionOf(push)).toBe(
+      'When a lead’s turn ends, what it committed goes up to its pull request, even after you’ve looked. If someone else pushed there, it waits for you.',
+    )
+    await userEvent.click(push)
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
+  })
+
+  it('posts a task’s screenshots to its pull request by itself once switched on, off until then', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const post = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Post screenshots to pull requests automatically',
+    })
+    expect(post.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(post)).toBe(
+      'A task’s Outputs screenshots go in one comment on its pull request, updated as they change. Off, you post them from Outputs.',
+    )
+    await userEvent.click(post)
+    expect(post.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', postScreenshots: true }))
+  })
+
   it('lets changes to issues apply without a card once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
     const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
     expect(change.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(change)).toBe(
-      'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
-    )
     await userEvent.click(change)
     expect(change.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
@@ -430,7 +574,7 @@ describe('a project’s settings', () => {
     await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Remove meridian from Althar?' }))
     expect(dialog.getByText(/Its task under way stops/)).toBeTruthy()
-    expect(dialog.getByText(/stay in ~\/Althar\/meridian/)).toBeTruthy()
+    expect(dialog.getByText(/Its folders, worktrees and branches stay/)).toBeTruthy()
     expect(client.removeProject).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Remove project' }))
     await waitFor(() => expect(client.removeProject).toHaveBeenCalledWith('p1'))
@@ -763,11 +907,7 @@ describe('what a project runs, in its settings', () => {
     windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
     await openSettings('Running')
     const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
-    expect(
-      await where.findByText(
-        'Leave it on its branch. Nothing goes to GitHub until Althar is connected there. Then it opens a draft pull request.',
-      ),
-    ).toBeTruthy()
+    expect(await where.findByText('Leave it on its branch. GitHub isn’t connected.')).toBeTruthy()
     expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
     await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
     expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
@@ -929,12 +1069,12 @@ describe('a project’s repositories, in its settings', () => {
     const { region } = await openRepositories()
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(host.pickFolder).toHaveBeenCalledWith('project')
-    expect(await screen.findByText('Reading it. Nothing in it changes')).toBeTruthy()
+    expect(await screen.findByText('Reading…')).toBeTruthy()
     expect(screen.getByText('~/code/meridian-docs')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_docs'))
     added()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
 
     // Dropped on them, each folder is granted and added the same way.
     const folder = new File([], 'meridian-docs')
@@ -1000,7 +1140,7 @@ describe('a project’s repositories, in its settings', () => {
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenLastCalledWith('p1', 'meridian-sdk'))
     pending[1]?.()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBeNull()
   })
 
@@ -1063,4 +1203,13 @@ describe('a project’s repositories, in its settings', () => {
     await openSettings('Code and issues')
     expect(await sheet('Code and issues').findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
   })
+})
+
+it('keeps the project web switch, default on, with the privacy trade-off visible', async () => {
+  const { client } = windowAt('/projects/p1?room=settings&section=general')
+  const toggle = await screen.findByRole('switch', { name: 'Leads can reach the web' })
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  expect(descriptionOf(toggle)).toContain('Pages could steer a lead into sending private code in a URL')
+  await userEvent.click(toggle)
+  await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', leadsReachWeb: false }))
 })

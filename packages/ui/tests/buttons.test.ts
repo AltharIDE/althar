@@ -23,6 +23,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',
   'home/ProjectList/ProjectList.tsx': 'a project’s row, which opens it; the quiet line, which folds',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
+  'setup/RepositorySetups/RepositorySetups.tsx': 'a repository’s tab, whose shape joins the card below it',
   'board/NextLine/NextLine.tsx': 'a row’s grip in the lane’s margin, held to drag the row',
   'chrome/WindowButtons/WindowButtons.tsx': 'the traffic lights, whose shape is the system’s own',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview; the bare count, the words of the chip it sits in',

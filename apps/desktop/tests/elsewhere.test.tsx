@@ -45,7 +45,6 @@ describe('settings on Windows', () => {
 
     await userEvent.click(sections().getByRole('button', { name: 'Notifications' }))
     expect(screen.queryByRole('switch', { name: /Count them/ })).toBeNull()
-    expect(screen.getByText('The system’s own sound, with each notification, or none.')).toBeTruthy()
     await userEvent.click(screen.getByRole('combobox', { name: 'Sound' }))
     await userEvent.click(await screen.findByRole('option', { name: 'The system’s sound' }))
     expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'default')
@@ -72,7 +71,6 @@ describe('settings on Windows', () => {
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
     ).toEqual(['Light', 'Dark', 'Match the PC'])
-    expect(screen.getByText('Match the PC turns dark when the PC does.')).toBeTruthy()
     await userEvent.click(within(choice).getByRole('radio', { name: 'Match the PC' }))
     // already as the system is: nothing to keep
     await userEvent.click(within(choice).getByRole('radio', { name: 'Light' }))
@@ -88,7 +86,7 @@ describe('settings on Windows', () => {
     withServices(<Settings at="appearance" />, fakeClient().client, host)
     expect(await screen.findByText('In the system tray')).toBeTruthy()
     expect(screen.queryByRole('radiogroup', { name: 'In other apps' })).toBeNull()
-    expect(screen.getByText('Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.')).toBeTruthy()
+    expect(screen.getByText('Windows may tuck it under the ^. Drag it onto the taskbar to keep it in sight.')).toBeTruthy()
   })
 })
 
@@ -102,10 +100,10 @@ describe('settings on Linux', () => {
       })
     const first = withServices(<Settings at="appearance" />, fakeClient().client, linux(true))
     // A desktop may take the mark and not show it, which nothing tells Althar: the page says where it would be then.
-    expect(await screen.findByText('Where the desktop has no tray, Althar shows only in its window.')).toBeTruthy()
+    expect(await screen.findByText('Without a tray, Althar shows only in its window.')).toBeTruthy()
     first.unmount()
     withServices(<Settings at="appearance" />, fakeClient().client, linux(false))
     expect(await screen.findByText('Only in Althar’s window')).toBeTruthy()
-    expect(screen.getByText('This desktop has no system tray, so Althar shows only in its own window.')).toBeTruthy()
+    expect(screen.getByText('This desktop has no system tray.')).toBeTruthy()
   })
 })

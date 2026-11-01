@@ -27,7 +27,6 @@ export const text = {
   trackers: 'Trackers',
   connectTracker: 'Connect a tracker',
   none: 'No tracker yet',
-  noneNote: 'Connect one, and the coordinator can start tasks from its issues.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
   issues: (tracker: Tracker) =>
     tracker.key === null ? frontText.issues(tracker) : `${frontText.issues(tracker)} · ${productName(tracker.product)}`,
@@ -39,7 +38,6 @@ export const text = {
   connect: 'Connect',
   signIn: 'Sign in again',
   openOn: (tracker: Tracker) => `Open on ${productName(tracker.product)}`,
-  appWide: 'Connections are shared by every project.',
   manage: 'Manage connections',
 }
 
@@ -140,9 +138,7 @@ export function CodeSection({
             </p>
           )}
           {trackers.length === 0 ? (
-            <SettingRow title={text.none} note={text.noneNote}>
-              {() => null}
-            </SettingRow>
+            <SettingRow title={text.none}>{() => null}</SettingRow>
           ) : (
             trackers.map((tracker) => (
               <TrackerRow
@@ -156,7 +152,7 @@ export function CodeSection({
         </SettingList>
       </SettingGroup>
       <p className={s.quiet}>
-        {text.appWide} <LinkButton onClick={onManage}>{text.manage}</LinkButton>
+        <LinkButton onClick={onManage}>{text.manage}</LinkButton>
       </p>
     </>
   )

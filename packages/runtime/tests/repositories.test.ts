@@ -14,6 +14,7 @@ import { coordinatorFolder } from '../src/coordinatorFolder'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -278,7 +279,7 @@ describe('a task of several repositories', () => {
       assert.include(git(join(folder, 'web'), 'log', '--format=%s', 'main'), 'Retry')
       assert.notInclude(git(join(folder, 'api'), 'log', '--format=%s', 'main'), 'Retry')
       assert.deepStrictEqual((yield* notices(task.threadId)).map((notice) => notice.title).slice(-2), [
-        'Merged here: web into main.',
+        'Merged into main here.',
         `Not done yet: PR #${github.changes[0]?.number ?? 0} in api is still open.`,
       ])
       assert.deepStrictEqual((yield* queries.thread(task.threadId, { limit: 0 })).task.here, [])
@@ -472,6 +473,8 @@ describe('a task of several repositories', () => {
         [true, false],
       )
       // The lead asks the person to push: with nothing new, each says so; unnamed, the one with something new; with both, it asks which.
+      // Pushes are the person's here, as before a lead's commits went up on their own (ADR-072).
+      yield* (yield* Policies).set(opened.projectId, { pushCommits: false }, instance.personId)
       const asks = (args: Record<string, unknown> = {}) => callTool(lead, 'push_to_pull_request', args)
       const nothing = yield* asks()
       assert.include(nothing, `api#${api?.number ?? 0} already has every commit on the branch`)

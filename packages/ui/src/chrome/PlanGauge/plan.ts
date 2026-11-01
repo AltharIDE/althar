@@ -50,10 +50,18 @@ export interface PlanAgent {
    * one, and the gauge and the peek's level go by the agents that can run.
    */
   stopped?: string
+  /**
+   * Why it has no figure, though work can start on it: every window read of
+   * it has reset since, and how much of them is used no one has said yet. Not
+   * read since reset. Said in place of a figure, as `stopped` is, with each
+   * account's age and why it wasn't read again in the detail.
+   */
+  unread?: string
 }
 
-/** The agent with least room that work can start on: the figure that counts. */
-export const firstRunning = (agents: readonly PlanAgent[]): PlanAgent | undefined => agents.find((agent) => agent.stopped === undefined)
+/** The agent with least room that work can start on, of those with a figure: the figure that counts. */
+export const firstRunning = (agents: readonly PlanAgent[]): PlanAgent | undefined =>
+  agents.find((agent) => agent.stopped === undefined && agent.unread === undefined)
 
 /** Under this share left, the gauge is in full ink. */
 export const SAY_UNDER = 10

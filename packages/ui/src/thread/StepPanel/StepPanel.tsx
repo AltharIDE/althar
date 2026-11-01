@@ -29,14 +29,10 @@ export interface StepPanelText {
   all: (n: number) => string
   tabs: string
   instructions: (name: string) => string
-  /** What happens to its result, with one agent and with several. */
-  returns: (many: boolean) => string
   /** For the consumer's composer: its placeholder, saying who hears it and that the lead does not. */
   placeholder: (to: string) => string
   /** Who hears it from the tab for every agent, for the placeholder. */
   toAll: (n: number) => string
-  /** For the consumer's composer: a note beside it. */
-  composeNote: string
 }
 
 export const stepPanelText: StepPanelText = {
@@ -45,10 +41,8 @@ export const stepPanelText: StepPanelText = {
   all: (n) => (n === 2 ? 'Both' : 'All'),
   tabs: 'Whose thread',
   instructions: (name) => `Instructions · ${name}`,
-  returns: (many) => (many ? 'Combined into one list for the lead' : 'Returns a verdict and findings to the lead'),
   placeholder: (to) => `Message ${to}. The lead does not hear it`,
   toAll: (n) => (n === 2 ? 'both reviewers' : `all ${n} reviewers`),
-  composeNote: 'The lead sees this as one line in the task thread',
 }
 
 /** Who a message from this tab reaches, in words, for the composer's placeholder. */
@@ -126,16 +120,13 @@ export function StepPanel({
             ))}
           </Tabs.List>
         )}
-        <div className={s.meta}>
-          {instructions && openDoc ? (
+        {instructions && openDoc && (
+          <div className={s.meta}>
             <LinkButton onClick={() => openDoc(instructions)}>
               {t.instructions(instructions.path?.split('/').pop() ?? instructions.title ?? '')}
             </LinkButton>
-          ) : (
-            <span />
-          )}
-          <span>{t.returns(many)}</span>
-        </div>
+          </div>
+        )}
         {(many ? ['all', ...agents.map((a) => a.id)] : [tab]).map((v) => (
           <Tabs.Content key={v} value={v} className={s.content} tabIndex={-1}>
             <SidePanelBody className={s.body}>{body(v)}</SidePanelBody>

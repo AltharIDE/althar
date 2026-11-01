@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, realpathSync, symlinkSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -176,6 +176,28 @@ describe('the process transport', () => {
       const shared = yield* Effect.scoped(spawnOwned({ command: '/bin/sh', args: ['-c', 'exit 0'] }, '/tmp'))
       assert.isUndefined(shared.temp)
     }),
+  )
+
+  // Windows holds a folder a moment after a process has gone; here, one in it can't be written to.
+  it.live.skipIf(windows || process.getuid?.() === 0)(
+    'says it has stopped all the same where its temporary folder can’t be removed yet, and leaves the folder',
+    () =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.make()
+        const owned = yield* Scope.provide(scope)(spawnOwned({ command: '/bin/sh', args: ['-c', 'sleep 30'], privateTemp: true }, '/tmp'))
+        const temp = owned.temp ?? ''
+        const held = join(temp, 'held')
+        mkdirSync(held)
+        writeFileSync(join(held, 'open'), '')
+        chmodSync(held, 0o555)
+        yield* Scope.close(scope, Exit.void)
+        const stopped = yield* Deferred.isDone(owned.stopped)
+        const stayed = existsSync(join(held, 'open'))
+        chmodSync(held, 0o755)
+        rmSync(temp, { recursive: true, force: true })
+        assert.isTrue(stopped)
+        assert.isTrue(stayed)
+      }),
   )
 
   it.live('removes the temporary folder of a command that never started', () =>

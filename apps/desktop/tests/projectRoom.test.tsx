@@ -207,7 +207,9 @@ describe('a task’s card in the Talk room', () => {
       }),
     )
     expect(await screen.findByText('MER-231')).toBeTruthy()
-    expect(screen.getByText('PR #14, after PR #7 and PR #9')).toBeTruthy()
+    // The latest alone: no list of the earlier rounds' pull requests.
+    expect(screen.getByText('PR #14')).toBeTruthy()
+    expect(screen.queryByText(/PR #7/)).toBeNull()
   })
 
   it('says why work its lead couldn’t finish needs you', async () => {
@@ -228,7 +230,6 @@ describe('a task’s card in the Talk room', () => {
     ]
     const client = await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
     expect(await screen.findByRole('button', { name: /^Keeping a place/ })).toBeTruthy()
-    expect(screen.queryByText(/^Held by/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /^Keeping a place/ }))
     const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
     await userEvent.click(list.getByRole('button', { name: 'Stop bun test --watch' }))
@@ -267,10 +268,15 @@ describe('a task’s card in the Talk room', () => {
     await waitFor(() => expect(client.stopBackground).toHaveBeenCalledWith('th9', 'bg1'))
   })
 
-  it('shows its card alone when nobody holds a place', async () => {
-    await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders: [] } }))
+  it('shows its card alone when only agents at work hold the places, naming none of them', async () => {
+    const holders = [
+      { taskId: 't9', title: 'Run the suite', threadId: 'th9', kept: false, running: [] },
+      { taskId: 't8', title: 'Fix the login', threadId: null, kept: false, running: [] },
+    ]
+    await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    expect(screen.queryByText(/^Held by/)).toBeNull()
+    expect(screen.queryByText(/Run the suite|Fix the login/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
   })
 
   it.each([
@@ -344,7 +350,7 @@ describe('the Talk room’s composer when Althar doesn’t take what was said', 
     })
     withServices(<Project />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
-    const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
+    const queue = screen.getByRole('region', { name: '2 queued' })
     const [first, second] = within(queue).getAllByRole('button', { name: 'Edit' })
     await userEvent.click(second as HTMLElement)
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('already has that message'))

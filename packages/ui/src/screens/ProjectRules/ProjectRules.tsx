@@ -288,13 +288,12 @@ export const projectRulesText: ProjectRulesText = {
   },
   allow: {
     with: (subject) => `${subject} go ahead with `,
-    none: 'Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.',
+    none: 'Nothing goes ahead by a rule yet.',
   },
   off: 'Off while everything is allowed.',
   allowAll: {
     title: 'Allow everything',
-    note: (project) =>
-      `Nothing in ${project} waits for you but what can’t be undone, such as a force push or deleting outside the task, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
+    note: (project) => `Nothing in ${project} waits for you but what can’t be undone. Never still holds.`,
   },
   add: {
     [RulePlace.Never]: 'Add a command to Never',
@@ -318,13 +317,13 @@ export const projectRulesText: ProjectRulesText = {
       [PermissionPolicy.Coordinator]: {
         word: 'the coordinator decides',
         title: 'The coordinator decides',
-        note: 'Allows or refuses, with a reason; what it can’t settle comes to you',
+        note: 'What it can’t settle comes to you',
         after: 'What it can’t settle, and what Althar can’t read, comes to you.',
       },
       [PermissionPolicy.Ask]: {
         word: 'ask me',
         title: 'Ask me',
-        note: 'Reads and the task’s own files still go ahead. OpenCode has no sandbox, so each of its commands waits',
+        note: 'Reads and the task’s own files still go ahead',
         after: 'Reads and the task’s own files still go ahead.',
       },
     },
@@ -341,7 +340,7 @@ export const projectRulesText: ProjectRulesText = {
     add: { commands: 'Add a command leads run outside their sandbox', hosts: 'Add a host leads reach without asking' },
     field: { commands: 'A command, as it starts', hosts: 'A host' },
     empty: {
-      commands: 'How the command starts. Run outside the sandbox, it still asks, and meets these rules',
+      commands: 'How the command starts',
       hosts: 'A host such as registry.npmjs.org',
     },
     typed: { commands: 'Runs outside the sandbox', hosts: 'Reached without asking' },
@@ -370,7 +369,7 @@ export const projectRulesText: ProjectRulesText = {
     prTitled: '. A pull request opened from it is titled ',
     described: ', described in ',
     label: 'When a task is done',
-    note: 'Merging stays yours. A repository on a host Althar doesn’t know ends on its branch',
+    note: 'Merging stays yours',
     end: {
       [TaskEnd.DraftPr]: { word: 'a draft pull request', title: 'Open a draft pull request', note: 'Checks run on it; you mark it ready' },
       [TaskEnd.ReadyPr]: {
@@ -385,7 +384,7 @@ export const projectRulesText: ProjectRulesText = {
   titles: { label: 'Pull request titles', note: '{key} is the issue’s key, {title} the task’s title', each: 'as each repository says' },
   templates: {
     label: 'Descriptions',
-    note: 'Written in the repository’s pull request template, where it has one. The boxes are yours to tick',
+    note: 'The repository’s pull request template, where it has one',
     every: 'each repository’s template',
     some: 'each repository’s template, where it has one',
     none: 'Althar’s own words',
@@ -398,18 +397,18 @@ export const projectRulesText: ProjectRulesText = {
       [LimitPolicy.Move]: {
         word: 'moves to the next agent free',
         title: 'Move the work to the next agent free',
-        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands. With none free, it waits for the reset, and you can move it to another model meanwhile',
+        note: 'In the order of your agents; with none free, it waits for the reset',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
         title: 'Wait for the reset',
-        note: 'The step keeps its place and runs again at the reset, unless you move it to another model meanwhile',
+        note: 'Runs again at the reset',
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',
         after: ' to move it to a model that’s free, or to wait for the reset',
         title: 'Ask me',
-        note: 'The step waits for you: move it to a model that’s free, or wait for the reset',
+        note: 'Move it to a free model, or wait for the reset',
       },
     },
   },
@@ -423,7 +422,7 @@ export const projectRulesText: ProjectRulesText = {
       first: { title: 'Stay on the first', note: 'Then the work does as the limit says' },
       next: { title: 'Go on with the next', note: 'The agent’s next account here, then as the limit says' },
     },
-    note: 'In your order from Settings. Going on with the next holds for every agent in this project',
+    note: 'In your order from Settings',
   },
   token: {},
   hint: {},

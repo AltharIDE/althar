@@ -79,5 +79,15 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [069](069-motion-is-one-system-named-by-what-happens.md) | Motion is one system, named by what happens, in CSS and the browser's own animations |
 | [070](070-failing-checks-go-to-the-lead-whoever-has-looked.md) | Failing checks go to the lead, whoever has looked, and it tells a failure of its own from one broken on main |
 | [071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md) | The sandbox is the boundary: what it holds runs unread, what crosses meets the rules, and git stops what can't be undone |
-| [072](072-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [073](073-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [072](072-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
+| [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
+| [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
+| [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
+| [077](077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md) | A task's screenshots go in one comment on its pull request, written anew as they change, by hand or by a project rule |
+| [078](078-project-leads-can-read-the-web.md) | Project leads and their own reviewers can read the web, with a default-on project switch and outside reviews kept offline |
+| [079](079-outputs-show-the-change-as-built.md) | Outputs show the change as built: the lead marks options, a later round replaces earlier views, and a posted comment follows |
+| [080](080-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md) | A task folder's setup is recorded by a lead and replayed by Althar, and a lead's sandbox writes to its tools' caches |
+| [081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md) | The coordinator, and a task's lead, do on the code host what the person's account can, short of four limits: what can't be undone waits for their word, a short never list stays theirs, a change to the code is a task, and nothing approves its own work; the coordinator runs merging and releases, and hears every pull request and main |
+| [082](082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |
+| [083](083-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [084](084-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |

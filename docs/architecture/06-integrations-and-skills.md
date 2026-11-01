@@ -181,6 +181,33 @@ Both models were laid against all six services before any adapter was
 written. A model whose terms only one service has is a sign it is that
 service's model.
 
+### Every service alike
+
+A feature built for one code host or tracker is built for every one that can
+have it, in the same release. Where a service lacks it, Althar stands in with
+what the service has, and where neither can, it says so and why
+([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+The feature is written against the model, adds its clause to the contract
+suite, and is turned off in the adapter's capabilities where it can't be had.
+What isn't alike, as read on 31 October 2026:
+
+| What | Where it's missing | Why | What follows |
+| --- | --- | --- | --- |
+| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
+| Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
+| Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
+| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-081, task 5, with an errand standing in, one merge at a time into each branch |
+| Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
+| A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-081, task 8, publishing as each host does |
+| Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
+| The gated call's writes | GitLab, Bitbucket Cloud and Data Center | Not built | ADR-081, task 14 |
+| Moving an issue to started (`starts`) | GitHub's and GitLab's issues | Not built: GitLab's statuses where the server has them, GitHub's project Status field, or a label the project's notes name | ADR-082, task 2 |
+| Priority | GitHub's and GitLab's issues, Trello | No field of their own: a label the project's notes name, or GitHub's organization issue fields | ADR-082, task 3 |
+| Project or milestone | Jira, Trello | Not built: Jira Cloud moves an issue to another project, Trello a card to another board | ADR-082, task 3 |
+
+Linking a pull request to GitHub's and GitLab's issues isn't a gap: a pull
+request that names the issue links it.
+
 ### Code hosts
 
 | | GitHub (and Enterprise Server) | GitLab (and self-managed) | Bitbucket Cloud | Bitbucket Data Center | The model |
@@ -254,10 +281,30 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **After the first push, pushing is the person's.** When a plan's steps are
+- **A pull request shows the review its change had** (ADR-076), unless the
+  person turned it off in Settings: on GitHub, a seal in its corner, drawn
+  by the site from its address, names the reviewer, how many passes, and
+  the commit the last pass read. Folded at the description's end, what
+  changed after review, with the commits that made it, and what the lead
+  kept, with why. Never how many findings there were.
+- **After the first push, a lead's commits go up as its turn ends** (ADR-083),
+  where the project's rules say so (`pushCommits`, "Push the lead's commits
+  automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
-  commits after, answering the person, a review or failed checks, waits on the
-  task's branch until the person has looked at it and pushes it: the task
+  commits after, answering the person, a review or failed checks, Althar
+  pushes to the task's open pull request once the lead's turn has ended and
+  it is done, as a plain push to that pull request's own branch, never the
+  default branch and never forced; `push_to_pull_request` pushes at once.
+  It waits for the person instead, the card's Push saying why, where the
+  pull request's branch isn't where Althar last pushed it (someone pushed
+  there outside Althar), where the person stopped or interrupted the lead
+  since, where the push would need forcing, or where it, or asking the host
+  before it, failed; a fix for failing checks doesn't go past such a hold.
+  Until they're on the pull request, commits going up offer no Push and no
+  Accept: the card says they're going up.
+- **Where the project leaves pushing to the person, it is theirs after the
+  first push.** What the lead commits waits on the task's branch until the
+  person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead never pushes:
   when the person asks it to, or what it committed should go up, it asks them
@@ -936,9 +983,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-072](../decisions/072-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-083](../decisions/083-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-073](../decisions/073-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-084](../decisions/084-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)
@@ -1143,3 +1190,22 @@ silently switch SaaS authority.
 - [Linear rate limits](https://linear.app/developers/rate-limiting)
 - [Jira Cloud webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/)
 - [Jira Cloud rate limiting](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)
+
+### CI output is untrusted data
+
+`read_checks` reads the task's pull request head or a named commit/branch,
+including passing jobs. It returns bounded cleaned logs, literal searches,
+annotations and workflow-run artifact listings. Full logs and small artifact
+ZIPs can be exported to the worktree's gitignored `.althar/ci/` scratch area;
+artifacts are never extracted or executed. Existing files are not overwritten.
+The host listing limit is stated in the response; unavailable metadata is
+reported rather than inferred. GitLab job traces share the log operations;
+GitLab annotations and artifact downloads are not implemented yet.
+
+A fork PR's workflow output is less trusted: contributors can change the code
+and scripts producing it, even when the workflow itself belongs to the project.
+Logs, annotations and artifact names/content are evidence, never instructions
+or authority to run commands or disclose credentials. Reading CI does not relax
+the existing filtering of outsiders' comments. Tool responses are capped at
+32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
+applies while streaming, even when the server omits or lies about its size.

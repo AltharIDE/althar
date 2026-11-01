@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
 
 import { makeFakeService } from '@althar/connectors/testing'
+import { holds } from '@althar/provider-adapters/testing'
 
 import { Busy } from '../src/Busy'
 import { Changes } from '../src/Changes'
@@ -279,13 +280,14 @@ describe.skipIf(windows)('a task that settles', () => {
 })
 
 describe.skipIf(windows)('a task opened again before settling has stopped it', () => {
-  it.live('keeps its lead and the run started since', () =>
-    Effect.gen(function* () {
+  it.live('keeps its lead and the run started since', () => {
+    const lead = holds()
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const launches = yield* Launches
       const { project, task } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
-      // Asked something that takes it a while: its turn runs as the task settles, so settling waits for it.
+      // Asked something that takes it a while, until the test lets it go on: its turn runs as the task settles, so settling waits for it.
       const body = 'And the footer? [lead:slowly]'
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
@@ -304,6 +306,7 @@ describe.skipIf(windows)('a task opened again before settling has stopped it', (
       yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${task.taskId}`
       const again = yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
       // Its turn ended, and settling had its go: its lead and its new run go on.
+      lead.open('[lead:slowly]')
       yield* turn(false)
       yield* Effect.sleep(Duration.seconds(5))
       assert.isTrue(Option.isSome(yield* sessions.running(task.threadId)))
@@ -314,8 +317,8 @@ describe.skipIf(windows)('a task opened again before settling has stopped it', (
       )
       yield* sessions.stop(task.threadId)
       yield* launches.stopAll(project.projectId)
-    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
-  )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: lead })))))
+  })
 })
 
 describe.skipIf(windows)('what settled tasks left running that Althar lost track of', () => {

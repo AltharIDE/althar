@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
+import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -41,7 +42,7 @@ const folderOf = (...names: ReadonlyArray<string>) => {
   return folder
 }
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+const withQueries = (agents: FakeAgentOptions = {}) => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agents)))
 
 /** A task changing both repositories, planned as given and started at once: its ids, and each worktree by repository. */
 const across = (description: string, review: boolean, end: TaskEnd | null) =>
@@ -112,8 +113,9 @@ describe('a task of several repositories', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('reviews a round of work after its plan by what changed in each repository since', () =>
-    Effect.gen(function* () {
+  it.live('reviews a round of work after its plan by what changed in each repository since', () => {
+    const lead = holds()
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const task = yield* across('Do it. [lead:finish] [review:pass]', true, null)
@@ -126,6 +128,7 @@ describe('a task of several repositories', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: task.threadId, body })
       yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'running')
       writeFileSync(join(task.worktree.web ?? '', 'docs.md'), '# Retry\n')
+      lead.open('[lead:slowly]')
       const [told] = yield* until(
         sql<{ body: string }>`
           SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
@@ -133,6 +136,6 @@ describe('a task of several repositories', () => {
         (rows) => rows.length === 1,
       )
       assert.include(told?.body, `Review what changed since, \n- api: \`git diff ${heads.api}\`\n- web: \`git diff ${heads.web}\`.`)
-    }).pipe(Effect.provide(withQueries())),
-  )
+    }).pipe(Effect.provide(withQueries({ holds: lead })))
+  })
 })

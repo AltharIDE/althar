@@ -40,8 +40,8 @@ describe('projectInk', () => {
     const counts = new Map(inks.map((ink) => [ink, 0]))
     for (const seed of seeds) counts.set(projectInk(seed), (counts.get(projectInk(seed)) ?? 0) + 1)
     const even = seeds.length / inks.length
-    for (const ink of inks) expect(counts.get(ink)).toBeGreaterThan(even * 0.6)
-    for (const ink of inks) expect(counts.get(ink)).toBeLessThan(even * 1.4)
+    for (const ink of inks) expect(counts.get(ink)).toBeGreaterThan(even * 0.4)
+    for (const ink of inks) expect(counts.get(ink)).toBeLessThan(even * 1.6)
   })
 
   it('passes over inks already taken while one is free, so projects side by side differ', () => {

@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
+
+import { cleanUp } from './removal'
 
 /*
  * The keeper: how Althar owns the whole tree of a process it starts on
@@ -285,14 +287,18 @@ export const keeper = (folder: string = join(tmpdir(), 'althar')): Effect.Effect
           } catch {
             // Another build put its keeper in place first.
           }
-          rmSync(work, { recursive: true, force: true })
-          if (existsSync(path)) {
-            built = path
-            return resume(Effect.succeed(path))
-          }
+          // Where it was built goes, but a folder Windows still holds after the compiler leaves no keeper unbuilt.
           resume(
-            Effect.fail(
-              `Althar couldn't build the keeper of its agents' processes: ${(stdout || (error?.message ?? "it couldn't be put in place")).trim().slice(-500)}`,
+            Effect.andThen(
+              cleanUp(work, "where the keeper of agents' processes was built"),
+              Effect.suspend(() => {
+                if (!existsSync(path))
+                  return Effect.fail(
+                    `Althar couldn't build the keeper of its agents' processes: ${(stdout || (error?.message ?? "it couldn't be put in place")).trim().slice(-500)}`,
+                  )
+                built = path
+                return Effect.succeed(path)
+              }),
             ),
           )
         },

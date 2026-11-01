@@ -1,4 +1,4 @@
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
@@ -25,7 +25,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { cantChange, leftAsItIs, noListing, noReviews, stillOpen, unchangeable, unstarted } from '../model'
+import { cantChange, leftAsItIs, noListing, noPictures, noReviews, stillOpen, unchangeable, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -72,12 +72,17 @@ export interface FakeServiceOptions {
   readonly reruns?: boolean
   /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
   readonly reviews?: boolean
+  /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
+  readonly pictures?: boolean
   /** Whether reading a change says the repository its branch is on: it does, unless a test says, as a host that can't. */
   readonly saysHead?: boolean
   /** What of an issue it updates: as its product's adapter does, unless a test says. */
   readonly changes?: ReadonlyArray<IssueField>
-  /** How long each call takes, in milliseconds, by method, as a host far away answers: at once unless said. */
-  readonly latency?: (method: string) => number
+  /**
+   * What each call waits for before it answers, by method, as a host far away takes its time: a gate the test opens when
+   * it has seen what it looks for meanwhile, never a time of the fake's. At once unless said.
+   */
+  readonly waitsFor?: (method: string) => Effect.Effect<void>
 }
 
 /** What each product's adapter changes of an issue, as the fake takes them. */
@@ -209,6 +214,10 @@ export interface FakeControls {
     /** Whose review it asks for, by login. */
     readonly reviewers?: ReadonlyArray<string>
   }): ChangeRequest
+  /** Every picture uploaded, in order, with the address the host gave it. */
+  readonly uploads: ReadonlyArray<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }>
+  /** Someone deletes a comment on the host itself, Althar's included. */
+  deleteComment(number: number, id: string): void
   /** Every review posted, in order, with the change it is on. */
   readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
   /** Every branch `deleteBranch` deleted, by the number of the change it was the branch of, in order. */
@@ -246,6 +255,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const bases = new Map<number, string>()
   const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
   const comments = new Map<number, Array<Comment>>()
+  const uploaded: Array<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }> = []
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
   const logs = new Map<string, string | ConnectorFailed | null>()
@@ -278,12 +288,12 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const inQueue = new Set<number>()
   const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
 
-  /** Records a call, taking as long as the test said, and fails it if a test asked. */
+  /** Records a call, held until what the test said it waits for, and fails it if a test asked. */
   const called = (method: string) =>
     Effect.suspend(() => {
       calls.push(method)
-      const takes = options.latency?.(method) ?? 0
-      return takes > 0 ? Effect.andThen(Effect.sleep(Duration.millis(takes)), failing(method)) : failing(method)
+      const waits = options.waitsFor?.(method)
+      return waits === undefined ? failing(method) : Effect.andThen(waits, failing(method))
     })
   const failing = (method: string) =>
     Effect.suspend(() => {
@@ -330,6 +340,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       checkLogs: true,
       threads: true,
       reviews: options.reviews ?? product === 'github',
+      pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
       links: true,
       starts: true,
       changes: changesHere,
@@ -569,6 +580,28 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         comments.set(number, [...(comments.get(number) ?? []), comment])
         return Effect.succeed(comment)
+      }),
+    uploadPicture: (repository, picture) =>
+      Effect.andThen(called('uploadPicture'), () => {
+        if (!service.capabilities.pictures) return Effect.fail(noPictures(product))
+        const url = `https://fake.example/${repository.path.join('/')}/assets/${nextId()}/${encodeURIComponent(picture.name)}`
+        uploaded.push({ name: picture.name, mediaType: picture.mediaType, bytes: picture.bytes.byteLength, url })
+        return Effect.succeed(url)
+      }),
+    editComment: (_repository, number, commentId, body) =>
+      Effect.andThen(called('editComment'), () => {
+        const said = comments.get(number) ?? []
+        const found = said.find((comment) => comment.id === commentId && comment.threadId === null)
+        if (found === undefined) return Effect.fail(missing(`comment ${commentId}`))
+        // As a host: only its author edits it.
+        if (found.author.id !== account.id)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', status: 403, message: 'Only its author edits a comment' }))
+        const edited: Comment = { ...found, body, at: now() }
+        comments.set(
+          number,
+          said.map((comment) => (comment.id === commentId ? edited : comment)),
+        )
+        return Effect.succeed(edited)
       }),
     changeToReview: (_repository, number) =>
       Effect.andThen(called('changeToReview'), () => {
@@ -869,6 +902,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       return [...issueChanges]
     },
     commentsOn: (number) => comments.get(number) ?? [],
+    get uploads() {
+      return uploaded
+    },
+    deleteComment: (number, id) => {
+      comments.set(
+        number,
+        (comments.get(number) ?? []).filter((comment) => comment.id !== id),
+      )
+    },
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
     forkOf: (number) => forks.get(number) ?? null,

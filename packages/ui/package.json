@@ -10,6 +10,7 @@
     "./screens": "./src/screens/index.ts",
     "./opening": "./src/opening.ts",
     "./device": "./src/foundations/device.ts",
+    "./seal": "./src/seal/seal.ts",
     "./styles.css": "./src/styles/global.css"
   },
   "scripts": {
@@ -20,6 +21,7 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "test:coverage": "vp test run --coverage",
+    "test:performance": "vp test bench --run",
     "verify": "bun run check && bun run test:coverage && bun run build"
   },
   "dependencies": {

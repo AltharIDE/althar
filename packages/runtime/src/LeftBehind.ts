@@ -197,7 +197,7 @@ export class LeftBehind extends Context.Service<
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Couldn’t stop everything it left running: ${what.join(', ')}.`,
+            title: `Couldn’t stop ${what.length === 1 ? (what[0] ?? 'it') : `${what.length} things`} it left running.`,
             description: null,
           })
         })
