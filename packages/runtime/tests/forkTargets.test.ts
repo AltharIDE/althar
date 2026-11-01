@@ -17,7 +17,7 @@ import { ask, cards, connect, git, pushByHand, runtimeWith } from './changesSupp
 import { HOST, hosted, until } from './support'
 
 /*
- * Where a fork's tasks' branches go (ADR-078): the fork, until the project
+ * Where a fork's tasks' branches go (ADR-085): the fork, until the project
  * says the repository it was forked from, which the host must say the person
  * can push to. What is open stays where it is: a pull request already open from
  * the fork takes its commits on the fork, whatever the project says now. Here

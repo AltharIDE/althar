@@ -1,3 +1,5 @@
+import { basename } from 'node:path'
+
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
@@ -135,6 +137,10 @@ export const words = (
     switch (reason) {
       case 'NotARepository':
         return `${text(error, 'path')} isn't a git repository. Choose another folder.`
+      case 'RepositoryRefused':
+        return text(error, 'reason') === 'taken'
+          ? `There’s a folder named ${text(error, 'name')} in ${basename(text(error, 'parent'))} already. Choose another place, or rename the project.`
+          : 'Name the project first: its repository is named after it.'
       case 'RepositoriesNeeded': {
         const unknown = (error as { readonly unknown?: ReadonlyArray<string> }).unknown ?? []
         const choices = ((error as { readonly choices?: ReadonlyArray<string> }).choices ?? []).join(', ')
@@ -267,6 +273,7 @@ export const words = (
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
         return text(error, 'message')
@@ -462,6 +469,7 @@ const reviewIncomplete = {
 export const expected = new Set([
   'LaunchRefused',
   'AttachRefused',
+  'ScreenshotsRefused',
   'DraftClosed',
   'DraftUntitled',
   'ChangesClosed',
@@ -480,6 +488,7 @@ export const expected = new Set([
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
+  'RepositoryRefused',
   'ProjectRefused',
   'DocumentRefused',
   'ImageRefused',
@@ -542,6 +551,7 @@ const projectRefused = {
   not_a_fork: "That repository isn't a fork.",
   no_upstream_access: "You can't push to the repository it was forked from yet. Its owners can give you access.",
   id_taken: "Couldn't make the project. Close the tab and start again.",
+  bad_setup: 'Name each file from the repository’s root, inside it and not in .git, and give at most 20 commands.',
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */

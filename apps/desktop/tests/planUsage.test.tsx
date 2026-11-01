@@ -405,7 +405,7 @@ describe('each model’s room in the pickers', () => {
       />,
       fake.client,
     )
-    await screen.findByText('3% left')
+    await screen.findByText(`3% left · until ${clock(RESET)}`)
     expect(fake.client.getModelRooms).toHaveBeenCalledWith('p1')
     await userEvent.click(screen.getByRole('button', { name: /^Lead: / }))
     expect((await screen.findByRole('radio', { name: /gpt-5\.2-codex/ })).textContent).toContain(`3% · until ${clock(RESET)}`)

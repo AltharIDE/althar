@@ -51,7 +51,11 @@ import { statements as shownPictures } from './0046_shown_pictures'
 import { statements as taskRequestInputs } from './0047_task_request_inputs'
 import { statements as threadItemsByInput } from './0048_thread_items_by_input'
 import { statements as decisionKind } from './0049_decision_kind'
-import { statements as upstreamBranches } from './0050_upstream_branches'
+import { statements as moreInks } from './0050_more_inks'
+import { statements as pullRequestPictures } from './0051_pull_request_pictures'
+import { statements as onePressSettles } from './0052_one_press_settles'
+import { statements as recordedSetups } from './0053_recorded_setups'
+import { statements as upstreamBranches } from './0054_upstream_branches'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -120,7 +124,11 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0047_task_request_inputs', statements: taskRequestInputs },
   { key: '0048_thread_items_by_input', statements: threadItemsByInput },
   { key: '0049_decision_kind', statements: decisionKind },
-  { key: '0050_upstream_branches', statements: upstreamBranches },
+  { key: '0050_more_inks', statements: moreInks },
+  { key: '0051_pull_request_pictures', statements: pullRequestPictures },
+  { key: '0052_one_press_settles', statements: onePressSettles },
+  { key: '0053_recorded_setups', statements: recordedSetups },
+  { key: '0054_upstream_branches', statements: upstreamBranches },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

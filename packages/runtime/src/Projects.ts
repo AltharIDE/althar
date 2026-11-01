@@ -40,7 +40,7 @@ import { Instance } from './Instance'
 import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
-import { Setups } from './Setups'
+import { recordedOf, setupOf, Setups } from './Setups'
 
 /*
  * Projects and tasks (docs/architecture/01). Opening a folder makes it a
@@ -78,6 +78,12 @@ export interface Reading {
  * repository's root: on Windows by the native call, the one that expands a
  * short name (`RUNNER~1`) to the whole one git gives.
  */
+/** A repository's recorded setup as its settings show it: its files and commands; null for none. */
+const setupShown = (json: string | null) => {
+  const recorded = recordedOf(json)
+  return recorded === null ? null : { copy: recorded.copy, commands: recorded.commands }
+}
+
 const real = (path: string) => {
   try {
     return process.platform === 'win32' ? realpathSync.native(path) : realpathSync(path)
@@ -205,6 +211,8 @@ export interface ProjectRepository {
   } | null
   /** Tasks under way that change it, which keep it if it is left out. */
   readonly tasks: number
+  /** How each new task's folder of it gets ready (ADR-080); null until a lead records it. */
+  readonly setup: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
 }
 
 /** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
@@ -376,8 +384,9 @@ export class Projects extends Context.Service<
      */
     leaveOut(projectId: string, repositoryId: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
     /**
-     * Sets a repository's role, and for a fork, where its tasks' work goes, which answers the offer to push its branches
-     * upstream, as `notNow` does alone. Whether the person can push upstream is the caller's to ask its host.
+     * Sets a repository's role; for a fork, where its tasks' work goes, which answers the offer to push its branches upstream, as
+     * `notNow` does alone (whether the person can push there is the caller's to ask its host); or how each new task's folder of it
+     * gets ready (ADR-080).
      */
     setRepository(input: {
       readonly projectId: string
@@ -385,6 +394,7 @@ export class Projects extends Context.Service<
       readonly role?: string
       readonly changeTarget?: string
       readonly notNow?: boolean
+      readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
       readonly commandId?: CommandId
     }): Effect.Effect<void, NotFound | ProjectRefused | GitFailed | Failure>
     /**
@@ -818,8 +828,10 @@ export class Projects extends Context.Service<
             upstreamOfferAt: string | null
             remotes: string
             tasks: number
+            recordedSetup: string | null
           }>`
             SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target, b.upstream_offer_at, b.remote_fingerprints AS remotes,
+              b.recorded_setup,
               (SELECT count(DISTINCT w.task_id) FROM workspaces w JOIN tasks k ON k.id = w.task_id
                 WHERE w.binding_id = b.id AND k.state NOT IN ('done', 'abandoned')) AS tasks
             FROM repository_bindings b
@@ -855,6 +867,7 @@ export class Projects extends Context.Service<
                         offered: row.upstreamOfferAt !== null,
                       },
                 tasks: row.tasks,
+                setup: setupShown(row.recordedSetup),
               } satisfies ProjectRepository
             }),
           )
@@ -1036,11 +1049,24 @@ export class Projects extends Context.Service<
         readonly role?: string
         readonly changeTarget?: string
         readonly notNow?: boolean
+        /** Its setup as the person changed it in the project's settings (ADR-080). */
+        readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
         readonly commandId?: CommandId
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const binding = yield* bindingOf(input.projectId, input.repositoryId)
+          if (input.setup !== undefined) {
+            const tidy = setupOf(input.setup)
+            if ('refused' in tidy) return yield* new ProjectRefused({ reason: 'bad_setup' })
+            const recorded = JSON.stringify({ ...tidy, at: yield* timestamp, taskId: null })
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`UPDATE repository_bindings SET recorded_setup = ${recorded} WHERE id = ${binding.id}`
+                yield* changed(input.projectId, 'project.setup_changed', { repository: binding.name, ...tidy }, input.commandId)
+              }),
+            )
+          }
           const role = input.role
           if (role !== undefined && !Schema.is(RepositoryRole)(role)) return yield* new ProjectRefused({ reason: 'no_role' })
           const target = input.changeTarget

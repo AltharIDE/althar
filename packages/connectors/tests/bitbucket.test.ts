@@ -1015,7 +1015,7 @@ describe('Bitbucket Data Center as a code host', () => {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
       assert.deepStrictEqual(yield* host.account, { id: '101', login: 'jcitizen', name: 'Jane Citizen' })
       assert.strictEqual(sent[0]?.headers.authorization, 'Bearer BBDC-t')
-      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true, reviews: false })
+      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false })
       // A project's token signs in as a service account, which the users aren't listed with.
       const project = center([whoami('bot-prj-1', '7'), ['GET', /\/users\?filter=/, { json: page([]) }]])
       assert.deepStrictEqual(yield* project.host.account, { id: '7', login: 'bot-prj-1', name: null })

@@ -26,7 +26,7 @@ export interface ModelRoomText {
   /** Side · 79%. */
   account: (name: string, share: string) => string
   noReading: string
-  /** Beside the chip once nearly out: 3% left, out. */
+  /** Beside the chip once nearly out: 3% left, Out. */
   chipLeft: (percent: number) => string
   chipOut: string
 }
@@ -38,7 +38,7 @@ export const modelRoomText: ModelRoomText = {
   account: (name, share) => `${name} · ${share}`,
   noReading: 'no reading',
   chipLeft: (n) => `${n}% left`,
-  chipOut: 'out',
+  chipOut: 'Out',
 }
 
 /** From a quarter down, a row says until when too. */
@@ -78,14 +78,19 @@ export function RoomNote({
   )
 }
 
-/** Beside a picker's chip, once its model is nearly out: 3% left until 14:00. Nothing before. */
+/**
+ * Beside a picker's chip, once its model is nearly out: 3% left · until 14:00,
+ * Out · until 14:00. One run at the chip's size, in the chip's ink, a step
+ * deeper as it runs down. Nothing before.
+ */
 export function RoomSaid({ room, text }: { room: ModelRoom | null | undefined; text?: Partial<ModelRoomText> }) {
   const t = { ...modelRoomText, ...text }
   if (room == null || room.left > SAY_UNDER) return null
+  const said = room.left === 0 ? t.chipOut : t.chipLeft(room.left)
+  const words = room.until === null ? said : `${said} · ${t.until(room.until)}`
   return (
-    <span className={s.said}>
-      {room.left === 0 ? t.chipOut : t.chipLeft(room.left)}
-      {room.until !== null && <span className={s.saidUntil}> {t.until(room.until)}</span>}
+    <span className={s.said} data-tone={usageTone(room.left)} title={words}>
+      {words}
     </span>
   )
 }

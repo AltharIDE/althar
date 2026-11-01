@@ -10,7 +10,7 @@ import { useServices } from '../../data/services'
 /*
  * The offer, once, to push a fork's tasks' branches to the repository it was
  * forked from, as Althar reads its repositories and its host says the person
- * can (ADR-078): shown in the project's room and its settings, whichever they
+ * can (ADR-085): shown in the project's room and its settings, whichever they
  * are in, and answered in place. Accepting changes the project's setting and
  * no remote.
  */

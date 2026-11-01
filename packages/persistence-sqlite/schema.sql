@@ -91,16 +91,6 @@ CREATE TABLE runtime_instances (
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 ) STRICT;
 
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proj_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
-  name TEXT NOT NULL,
-  slug TEXT NOT NULL UNIQUE CHECK (slug <> '' AND slug NOT GLOB '*[^a-z0-9-]*'),
-  created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
-  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber')), tracker_connection_id TEXT REFERENCES connections (id), tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL), tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))) STRICT;
-
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
@@ -140,7 +130,7 @@ CREATE TABLE repository_bindings (
   allowed_subpaths TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(allowed_subpaths)),
   default_base_ref TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT, upstream_offer_at TEXT CHECK (upstream_offer_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT, recorded_setup TEXT, upstream_offer_at TEXT CHECK (upstream_offer_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -1312,3 +1302,43 @@ CREATE TABLE task_request_inputs (
 ) STRICT;
 
 CREATE INDEX thread_items_by_user_input ON thread_items (user_input_id) WHERE user_input_id IS NOT NULL;
+
+CREATE TABLE "projects" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proj_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE CHECK (slug <> '' AND slug NOT GLOB '*[^a-z0-9-]*'),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'sand', 'olive', 'moss', 'teal', 'slate', 'indigo', 'plum', 'rose', 'brick', 'umber')),
+  tracker_connection_id TEXT REFERENCES connections (id),
+  tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL),
+  tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))
+) STRICT;
+
+CREATE TABLE pull_request_pictures (
+  link_id TEXT PRIMARY KEY NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  comment_id TEXT,
+  comment_url TEXT,
+  shown TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(shown)),
+  earlier TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(earlier)),
+  left_out TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(left_out)),
+  uploads TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(uploads)),
+  posted_at TEXT CHECK (posted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  failed TEXT,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  FOREIGN KEY (link_id, project_id) REFERENCES external_links (id, project_id)
+) STRICT;
+
+CREATE TABLE one_press_settles (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject')),
+    unopened INTEGER NOT NULL CHECK (unopened IN (0, 1)),
+    pressed_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX one_press_settles_by_time ON one_press_settles (pressed_at);

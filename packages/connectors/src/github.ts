@@ -27,7 +27,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { branchPath, cantChange, lacking, leftAsItIs, stillOpen, unchangeable } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, noPictures, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -111,6 +111,9 @@ const CheckRuns = Schema.Struct({
       id: Schema.Number,
       name: Schema.String,
       status: Schema.String,
+      check_suite: Schema.optional(Schema.Struct({ id: Schema.Number })),
+      started_at: Schema.optional(Schema.NullOr(Schema.String)),
+      completed_at: Schema.optional(Schema.NullOr(Schema.String)),
       conclusion: Schema.optional(Schema.NullOr(Schema.String)),
       html_url: Schema.optional(Schema.NullOr(Schema.String)),
       details_url: Schema.optional(Schema.NullOr(Schema.String)),
@@ -465,6 +468,9 @@ export const tail = (log: string): string => {
 /** What every call to GitHub's API carries: its media type, and the version of the API it is written against. */
 const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
 
+/** What GitHub says of a picture it took for a repository's conversations: where it is served from. */
+const AssetAnswer = Schema.Struct({ url: Schema.String })
+
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
 
@@ -506,7 +512,15 @@ export const NO_QUEUE_KEPT_MS = 60 * 60_000
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
-  const graphqlUrl = api.endsWith('/api/v3') ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /** Enterprise Server: its API is under its own address, at /api/v3. */
+  const server = api.endsWith('/api/v3')
+  const graphqlUrl = server ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /*
+   * Where a picture for a conversation is uploaded: GitHub's uploads host,
+   * beside its own (github.com's, or a ghe.com tenant's), as its own CLI
+   * attaches one (gh 2.99, --attach). Enterprise Server takes none.
+   */
+  const uploads = server ? null : `https://uploads.${new URL(options.webUrl).host}/user-attachments/assets`
   /** Listings by their search, with when each was asked. */
   const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
   /** Whether each `owner/name branch` merges through a merge queue, as GitHub last said, and when. */
@@ -665,7 +679,16 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false, changes: ISSUE_CHANGES },
+    capabilities: {
+      drafts: true,
+      checkLogs: true,
+      threads: true,
+      reviews: true,
+      pictures: uploads !== null,
+      links: false,
+      starts: false,
+      changes: ISSUE_CHANGES,
+    },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -825,16 +848,31 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
-        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${sha}/check-runs?per_page=100`).pipe(
+        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100`).pipe(
           Effect.catchIf(
             (error) => error.reason === 'forbidden',
             () => Effect.succeed<typeof CheckRuns.Type>({ check_runs: [] }),
           ),
         )
-        const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${sha}/status`)
+        const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${encodeURIComponent(sha)}/status`)
+        const workflows = yield* runs.check_runs.some((run) => run.app?.slug === 'github-actions' && run.check_suite !== undefined)
+          ? http
+              .cached(
+                Schema.Struct({
+                  workflow_runs: Schema.Array(Schema.Struct({ check_suite_id: Schema.Number, name: Schema.NullOr(Schema.String) })),
+                }),
+                `${repo(repository)}/actions/runs?${/^[0-9a-f]{40,64}$/i.test(sha) ? 'head_sha' : 'branch'}=${encodeURIComponent(sha)}&per_page=100`,
+              )
+              .pipe(Effect.orElseSucceed(() => ({ workflow_runs: [] })))
+          : Effect.succeed({ workflow_runs: [] })
         const fromRuns: ReadonlyArray<Check> = runs.check_runs.map((run) => ({
           id: `run:${run.id}:${run.app?.slug ?? ''}`,
           name: run.name,
+          ...(run.started_at === undefined ? {} : { startedAt: run.started_at }),
+          ...(run.completed_at === undefined ? {} : { completedAt: run.completed_at }),
+          ...(run.check_suite === undefined
+            ? {}
+            : { workflow: workflows.workflow_runs.find((workflow) => workflow.check_suite_id === run.check_suite?.id)?.name ?? null }),
           state: checkRunState(run.status, run.conclusion),
           url: run.html_url ?? run.details_url ?? null,
           summary: run.output?.title ?? null,
@@ -855,6 +893,37 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       if (match === null) return Effect.succeed(null)
       return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(Effect.map((log) => (whole ? log : tail(log))))
     },
+    checkAnnotations: (repository, check) => {
+      const match = /^run:(\d+):/.exec(check.id)
+      if (match === null) return Effect.succeed([])
+      return http
+        .json(
+          Schema.Array(Schema.Struct({ path: Schema.String, start_line: Schema.Number, message: Schema.String })),
+          'GET',
+          `${repo(repository)}/check-runs/${match[1]}/annotations?per_page=100`,
+        )
+        .pipe(Effect.map((rows) => rows.map((row) => ({ path: row.path, line: row.start_line, message: row.message }))))
+    },
+    checkArtifacts: (repository, check) =>
+      Effect.gen(function* () {
+        const match = /^run:(\d+):github-actions$/.exec(check.id)
+        if (match === null) return []
+        const job = yield* http.json(Schema.Struct({ run_id: Schema.Number }), 'GET', `${repo(repository)}/actions/jobs/${match[1]}`)
+        const result = yield* http.json(
+          Schema.Struct({
+            artifacts: Schema.Array(
+              Schema.Struct({ id: Schema.Number, name: Schema.String, size_in_bytes: Schema.Number, expired: Schema.Boolean }),
+            ),
+          }),
+          'GET',
+          `${repo(repository)}/actions/runs/${job.run_id}/artifacts?per_page=100`,
+        )
+        return result.artifacts
+          .filter((row) => !row.expired)
+          .map((row) => ({ id: String(row.id), name: row.name, size: row.size_in_bytes }))
+      }),
+    checkArtifact: (repository, id, maxBytes) =>
+      http.bytes(`${repo(repository)}/actions/artifacts/${encodeURIComponent(id)}/zip`, maxBytes),
     checkReport: (repository, check) => {
       // A check run from another service (CodeQL, CircleCI's app) keeps its log there, but says what it found in its output.
       const match = /^run:(\d+):/.exec(check.id)
@@ -926,6 +995,43 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           comments: review.comments.map((comment) => ({ path: comment.path, line: comment.line, side: 'RIGHT', body: comment.body })),
         }),
         (posted) => ({ id: String(posted.id), url: posted.html_url ?? null }),
+      ),
+    uploadPicture: (repository, picture) =>
+      Effect.gen(function* () {
+        if (uploads === null) return yield* noPictures(product)
+        // By the repository's own number, so it is served to those who can see the repository: its id, as GitHub gave it.
+        const query = new URLSearchParams({ name: picture.name, content_type: picture.mediaType, repository_id: repository.id })
+        const asset = yield* http.upload(AssetAnswer, `${uploads}?${query.toString()}`, picture.bytes, 'application/octet-stream')
+        // It is shown by its address in a comment anyone with the repository reads: never one off GitHub's own.
+        const at = URL.parse(asset.url)
+        if (
+          at === null ||
+          at.protocol !== 'https:' ||
+          !(at.host === new URL(options.webUrl).host || at.host.endsWith('.githubusercontent.com'))
+        )
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'invalid_response',
+            message: `GitHub gave the picture an address off GitHub: ${asset.url}`,
+          })
+        return asset.url
+      }).pipe(
+        // GitHub answers a token that can't write to the repository as if it weren't there.
+        Effect.mapError((error) =>
+          error.reason === 'not_found'
+            ? new ConnectorFailed({
+                product,
+                reason: 'forbidden',
+                ...(error.status === undefined ? {} : { status: error.status }),
+                message: 'Uploading a picture needs write access to the repository',
+              })
+            : error,
+        ),
+      ),
+    editComment: (repository, _number, commentId, body) =>
+      Effect.map(
+        http.json(CommentAnswer, 'PATCH', `${repo(repository)}/issues/comments/${encodeURIComponent(commentId)}`, { body }),
+        (comment) => commentOf(comment, false),
       ),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({

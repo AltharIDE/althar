@@ -71,6 +71,13 @@ export interface UpdateHost {
   readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
 
+/** Quit with work under way (DEV-118): the main process asks what to do, and hears the answer. */
+export interface QuitHost {
+  /** Calls `listener` with what quitting would stop, or null once it is answered, until the returned function is called. */
+  readonly onAsk: (listener: (question: unknown) => void) => () => void
+  readonly answer: (answer: 'quit' | 'background' | 'cancel') => void
+}
+
 /**
  * What the window's own buttons ask the main process to do where the system draws none (window-chrome).
  */
@@ -163,6 +170,8 @@ export interface Host {
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** Asks the person for folders for a new project, several at once; a grant for each, none when they cancel. */
   readonly pickFolders: () => Promise<ReadonlyArray<string>>
+  /** Asks the person where a new repository named `name` goes; the grant of the folder it goes in, or null when they cancel. */
+  readonly pickPlace: (name: string) => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
   /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */
@@ -229,6 +238,8 @@ export interface Host {
   readonly reportProblem?: (about: ProblemAbout) => void
   /** How the dialog reaches the main process; absent with `reportProblem`. */
   readonly report?: ReportHost
+  /** Quit with work under way asks the person; absent where the page can't be asked, as the edge's. */
+  readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
 }

@@ -168,14 +168,17 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     (copy) => cleanUp(dirname(copy), "where a worktree's tree was read"),
   )
 
+/** Who Althar commits as: its snapshots, and a new repository's first commit where git doesn't know who the person is. */
+const ALTHAR_IDENTITY = {
+  GIT_AUTHOR_NAME: 'Althar',
+  GIT_AUTHOR_EMAIL: 'althar@localhost',
+  GIT_COMMITTER_NAME: 'Althar',
+  GIT_COMMITTER_EMAIL: 'althar@localhost',
+}
+
 /** Commits a tree on top of a parent without touching any branch, as Althar: a snapshot a worktree can check out. */
 export const commitTree = (cwd: string, tree: string, parent: string, message: string): Effect.Effect<string, GitFailed> =>
-  run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], {
-    GIT_AUTHOR_NAME: 'Althar',
-    GIT_AUTHOR_EMAIL: 'althar@localhost',
-    GIT_COMMITTER_NAME: 'Althar',
-    GIT_COMMITTER_EMAIL: 'althar@localhost',
-  })
+  run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], ALTHAR_IDENTITY)
 
 /** Who made a commit, and when, as git keeps it: `1760000000 +0200` for a date. */
 export interface Signature {
@@ -397,6 +400,27 @@ export const indexStamp = (worktree: string): Effect.Effect<string> =>
     const index = await stat(join(linked === undefined ? dotGit : resolve(worktree, linked.trim()), 'index'), { bigint: true })
     return `${index.ino}:${index.size}:${index.mtimeNs}`
   }).pipe(Effect.orElseSucceed(() => ''))
+
+/**
+ * Makes a new repository in the empty folder `path`, on `main`, with a first
+ * commit and nothing in it, so a task has a commit to branch from. The commit
+ * is the person's, as git knows them; where git doesn't, Althar's. It is
+ * never signed, as signing could wait on a passphrase nobody is asked for.
+ */
+export const startRepository = (path: string): Effect.Effect<void, GitFailed> =>
+  Effect.gen(function* () {
+    yield* run(60_000, path, ['init', '--quiet', '--initial-branch=main'])
+    const known = yield* run(60_000, path, ['var', 'GIT_COMMITTER_IDENT']).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    )
+    yield* run(
+      60_000,
+      path,
+      ['commit', '--quiet', '--allow-empty', '--no-gpg-sign', '--message', 'Initial commit'],
+      known ? {} : ALTHAR_IDENTITY,
+    )
+  })
 
 /** Whether a local branch exists. */
 export const branchExists = (cwd: string, branch: string) =>

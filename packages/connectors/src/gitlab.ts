@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
@@ -122,6 +124,24 @@ const NoteAnswer = Schema.Struct({
   ),
 })
 type NoteAnswer = typeof NoteAnswer.Type
+
+/** What GitLab says of a file it took for a project's notes: where it is, from the project's own page. */
+const UploadAnswer = Schema.Struct({ url: Schema.String })
+
+/** A file as a form sends it, the way GitLab's uploads take one: its bytes as `file`, with its name and type. */
+const formWith = (picture: { readonly bytes: Uint8Array; readonly name: string; readonly mediaType: string }, boundary: string) => {
+  // A name in quotes can't hold a quote or a line's end.
+  const name = picture.name.replace(/["\r\n]/g, '-')
+  const head = new TextEncoder().encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${picture.mediaType}\r\n\r\n`,
+  )
+  const foot = new TextEncoder().encode(`\r\n--${boundary}--\r\n`)
+  const body = new Uint8Array(head.length + picture.bytes.length + foot.length)
+  body.set(head, 0)
+  body.set(picture.bytes, head.length)
+  body.set(foot, head.length + picture.bytes.length)
+  return body
+}
 
 /** A trigger job: it starts a child pipeline, or another project's, and its result is that pipeline's. */
 const BridgeAnswer = Schema.Struct({
@@ -545,7 +565,16 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, links: false, starts: false, changes: ISSUE_CHANGES },
+    capabilities: {
+      drafts: true,
+      checkLogs: true,
+      threads: true,
+      reviews: false,
+      pictures: true,
+      links: false,
+      starts: false,
+      changes: ISSUE_CHANGES,
+    },
     account,
     repository: (path) =>
       Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
@@ -771,6 +800,29 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         ),
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (note) => commentOf(repository, number, note, reply.threadId, true),
+      ),
+    uploadPicture: (repository, picture) =>
+      Effect.gen(function* () {
+        const boundary = `althar-${createHash('sha256').update(picture.bytes).digest('hex').slice(0, 24)}`
+        const answer = yield* http.upload(
+          UploadAnswer,
+          `${project(repository)}/uploads`,
+          formWith(picture, boundary),
+          `multipart/form-data; boundary=${boundary}`,
+        )
+        // From the project's own page, which serves it to those who can see the project: never an address elsewhere.
+        if (!answer.url.startsWith('/uploads/'))
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'invalid_response',
+            message: `GitLab gave the picture an address elsewhere: ${answer.url}`,
+          })
+        return `${web}/${repository.path.join('/')}${answer.url}`
+      }),
+    editComment: (repository, number, commentId, body) =>
+      Effect.map(
+        http.json(NoteAnswer, 'PUT', `${project(repository)}/merge_requests/${number}/notes/${encodeURIComponent(commentId)}`, { body }),
+        (note) => commentOf(repository, number, note, null, true),
       ),
     // Reviews of a change Althar didn't open are GitHub's alone, for now.
     changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),

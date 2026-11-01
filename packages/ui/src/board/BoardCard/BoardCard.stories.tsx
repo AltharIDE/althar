@@ -4,6 +4,8 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import {
   CHANGE_CONFLICT,
+  CHANGE_CHECKS_RUNNING,
+  CHANGE_IN_MERGE_QUEUE,
   CHANGE_PERMISSION,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
@@ -22,6 +24,7 @@ import {
   REVIEW_DRAFTED,
   REVIEW_RUNNING,
 } from '../../fixtures/kinds'
+import { QUESTION_LONG } from '../../fixtures/home'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
@@ -314,6 +317,31 @@ export const ReadyFactsOnOneLine: Story = {
   },
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */
+/** In its branch's merge queue: its steps are all done, none on, and the words at the top say where it stands. */
+export const InMergeQueue: Story = {
+  args: CHANGE_IN_MERGE_QUEUE,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('In the merge queue')).toBeInTheDocument()
+    const track = card.getByRole('list', { name: 'Steps' }).textContent ?? ''
+    // Both steps are done: the word for one on it is never in the track.
+    await expect(track).not.toMatch(/now/)
+    await expect(track.match(/done/g)).toHaveLength(2)
+  },
+}
+export const InMergeQueueDark: Story = { ...InMergeQueue, globals: { theme: 'dark' } }
+/** Its checks run on the code host: no step is on, and the track has no loading fill; the words at the top say it runs. */
+export const ChecksRunning: Story = {
+  args: CHANGE_CHECKS_RUNNING,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Checks running')).toBeInTheDocument()
+    const track = card.getByRole('list', { name: 'Steps' }).textContent ?? ''
+    await expect(track).not.toMatch(/now/)
+    await expect(track.match(/done/g)).toHaveLength(2)
+  },
+}
+export const ChecksRunningDark: Story = { ...ChecksRunning, globals: { theme: 'dark' } }
 export const MergeConflict: Story = { args: CHANGE_CONFLICT }
 /** Files by name, three at most; a long unbroken word still wraps inside the card at its narrowest. */
 export const MergeConflictLongNote: Story = {
@@ -368,6 +396,15 @@ export const Permission: Story = {
   },
 }
 export const Question: Story = { args: CHANGE_QUESTION }
+/** A lead's free-form question as the board gives it: the headline as the card's line, and Answer. The paragraph it came with is in the task. */
+export const QuestionNoOptions: Story = {
+  args: { ...CHANGE_QUESTION, why: QUESTION_LONG.title, next: <NextStep signal>Answer</NextStep> },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText(QUESTION_LONG.title)).toBeInTheDocument()
+    await expect(card.queryByText(/^ADR-070 says/)).not.toBeInTheDocument()
+  },
+}
 export const Stuck: Story = { args: CHANGE_STUCK }
 export const ReviewRunning: Story = {
   args: REVIEW_RUNNING,

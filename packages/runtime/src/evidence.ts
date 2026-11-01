@@ -40,6 +40,8 @@ export const EvidenceGiven = Schema.Struct({
   exit_code: Schema.optional(Schema.Int),
   output: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String),
+  view: Schema.optional(Schema.String),
+  option: Schema.optional(Schema.Boolean),
 })
 export type EvidenceGiven = typeof EvidenceGiven.Type
 
@@ -56,6 +58,10 @@ export interface KeptEvidence {
   readonly text: string | null
   /** Lines from the start of the text that weren't kept. */
   readonly dropped: number
+  /** For a picture of the work as built: the view it shows, by the name its lead keeps for it. */
+  readonly view?: string
+  /** For a picture: an option the person chose between, or an exploration, kept out of Outputs and the pull request. */
+  readonly option?: true
 }
 
 /** A picture evidence names, found and read, before it is kept. */
@@ -280,6 +286,8 @@ export const keepEvidence = (place: HandedPlace, read: ReadonlyArray<{ readonly 
         exit: given.exit_code ?? null,
         text: kept?.text ?? null,
         dropped: kept?.dropped ?? 0,
+        ...(found !== null && given.view?.trim() ? { view: given.view.trim() } : {}),
+        ...(found !== null && given.option === true ? { option: true as const } : {}),
       } satisfies KeptEvidence
     }),
   )
@@ -310,9 +318,19 @@ export const evidenceOf = (value: unknown): ReadonlyArray<Evidence> =>
         exit: typeof piece.exit === 'number' ? piece.exit : null,
         text: stringOrNull(piece.text),
         dropped: typeof piece.dropped === 'number' ? piece.dropped : 0,
+        ...(stringOrNull(piece.view) === null ? {} : { view: stringOrNull(piece.view) ?? '' }),
+        ...(piece.option === true ? { option: true } : {}),
       },
     ]
   })
+
+/** The views from earlier a step result says still hold; nothing where it named none. */
+export const keptViewsIn = (value: unknown): { readonly keptViews?: ReadonlyArray<string> } => {
+  const views = Array.isArray(value)
+    ? [...new Set(value.flatMap((view) => (typeof view === 'string' && view.trim() !== '' ? [view.trim()] : [])))]
+    : []
+  return views.length === 0 ? {} : { keptViews: views }
+}
 
 /** What a step result says couldn't be shown; null where it didn't say, so what an earlier step said stands. */
 export const unverifiedIn = (value: unknown): ReadonlyArray<string> | null =>

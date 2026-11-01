@@ -79,7 +79,7 @@ export const quoted = (text: string) =>
  * reviewer's.
  */
 export const DESCRIPTION_SHAPE =
-  "Write it as a thoughtful teammate would for a colleague reviewing the pull request, who hasn't seen your work: short, plain prose, in roughly this shape. Why: the problem or request behind it, and the issue it's for, if any. What changed: the change as a reader should understand it, its behaviour and design, not a list of files. How you approached it: the decisions and trade-offs worth knowing, alternatives you turned down, anything surprising. How it was checked: a sentence or a few bullets on what you tried by hand or saw working, and anything you couldn't check that a reviewer should look at; not the tests you wrote, which are in the diff. Leave out a part with nothing to say, and don't pad: headings only where they help a longer one. Never put in it the review, its rounds or findings, a list of evidence, commands with their exit codes and output, the names of agents or models, or Althar's words for its work (step, round, settle, lead, evidence). Leave screenshots out: they can't go up with the pull request. Althar adds the issue's link and a line saying it opened the pull request, so leave those out too."
+  "Write it as a thoughtful teammate would for a colleague reviewing the pull request, who hasn't seen your work: short, plain prose, in roughly this shape. Why: the problem or request behind it, and the issue it's for, if any. What changed: the change as a reader should understand it, its behaviour and design, not a list of files. How you approached it: the decisions and trade-offs worth knowing, alternatives you turned down, anything surprising. How it was checked: a sentence or a few bullets on what you tried by hand or saw working, and anything you couldn't check that a reviewer should look at; not the tests you wrote, which are in the diff. Leave out a part with nothing to say, and don't pad: headings only where they help a longer one. Never put in it the review, its rounds or findings, a list of evidence, commands with their exit codes and output, the names of agents or models, or Althar's words for its work (step, round, settle, lead, evidence). Leave screenshots out: they can't go up with the pull request. Althar adds the issue's link, what the review changed and kept, and a line saying it opened the pull request, so leave those out too."
 
 /** Something that has something to say: not null, nor blank. */
 const said = (text: string | null | undefined) => (text === undefined || text === null || text.trim() === '' ? null : text.trim())
@@ -92,7 +92,9 @@ const said = (text: string | null | undefined) => (text === undefined || text ==
  * person. Where the lead wrote none, as an older task's didn't, or one that
  * left the template, it is what the task built, as the lead last said it
  * (else its last step's summary): in the template's place for a summary,
- * or under a heading of its own below it.
+ * or under a heading of its own below it. Where the person has it on, the
+ * review its change had goes with it (pullRequestReview.ts): the seal at its
+ * head, in its corner, and the review folded after it.
  */
 export const bodyOf = (input: {
   /** What the task built, as the lead last said it: the description where the lead wrote none. */
@@ -108,8 +110,11 @@ export const bodyOf = (input: {
   readonly credit?: boolean
   /** The automation whose run opened it, which it is signed with whatever the credit: nobody watched it being made. */
   readonly automation?: string | null
+  /** The review the change had: its seal, where one shows, and the folded section. */
+  readonly review?: { readonly seal: string | null; readonly details: string } | null
 }) => {
   const parts: Array<string> = []
+  if (input.review?.seal != null) parts.push(input.review.seal)
   const plain = said(input.built) ?? said(input.lead)
   const template = input.template ?? null
   const written = said(input.written)
@@ -123,6 +128,7 @@ export const bodyOf = (input: {
     parts.push(untick(placed ?? template).trim())
     if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
   }
+  if (input.review != null) parts.push(input.review.details)
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
   if (input.automation !== undefined && input.automation !== null)
@@ -193,7 +199,7 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke and commit it, then push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
+    'Fix what broke and commit it, then push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. Read more with read_checks (tail, search, full log file, annotations and artifacts). read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
   ].join('\n\n')
 
 /**
@@ -213,7 +219,7 @@ export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyA
       `- where it is broken on ${base}, or fails for a reason that has nothing to do with this change, as when the same check fails the same way on ${base}'s latest commit (read_default_branch_checks shows its checks): change nothing on the branch to work around it, and call hand_checks_to_person with one short line saying so, such as "Fails on ${base} too: test times out in limit.test.ts", and what would fix it;`,
       '- where it needs the person to decide, call hand_checks_to_person with what they are to decide.',
     ].join('\n'),
-    `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
+    `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Read more with read_checks (tail, search, full log file, annotations and artifacts). read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
   ].join('\n\n')
 
 /**

@@ -733,7 +733,8 @@ Taken where the other tools agree:
   run only reads. claude-code-action and GitHub's agentic workflows do the
   same, and with every ask allowed it matters more.
 - **8. The limits by default:** one place for automations; at least an hour
-  apart; 45 minutes of work a run, over all its steps; a cap on runs a day
+  apart; 45 minutes of work a run, over all its steps, but one whose lead is done
+  and only its review works on goes on without it, not stopped; a cap on runs a day
   for all automations together; on a usage limit, stop rather than move;
   plan accounts only at first, which leaves OpenCode out; at most five of
   an automation's pull requests open, Dependabot's limit.

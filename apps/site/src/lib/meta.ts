@@ -39,6 +39,9 @@ export const withMeta = (html: string, page: PageMeta, origin: string, structure
     meta('property', 'og:image:height', '630'),
     ...(base ? [meta('property', 'og:url', url)] : []),
     meta('name', 'twitter:card', 'summary_large_image'),
+    meta('name', 'twitter:title', page.title),
+    meta('name', 'twitter:description', page.description),
+    meta('name', 'twitter:image', `${base}${page.image}`),
     ...(page.index ? [] : [meta('name', 'robots', 'noindex')]),
     ...structured.map(jsonLd),
   ]
