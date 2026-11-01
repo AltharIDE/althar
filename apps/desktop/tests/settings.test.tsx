@@ -409,9 +409,7 @@ describe('the Settings tab', () => {
     withServices(<Settings at="skills" />, fakeClient().client)
     expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
     expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
-    expect(sectionText.skills.lede).toBe(
-      'What each task’s lead is given as it starts, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
-    )
+    expect(sectionText.skills.title).toBe('Skills')
   })
 
   it('says when this Althar has no skills to give, without speaking of the runtime', async () => {
