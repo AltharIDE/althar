@@ -192,8 +192,12 @@ describe('reviewing someone else’s pull request', () => {
       yield* until(said(threadId), (all) => all.length > 0)
       assert.isTrue(launches.some((launch) => launch.cwd === workspace?.path))
       // Untrusted, as a reader: nothing of the repository's own settings, hooks or plugins loads, and offline, from outside.
-      assert.deepStrictEqual(launches.find((launch) => launch.cwd === workspace?.path)?.options, { untrusted: true })
-      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true, offline: true } })
+      assert.deepStrictEqual(launches.find((launch) => launch.cwd === workspace?.path)?.options, {
+        web: false,
+        untrusted: true,
+        offline: true,
+      })
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { web: false, untrusted: true, offline: true } })
       const sessions = yield* Sessions
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'settings' })
       const [mode] = yield* until(
@@ -320,7 +324,7 @@ describe('reviewing someone else’s pull request', () => {
       // Its head moved on since Althar copied it: said so.
       assert.match(read, /Its head is head-1 now; your copy holds [0-9a-f]{12}, as Althar fetched it\./)
       // A team's pull request: untrusted all the same, but not offline.
-      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true } })
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { web: true, untrusted: true } })
 
       // It is given only what reads, draft_review, and settle_task to keep or discard it as the person says; the rest is refused
       // when called, listed or not: nothing it could change the project with, such as how it runs, which Althar runs outside any
