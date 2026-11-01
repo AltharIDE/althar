@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import type { ChangeTarget } from '@althar/domain'
-import { forkOf, workRemotes } from '../src/forks'
+import { baseBranch, forkOf, workRemotes } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ask, cards, connect, git, pushByHand, runtimeWith } from './changesSupport'
@@ -219,6 +219,14 @@ describe('a clone whose remotes were renamed by hand', () => {
     ])
     // No origin at all: what it was added with.
     assert.deepStrictEqual(workRemotes([{ name: 'fork', url: 'a' }], ['a', 'b']), ['a', 'b'])
+  })
+
+  it('opens a task started before the rename into that branch, not one called upstream/main', () => {
+    assert.strictEqual(baseBranch('upstream/main', false), 'main')
+    assert.strictEqual(baseBranch('origin/main', false), 'main')
+    assert.strictEqual(baseBranch('main', false), 'main')
+    // A branch of this clone's that is called that stays as it is.
+    assert.strictEqual(baseBranch('upstream/next', true), 'upstream/next')
   })
 
   it.live('keeps a pull request open from the fork on the fork, and opens new ones as a normal project', () => {

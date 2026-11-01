@@ -66,7 +66,7 @@ import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
-import { forkOf, workRemotes } from './forks'
+import { baseBranch, forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
@@ -1243,7 +1243,9 @@ export class Changes extends Context.Service<
           // was chosen, that repository's default.
           const target =
             fork === null || !samePath(repository.path, fork.upstream.path)
-              ? (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
+              ? baseBranch(task.baseRef ?? '', task.baseRef != null && (yield* branchExists(task.path, task.baseRef))) ||
+                task.defaultBase ||
+                repository.defaultBranch
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
                 : repository.defaultBranch

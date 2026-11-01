@@ -40,3 +40,10 @@ export const workRemotes = (
   const origin = remotes.find((remote) => remote.name === 'origin')?.url
   return origin === undefined ? recorded : [origin, ...recorded.filter((url) => url !== origin)]
 }
+
+/**
+ * The branch a task's base names on the repository: `origin/…` or `upstream/…`
+ * as its clone's remotes had it when the task started, which a rename by hand
+ * since hasn't changed. A branch of the clone's own called that stays as it is.
+ */
+export const baseBranch = (baseRef: string, local: boolean) => (local ? baseRef : baseRef.replace(/^(origin|upstream)\//, ''))
