@@ -77,9 +77,10 @@
     for a tag or a merge, and the lead has the same tools and the gated
     call ([Leads](#leads-under-the-same-rule)).
   - **The coordinator reads the web under the project's switch, as a lead
-    does** (ADR-078), and in a turn an outside author's words reached, a web
-    read asks the person ([The web](#the-web)). This amends ADR-078, which
-    left the coordinator out.
+    does** (ADR-078). Once an outside author's words reach its
+    conversation, its web reads ask the person, until a fresh session
+    starts with none of them ([The web](#the-web)). This amends ADR-078,
+    which left the coordinator out.
   - **The coordinator runs merging and releases, not a standing task's
     lead** ([why](#the-coordinator-not-a-standing-task)). A fix stays a task
     with a lead, which the coordinator plans.
@@ -110,8 +111,11 @@
   - **The coordinator off the switch** (as first written, after ADR-078):
     each of its web reads asked. The switch is the person's call on that
     leak, for the coordinator as for a lead; what the coordinator alone
-    meets, strangers' words from every pull request, is held by asking in a
-    turn they reached ([The web](#the-web)).
+    meets, strangers' words from every pull request, is held by asking
+    while they can reach its conversation ([The web](#the-web)).
+  - **A mark for the turn only** (as first written): a stranger's comment
+    can ask for the URL a turn later, in a turn that brought nothing new,
+    since the coordinator is one long conversation (ADR-031).
   - **Rules for each flow** (this ADR as first written, on 31 October):
     merging, queues and releases each had rules of their own, which read as
     all the coordinator might do. The person asked on 1 November for one
@@ -148,8 +152,11 @@
     ([The person's word](#the-persons-word)). The same holds for a lead, in
     a turn the person started in its task's thread: it reads its pull
     request's comments and, where the project lets it, the web (ADR-078).
-    The coordinator reads the web under the same switch, short of a turn an
-    outside author's words reached ([The web](#the-web)).
+    The coordinator reads the web under the same switch, short of a
+    conversation an outside author's words reached ([The web](#the-web)).
+    Such a conversation's web reads ask until Althar hands it over at a
+    break, and so do those of a task planned from it, for the rest of the
+    task: the person meets asks around an outside author's pull request.
   - **The keychain.** All of this holds against a mistake, and against text
     steering the coordinator through Althar's tools; not against a script
     set on going round Althar. On a Mac, a script inside Claude Code's
@@ -193,11 +200,12 @@
     tried for real, with each host's contract clauses.
 - **Revisit when:** Claude Code's sandbox can deny the keychain's service;
   the coordinator or a lead acts on a target, or does something, the
-  person didn't mean; a web read asks too often in turns an
-  outside author's words reached; following every pull request reaches a host's rate limit; the
-  person wants something that can't be undone to go ahead unasked; a
-  project is shared, and it matters whose word counts; a host opens an API
-  for what Althar stands in for, such as entering Bitbucket Cloud's queue.
+  person didn't mean; web reads ask too often in conversations, or tasks,
+  an outside author's words reached; following every pull request reaches
+  a host's rate limit; the person wants something that can't be undone to
+  go ahead unasked; a project is shared, and it matters whose word counts;
+  a host opens an API for what Althar stands in for, such as entering
+  Bitbucket Cloud's queue.
 
 Paths below are in `packages/runtime/src`, or in `packages/` where they
 start with another package's folder, as they stood at 3b4e42f1.
@@ -482,19 +490,65 @@ Two things stay:
 
 - **Its commands reach no network.** Its sandbox allows no host, which is
   why they run without asking (ADR-058). The web is its web tools.
-- **In a turn an outside author's words reached, a web read asks the
-  person,** for the rest of that turn, whatever the switch says. Following
-  every open pull request brings the coordinator strangers' words unasked:
-  a description, a comment or a review from outside the repository's own
-  people, as `reply_on_pull_request` has them
-  ([On the code host](#on-the-code-host)), and their code where it looks.
-  ADR-078 keeps outside reviews offline for the same reason. Althar marks
-  the turn when one of its tools hands the coordinator such words: news
-  carrying a comment or a review of theirs, `read_pull_request` on their
-  pull request, or the gated call's read of one. The ask shows the address
-  the read would send. A lead's turns aren't marked: an outside author's
-  words reach it only on a pull request the person attached to its task
-  (ADR-052), not unasked from every pull request in the project.
+- **Once an outside author's words reach its conversation, a web read asks
+  the person,** whatever the switch says, until a fresh session starts
+  with none of them ([below](#how-long-the-mark-lasts)). Following every
+  open pull request puts strangers in the coordinator's way: a description,
+  a comment or a review from outside the repository's own people, as
+  `reply_on_pull_request` has them ([On the code host](#on-the-code-host)),
+  and their code where it looks. ADR-078 keeps outside reviews offline for
+  the same reason, for as long as each runs. The ask shows the address the
+  read would send, and the pull request whose words marked the
+  conversation.
+
+### How long the mark lasts
+
+The coordinator is one long conversation (ADR-031). What a stranger wrote
+stays in its context after the turn that brought it, and can ask for the
+URL a turn later, in a turn that brought nothing new. So the mark is the
+session's, not the turn's, and it follows the words wherever Althar keeps
+them:
+
+- **Set** when one of Althar's tools hands the coordinator an outside
+  author's words: `read_pull_request` on their pull request, `read_checks`
+  on its runs, whose logs their code writes, the gated call's read of
+  either, or a marked text of Althar's (below). News doesn't set it: news
+  of an outside author's pull request is in Althar's words, its number,
+  that its author is outside the repository's people, its state, its
+  checks and its reviews' verdicts, without their title, description,
+  comments, reviews' bodies, commit messages or branch's name. The
+  coordinator reads those when its work calls for them.
+- **Kept for the session:** every later turn of it, started by the person
+  or woken by news, and through compaction, its agent's own or the
+  person's Compact (ADR-039), since a summary is written from what was
+  read.
+- **Carried by what a marked session writes.** Althar marks each text it
+  keeps from one: its messages, the plans and briefs of tasks it plans,
+  what it passes to a lead, the notes it keeps, its drafts, and its
+  receipts for what it posted on the host. A session handed a marked text
+  is marked: a fresh one briefed with it; one reading it back, through
+  `read_thread`, `read_task`, `list_notes`, or `read_pull_request` on a
+  comment Althar posted from a marked session; and a task's lead whose
+  brief or message holds it, for the rest of the task, since each of its
+  fresh sessions is briefed from the task (ADR-038). What a marked lead
+  writes is marked in the same way.
+- **Cleared only by a fresh session briefed with nothing marked.** A marked
+  coordinator is handed over at its next break, as a lead is at one
+  (ADR-038): idle past its prompt cache's life, when its next turn would
+  read its whole context afresh anyway. The brief, from Althar's records
+  (ADR-031), leaves out each marked text, with a line naming what it left
+  out and where to read it: the coordinator's own messages said while
+  marked (the person's stay, word for word), and a marked task's plan and
+  report. Reading one back marks the session again.
+- **A note kept in a marked session stays marked** until the person edits
+  it in the project's settings, where it says why. It holds a decision of
+  the person's, so every brief carries it, and every session briefed with
+  it is marked.
+
+A lead's sessions are marked only by a marked text handed to it. An
+outside author's own words reach a lead on a pull request the person
+attached to its task (ADR-052), which is their call, as ADR-078's switch
+is.
 
 ## The coordinator, not a standing task
 
@@ -665,6 +719,9 @@ coordinator now hears it too, beside plans and issue cards:
   One an errand waits on is polled as a task's own is, as
   [above](#ci-news-and-what-the-coordinator-does-with-it), and a task's own
   pull request is still polled as now.
+- News of an outside author's pull request is in Althar's words, not
+  theirs: its state, checks and reviews' verdicts, without its title or
+  their comments ([How long the mark lasts](#how-long-the-mark-lasts)).
 - About 30 open pull requests is well inside GitHub's 5,000 requests an
   hour. On every host, following takes at most a fifth of what the host
   allows in an hour, by its own headers or Althar's count where it sends
@@ -772,7 +829,7 @@ decision's, and its reason says which.
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | Not a limit on what: news brings what it would have fetched for |
 | Each web read asks the person, and the project's web switch passes it by | ADR-078; `provider-adapters/src/registry.ts:754` | Lifted: it follows the switch, as a lead does | The switch is the person's call on the leak ADR-078 weighs, for the coordinator as for a lead |
-| *New:* in a turn an outside author's words reached, a web read asks | [The web](#the-web) | Added | A URL sent can't be called back, and in that turn a stranger may have chosen it: the first limit. ADR-078 keeps outside reviews offline for the same reason |
+| *New:* while an outside author's words can reach its conversation, a web read asks | [How long the mark lasts](#how-long-the-mark-lasts) | Added | A URL sent can't be called back, and a stranger's words may have chosen it, in the turn that brought them or a later one: the first limit. ADR-078 keeps outside reviews offline, for as long as each runs, for the same reason |
 | Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The third limit: the record and the review |
 | Where no sandbox holds it, only commands that look | ADR-058; `provider-adapters/src/registry.ts:743-744` | Kept | ADR-071 runs Claude Code's inside its sandbox unread already; ADR-082's task 4 and DEV-179 are the rest |
 | **Tasks** | | | |
@@ -819,7 +876,7 @@ title is a task's, in at most 60 characters.
 | 4 | A stopped lead hears what's meant for it | `message_lead` starts a stopped lead. Reviews, comments and the queue sending its pull request back are queued for it, and wake it (today `Changes.ts:3261` drops them). Shared with DEV-176 | S | – |
 | 5 | Coordinator merges and queues when you ask | `merge_pull_request` at a head, with a method the repository allows: GitHub's queue (at `expectedHeadOid`), GitLab's merge train, and elsewhere the errand standing in for a queue: one slot per repository and branch, taken in the order asked and held until a read shows the merge landed, each branch brought up to date and green against the target's new head (three tries for someone else's writes), auto-merge as its merge where the host has it (GitLab's, Data Center's), the person's "merge it now" waiting only for a merge in flight, and a link to the host's Add to queue where a plain merge is refused; `leave_queue` on each. What each server has, read and kept. A merge that lands later is done once read. Any of the project's pull requests, in any of its repositories. "Once it's green" as an errand. The line in the chat. Contract clauses on every host's fake. Tests: two errands with the first merge held pending, where the second waits, then starts again from the new head; the person's "merge it now" ahead of the line; a write by someone else in the gap, heard as main red; a restart keeps the line | L | 2, 3 |
 | 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. An outside author's branch where the host lets the account push to it, else a reply asks them, asked-for. Never a rebase, never forced | M | 1 |
-| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. At most a fifth of each host's hourly allowance, by its headers or Althar's own count, backing off as it falls; Bitbucket's lists carry no checks. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
+| 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. At most a fifth of each host's hourly allowance, by its headers or Althar's own count, backing off as it falls; Bitbucket's lists carry no checks. News only: no card, no lead; an outside author's pull request's news carries none of their words (task 17). Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
 | 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on the commit the person names or the default branch's, on every host; moving or deleting a tag, asked-for. In the connectors: read a release, and publish one as each host does (GitHub's draft, GitLab's release made, Bitbucket Cloud's files in Downloads); approve a run (GitHub's environment, GitLab's deployment approval or manual job), and link the host's own button where only the person can (Bitbucket's manual steps); run a run's failed jobs again; read a run on a tag (with DEV-94). Another repository's release steps, read from it and kept as a note | L | 3 |
 | 9 | Release 0.7.0 through the coordinator | The release errand above: the version-and-notes task, then merge, tag, approve, the draft, the decision to try and publish it, Publish, the tap. Each step in the chat. The coordinator's brief for releasing. Proven by releasing 0.7.0 itself, so it goes last | M | 2, 5, 8 |
 | 10 | A gated call to the code host's API | `code_host_api`: REST reads and GraphQL queries; writes asked-for, REST by method and path and GraphQL mutations by name, a document parsed whole; GitHub's lists by family: typed tools' (by name), the repository's content (pointing to a task), what stands in for a check of the work, and never; a workflow started on any branch, asked-for. A test that places every write in GitHub's published description of its API, and every mutation in its GraphQL schema; a write not placed is refused at run time, and a document holding one is refused whole. The other hosts' lists are task 14; receipts and the line in the chat; a floor under the rate limit | L | 3 |
@@ -829,7 +886,7 @@ title is a task's, in at most 60 characters.
 | 14 | The gated call on GitLab and both Bitbuckets | GitLab's, Bitbucket Cloud's and Data Center's lists, by [the same families](#the-gated-calls-lists-on-the-other-hosts), each tested against the host's published description: GitLab's, which is partial, completed by hand, and Data Center's for each version Althar supports. GitLab's GraphQL mutations by name. A write placed nowhere is refused | M | 10 |
 | 15 | Leads merge, tag and call the host when you ask | A lead's `merge_pull_request` on its task's pull requests, through task 5's slot and line; `push_tag` with no card where the person asked in the task's thread, and asking as now where they didn't; `update_branch`, and closing and reopening its own; `code_host_api` on its task's repositories. Its brief says what it does unasked. Tests: a merge the person asked for in the thread goes, one the lead works out for itself asks, a turn a review started can't merge | M | 3, 5, 10 |
 | 16 | A gated call to the tracker's API | `tracker_api`, as task 10's is for the host: reads in any turn, writes asked-for; Linear's GraphQL mutations by name, Jira's and Trello's REST by method and path, in the same families: a typed tool's (`draft_issue`, `change_issue`, comments), and never (the workspace's or site's settings, teams' and projects' settings, members and permissions, keys and tokens, webhooks, apps and integrations). GitHub's and GitLab's issues go through `code_host_api`. Each list tested against the tracker's published schema or description, placed by hand where it has none; a write placed nowhere is refused | L | 10 |
-| 17 | The coordinator reads the web under the switch | The coordinator's session follows `leadsReachWeb` as a lead's does: on, its web tools go without asking, on each agent as ADR-078 has them; off, they ask, as now. Its sandbox still allows no host. Althar marks a turn when a tool hands it an outside author's words: news carrying their comment or review, `read_pull_request` on their pull request, the gated call's read of one; in a marked turn a web read asks the person, showing the address, whatever the switch says. The switch's words name the coordinator too. Tests: on, a read goes; off, it asks; after an outside author's comment in the turn, it asks; the person's next turn goes again | M | 2, 7, 10 |
+| 17 | The coordinator reads the web under the switch | The coordinator's session follows `leadsReachWeb` as a lead's does: on, its web tools go without asking, on each agent as ADR-078 has them; off, they ask, as now. Its sandbox still allows no host. The mark, as [How long the mark lasts](#how-long-the-mark-lasts) has it: set by a tool handing it an outside author's words (`read_pull_request`, `read_checks` on their runs, the gated call's read) or a marked text; kept on the session, through compaction; carried by every text Althar keeps from a marked session, to a lead whose brief or message holds one; cleared by a handover at the next break, whose brief leaves out what's marked and says what. While marked, a web read asks, whatever the switch says, showing the address and the pull request that marked it. A marked note says so in the project's settings until the person edits it. The switch's words name the coordinator too. Tests: on, a read goes; off, it asks; an outside author's comment read in one turn, a read the person's next turn asks for still asks, and still does after a compaction; `read_thread` handing back a marked message marks a fresh session; a lead planned while marked asks for its reads; the handover at a break leaves the marked messages out, and the next read goes | L | 2, 7, 10 |
 
 In order:
 1. **First, side by side:** 1, 2, 3 and 4. None waits on another.
