@@ -151,6 +151,38 @@ describe('evidence, as the window draws it', () => {
     ).toEqual(['A1 · Settings as a page', 'A2 · Its rules'])
   })
 
+  it('shows #476 as built: none of its first looks or the directions the person chose between', () => {
+    const at = (time: string, captions: ReadonlyArray<string>) => ({
+      ...items.step({
+        evidence: captions.map((caption, i) =>
+          piece({ kind: 'screenshot', caption, picture: { ...PICTURE, digest: `${time}${i}`.padEnd(64, '0') } }),
+        ),
+      }),
+      createdAt: time,
+    })
+    // Its reports' pictures, as they were: planned as a change from the start, so it never became one.
+    const rounds = [
+      at('2026-10-31T10:45:02.094Z', ['A · Rows: a row per repository', 'B · Script: the script Althar runs', 'C · Its own section']),
+      at('2026-11-01T16:08:55.484Z', ["The plain-text setup in project settings' Running"]),
+      at('2026-11-01T16:13:07.335Z', [
+        "A · Cards on meridian's three repositories",
+        'B · Tabs',
+        'C · Terminal: dark cards',
+        'D · One script',
+      ]),
+      at('2026-11-01T16:33:07.976Z', ['B · Files: the copied files as chips under the commands']),
+      at('2026-11-01T17:01:47.156Z', ["The kit's RepositorySetups with one repository", 'Three repositories as tabs']),
+      at('2026-11-01T17:08:13.672Z', ['The real Running page in the app after a window reload', 'Adding ../secrets.env is refused']),
+    ]
+    const shots = outcomeOf(
+      snapshot({ items: rounds, task: { ...snapshot().task, kind: 'change', changes: [change()], madeChangeAt: null } }),
+    ).shots
+    expect(shots.map((one) => one.caption)).toEqual([
+      'The real Running page in the app after a window reload',
+      'Adding ../secrets.env is refused',
+    ])
+  })
+
   it('says what it is as its pull request does: the lead’s description, else what it built, else its last summary', () => {
     const built = items.step({ built: 'A retry.' })
     const described = items.step({ step: 'settle', descriptions: { meridian: 'Checkout retries once.\n\nThe rest of it.' } })
