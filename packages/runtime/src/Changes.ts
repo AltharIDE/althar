@@ -3029,18 +3029,35 @@ export class Changes extends Context.Service<
       const heard = (link: LinkRow, kind: string, id: string, payload: Readonly<Record<string, unknown>>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql`INSERT OR IGNORE INTO observations ${sql.insert({
-            id: yield* newId(Ids.observation),
-            projectId: link.projectId,
-            subjectType: 'external_link',
-            subjectId: link.id,
-            kind,
-            payload: JSON.stringify({ ...payload, id }),
-            source: link.product,
-            observedAt: yield* timestamp,
-          })}`
-          const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
-          return (inserted?.n ?? 0) > 0
+          return yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`INSERT OR IGNORE INTO observations ${sql.insert({
+                id: yield* newId(Ids.observation),
+                projectId: link.projectId,
+                subjectType: 'external_link',
+                subjectId: link.id,
+                kind,
+                payload: JSON.stringify({ ...payload, id }),
+                source: link.product,
+                observedAt: yield* timestamp,
+              })}`
+              const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
+              const fresh = (inserted?.n ?? 0) > 0
+              if (fresh && ['checks', 'checks_handed', 'review', 'queue_left', 'merged', 'closed'].includes(kind)) {
+                const revision = yield* change('external_links', link.id, { updatedAt: yield* timestamp })
+                yield* fact({
+                  projectId: link.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: link.id,
+                  revision,
+                  type: 'external_link.news',
+                  payload: { kind, ...payload },
+                  actorId: instance.systemId,
+                })
+              }
+              return fresh
+            }),
+          )
         })
 
       /** An arrival in the task's thread. */
@@ -3550,7 +3567,15 @@ export class Changes extends Context.Service<
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
-            if (voice === 'althar' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
+            if (
+              voice === 'althar' ||
+              !(yield* heard(link, 'review', `review:${review.id}`, {
+                author: review.author.login,
+                verdict: review.verdict,
+                sha: now.headSha,
+              }))
+            )
+              continue
             happened = true
             yield* arrive(link, {
               kind: 'review',
@@ -3600,10 +3625,13 @@ export class Changes extends Context.Service<
           if (after.queued === true) happened = true
           if (entered) yield* sayOn(link, queuedNote(name, now.target))
           if (leftQueue) {
+            yield* heard(link, 'queue_left', `queue_left:${after.leftQueue}`, { reason: now.leftQueue ?? 'other', sha: now.headSha })
             happened = true
             yield* sayOn(link, leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
+            if (after.state === 'merged' || after.state === 'closed')
+              yield* heard(link, after.state, `${after.state}:${now.headSha}`, { sha: now.headSha })
             happened = true
             if (after.state === 'merged') yield* arrive(link, { kind: 'merged', from: null, where: name, url: now.url })
             if (after.state === 'closed') yield* arrive(link, { kind: 'closed', from: null, where: name, url: now.url })

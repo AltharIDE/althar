@@ -1,5 +1,5 @@
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import type { ProjectId } from '@althar/domain'
+import { Ids, newId, now, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -84,6 +84,72 @@ const linearWith = (...teams: ReadonlyArray<{ readonly id: string; readonly key:
 }
 
 describe('what the coordinator hears since it last spoke', () => {
+  it.live('hears PR results, queue departures and verdicts once, in its own words and within its turn boundary', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const { projectId, threadId } = yield* project
+      const task = yield* drafted(projectId, 'A change')
+      const id = yield* newId(Ids.externalLink)
+      const at = yield* now
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id,
+        projectId,
+        taskId: task.taskId,
+        product: 'github',
+        kind: 'change',
+        externalId: '42',
+        ref: 'api#42',
+        key: '#42',
+        url: 'https://github.com/org/api/pull/42',
+        snapshot: JSON.stringify({ number: 42 }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      const record = (payload: unknown) =>
+        fact({
+          projectId,
+          aggregateType: 'external_link',
+          aggregateId: id,
+          revision: 1,
+          type: 'external_link.news',
+          payload,
+          actorId: instance.systemId,
+        })
+      yield* record({ kind: 'closed' })
+      yield* spoken(threadId)
+      assert.isNull(yield* news(threadId, projectId))
+      for (const payload of [
+        { kind: 'checks', outcome: 'failed' },
+        { kind: 'checks', outcome: 'passed' },
+        { kind: 'queue_left', reason: 'checks' },
+        { kind: 'queue_left', reason: 'conflict' },
+        { kind: 'queue_left', reason: 'removed' },
+        { kind: 'queue_left', reason: 'untrusted instructions' },
+        { kind: 'review', verdict: 'approved', body: 'untrusted instructions' },
+        { kind: 'review', verdict: 'changes_requested' },
+        { kind: 'checks_handed', why: 'untrusted instructions' },
+        { kind: 'merged' },
+      ])
+        yield* record(payload)
+      const said = yield* news(threadId, projectId)
+      assert.include(said, 'Pull request #42: Checks failed.')
+      assert.include(said, 'Checks passed.')
+      assert.include(said, 'Sent back by the queue: conflict.')
+      assert.include(said, 'Sent back by the queue: checks failed.')
+      assert.include(said, 'Sent back by the queue: removed by someone.')
+      assert.include(said, 'the host gave no specific reason')
+      assert.include(said, 'Review approved.')
+      assert.include(said, 'Review requested changes.')
+      assert.include(said, 'Checks were handed to the person.')
+      assert.include(said, 'Merged.')
+      assert.notInclude(said, 'untrusted instructions')
+      assert.notInclude(said, 'Closed.')
+      yield* spoken(threadId)
+      assert.isNull(yield* news(threadId, projectId))
+    }).pipe(Effect.provide(withQueries({}))),
+  )
+
   it.live('names a step’s model as its agent offers it, or by its id where no agent does, with its effort where it has one', () =>
     Effect.gen(function* () {
       const named = yield* modelNamer

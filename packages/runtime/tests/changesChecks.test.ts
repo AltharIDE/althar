@@ -152,6 +152,13 @@ describe('a change whose checks Althar sees through', () => {
         (yield* readResults).filter((one) => one.outcome === 'passed'),
         3,
       )
+      // Every new finished result is also durable coordinator news, with no duplicate after snapshot recovery.
+      const delivered = yield* sql<{ outcome: string }>`
+        SELECT json_extract(e.payload, '$.outcome') AS outcome FROM record_events e
+        JOIN external_links l ON l.id = e.aggregate_id
+        WHERE l.task_id = ${taskId} AND e.type = 'external_link.news'
+          AND json_extract(e.payload, '$.kind') = 'checks' ORDER BY e.sequence`
+      assert.deepStrictEqual(delivered, yield* readResults)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

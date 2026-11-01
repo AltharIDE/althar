@@ -100,9 +100,10 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       ORDER BY sequence`
     // What became of its issue drafts, and of changes to issues in its thread, are told together.
     const drafts = [...(yield* draftNews(projectId, last.sequence)), ...(yield* changeNews(projectId, last.sequence))]
+    const pulls = yield* pullRequestNews(projectId, last.sequence)
     const started = yield* startedNews(projectId, last.sequence)
     const made = yield* madeNews(projectId, last.sequence, modelOf)
-    if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
+    if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0 && pulls.length === 0) return null
 
     /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */
     const team = (parameters: PlanParameters, other: PlanParameters) =>
@@ -152,7 +153,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       else if (plan.state === 'proposed' && plan.startsAt === null) said.push('The person is holding it: it waits until they start it.')
       if (said.length > 0) lines.push(`- ${plan.slug} (${plan.title}): ${said.join(' ')}`)
     }
-    if (lines.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
+    if (lines.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0 && pulls.length === 0) return null
     const close =
       lines.length === 0 && drafts.length === 0
         ? started.length === 0
@@ -163,7 +164,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
           : lines.length === 0
             ? 'Speak of these issues as they are now, not as you drafted them.'
             : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
-    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...made, ...drafts, ...(close === null ? [] : [close])].join('\n')}`
+    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...made, ...drafts, ...pulls, ...(close === null ? [] : [close])].join('\n')}`
   })
 
 /** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
@@ -319,5 +320,42 @@ const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
       const was = made.was === undefined || made.was === event.title ? '' : ` (it was “${made.was}”)`
       const who = made.review == null ? 'no review' : `${modelOf(made.review)} reviews it`
       return `- ${event.slug} (${event.title})${was}: the person asked its lead to make this quick task a change, and it is one now: ${who}, and ${endWords(made.end)}.`
+    })
+  })
+
+/** Host news in Althar's words: never carry a review's body, author or a PR title into the coordinator's instructions. */
+const pullRequestNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ payload: string; number: number }>`
+      SELECT e.payload, json_extract(l.snapshot, '$.number') AS number
+      FROM record_events e JOIN external_links l ON l.id = e.aggregate_id
+      WHERE e.project_id = ${projectId} AND e.sequence > ${since} AND e.type = 'external_link.news'
+      ORDER BY e.sequence`
+    return rows.flatMap((row) => {
+      const news = JSON.parse(row.payload) as { kind?: string; outcome?: string; verdict?: string; reason?: string }
+      const words =
+        news.kind === 'checks'
+          ? news.outcome === 'passed'
+            ? 'Checks passed.'
+            : news.outcome === 'failed'
+              ? 'Checks failed.'
+              : null
+          : news.kind === 'checks_handed'
+            ? 'Checks were handed to the person.'
+            : news.kind === 'merged'
+              ? 'Merged.'
+              : news.kind === 'closed'
+                ? 'Closed.'
+                : news.kind === 'review'
+                  ? news.verdict === 'approved'
+                    ? 'Review approved.'
+                    : news.verdict === 'changes_requested'
+                      ? 'Review requested changes.'
+                      : null
+                  : news.kind === 'queue_left'
+                    ? `Sent back by the queue: ${news.reason === 'checks' ? 'checks failed' : news.reason === 'conflict' ? 'conflict' : news.reason === 'removed' ? 'removed by someone' : 'the host gave no specific reason'}.`
+                    : null
+      return words === null ? [] : [`- Pull request #${row.number}: ${words}`]
     })
   })
