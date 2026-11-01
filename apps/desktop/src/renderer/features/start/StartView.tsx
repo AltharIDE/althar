@@ -36,6 +36,8 @@ export const text = {
   removeAnyway: 'Remove anyway',
   /** Asks every agent again, after one couldn't be checked. */
   checkAgain: 'Check again',
+  /** An agent signed in, on its row in the welcome. */
+  signedIn: 'Signed in',
   /** The welcome, in this computer's words, with the keys this system has. */
   first: () => ({
     welcome: {
@@ -97,15 +99,19 @@ export const openGuide = (model: StartModel, agentId: string) => {
   if (guide != null) window.open(guide, '_blank')
 }
 
-/** The agents, each as a row of the kit's list, with its own sign-in under it while one is under way. */
+/**
+ * The agents, each as a row of the kit's list, with its own sign-in under it while one is under way. A row signed in says
+ * so, before its version: someone new needn't know what a version number means to see it is ready.
+ */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
-  model.status?.agents.map((agent) =>
-    runtimeEntry(
+  model.status?.agents.map((agent) => {
+    const entry = runtimeEntry(
       agent,
       agent.installed && signIn.signingIn?.agentId === agent.id ? <AgentSignIn agent={agent} signIn={signIn} position={1} /> : undefined,
       model.installFailed[agent.id],
-    ),
-  ) ?? []
+    )
+    return entry.state === RuntimeState.Ready && entry.account === undefined ? { ...entry, account: text.signedIn } : entry
+  }) ?? []
 
 /** Signs an agent in by its first account, or a new one where it has none. */
 const signInTo = (model: StartModel, signIn: AccountSignInModel, agentId: string) => {

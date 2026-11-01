@@ -339,7 +339,7 @@ export function Welcome({
         <div key={step} className={cx(s.body, !instant && s.arrive)}>
           {isTour(step) ? (
             <div className={s.tour}>
-              <SceneFrame scene={SCENES[step]} instant={instant} label={t.tour[step].label} />
+              <SceneFrame scene={SCENES[step]} room={ROOM[step]} instant={instant} label={t.tour[step].label} />
               <div className={s.words}>
                 {at === 0 && <span className={s.greeting}>{t.greeting}</span>}
                 <h1 id={titleId} className={s.title}>
@@ -490,11 +490,26 @@ function mainOf(
   }
 }
 
-/** Room round a scene for the notes that point into it from outside: more at the sides, where the long ones reach. */
-const ROOM = { side: 200, end: 72 }
+/** Room round a scene for the notes that point into it from outside: more at the sides, where the long ones reach, and most where one reaches far. */
+const ROOM: Record<TourStep, { readonly side: number; readonly end: number }> = {
+  ask: { side: 330, end: 72 },
+  build: { side: 200, end: 72 },
+  decide: { side: 200, end: 72 },
+  review: { side: 220, end: 72 },
+}
 
 /** A scene, playing, scaled to fit its frame on the drafting table's dots. */
-function SceneFrame({ scene: Scene, instant, label }: { scene: ComponentType<SceneProps>; instant: boolean; label: string }) {
+function SceneFrame({
+  scene: Scene,
+  room,
+  instant,
+  label,
+}: {
+  scene: ComponentType<SceneProps>
+  room: { readonly side: number; readonly end: number }
+  instant: boolean
+  label: string
+}) {
   const frame = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number; room: { w: number; h: number } } | null>(null)
   useLayoutEffect(() => {
@@ -509,8 +524,8 @@ function SceneFrame({ scene: Scene, instant, label }: { scene: ComponentType<Sce
     observer.observe(box)
     return () => observer.disconnect()
   }, [])
-  const w = (size?.w ?? 0) + ROOM.side * 2
-  const h = (size?.h ?? 0) + ROOM.end * 2
+  const w = (size?.w ?? 0) + room.side * 2
+  const h = (size?.h ?? 0) + room.end * 2
   const k = size === null || size.w === 0 ? 1 : Math.min(1, (size.room.w - 24) / w, (size.room.h - 16) / h)
   return (
     <div ref={frame} className={s.frame} aria-hidden="true">
@@ -518,7 +533,7 @@ function SceneFrame({ scene: Scene, instant, label }: { scene: ComponentType<Sce
         className={s.stage}
         style={{ width: w, height: h, transform: `translate(-50%, -50%) scale(${k})`, opacity: size === null ? 0 : 1 }}
       >
-        <Station n={1} label={label} x={ROOM.side} y={ROOM.end} shown built instant={instant} bare>
+        <Station n={1} label={label} x={room.side} y={room.end} shown built instant={instant} bare>
           <Scene live={!instant} instant={instant} />
         </Station>
       </div>

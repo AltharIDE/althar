@@ -187,3 +187,8 @@
 .grow {
   flex: 1;
 }
+/* Ruled off from Back, where Back is beside it. */
+* + .footLine {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
