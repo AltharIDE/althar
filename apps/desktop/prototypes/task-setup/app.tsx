@@ -15,7 +15,7 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeClient, fakeHost, project, repositories, snapshot } from '../../tests/fixtures'
 import s from './proto.module.css'
-import { type Moment, proto, useProto, type Which } from './state'
+import { type Direction, type Moment, proto, useProto, type Which } from './state'
 
 const PROJECTS = {
   althar: {
@@ -59,10 +59,50 @@ const go = () => {
   window.location.hash = '#/projects/p1?room=settings&section=running'
 }
 
+const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
+  { value: 'A', name: 'Cards' },
+  { value: 'B', name: 'Tabs' },
+  { value: 'C', name: 'Terminal' },
+  { value: 'D', name: 'One script' },
+]
+
+window.addEventListener(
+  'keydown',
+  (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    const target = event.target instanceof Element ? event.target : null
+    if (target?.closest('input, textarea, select, [contenteditable], [role=menu], [role=dialog]')) return
+    const at = DIRECTIONS.findIndex((one) => one.value === proto.get().direction)
+    const picked =
+      event.key === 'ArrowRight'
+        ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
+        : event.key === 'ArrowLeft'
+          ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
+          : /^[1-4]$/.test(event.key)
+            ? DIRECTIONS[Number(event.key) - 1]
+            : undefined
+    if (picked === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    proto.set({ direction: picked.value })
+  },
+  { capture: true },
+)
+
 function Switcher() {
   const p = useProto()
   return (
     <div className={s.strip}>
+      <Segmented<Direction>
+        label="Direction"
+        value={p.direction}
+        onChange={(direction) => proto.set({ direction })}
+        options={DIRECTIONS.map((one, at) => ({
+          value: one.value,
+          label: `${one.value} · ${one.name}`,
+          tooltip: { label: one.name, kbd: String(at + 1) },
+        }))}
+      />
       <Segmented<Which>
         label="Project"
         value={p.which}
@@ -82,6 +122,7 @@ function Switcher() {
         ]}
       />
       <span className={s.grow} />
+      <span>1–4 or ← → switch</span>
       <LinkButton onClick={go}>Back to settings</LinkButton>
     </div>
   )
@@ -89,6 +130,7 @@ function Switcher() {
 
 const params = new URLSearchParams(window.location.search)
 proto.set({
+  direction: DIRECTIONS.find((one) => one.value === params.get('d')?.toUpperCase())?.value ?? 'A',
   which: params.get('p') === 'meridian' ? 'meridian' : 'althar',
   moment: params.get('s') === 'none' ? 'none' : 'recorded',
 })

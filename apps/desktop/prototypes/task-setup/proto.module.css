@@ -1,34 +1,137 @@
 /* Scrappy: layout for the prototype's parts; colours and type are the kit's tokens. */
-.repos {
+.cards {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
-.repo {
-  display: grid;
-  gap: 6px;
+/* A repository, set apart as a card, like the kit's CodeBlock. */
+.card {
+  border-radius: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  overflow: hidden;
 }
-.name {
-  margin: 0;
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.headIcon {
+  flex: none;
+  color: var(--t-3);
+}
+.repoName {
   font-weight: 600;
+  font-size: 13px;
   color: var(--t-1);
-  font-size: 13.5px;
 }
-.label {
-  margin-top: 6px;
-  color: var(--t-2);
-  font-size: 12.5px;
+.checkout {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11.5px var(--mono);
+  color: var(--t-3);
 }
-.mono {
-  width: 100%;
-  white-space: pre;
-  overflow-x: auto;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.6;
-  resize: vertical;
+.part {
+  padding: 7px 14px 6px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-plain);
+  font-size: 11.5px;
+  color: var(--t-3);
 }
-.grow {
+.head + .part {
+  border-top: 0;
+}
+
+/* B: a tab each, commands and files side by side. */
+.tabs {
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+  padding-right: 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: none;
+  font: 500 13px var(--font);
+  color: var(--t-3);
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--t-1);
+}
+.tabOn {
+  composes: tab;
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow: inset 0 -2px 0 var(--t-1);
+}
+.tabsEnd {
+  margin-left: auto;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 12px;
+  font: 11.5px var(--mono);
+  color: var(--t-3);
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pane > :last-child {
   flex: 1;
+}
+.pane + .pane {
+  border-left: 1px solid var(--line);
+}
+.split .part {
+  border-top: 0;
+}
+
+/* C: dark, like what a task's commands print. */
+.termCard {
+  border-radius: 10px;
+  background: var(--term);
+  overflow: hidden;
+}
+.termHead {
+  composes: head;
+  background: var(--term-raised);
+  border-bottom: 0;
+}
+.termHead .repoName {
+  color: var(--term-t1);
+}
+.termHead .headIcon,
+.termHead .checkout {
+  color: var(--term-t4);
+}
+.termPart {
+  padding: 7px 14px 6px;
+  background: var(--term-raised);
+  font-size: 11.5px;
+  color: var(--term-t3);
 }
 
 /* The strip of states under the window: the prototype's, not the app's. */
@@ -42,6 +145,9 @@
   background: var(--paper);
   font-size: 11.5px;
   color: var(--t-3);
+}
+.grow {
+  flex: 1;
 }
 .frame {
   height: calc(100vh - 44px);
