@@ -79,3 +79,16 @@ The developer page's drafts are in `althar-designs/althar-dev/` (`a.html` is the
 - Replace the placeholder in `facts.ts`: the clone URL. The Homebrew command is the tap's (`apps/desktop/README.md`, "The Homebrew tap").
 - Re-check that Claude plans may still be used through third-party apps; the page's first claim depends on it.
 - Split the main bundle further; most of it is `@althar/ui`.
+
+## Checking social previews
+
+`bun run build` tests every generated page (including 404) for an absolute
+OG image, a large Twitter card, and matching explicit Twitter title,
+description and image. This runs before either a local deploy or a Workers
+Build can publish artifacts. `bun run deploy` uses that full build.
+
+For Workers Builds keep the root directory `apps/site`, the build command
+`bun install --frozen-lockfile && bun run build`, the production deploy command
+`npx wrangler deploy`, and the non-production deploy command
+`npx wrangler preview`. A dashboard command of `vp build` skips prerendering;
+the dashboard setting must be corrected there, independently of this script.
