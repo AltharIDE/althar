@@ -49,8 +49,12 @@ export const afterSteps = (step: string | null) =>
   step === 'merging' ||
   step === 'merge_queue'
 
-/** Whether a task is being merged, or waits in its merge queue: its merge is no step of its plan's, so its planned steps are all done, none on. */
-export const isMergeStep = (step: string | null) => step === 'merging' || step === 'merge_queue'
+/**
+ * Whether no agent is on a task's step, as Althar or its code host is: its checks run on the host, its commits go up, or its pull
+ * request is merged or waits in its merge queue. Its planned steps are then all done, none on, and its status line says where it is.
+ */
+export const isAutomatedStep = (step: string | null) =>
+  step === 'checks_running' || step === 'pushing' || step === 'merging' || step === 'merge_queue'
 
 /** The names of the steps it takes: on a round of work after its plan (ADR-034), its lead's follow-up in place of Implement. */
 export const stepNames = (steps: ReadonlyArray<PlanStep>, followUp = false): ReadonlyArray<string> =>
@@ -68,5 +72,5 @@ export const stepIndex = (names: ReadonlyArray<string>, step: string | null): nu
 export const trackFor = (steps: ReadonlyArray<PlanStep>, step: string | null, done: boolean, followUp = false): TrackItem[] => {
   const names = stepNames(steps, followUp)
   const at = stepIndex(names, step)
-  return trackOf(names, at, at, done || isMergeStep(step))
+  return trackOf(names, at, at, done || isAutomatedStep(step))
 }
