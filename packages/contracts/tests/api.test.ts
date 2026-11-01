@@ -8,6 +8,7 @@ import {
   AgentsAtOnce,
   Api,
   ApiError,
+  ClientAuthority,
   AtOnceCount,
   CommandId,
   FOUND_MOST,
@@ -679,7 +680,11 @@ describe('the API', () => {
         )
         yield* Effect.forkScoped(
           Layer.launch(
-            RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data)))),
+            RpcServer.layer(Api).pipe(
+              Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
+              Layer.provide(handlers),
+              Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data))),
+            ),
           ),
         )
         const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))

@@ -692,13 +692,21 @@ describe('the board’s lanes', () => {
     expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
   })
 
-  it('has every step done, none on, while a task is merging or in its merge queue', () => {
-    // Its steps are finished; the merge is what is left, and the words at the top say so.
+  it('has every step done, none on, while no agent is on a task: its checks run, its commits push, or it merges', () => {
+    // Its steps are finished; the checks, the push or the merge is what is left, and the words at the top say so.
+    expect(trackOf(task({ step: 'checks_running', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: 'pushing', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     expect(trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     expect(trackOf(task({ step: MERGING_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     // Drawn with that flag, no step is left as the one on it.
-    const { steps, at, done } = trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))
-    expect(trackItems(steps, at, at, done).map((step) => step.state)).toEqual([TrackStep.Done, TrackStep.Done])
+    for (const step of ['checks_running', 'pushing', MERGE_QUEUE_STEP]) {
+      const { steps, at, done } = trackOf(task({ step, phase: 'running' }))
+      expect(trackItems(steps, at, at, done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Done])
+    }
+    // A checks round is a lead's work: its last step stays on.
+    const round = trackOf(task({ step: 'checks', phase: 'running' }))
+    expect(round.done).toBe(false)
+    expect(trackItems(round.steps, round.at, round.at, round.done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Now])
   })
 
   it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
