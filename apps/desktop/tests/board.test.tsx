@@ -2167,6 +2167,39 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('offers a stopped task’s green pull request to merge, next to Carry on, and keeps Carry on alone where it is not ready', async () => {
+    tasks = [
+      task({
+        taskId: 'sm',
+        threadId: 'th-sm',
+        title: 'Stopped with a green pull request',
+        kind: 'change',
+        phase: 'stopped',
+        mergeable: true,
+        stopped: { by: 'althar', at: '2026-09-30T14:00:00.000Z' },
+        change: change({ draft: false, checks: passed }),
+      }),
+      task({
+        taskId: 'sf',
+        threadId: 'th-sf',
+        title: 'Stopped with failing checks',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-30T14:00:00.000Z' },
+        change: change({ draft: false, checks: { ...passed, outcome: 'failed', passed: 4, failed: 1, failing: ['test'] } }),
+      }),
+    ]
+    const merge = vi.fn(async () => {})
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ merge, getBoard: getBoard() }).client)
+    const green = await cardOf('Stopped with a green pull request')
+    expect(green.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    await userEvent.click(green.getByRole('button', { name: 'Accept and merge #12' }))
+    expect(merge).toHaveBeenCalledWith('sm', 'abc123', 'https://github.com/meridian/api/pull/12')
+    const failing = await cardOf('Stopped with failing checks')
+    expect(failing.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    expect(failing.queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+  })
+
   it('leaves what needs the lead to the task: words that open it, not a button of their own', async () => {
     const onOpen = vi.fn()
     withServices(<Board onOpen={onOpen} />, fakeClient({ getBoard: getBoard() }).client)

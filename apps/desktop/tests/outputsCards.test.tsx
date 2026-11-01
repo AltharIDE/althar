@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { cleanup, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -74,6 +74,16 @@ describe('what a task changed, card by card', () => {
       { head: '', url: 'https://github.com/meridian/web/pull/2' },
       { head: 'abc123', url: 'https://github.com/meridian/docs/pull/3' },
     ])
+  })
+
+  it('offers Accept and merge on a stopped task whose pull request is ready as it is, and not on one stopped without', async () => {
+    const stopped = { phase: 'stopped' as const, stopped: { by: 'althar' as const, at: null } }
+    const { onAccept } = show(task({ ...stopped, mergeable: true, changes: [pr('api', 1)] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: 'abc123', url: 'https://github.com/meridian/api/pull/1' }])
+    cleanup()
+    show(task({ ...stopped, changes: [pr('api', 1, { conflicts: true })] }))
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
   })
 
   it('says who asked for changes on its last review, on the model its plan gave them', async () => {

@@ -365,6 +365,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
   const card = runningCard(work, '', () => '')
   const sendBack = actions?.sendBack
+  const merges = work.mergeable === true && work.change?.state === 'open' && actions !== undefined
   const { at: _, ...rest } = card
   return {
     ...rest,
@@ -379,7 +380,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
       : {
           // What stopped it leads; a conflict is one line under it, which Carry on settles on the way.
           ...(work.conflictUnsent == null
-            ? {}
+            ? merges && work.change != null
+              ? // How its pull request stands, as a ready card says: every check passed, nothing in the way.
+                { foot: readyOf(work, work.change, undefined).foot }
+              : {}
             : {
                 foot: (
                   <FactLine>
@@ -389,19 +393,35 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                   </FactLine>
                 ),
               }),
-          // Carry on, the card's one step, on the strip at its foot.
-          ...(sendBack === undefined
+          // Carry on on the strip at its foot, and, where its pull request is ready as it stands, Accept and merge before it: a
+          // stopped task never hides the way to merge work that is ready.
+          ...(sendBack === undefined && !merges
             ? {}
             : {
                 next: (
-                  <NextStep
-                    signal
-                    busy={actions?.sending?.has(work.taskId) ?? false}
-                    doing={text.carryingOn}
-                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
-                  >
-                    {text.carryOn}
-                  </NextStep>
+                  <>
+                    {merges && (
+                      <NextStep
+                        signal
+                        busy={actions?.merging?.has(work.taskId) ?? false}
+                        doing={doingWords({ kind: 'merge' })}
+                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                      >
+                        {nextWords({ kind: 'merge' })}
+                      </NextStep>
+                    )}
+                    {sendBack !== undefined && (
+                      <NextStep
+                        signal={!merges}
+                        busy={actions?.sending?.has(work.taskId) ?? false}
+                        doing={text.carryingOn}
+                        onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
+                      >
+                        {text.carryOn}
+                      </NextStep>
+                    )}
+                  </>
                 ),
               }),
         }),
