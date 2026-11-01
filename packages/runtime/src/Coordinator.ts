@@ -1,3 +1,4 @@
+import type { MessageSender } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import type { Priority } from '@althar/connectors'
@@ -243,6 +244,8 @@ export class Coordinator extends Context.Service<
       readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
       readonly dictated?: boolean
+      readonly sender?: MessageSender
+      readonly origin?: 'news' | 'system'
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -295,6 +298,8 @@ export class Coordinator extends Context.Service<
         readonly images?: ReadonlyArray<InputImage>
         readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
+        readonly sender?: MessageSender
+        readonly origin?: 'news' | 'system'
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {

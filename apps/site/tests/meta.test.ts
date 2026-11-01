@@ -80,7 +80,18 @@ describe('withMeta', () => {
   it('adds the preview tags inside the head, once', () => {
     const out = withMeta(withMeta(HTML, page, ''), page, '')
     const head = out.slice(0, out.indexOf('</head>'))
-    for (const tag of ['og:title', 'og:description', 'og:image', 'og:image:width', 'og:type', 'og:site_name', 'twitter:card']) {
+    for (const tag of [
+      'og:title',
+      'og:description',
+      'og:image',
+      'og:image:width',
+      'og:type',
+      'og:site_name',
+      'twitter:card',
+      'twitter:title',
+      'twitter:description',
+      'twitter:image',
+    ]) {
       expect(head.split(`"${tag}"`).length - 1).toBe(1)
     }
     expect(head).toContain('<meta property="og:image" content="/og/shifts.png" />')
@@ -90,6 +101,9 @@ describe('withMeta', () => {
   it('makes the image and the page address absolute when the origin is known, and names that address as the page’s own', () => {
     const out = withMeta(HTML, page, 'https://example.test/')
     expect(out).toContain('<meta property="og:image" content="https://example.test/og/shifts.png" />')
+    expect(out).toContain('<meta name="twitter:image" content="https://example.test/og/shifts.png" />')
+    expect(out).toContain('<meta name="twitter:title" content="Shifts · Althar" />')
+    expect(out).toContain('<meta name="twitter:description" content="What changed, and when." />')
     expect(out).toContain('<meta property="og:url" content="https://example.test/shifts" />')
     expect(out).toContain('<link rel="canonical" href="https://example.test/shifts" />')
     expect(withMeta(HTML, page, '')).not.toContain('og:url')

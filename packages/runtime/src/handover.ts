@@ -1,3 +1,4 @@
+import { errandLines } from './Errands'
 import type { ProjectId } from '@althar/domain'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -301,6 +302,7 @@ export const handoverRecord = (input: {
         `The project, as project_overview gives it:\n\n${overview}`,
         notesSection(notes),
         tasks.text,
+        `Open errands (only their recorded next steps may act in a news turn):\n${(yield* errandLines(input.projectId)).join('\n') || 'None.'}`,
         recent.text === ''
           ? 'The conversation has no messages yet.'
           : `The last messages of the conversation, oldest first${recent.omitted > 0 ? ` (the ${recent.omitted} before them are left out)` : ''}:\n${recent.text}`,

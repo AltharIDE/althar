@@ -1,3 +1,4 @@
+import { Errands } from './Errands'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
@@ -187,6 +188,8 @@ const Snapshot = Schema.Struct({
       ),
     }),
   ),
+  /** Number of finished-check transitions heard, including reruns at the same head. */
+  checksRevision: Schema.optional(Schema.Number),
   /** The branch it merges into; absent from a snapshot kept before this was. */
   target: Schema.optional(Schema.String),
   /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
@@ -476,6 +479,7 @@ const snapshotOf = (
 })
 
 type Store =
+  | Errands
   | SqlClient.SqlClient
   | Instance
   | Ledger
@@ -3071,18 +3075,35 @@ export class Changes extends Context.Service<
       const heard = (link: LinkRow, kind: string, id: string, payload: Readonly<Record<string, unknown>>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql`INSERT OR IGNORE INTO observations ${sql.insert({
-            id: yield* newId(Ids.observation),
-            projectId: link.projectId,
-            subjectType: 'external_link',
-            subjectId: link.id,
-            kind,
-            payload: JSON.stringify({ ...payload, id }),
-            source: link.product,
-            observedAt: yield* timestamp,
-          })}`
-          const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
-          return (inserted?.n ?? 0) > 0
+          return yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`INSERT OR IGNORE INTO observations ${sql.insert({
+                id: yield* newId(Ids.observation),
+                projectId: link.projectId,
+                subjectType: 'external_link',
+                subjectId: link.id,
+                kind,
+                payload: JSON.stringify({ ...payload, id }),
+                source: link.product,
+                observedAt: yield* timestamp,
+              })}`
+              const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
+              const fresh = (inserted?.n ?? 0) > 0
+              if (fresh && ['checks', 'checks_handed', 'review', 'queue_left', 'merged', 'closed'].includes(kind)) {
+                const revision = yield* change('external_links', link.id, { updatedAt: yield* timestamp })
+                yield* fact({
+                  projectId: link.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: link.id,
+                  revision,
+                  type: 'external_link.news',
+                  payload: { kind, ...payload },
+                  actorId: instance.systemId,
+                })
+              }
+              return fresh
+            }),
+          )
         })
 
       /** An arrival in the task's thread. */
@@ -3457,6 +3478,7 @@ export class Changes extends Context.Service<
           let rerunning = false
           let happened = false
           let checks = before.checks
+          let checksRevision = before.checksRevision ?? 0
           // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
           // and a failure goes where it should (ADR-040).
           const held = now.headSha !== null && (yield* publishing(link.taskId))
@@ -3497,11 +3519,13 @@ export class Changes extends Context.Service<
             }
             const settled =
               reran === null || reran.started || (yield* Clock.currentTimeMillis) - Date.parse(reran.at) > Duration.toMillis(RERUN_SHOWS)
+            const transitioned = finished && settled && (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome)
+            // Advance even when this observation already exists: a previous poll may have recorded it and then failed before
+            // saving its snapshot. Reusing that observation repairs the snapshot without delivering the result twice.
+            if (transitioned) checksRevision += 1
             if (
-              finished &&
-              settled &&
-              (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran?.again ?? ''}`, { ...sum }))
+              transitioned &&
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision}${reran?.again ?? ''}`, { ...sum }))
             ) {
               happened = true
               // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
@@ -3589,7 +3613,15 @@ export class Changes extends Context.Service<
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
-            if (voice === 'althar' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
+            if (
+              voice === 'althar' ||
+              !(yield* heard(link, 'review', `review:${review.id}`, {
+                author: review.author.login,
+                verdict: review.verdict,
+                sha: now.headSha,
+              }))
+            )
+              continue
             happened = true
             yield* arrive(link, {
               kind: 'review',
@@ -3630,6 +3662,7 @@ export class Changes extends Context.Service<
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
+            checksRevision,
             ...(before.attached === true ? { attached: true } : {}),
             ...(lands || unsaid ? { queued: true } : {}),
             ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
@@ -3638,10 +3671,13 @@ export class Changes extends Context.Service<
           if (after.queued === true) happened = true
           if (entered) yield* sayOn(link, queuedNote(name, now.target))
           if (leftQueue) {
+            yield* heard(link, 'queue_left', `queue_left:${after.leftQueue}`, { reason: now.leftQueue ?? 'other', sha: now.headSha })
             happened = true
             yield* sayOn(link, leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
+            if (after.state === 'merged' || after.state === 'closed')
+              yield* heard(link, after.state, `${after.state}:${now.headSha}`, { sha: now.headSha })
             happened = true
             if (after.state === 'merged') yield* arrive(link, { kind: 'merged', from: null, where: name, url: now.url })
             if (after.state === 'closed') yield* arrive(link, { kind: 'closed', from: null, where: name, url: now.url })
@@ -5615,8 +5651,11 @@ export class Changes extends Context.Service<
        * fetched, fetched again where that was a while ago, without asking its
        * host; a branch with none, with its default branch here.
        */
+      const errands = yield* Errands
       const sweep = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
+        for (const project of yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`)
+          yield* errands.remind(project.id).pipe(contained('Errands.remind', () => undefined))
         const links = yield* sql<LinkRow>`
           SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
           WHERE kind = 'change' AND listening = 1 AND json_extract(snapshot, '$.state') = 'open'

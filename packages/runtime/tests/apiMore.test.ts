@@ -48,7 +48,14 @@ const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly ed
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     const grant = (path: string) => Context.get(context, Folders).allow(path)

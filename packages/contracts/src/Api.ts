@@ -1,5 +1,5 @@
-import { Schema } from 'effect'
-import { Rpc, RpcGroup } from 'effect/rpc'
+import { Context, Schema } from 'effect'
+import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
@@ -16,6 +16,16 @@ import { MESSAGE_IMAGES } from './pictures'
  * change-feed cursor it read at, so a client watches from there and misses
  * nothing between the two.
  */
+
+/** Set by the host on a connection, never accepted from an RPC payload. */
+export type MessageSender =
+  | { readonly kind: 'window' }
+  | { readonly kind: 'paired_device'; readonly deviceId: string }
+  | { readonly kind: 'socket' }
+  | { readonly kind: 'internal' }
+
+/** ADR-048: new calls are unavailable to a socket until explicitly marked. */
+export const SocketAllowed = Context.Reference<boolean>('@althar/contracts/SocketAllowed', { defaultValue: () => false })
 
 /** Bumped when a change would break a client built against an older API. */
 export const API_VERSION = 1
@@ -1688,6 +1698,8 @@ export type HeldForConnection = typeof HeldForConnection.Type
  * step it is on, what its lead last reported, who leads it.
  */
 export const TaskCard = Schema.Struct({
+  /** Open errands concerning this task, from durable records. */
+  errands: Schema.optional(Schema.Array(Schema.String)),
   taskId: Schema.String,
   threadId: Schema.String,
   title: Schema.String,
@@ -3116,11 +3128,49 @@ export const SkillUpdate = Schema.Union([
   Schema.Struct({ id: Schema.String, state: Schema.Literal('failed'), error: Schema.String }),
 ])
 export type SkillUpdate = typeof SkillUpdate.Type
+/** Enforced by the runtime for each connection, including streaming calls. */
+export class ClientAuthority extends RpcMiddleware.Service<ClientAuthority>()('@althar/contracts/ClientAuthority', { error: ApiError }) {}
+
+const socketCalls = new Set<string>([
+  'Status',
+  'ListProjects',
+  'GetProject',
+  'GetTask',
+  'GetThread',
+  'GetThreadItem',
+  'ReadOutput',
+  'ReadDocument',
+  'FindCode',
+  'ReadCode',
+  'GetFileDiff',
+  'GetBoard',
+  'GetOlderSettled',
+  'GetHome',
+  'GetCoordinator',
+  'GetModels',
+  'GetSettings',
+  'GetLoad',
+  'SearchTasks',
+  'Watch',
+  'Send',
+  'TakeBack',
+  'StartTask',
+  'CreateTask',
+  'StopTask',
+  'ResumeTask',
+  'StartSession',
+  'StopSession',
+  'Interrupt',
+  'SwitchAgent',
+  'SetModel',
+  'SetEffort',
+  'GetRepositoryScripts',
+])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
-  Rpc.make(tag, { payload, success, error: ApiError })
+  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
 
 /** A command: what it says, and the client's id for it. */
 const command = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
@@ -3131,7 +3181,7 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 export const Api = RpcGroup.make(
   /** The runtime's version and the agents on this machine. Sign-in is checked at most once a minute, unless `recheck`. */
   call('Status', { recheck: Schema.optional(Schema.Boolean) }, Status),
-  Rpc.make('ListProjects', { success: ProjectList, error: ApiError }),
+  Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
   /** Reads a folder the person chose, by its grant, for what opening it would make. */
   call('ReadFolder', { grant: Schema.String }, FolderReading),
   /**
@@ -3946,6 +3996,9 @@ export const Api = RpcGroup.make(
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
-  Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
-)
+  Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }).annotate(
+    SocketAllowed,
+    true,
+  ),
+).middleware(ClientAuthority)
 export type Api = typeof Api

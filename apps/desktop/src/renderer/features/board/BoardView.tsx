@@ -42,7 +42,7 @@ import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } f
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
-import { afterSteps, isMergeStep, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
@@ -171,12 +171,12 @@ const HANDED_SHOWN = 3
 export type DockTarget = { readonly kind: 'task'; readonly id: string } | { readonly kind: 'call'; readonly id: string }
 
 /**
- * A task's steps as its card's track names them, the one it is on, and whether they are all done: a task being merged, or in its
- * merge queue, has finished its steps, so none of them is on.
+ * A task's steps as its card's track names them, the one it is on, and whether they are all done: a task whose checks run, whose
+ * commits are pushing, or that is being merged, has finished its steps, so none of them is on.
  */
 export const trackOf = (task: BoardTask) => {
   const planned = (task.plan?.steps ?? []).filter((step) => !step.skipped).map((step) => step.key)
-  const done = isMergeStep(task.step)
+  const done = isAutomatedStep(task.step)
   if (planned.length === 0) return { steps: [text.conversation], at: 0, done }
   // Settling a review's findings is part of the review.
   const on =
@@ -827,6 +827,7 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
+            errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />
         ))}
@@ -839,6 +840,7 @@ export function BoardView({
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
+              errands={ask.waiting.task.errands}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
@@ -846,10 +848,16 @@ export function BoardView({
           ),
         )}
         {lanes.stopped.map((work) => (
-          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} errands={work.errands} onOpen={() => onOpen(work.threadId)} />
         ))}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} data-move={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...readyCardOf(work, actions)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
       </BoardColumn>
 
