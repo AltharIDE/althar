@@ -238,6 +238,41 @@ describe('a project’s settings', () => {
     expect(files).toHaveProperty('value', '.env\n.env.local')
   })
 
+  it('keeps a repository’s changes to its setup in order across leaving Running and coming back', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=running', { setRepository, getRepositories: vi.fn(async () => kept) })
+    const commandsOf = () => screen.getByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(await screen.findByRole('textbox', { name: 'meridian-api: commands' }))
+    await userEvent.type(commandsOf(), '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake test')
+    await userEvent.tab()
+    const side = screen.getByRole('navigation', { name: 'Project settings' })
+    await userEvent.click(within(side).getByRole('button', { name: 'General' }))
+    await userEvent.click(within(side).getByRole('button', { name: 'Running' }))
+    // Back in Running, the change still on its way is what shows, and the next one waits behind it.
+    expect(await screen.findByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty(
+      'value',
+      'bun install --frozen-lockfile\nmake\nmake test',
+    )
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake lint')
+    await userEvent.tab()
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(3))
+    expect(setRepository.mock.calls.map(([input]) => input.setup?.commands.at(-1))).toEqual(['make', 'make test', 'make lint'])
+    await waitFor(() => expect(kept[0]?.setup?.commands.at(-1)).toBe('make lint'))
+    expect(commandsOf()).toHaveProperty('value', 'bun install --frozen-lockfile\nmake\nmake test\nmake lint')
+  })
+
   it('says why a change to a setup didn’t hold', async () => {
     windowAt('/projects/p1?room=settings&section=running', {
       setRepository: vi.fn(async () => {

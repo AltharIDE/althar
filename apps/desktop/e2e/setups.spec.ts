@@ -40,6 +40,7 @@ test('changes a repository’s setup in Running: kept, read back, and a refused 
     // Away to the work and back, then read afresh: the window starts over and asks the runtime.
     await backToWork(page)
     await projectSettings(page, 'Running')
+    await expect(commands).toHaveValue('bun install --frozen-lockfile\nbunx playwright install chromium')
     await expect(files).toHaveValue('.env\n.env.local')
     await page.reload()
     await projectSettings(page, 'Running')
