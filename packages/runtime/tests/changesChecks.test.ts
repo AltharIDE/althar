@@ -518,7 +518,9 @@ describe('a change whose checks Althar sees through', () => {
       // again: the person has it.
       hold = false
       yield* until(
-        sql<{ id: string }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.id') LIKE '%:failed:again'`,
+        sql<{
+          id: string
+        }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' AND json_extract(payload, '$.id') LIKE '%:again'`,
         (heard) => heard.length > 0,
       )
       const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
