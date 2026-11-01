@@ -116,6 +116,8 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_FAKE_AGENTS: '1',
       ALTHAR_CODE_HOME: home,
+      // Closing the app with work running would otherwise wait on Quit's question; only quit.spec.ts asks it (ALTHAR_QUIT_WITHOUT_ASKING=0).
+      ALTHAR_QUIT_WITHOUT_ASKING: '1',
       ...(quiet ? { ALTHAR_QUIET: '1' } : {}),
       ...env,
     },

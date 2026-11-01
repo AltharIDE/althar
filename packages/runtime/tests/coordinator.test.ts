@@ -930,6 +930,36 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('starts a lead that goes on its own mid-step again, once, and asks nothing when it carries on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task } = yield* planned('Crashes once', '[lead:gone-once] [lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+      ])
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.strictEqual(card?.summary, 'Did the task.')
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      const notices = yield* sql<{ title: string }>`
+        SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
+      assert.include(
+        notices.map((notice) => notice.title),
+        'Started again after its agent stopped on its own.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person when the lead it started again goes on its own again soon after', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Crashes twice', '[lead:gone-twice] [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'session_ended'])
+      // Started again once only: two sessions, the second gone too.
+      const sessions = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      assert.lengthOf(sessions, 2)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { type LimitCall, LimitChoice } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
@@ -25,7 +26,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { Connectivity } from './Connectivity'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor } from './errors'
+import { AttentionClosed, GitFailed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor, PushRefused } from './errors'
 import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
@@ -56,6 +57,7 @@ import {
   readEvidence,
   readShown,
   SHOWN_MOST,
+  keptViewsIn,
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
@@ -188,10 +190,20 @@ const Finished = Schema.Struct({
   /** What shows the change does what it should; and what couldn't be shown. */
   evidence: Schema.optional(Schema.Array(EvidenceGiven)),
   unverified: Schema.optional(Schema.Array(Schema.String)),
+  /** The views an earlier step pictured that still show the work as it is, beside this step's pictures. */
+  kept_views: Schema.optional(Schema.Array(Schema.String)),
+  /** A round of work where the person only asked something, and what the lead committed came with answering: it opens no pull request. */
+  answered: Schema.optional(Schema.Boolean),
   /** When settling a review: what became of each finding, by its id. */
   findings: Schema.optional(
     Schema.Array(
-      Schema.Struct({ id: Schema.String, outcome: Schema.Literals(['fixed', 'set_aside']), reason: Schema.optional(Schema.String) }),
+      Schema.Struct({
+        id: Schema.String,
+        outcome: Schema.Literals(['fixed', 'set_aside']),
+        reason: Schema.optional(Schema.String),
+        /** For one fixed, the commit that fixed it: the pull request names it. */
+        commit: Schema.optional(Schema.String),
+      }),
     ),
   ),
 })
@@ -314,6 +326,22 @@ type Store =
   | Artifacts
   | Connectivity
   | LeftBehind
+
+/**
+ * Whether a publish step's failure may pass if tried again (DEV-173): the
+ * code host failing or not answering (a 5xx, a rate limit, the network), a
+ * push that couldn't reach it, or git running past its time. Not one that
+ * won't: not connected, signed out, refused, or a request the host turned
+ * down as it stands.
+ */
+export const mayPass = (cause: Cause.Cause<unknown>): boolean => {
+  const error = Cause.findErrorOption(cause)
+  if (Option.isNone(error)) return false
+  const failed = error.value
+  if (failed instanceof ConnectorFailed) return failed.reason === 'unreachable' || failed.reason === 'rate_limited'
+  if (failed instanceof PushRefused) return failed.why === 'unreachable'
+  return failed instanceof GitFailed && failed.timedOut === true
+}
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -566,6 +594,7 @@ export class Runs extends Context.Service<
       const agentsHere = yield* Agents
       const scope = yield* Effect.scope
       const blankPause = (yield* RuntimeConfig).idle?.blank ?? BLANK_PAUSE
+      const publishAgain = (yield* RuntimeConfig).publishAgain ?? Duration.seconds(30)
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1045,28 +1074,55 @@ export class Runs extends Context.Service<
           // A quick task whose lead changed nothing in the repository has no branch, and nothing to send anywhere: it is done.
           if (yield* unbranched(run.taskId)) return yield* finish(run, 'succeeded')
           const ending = yield* stepsOf(run)
-          // A round of work never publishes by itself (ADR-034): what it committed goes to the task's open pull request from its
-          // card, or in a new one the person opens there once the last merged or closed. But for the round a quick task was made a
-          // change in, which ends as the person asked.
+          // A round of work's commits go to the task's open pull request as its lead's turn ends (ADR-072); after its last merged
+          // or closed, they open the next by themselves, a draft, as a plan's ending opens the first, where the project's rules
+          // would have (ADR-034). But for the round a quick task was made a change in, which ends as the person asked.
           if (run.planId === null && !ending.publishes) {
-            // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to offer.
+            // A quick task's work isn't for a pull request, unless the person has it made a change: nothing to open.
             const after = ending.here ? [] : yield* changes.unshipped(run.taskId).pipe(Effect.orElseSucceed(() => []))
-            // Each repository with what it has: its last pull request merged or closed, or none yet.
-            const said = after.map((one) =>
-              one.change === null
-                ? `${one.name} has no pull request`
-                : `${one.change.words.short} ${one.change.words.prefix}${one.change.number}${after.length > 1 ? ` in ${one.name}` : ''} ${
-                    one.change.state === 'merged' ? 'is merged' : 'was closed'
-                  }`,
-            )
-            if (said.length > 0)
-              yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
-                source: 'runtime',
-                severity: 'info',
-                title: "What the follow-up committed isn't in a pull request yet.",
-              })
-            yield* finish(run, 'succeeded')
-            return yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+            if (after.length === 0) {
+              yield* finish(run, 'succeeded')
+              yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+              return
+            }
+            const unsaid = addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: "What the follow-up committed isn't in a pull request yet.",
+            })
+            // Only a task that had a pull request, in any of its repositories: one whose project leaves its work on its branch, or
+            // on no host, stays so.
+            const had = (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
+            const end = had ? yield* changes.endFor(run.projectId, run.taskId).pipe(Effect.orElseSucceed(() => null)) : null
+            // Nor a round its lead said only answered the person: what it committed in passing waits for them (ADR-034).
+            const [last] = yield* sql<{ answered: number | null }>`
+              SELECT json_extract(a.output, '$.answered') AS answered FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+              WHERE n.execution_id = ${run.executionId} AND n.node_key = 'implement' AND a.state = 'succeeded'
+              ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
+            if ((end !== 'draft' && end !== 'ready') || last?.answered === 1) {
+              yield* finish(run, 'succeeded')
+              yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+              yield* unsaid
+              return
+            }
+            // Under way from before the round ends until it opens or can't, so its card never reads Ready in between (DEV-173).
+            yield* changes.opensNext(run.taskId, true)
+            yield* finish(run, 'succeeded').pipe(Effect.onError(() => changes.opensNext(run.taskId, false)))
+            yield* Effect.ignore(changes.settleIfMerged(run.taskId))
+            // Apart: publishing takes the task's lock, which what ends the round may hold. Where it can't, the card offers it.
+            return yield* Effect.forkIn(
+              provide(
+                publish(run.taskId).pipe(
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.interrupt
+                      : Effect.andThen(Effect.logWarning('Could not open the next pull request', cause), unsaid),
+                  ),
+                  Effect.ensuring(Effect.andThen(changes.opensNext(run.taskId, false), Effect.ignore(touchCard(run.taskId)))),
+                ),
+              ),
+              scope,
+            ).pipe(Effect.asVoid)
           }
           // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
           // A quick task's stays on this Mac, and says nothing of a host.
@@ -1096,7 +1152,21 @@ export class Runs extends Context.Service<
           if (admitted === undefined) return
           const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
-          const published = yield* Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
+          const publishing = Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
+          const first = yield* publishing
+          // A failure that may pass is tried again once by itself, after a pause, unless it was stopped meanwhile: only a second
+          // asks the person (DEV-173). Publishing again adopts what the first did on the host.
+          const again =
+            first._tag === 'Failure' && mayPass(first.cause)
+              ? yield* Effect.andThen(
+                  Effect.sleep(publishAgain),
+                  Effect.gen(function* () {
+                    const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+                    return still?.state === 'running' && (yield* going(run))
+                  }),
+                )
+              : false
+          const published = again ? yield* publishing : first
           if (published._tag === 'Failure') {
             const error = Cause.findErrorOption(published.cause)
             const notConnected = Option.isSome(error) && error.value instanceof NotConnected
@@ -1453,6 +1523,9 @@ export class Runs extends Context.Service<
             if (yield* asking(event.threadId)) return
             // A round that made nothing new ends with its lead (ADR-034).
             if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
+            // Gone on its own, it is started again once, as after a restart (DEV-173); gone again soon after, it needs the person.
+            const key = `${on.run.runId}:${on.nodeKey}:${on.iteration}`
+            if (event.state === 'lost' && !(yield* soonAgain(on.run, '$.startedAgain', key))) return yield* startAgain(on, key, info)
             return yield* stuck(on.run, { id: on.attemptId }, info('session_ended', null))
           }
           // A turn of a session another agent has taken over from is that session's last, not the step's.
@@ -2142,7 +2215,7 @@ export class Runs extends Context.Service<
 
       /** What the lead is told to settle a review's findings. */
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
-        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
+        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, with what changed in a line of plain words and the commit that fixed it, or set_aside, with why in a line. The pull request lists both. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
 
       /** The model a session is on, where it says. */
       const modelOf = (sessionId: string) =>
@@ -2515,14 +2588,17 @@ export class Runs extends Context.Service<
             rather: other === undefined ? [] : [other],
             ...(planned === undefined ? {} : { planned }),
           })
-          if (policy === 'ask' || out === null || resetsAt === null)
+          // Where the project asks but no one could take it over, there is nothing to choose: it waits for the reset, as where
+          // nothing was free to move it to (DEV-173). Not started yet, nearly out, starting on what is left is a choice still.
+          const noOne = policy === 'ask' && out !== null && resetsAt !== null && low === undefined && !(yield* limits.canTakeOver(choices))
+          if ((policy === 'ask' && !noOne) || out === null || resetsAt === null)
             return yield* stuck(
               on.run,
               { id: on.attemptId },
               { ...info, limit: { accountId, resetsAt, choices, ...(low === undefined ? {} : { left: low.leftPercent }) } },
             )
-          // Waiting, it says why: the project waits for resets, or it moves on and nothing else was free.
-          const nothingFree = policy === 'move'
+          // Waiting, it says why: the project waits for resets, or nothing else was free to move it to or to ask about.
+          const nothingFree = policy === 'move' || noOne
           yield* holdForLimit(on, agentId, accountId, out, nothingFree ? 'nothing_free' : 'waits', choices, low)
           yield* sayOut(
             on.run.threadId,
@@ -2972,7 +3048,9 @@ export class Runs extends Context.Service<
             descriptions: given = [],
             evidence: handed = [],
             unverified,
+            kept_views: keptViews,
             built: said,
+            answered: answering = false,
           } = yield* read(Finished, input)
           const built = builtIn(said)
           const builds = built === null ? {} : { built }
@@ -3000,6 +3078,7 @@ export class Runs extends Context.Service<
             return {
               ...(kept.length === 0 ? {} : { evidence: kept }),
               ...(unverified === undefined ? {} : { unverified: unverifiedOf(unverified) }),
+              ...keptViewsIn(keptViews),
             }
           })
           // What it gave before Althar sent the step back, and what it gives now.
@@ -3031,6 +3110,8 @@ export class Runs extends Context.Service<
           // A round of work that made nothing new ends with its summary, and the task is back where it was.
           const round = current.planId === null && step === 'implement' ? roundOf(attempt.input) : undefined
           const quiet = round !== undefined && !(yield* madeSince(current.taskId, round.start))
+          // Only a round answers: what it committed opens no pull request, so it needs no description (ADR-034).
+          const answered = round !== undefined && answering
           // Whether settling changed the work: then what the task built is said again, so its end is never older than its work. A round
           // that made nothing new needn't say it.
           const workBefore = step === 'settle' ? ((JSON.parse(attempt.input) as { before?: string }).before ?? '') : ''
@@ -3062,7 +3143,7 @@ export class Runs extends Context.Service<
               })
           }
           // A pull request the task opens is described by the lead, for its reviewer: in the repository's template, where it has one.
-          if ((end === 'draft' || end === 'ready') && !quiet) {
+          if ((end === 'draft' || end === 'ready') && !quiet && !answered) {
             // A round's work after its task's pull request merged or closed goes in a new one, described from what came since.
             const after = round === undefined ? [] : yield* changes.unshipped(current.taskId).pipe(Effect.orElseSucceed(() => []))
             const since = Object.fromEntries(
@@ -3082,7 +3163,7 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
-              yield* ended(current, attempt, 'succeeded', { summary })
+              yield* ended(current, attempt, 'succeeded', { summary, ...(answered ? { answered } : {}) })
               yield* result(current, { step, round: attempt.iteration, summary, ...builds, ...descriptions, ...showing }, itemId)
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
@@ -3168,7 +3249,12 @@ export class Runs extends Context.Service<
       const settleFindings = (
         run: RunRow,
         attemptId: string,
-        settled: ReadonlyArray<{ readonly id: string; readonly outcome: 'fixed' | 'set_aside'; readonly reason?: string | undefined }>,
+        settled: ReadonlyArray<{
+          readonly id: string
+          readonly outcome: 'fixed' | 'set_aside'
+          readonly reason?: string | undefined
+          readonly commit?: string | undefined
+        }>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3190,7 +3276,7 @@ export class Runs extends Context.Service<
               aggregateId: finding.id,
               revision,
               type: `finding.${outcome.outcome}`,
-              payload: { reason: outcome.reason ?? null },
+              payload: { reason: outcome.reason ?? null, ...(outcome.outcome === 'fixed' ? { commit: outcome.commit ?? null } : {}) },
               actorId: instance.systemId,
             })
           }
@@ -3306,9 +3392,30 @@ export class Runs extends Context.Service<
                       description: 'What it printed: the part that shows the result, such as the summary of a test run.',
                     },
                     text: { type: 'string', description: 'For a response, log or note: the text.' },
+                    view: {
+                      type: 'string',
+                      description:
+                        'For a screenshot or recording of the work as built: the view it shows, by a short name you keep the same each time you take it again ("Running page", "Running page, a refused file"). A later picture of the same view replaces it in Outputs and on the pull request.',
+                    },
+                    option: {
+                      type: 'boolean',
+                      description:
+                        "For a screenshot or recording: true where it isn't the work as built but one of the options or directions the person chooses between, or an exploration. It stays in the thread, and out of the change's Outputs and its pull request.",
+                    },
                   },
                   required: ['kind', 'caption'],
                 },
+              },
+              kept_views: {
+                type: 'array',
+                description:
+                  "The views you pictured in an earlier step that still show the work as it is, by their names, where this step pictures something new. A step's pictures replace the earlier ones in Outputs and on the pull request, but for the views it takes again and those named here; a step that only takes known views again leaves the others as they were.",
+                items: { type: 'string' },
+              },
+              answered: {
+                type: 'boolean',
+                description:
+                  'In a round of work after the plan, true where the person only asked something and what you committed came with answering it: Althar opens no pull request for it, and leaves it for the person to open from the task.',
               },
               unverified: {
                 type: 'array',
@@ -3336,7 +3443,16 @@ export class Runs extends Context.Service<
                   properties: {
                     id: { type: 'string' },
                     outcome: { type: 'string', enum: ['fixed', 'set_aside'] },
-                    reason: { type: 'string', description: 'Why it was set aside.' },
+                    reason: {
+                      type: 'string',
+                      description:
+                        'For one fixed, what changed, in a line of plain words ("A session’s windows stay over an endpoint answer asked before them."); for one set aside, why it stays, in a line. The pull request lists them.',
+                    },
+                    commit: {
+                      type: 'string',
+                      description:
+                        'For one fixed, the sha of the commit you made that fixed it, where one did. The pull request names it beside what changed.',
+                    },
                   },
                   required: ['id', 'outcome'],
                 },
@@ -4010,12 +4126,19 @@ export class Runs extends Context.Service<
        * line that said it carried on at least, came within RESTART_GRACE of
        * that line.
        */
-      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) =>
+      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) => soonAgain(current, '$.restarted', step.nodeId)
+
+      /**
+       * Whether a step Althar carried on by itself, as its notice keyed so in
+       * the task's thread says, stopped again soon after: nothing of the task's
+       * thread or its review's came RESTART_GRACE after that notice.
+       */
+      const soonAgain = (current: RunRow, key: '$.restarted' | '$.startedAgain', value: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [carried] = yield* sql<{ createdAt: string }>`
             SELECT created_at FROM thread_items
-            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, '$.restarted') = ${step.nodeId}
+            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, ${key}) = ${value}
             ORDER BY sequence DESC LIMIT 1`
           if (carried === undefined) return false
           const grace = new Date(Date.parse(carried.createdAt) + Duration.toMillis(RESTART_GRACE)).toISOString()
@@ -4176,6 +4299,39 @@ export class Runs extends Context.Service<
           // A lead that can't start, or one handed on for a limit that can't, leaves its step needing the person, as when a plan starts.
           if (carried._tag === 'Failure')
             yield* stuck(current, { id: step.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
+        })
+
+      /**
+       * Starts a step again whose agent went on its own (DEV-173), as a restart
+       * carries one on: the lead's steps on the lead, its model and effort, told
+       * to carry on; a review's round again on its reviewer. Said in the task's
+       * thread keyed by the step, so going again soon after needs the person
+       * (`soonAgain`); one that can't start needs them too.
+       */
+      const startAgain = (on: LimitedStep, key: string, info: (why: StuckWhy, detail: string | null) => StuckInfo) =>
+        Effect.gen(function* () {
+          const asked = info('session_ended', null)
+          const lead = on.step === 'implement' || on.step === 'settle'
+          const { agentId, model, effort } = lead
+            ? yield* lastLead(on.run)
+            : {
+                agentId: asked.agentId,
+                model: asked.agentId === null ? null : yield* modelOnStep(on.run.taskId, on.step, asked.agentId),
+                effort: null,
+              }
+          if (agentId === null) return yield* stuck(on.run, { id: on.attemptId }, asked)
+          yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: 'Started again after its agent stopped on its own.',
+            startedAgain: key,
+          })
+          const starting = yield* envelope('thread.send', { threadId: on.run.threadId, startedAgain: on.attemptId })
+          const carried = yield* Effect.exit(
+            carryOn(on.run, on.attemptId, asked, { kind: 'retry', agentId }, starting, model, undefined, effort),
+          )
+          if (carried._tag === 'Failure')
+            yield* stuck(on.run, { id: on.attemptId }, { ...asked, why: 'failed_to_start', detail: summarize(carried.cause) || null })
         })
 
       /**

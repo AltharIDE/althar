@@ -3039,6 +3039,12 @@ describe('a task', () => {
     expect(
       statusOf({ ...base, task: { ...base.task, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-29T18:00:00.000Z' } } }),
     ).toEqual({ status: TaskStatus.Stopped, state: 'Stopped', why: 'Stopped when you interrupted it' })
+    // Its pull request ready to merge as it is, said beside the word: it can be accepted all the same.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'stopped', mergeable: true, stopped: { by: 'althar', at: null } } })).toEqual({
+      status: TaskStatus.Stopped,
+      state: 'Stopped, ready to merge',
+      why: 'Stopped by Althar',
+    })
     // Ready, accepting it is the person's, in its card's words; settled, it is done.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready to accept' })
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled' } })).toEqual({ status: TaskStatus.Done, state: 'Done' })

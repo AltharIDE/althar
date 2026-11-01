@@ -20,7 +20,7 @@ import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { HOST, hosted, items, notices, until } from './support'
 
-import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
+import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, withoutReview } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -55,14 +55,17 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(change?.draft)
       assert.strictEqual(`${change?.short} ${change?.prefix}${change?.number}`, 'PR #1')
 
-      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review.
+      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review but
+      // what Althar adds of it, its seal at the head and the review folded after.
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
-      assert.isTrue(opened?.body.startsWith(`${DESCRIBED}\n\n`))
+      assert.isTrue(opened?.body.startsWith('<picture>'))
+      assert.include(opened?.body, '<summary>Reviewed by ')
+      assert.isTrue(withoutReview(opened?.body ?? '').startsWith(`${DESCRIBED}\n\n`))
       assert.notInclude(opened?.body, BUILT)
-      assert.notMatch(opened?.body ?? '', /review/i)
+      assert.notMatch(withoutReview(opened?.body ?? ''), /review/i)
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
@@ -180,7 +183,7 @@ describe('a task that ends in a pull request', () => {
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
       // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's line below.
       assert.strictEqual(
-        opened?.body,
+        withoutReview(opened?.body ?? ''),
         `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\nOpened by [Althar](https://github.com/AltharIDE/althar).`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -200,7 +203,7 @@ describe('a task that ends in a pull request', () => {
       // The description is written finishing; settling then changes the work, and says again what it built.
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      const body = github.changes[0]?.body ?? ''
+      const body = withoutReview(github.changes[0]?.body ?? '')
       assert.isTrue(body.startsWith('## What changed\n\nDid the task, in the template.'))
       assert.notInclude(body, BUILT_SETTLED)
       assert.notInclude(body, BUILT)

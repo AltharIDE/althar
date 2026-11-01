@@ -117,7 +117,7 @@ describe('evidence, as the window draws it', () => {
     ).toEqual([])
   })
 
-  it('shows a change as it is now: its pictures since it became one, each view once, as last taken', () => {
+  it('shows a change as it is now: its pictures since it became one, a later round’s replacing earlier ones, never an option', () => {
     const at = (time: string, item: ReturnType<typeof items.step>) => ({ ...item, createdAt: time })
     const shot = (caption: string, digest: string) =>
       piece({ kind: 'screenshot', caption, picture: { ...PICTURE, digest: digest.repeat(64) } })
@@ -131,12 +131,56 @@ describe('evidence, as the window draws it', () => {
     const made = (madeChangeAt: string | null) =>
       outcomeOf(snapshot({ items: rounds, task: { ...snapshot().task, kind: 'change', changes: [change()], madeChangeAt } })).shots
     expect(made('2026-10-18T11:00:00.000Z').map((one) => one.caption)).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
-    // A change from the start: every round is its own, each view once.
-    expect(made(null).map((one) => one.caption)).toEqual(['B1 · A direction', 'A1 · Settings as a page', 'A2 · Its rules, fixed'])
+    // A change from the start: a later round replaces the directions before it, and one that only takes a view again keeps the rest.
+    expect(made(null).map((one) => one.caption)).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
+    // Directions marked as options never show, though nothing came after them.
+    const options = items.step({
+      evidence: [
+        { ...shot('A · Cards', 'f'), option: true },
+        { ...shot('B · Tabs', 'g'), option: true },
+      ],
+    })
+    expect(
+      outcomeOf(snapshot({ items: [...rounds, options], task: { ...snapshot().task, kind: 'change', changes: [change()] } })).shots.map(
+        (one) => one.caption,
+      ),
+    ).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
     // A task that isn't a change: its last round that showed pictures, and those after.
     expect(
       outcomeOf(snapshot({ items: rounds.slice(0, 2), task: { ...snapshot().task, kind: 'plain' } })).shots.map((one) => one.caption),
     ).toEqual(['A1 · Settings as a page', 'A2 · Its rules'])
+  })
+
+  it('shows #476 as built: none of its first looks or the directions the person chose between', () => {
+    const at = (time: string, captions: ReadonlyArray<string>) => ({
+      ...items.step({
+        evidence: captions.map((caption, i) =>
+          piece({ kind: 'screenshot', caption, picture: { ...PICTURE, digest: `${time}${i}`.padEnd(64, '0') } }),
+        ),
+      }),
+      createdAt: time,
+    })
+    // Its reports' pictures, as they were: planned as a change from the start, so it never became one.
+    const rounds = [
+      at('2026-10-31T10:45:02.094Z', ['A · Rows: a row per repository', 'B · Script: the script Althar runs', 'C · Its own section']),
+      at('2026-11-01T16:08:55.484Z', ["The plain-text setup in project settings' Running"]),
+      at('2026-11-01T16:13:07.335Z', [
+        "A · Cards on meridian's three repositories",
+        'B · Tabs',
+        'C · Terminal: dark cards',
+        'D · One script',
+      ]),
+      at('2026-11-01T16:33:07.976Z', ['B · Files: the copied files as chips under the commands']),
+      at('2026-11-01T17:01:47.156Z', ["The kit's RepositorySetups with one repository", 'Three repositories as tabs']),
+      at('2026-11-01T17:08:13.672Z', ['The real Running page in the app after a window reload', 'Adding ../secrets.env is refused']),
+    ]
+    const shots = outcomeOf(
+      snapshot({ items: rounds, task: { ...snapshot().task, kind: 'change', changes: [change()], madeChangeAt: null } }),
+    ).shots
+    expect(shots.map((one) => one.caption)).toEqual([
+      'The real Running page in the app after a window reload',
+      'Adding ../secrets.env is refused',
+    ])
   })
 
   it('says what it is as its pull request does: the lead’s description, else what it built, else its last summary', () => {

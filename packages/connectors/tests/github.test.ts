@@ -1290,3 +1290,157 @@ describe('GitHub as a tracker', () => {
     }),
   )
 })
+
+it.effect('reads check annotations and run artifacts, and downloads an archive without forwarding credentials', () =>
+  Effect.gen(function* () {
+    const { host, sent } = github([
+      ['GET', `${REPO}/check-runs/7/annotations?per_page=100`, { json: [{ path: 'a.ts', start_line: 3, message: 'uncovered' }] }],
+      ['GET', `${REPO}/actions/jobs/7`, { json: { run_id: 9 } }],
+      [
+        'GET',
+        `${REPO}/actions/runs/9/artifacts?per_page=100`,
+        { json: { artifacts: [{ id: 11, name: 'coverage', size_in_bytes: 2, expired: false }] } },
+      ],
+      ['GET', `${REPO}/actions/artifacts/11/zip`, { status: 302, headers: { location: 'https://storage.example/archive' } }],
+      ['GET', 'https://storage.example/archive', { text: 'PK' }],
+    ])
+    const check = { id: 'run:7:github-actions', name: 'test', state: 'passed' as const, url: null, summary: null }
+    assert.deepEqual(yield* host.checkAnnotations!(repository, check), [{ path: 'a.ts', line: 3, message: 'uncovered' }])
+    assert.deepEqual(yield* host.checkArtifacts!(repository, check), [{ id: '11', name: 'coverage', size: 2 }])
+    assert.deepEqual([...(yield* host.checkArtifact!(repository, '11', 5))], [80, 75])
+    assert.isUndefined(sent.at(-1)?.headers.authorization)
+  }),
+)
+
+it.effect('lists a job with its workflow and timing when GitHub reports them', () =>
+  Effect.gen(function* () {
+    const { host } = github([
+      [
+        'GET',
+        `${REPO}/commits/main/check-runs?per_page=100`,
+        {
+          json: {
+            check_runs: [
+              {
+                id: 7,
+                name: 'verify',
+                status: 'completed',
+                conclusion: 'success',
+                started_at: '2026-10-31T10:00:00Z',
+                completed_at: '2026-10-31T10:01:00Z',
+                check_suite: { id: 4 },
+                app: { slug: 'github-actions' },
+              },
+            ],
+          },
+        },
+      ],
+      ['GET', `${REPO}/commits/main/status`, { json: { statuses: [] } }],
+      ['GET', `${REPO}/actions/runs?branch=main&per_page=100`, { json: { workflow_runs: [{ check_suite_id: 4, name: 'harness' }] } }],
+    ])
+    const [job] = yield* host.checks(repository, 'main')
+    assert.deepInclude(job, { name: 'verify', workflow: 'harness', startedAt: '2026-10-31T10:00:00Z', completedAt: '2026-10-31T10:01:00Z' })
+  }),
+)
+
+describe('GitHub’s pictures', () => {
+  const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'empty state.png', mediaType: 'image/png' }
+  const UPLOADS = /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/
+
+  it.effect('uploads one for the repository, by its number, as GitHub’s own CLI attaches one', () =>
+    Effect.gen(function* () {
+      const asset = 'https://github.com/user-attachments/assets/0c8e1a2b-3f4d-4e5f-9a6b-7c8d9e0f1a2b'
+      const { host, sent } = github([['POST', UPLOADS, { status: 201, json: { url: asset } }]])
+      assert.isTrue(host.capabilities.pictures)
+      assert.strictEqual(yield* host.uploadPicture?.(repository, picture) ?? Effect.die('none'), asset)
+      const [asked] = sent
+      const query = new URL(asked?.url ?? '').searchParams
+      assert.deepStrictEqual(Object.fromEntries(query), { name: 'empty state.png', content_type: 'image/png', repository_id: '7' })
+      assert.strictEqual(asked?.headers['content-type'], 'application/octet-stream')
+      assert.strictEqual(asked?.headers.authorization, 'Bearer ghu_t')
+      assert.deepStrictEqual([...(asked?.bytes ?? [])], [137, 80, 78, 71])
+    }),
+  )
+
+  it.effect('says write access is what it needs, where GitHub answers as if the repository weren’t there', () =>
+    Effect.gen(function* () {
+      const { host } = github([['POST', UPLOADS, { status: 404, json: { message: 'Not Found' } }]])
+      const failed = yield* Effect.flip(host.uploadPicture?.(repository, picture) ?? Effect.die('none'))
+      assert.strictEqual(failed.reason, 'forbidden')
+      assert.strictEqual(failed.status, 404)
+      assert.match(failed.message, /write access/)
+    }),
+  )
+
+  it.effect('passes on any other refusal as GitHub said it', () =>
+    Effect.gen(function* () {
+      const { host } = github([['POST', UPLOADS, { status: 422, json: { message: 'File type not allowed' } }]])
+      const failed = yield* Effect.flip(host.uploadPicture?.(repository, picture) ?? Effect.die('none'))
+      assert.strictEqual(failed.reason, 'rejected')
+      assert.strictEqual(failed.message, 'File type not allowed')
+    }),
+  )
+
+  it.effect('never takes an address off GitHub for one', () =>
+    Effect.gen(function* () {
+      for (const url of ['https://example.com/a.png', 'http://github.com/user-attachments/assets/1', 'not a url']) {
+        const { host } = github([['POST', UPLOADS, { status: 201, json: { url } }]])
+        const failed = yield* Effect.flip(host.uploadPicture?.(repository, picture) ?? Effect.die('none'))
+        assert.strictEqual(failed.reason, 'invalid_response', url)
+      }
+      const served = 'https://private-user-images.githubusercontent.com/1/2.png'
+      const { host } = github([['POST', UPLOADS, { status: 201, json: { url: served } }]])
+      assert.strictEqual(yield* host.uploadPicture?.(repository, picture) ?? Effect.die('none'), served)
+    }),
+  )
+
+  it.effect('takes them on a ghe.com tenant, by its own uploads host, and none on Enterprise Server', () =>
+    Effect.gen(function* () {
+      const tenant = stubFetch([
+        ['POST', /^https:\/\/uploads\.acme\.ghe\.com\//, { json: { url: 'https://acme.ghe.com/user-attachments/assets/1' } }],
+      ])
+      const onTenant = makeGitHub({
+        fetch: tenant.fetch,
+        apiUrl: 'https://api.acme.ghe.com',
+        webUrl: 'https://acme.ghe.com',
+        credential: Effect.succeed({ kind: 'bearer', token: 't' }),
+      })
+      assert.strictEqual(
+        yield* onTenant.uploadPicture?.(repository, picture) ?? Effect.die('none'),
+        'https://acme.ghe.com/user-attachments/assets/1',
+      )
+      const server = github([], 'https://git.example.com/api/v3')
+      assert.isFalse(server.host.capabilities.pictures)
+      const refused = yield* Effect.flip(server.host.uploadPicture?.(repository, picture) ?? Effect.die('none'))
+      assert.strictEqual(refused.reason, 'rejected')
+      assert.isEmpty(server.sent)
+    }),
+  )
+
+  it.effect('writes a comment in the conversation anew', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'PATCH',
+          `${REPO}/issues/comments/91`,
+          {
+            json: {
+              id: 91,
+              user: { id: 5, login: 'you', type: 'User' },
+              author_association: 'OWNER',
+              body: 'Again',
+              updated_at: '2026-10-31T12:00:00Z',
+              html_url: 'https://github.com/meridian/api/pull/12#issuecomment-91',
+            },
+          },
+        ],
+      ])
+      const edited = yield* host.editComment?.(repository, 12, '91', 'Again') ?? Effect.die('none')
+      assert.deepStrictEqual(sent[0]?.body, { body: 'Again' })
+      assert.strictEqual(edited.id, '91')
+      assert.strictEqual(edited.body, 'Again')
+      assert.isNull(edited.threadId)
+      assert.strictEqual(edited.url, 'https://github.com/meridian/api/pull/12#issuecomment-91')
+    }),
+  )
+})

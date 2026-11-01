@@ -182,6 +182,7 @@ export const CHANGES_LINEAR = {
       key: 'DEV-67',
       href: 'https://linear.app/meridian/issue/DEV-67',
       title: 'Refunds skip the rate limiter',
+      from: 'In Progress',
       changes: [{ field: 'status' as const, to: 'Done' }],
     },
     {
@@ -190,6 +191,7 @@ export const CHANGES_LINEAR = {
       key: 'DEV-142',
       href: 'https://linear.app/meridian/issue/DEV-142',
       title: 'Nightly partner export takes 40 minutes',
+      from: 'Backlog',
       changes: [
         { field: 'priority' as const, to: 'Low' },
         { field: 'labels' as const, add: ['perf'], remove: ['bug'] },
@@ -201,7 +203,9 @@ export const CHANGES_LINEAR = {
 
 /** Althar's offer to move a task's issue to review, as its pull request opened. */
 export const CHANGES_IN_REVIEW = {
-  note: 'PR #212 opened.',
+  note: 'PR #212 opened',
+  noteHref: 'https://github.com/meridian/api/pull/212',
+  task: 'Rate-limit refunds like charges',
   issues: [
     {
       mark: Brand.Linear,
@@ -209,7 +213,27 @@ export const CHANGES_IN_REVIEW = {
       key: 'MER-231',
       href: 'https://linear.app/meridian/issue/MER-231',
       title: 'Rate-limit refunds like charges',
+      from: 'In Progress',
       changes: [{ field: 'status' as const, to: 'In Review' }],
+    },
+  ],
+}
+
+/** Althar's move of a task's issue to Done, as its pull request merged: it applied at once, and shows as a line. */
+export const CHANGES_DONE = {
+  note: 'PR #212 merged',
+  noteHref: 'https://github.com/meridian/api/pull/212',
+  task: 'Rate-limit refunds like charges',
+  issues: [
+    {
+      mark: Brand.Linear,
+      source: 'Linear',
+      key: 'MER-231',
+      href: 'https://linear.app/meridian/issue/MER-231',
+      title: 'Rate-limit refunds like charges',
+      from: 'In Review',
+      became: 'Done',
+      changes: [{ field: 'close' as const, to: null }],
     },
   ],
 }

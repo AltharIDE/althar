@@ -10,6 +10,7 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } fro
 import { net } from 'electron'
 import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
+import { runtimeWork } from './atWork'
 import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
@@ -318,6 +319,17 @@ const tellNames = (requestId: string) => {
     )
 }
 
+/** What Quit would stop (atWork.ts), for the main process to ask the person about; an error answer while the store isn't open, which main takes as nothing to ask. */
+const tellWork = (requestId: string) => {
+  if (!readyNow) return parent.postMessage({ type: 'work', requestId, error: 'The store isn’t open.' })
+  void ready
+    .then((context) => Effect.runPromise(runtimeWork.pipe(Effect.provideContext(context))))
+    .then(
+      (value) => parent.postMessage({ type: 'work', requestId, value }),
+      (error: unknown) => parent.postMessage({ type: 'work', requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+}
+
 /** A folder the person chose, from the main process: its grant goes back, for the window to open it by. */
 const allowFolder = (requestId: string, path: string) =>
   void ready.then((context) =>
@@ -351,6 +363,7 @@ parent.on('message', (message) => {
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
+  if (data?.type === 'work' && data.requestId !== undefined) tellWork(data.requestId)
   if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {

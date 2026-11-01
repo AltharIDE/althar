@@ -799,6 +799,21 @@ Automatic provider upgrades must not silently change an in-flight run's
 adapter semantics. An app update can add support, but active sessions stay tied
 to the adapter/protocol version with which they began.
 
+### Every agent alike
+
+A feature built for one agent is built for every one that can have it, in
+the same release, and where one can't, its registry entry and this table say
+why
+([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+What isn't alike, as read on 31 October 2026:
+
+| What | Which agents have it | Why the others don't | What follows |
+| --- | --- | --- | --- |
+| A sandbox that holds the coordinator's and readers' commands (`contains`, `holds`) | Claude Code | Not read for the others yet. Codex has a sandbox of its own | ADR-082, task 4 |
+| A lead's sandbox exceptions worked out from the start (`upFront`) | Claude Code | As above | ADR-082, task 4 |
+| The coordinator judging permissions (`permissionJudge`) | Claude Code | Not read: it needs session settings that drop the agent's built-in tools, hooks and own MCP servers. Without it the person is asked | ADR-082, task 5 |
+| Reviewing a pull request from outside (`reviewing.outside`) | Claude Code, OpenCode | Codex's entry holds it off; the rest aren't read yet | ADR-082, task 6 |
+
 ## Permission routing
 
 Althar must see every permission request to apply the project's rules,
@@ -854,9 +869,9 @@ What keeps each agent asking, whatever its own settings say:
 
 | Agent | How | Checked against |
 |---|---|---|
-| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
 | Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
-| OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
+| OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits and commands to ask, and webfetch/websearch to allow for project leads when web access is on (otherwise asking), for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
 **Sandboxes are the boundary for commands.** A permission request for a shell
 command carries only its text, and no rule can tell what a script will write.
@@ -885,6 +900,33 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
 
+**Project leads can read the web** ([ADR-078](../decisions/078-project-leads-can-read-the-web.md)).
+“Leads can reach the web”, on by default in project Settings → General,
+allows implementers and the project’s own reviewers to use Claude Code’s
+WebSearch/WebFetch, Codex’s live web_search and page opening, and OpenCode’s
+websearch/webfetch without a permission request reaching Althar. Outside
+pull request reviews remain offline (ADR-058); Codex remains ineligible to
+lead them. The coordinator’s settings are unchanged. Changes apply to new
+sessions; restart an existing session after changing the switch.
+
+Shell networking stays constrained: Codex’s all-or-nothing switch stays off,
+and Claude’s known-host allowlist stays in place. Neither can grant GETs
+without also granting POSTs and uploads. Instead the rules allow plain
+HTTP(S) reads to stdout, such as `curl -q -fsSL https://example.com` and
+`wget --no-config --no-netrc --no-hsts -qO- https://example.com`, while the project switch is on.
+Disabling local config prevents it from silently selecting an upload or
+another method. Explicit command rules still win. Scripts, compound
+commands, custom headers, output files and uploads retain the existing
+rules; a host-only sandbox request is not proof of a GET and receives no new
+exemption. Prefer native web tools when a sandbox cannot express that read.
+Off, native fetches ask again, native search is gated (disabled for Codex),
+and shell commands receive no new read exemption.
+
+A lead reading a private repository could be steered by a web page into
+leaking code through a URL or search query. Read-only requests still carry
+that risk. The project switch and offline outside reviews mitigate it;
+credential denials and the rules for irreversible operations remain.
+
 **Known commands and hosts, from the start.** Some commands can't work inside
 Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
 some hosts every lead reaches (the code host, the package registry). Each
@@ -906,22 +948,43 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   person or the coordinator decides it, none the project never allows. A
   host is named on its own, never `*.` for every host under one: the rules
   judge a request by the host it names, and a wildcard would let through
-  hosts under it that they ask about or refuse.
+  hosts under it that they ask about or refuse. A request is read as a
+  host, never as a command: `release-assets.githubusercontent.com`, where
+  Electron's build downloads from, is no release script;
+- the caches of the tools the project installs with, which its sandboxed
+  commands write to without asking (`sandbox.filesystem.allowWrite`): what
+  fails in a fresh task folder is rarely the install, but a tool that
+  downloads outside it, as Electron does its build
+  (`~/Library/Caches/electron`), Playwright its browsers
+  (`~/Library/Caches/ms-playwright`) and Bun every package
+  (`~/.bun/install/cache`). One list (`toolPlaces.ts`) holds each tool's
+  caches on a Mac and on Linux and the hosts it downloads from, by the
+  files or packages that say a project uses it. None is where keys and
+  sign-ins are kept, nor holds one (`writesOf` drops it all the same).
+  A sandboxed command reaches the network only through the proxy the
+  sandbox names in `HTTPS_PROXY`, which Node's own `fetch` ignores, so
+  Claude Code starts with `NODE_USE_ENV_PROXY=1`: without it Electron's
+  download (`@electron/get`) fails in the sandbox even to a host it allows. A
+  cache is shared with the person's own installs, so a lead could leave
+  something there that a later install of theirs picks up: the trade made
+  so a task's folder gets ready without anyone.
 
-Both are worked out from the project: the tools its packages bring, its
+All three are worked out from the project: the tools its packages bring, its
 test and end-to-end scripts, what is kept for how it runs and is set up,
 its repositories' code hosts, its package managers' registries and what
 its packages download, and the trackers Althar is connected to (Linear's
-hosts, for one). The person adds to them and takes from them in the
-project's rules, under Sandbox, and those edits hold over what is worked
-out later. A change applies from a lead's next session. Codex's
+hosts, for one). The person adds to the commands and hosts and takes from
+them in the project's rules, under Sandbox, and those edits hold over what
+is worked out later; the caches follow the tools. A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
-modes don't use, so its leads are given neither; OpenCode has no sandbox.
-Every network request keeps its host on the record.
+modes don't use, so its leads are given none of them; OpenCode has no sandbox.
+Every sandbox network request keeps its host on the record. Native web tools
+allowed by the session do not reach Althar’s permission record.
 
-Installing a worktree's dependencies would have to leave it, and needn't:
-Althar does it before the lead starts ([below](#setting-up-a-worktree)).
+A worktree's setup Althar runs before the lead starts
+([below](#setting-up-a-worktree)); what the lead installs beyond it stays
+in its sandbox, writing to its tools' caches.
 
 **What the sandbox holds runs; what crosses meets the rules**
 ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)).
@@ -1015,16 +1078,22 @@ Known gaps:
 
 ### Setting up a worktree
 
-A lead starts in a fresh worktree with nothing installed, and its sandbox
-refuses an install: the package manager writes to its cache and temporary
-folders outside the worktree (Bun's `~/.bun`, npm's `~/.npm`). The lead
-would then ask to install outside the sandbox, a permission request for
-something no one doubts. So Althar sets the worktree up itself, as Superset,
-Conductor and Codex do, and the lead's sandbox stays as strict as it is
-([ADR-023](../decisions/023-althar-runs-the-project.md)):
+A lead starts in a fresh worktree with nothing installed, and nothing of
+what git ignores, such as `.env`. So Althar sets the worktree up itself, as
+Superset, Conductor and Codex do, before the lead starts
+([ADR-023](../decisions/023-althar-runs-the-project.md),
+[ADR-080](../decisions/080-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)):
 
-- **What runs** is the setup kept for the repository (`set_run_command`'s
-  `setup`, the same one a run of the project starts with), else the install
+- **What runs** is the setup a lead recorded for the repository with
+  `record_setup` (`recorded_setup`): the ignored files to copy from the
+  person's checkout, from the repository's root, and the commands, run one
+  after another from the repository's folder until one fails. The files are
+  copied first, only from inside the checkout, and never over or into
+  what the worktree has, nor through a folder of it that is a symbolic
+  link, which a commit can point anywhere. One that couldn't be copied, gone
+  from the checkout say, fails the setup, and the lead is told which. Without one
+  recorded, the setup kept for the repository (`set_run_command`'s `setup`,
+  the same one a run of the project starts with), else the install
   its lockfile names: `bun install --frozen-lockfile`, `pnpm install
   --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`. It never
   changes the lockfile. Its packages are its package.json's own, or, at the
@@ -1033,6 +1102,14 @@ Conductor and Codex do, and the lead's sandbox stays as strict as it is
   install is skipped where `node_modules` is there; in a worktree it runs
   whatever `node_modules` holds, since an install Althar quitting cut short
   leaves one, and whether the worktree is set up is kept on its workspace.
+- **Nobody writes the recorded setup.** Where none is recorded, the lead's
+  brief asks it to get its folder ready first (its dependencies, what its
+  tools download, the ignored files it needs from the person's checkout,
+  whose path it is given) and to record what worked; Althar copies the files
+  it names into its folder at once. A later lead whose replay failed is told
+  what failed and asked to record the setup that works, which replaces the
+  old one. The person reads it in the project's settings, and changes or
+  clears it there. Secret files such as `.env` are copied as any other.
 - **When:** as the task's worktrees are made (a draft's too, so it is ready
   by the time its plan starts), and again for a worktree a reopened task
   puts back, as soon as it is back. How it went is kept on the workspace, so
@@ -1050,8 +1127,11 @@ Conductor and Codex do, and the lead's sandbox stays as strict as it is
   it ended and the end of what it printed, so the lead can deal with it.
   A setup that fails never holds the task up.
 - **The thread shows it,** as Althar's own line: "Installing dependencies
-  in meridian…", then "Installed dependencies in meridian"; failed, the end
-  of what it printed stands under the line, with its exit code.
+  in meridian…", then "Installed dependencies in meridian", with what it
+  copied and the end of what it printed folded under it; failed, that
+  stands open under the line, with its exit code. The card says
+  "Installing dependencies" while it runs, or "Setting up" for a kept
+  setup line.
 
 It runs repository code on the Mac outside any sandbox (the project's own
 install scripts, and those of its dependencies where the package manager

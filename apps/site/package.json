@@ -7,9 +7,9 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
-    "build": "vp build && vp build --ssr src/entry-server.tsx --outDir .ssr && bun scripts/prerender.ts",
+    "build": "vp build && vp build --ssr src/entry-server.tsx --outDir .ssr && bun scripts/prerender.ts && bun scripts/test-built.ts",
     "preview": "vp preview",
-    "deploy": "vp build && wrangler deploy",
+    "deploy": "bun run build && wrangler deploy",
     "check": "vp check",
     "test": "vp test run",
     "fix": "vp check --fix",

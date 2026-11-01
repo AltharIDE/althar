@@ -14,7 +14,8 @@
     "fix": "vp check --fix",
     "test": "vp test run",
     "verify": "bun run check && bun run test",
-    "export:reels": "bun scripts/reels.ts"
+    "export:reels": "bun scripts/reels.ts",
+    "seal-glyphs": "bun scripts/seal-glyphs.ts"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",

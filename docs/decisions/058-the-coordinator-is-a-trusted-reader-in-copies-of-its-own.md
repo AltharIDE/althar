@@ -22,6 +22,7 @@
   `git fetch` and `git status` across its copies many times a day. A
   review's lead keeps the strict list.
 - **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): a command Claude Code can't read itself, which asks, now runs in the coordinator's sandbox without the reader rules reading it; the reader rules hold only where no sandbox does.
+- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): on the code host the coordinator no longer only reads. It does what the person's account can, through Althar's tools, with what can't be undone on their word; its copies, its sandbox with no network and its denied edit tools stay as they are, and it reads the web under the project's switch (ADR-078).
 - **Owner:** Repository maintainers
 - **Context:** The coordinator talks with the person about the project and
   reads the project's repositories in throwaway copies (ADR-004), under the

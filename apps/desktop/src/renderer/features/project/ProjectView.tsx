@@ -443,6 +443,11 @@ export function ProjectView({
 
   const talking = room !== Room.Board
   const boarding = room !== Room.Talk
+  /** Into the coordinator's composer, from an empty board: the conversation beside the board where it wasn't on screen. */
+  const talkToCoordinator = () => {
+    if (room === Room.Board) setRoom(Room.Both)
+    requestAnimationFrame(() => voice.inputRef.current?.focus())
+  }
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -658,6 +663,7 @@ export function ProjectView({
                     line={board.line}
                     folds={folds}
                     onFoldsChange={setFolds}
+                    onTalk={talkToCoordinator}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

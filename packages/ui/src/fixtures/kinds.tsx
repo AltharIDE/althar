@@ -57,6 +57,30 @@ export const CHANGE_READY: Card = {
   ),
 }
 
+/** Its pull request in its branch's merge queue: every step done, none on, and its host merges it once the queue's checks pass. */
+export const CHANGE_IN_MERGE_QUEUE: Card = {
+  status: TaskStatus.Running,
+  word: 'In the merge queue',
+  kind: TaskKind.Change,
+  at: '1h 6m',
+  title: 'Question cards: a one-line question, not a paragraph',
+  track: trackOf(['Implement', 'Review'], 1, 1, true),
+  object: <PullChip host={GITHUB} repo="althar" number={482} add={151} del={17} />,
+  foot: <Fact>24 of 32 checks passed</Fact>,
+}
+
+/** Its pull request's checks running on the code host: no agent is on it, so every step is done, none on, and its checks say where it is. */
+export const CHANGE_CHECKS_RUNNING: Card = {
+  status: TaskStatus.Running,
+  word: 'Checks running',
+  kind: TaskKind.Change,
+  at: '24m',
+  title: 'PR and CI news reach the coordinator',
+  track: trackOf(['Implement', 'Review'], 1, 1, true),
+  object: <PullChip host={GITHUB} repo="althar" number={497} add={246} del={22} />,
+  foot: <Fact tone="live">7 of 29 checks passed</Fact>,
+}
+
 /** Its lead couldn't resolve a conflict with the default branch: warm, not red, since nothing is lost. */
 export const CHANGE_CONFLICT: Card = {
   status: TaskStatus.Yours,
@@ -213,6 +237,8 @@ export const KIND_CARDS: ReadonlyArray<{ readonly id: string; readonly card: Car
   { id: 'review running', card: REVIEW_RUNNING },
   { id: 'plain working', card: PLAIN_WORKING },
   { id: 'change ready', card: CHANGE_READY },
+  { id: 'change in the merge queue', card: CHANGE_IN_MERGE_QUEUE },
+  { id: 'change checks running', card: CHANGE_CHECKS_RUNNING },
   { id: 'merge conflict', card: CHANGE_CONFLICT },
   { id: 'permission', card: CHANGE_PERMISSION },
   { id: 'question', card: CHANGE_QUESTION },

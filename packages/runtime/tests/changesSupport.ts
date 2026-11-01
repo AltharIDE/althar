@@ -71,3 +71,7 @@ export const git = (cwd: string, ...args: Array<string>) => execFileSync('git', 
 
 export const arrivals = (threadId: string) =>
   Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'arrival').map((item) => item.content))
+
+/** A pull request's description without what Althar adds of its change's review (pullRequestReview.ts): the seal at its head, and the fold. */
+export const withoutReview = (body: string) =>
+  body.replace(/^<picture>\n[\s\S]*?\n<\/picture>\n\n/, '').replace(/\n\n<details>\n<summary>Reviewed by [\s\S]*?\n<\/details>/, '')
