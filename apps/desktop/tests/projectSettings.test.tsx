@@ -168,6 +168,43 @@ describe('a project’s settings', () => {
     expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
   })
 
+  it('shows how each repository’s new task folders get ready, in Running, and keeps a change as the person leaves the lines', async () => {
+    const { client } = windowAt('/projects/p1?room=settings&section=running')
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    expect(commands).toHaveProperty('value', 'bun install --frozen-lockfile')
+    expect(screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })).toHaveProperty('value', '.env')
+    expect(screen.getByText('~/code/meridian-api')).toBeTruthy()
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nbunx playwright install chromium')
+    await userEvent.tab()
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryId: repositories[0]?.id,
+        setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
+      }),
+    )
+    // A repository no lead has set up yet says who fills it in.
+    await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
+    expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
+      'placeholder',
+      'The first task’s lead fills this in.',
+    )
+  })
+
+  it('says why a change to a setup didn’t hold', async () => {
+    windowAt('/projects/p1?room=settings&section=running', {
+      setRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'ProjectRefused', message: 'Name each file from the repository’s root.' })
+      }),
+    })
+    const files = await screen.findByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n../secrets')
+    await userEvent.tab()
+    expect((await screen.findByRole('alert')).textContent).toBe('Name each file from the repository’s root.')
+  })
+
   it('renames the project in place: its front page and its tab take the new name, without a restart', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()

@@ -33,7 +33,7 @@ import { type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
  * each from the repository's folder, until one fails. Where the replay
  * fails, the lead starts all the same, told what failed, and records the
  * setup that works, which replaces the old one. The person reads it in the
- * project's settings, and can change it there or clear it.
+ * project's settings, and can change it there.
  *
  * It starts as the worktree is made, and the lead's first turn waits for it.
  * Never in a copy a task only reads, such as the pull request a review reads:
@@ -181,6 +181,27 @@ export const failedSetUp = (setUp: SetUp) => setUp.command !== null && (setUp.co
 /** At most how many commands a recorded setup runs, and how long each may be. */
 const MOST_COMMANDS = 20
 const LONGEST_COMMAND = 2_000
+
+/**
+ * A setup as a lead or the person gave it, tidied: its commands without blank
+ * lines, its files from the repository's root, once each; or, where it can't
+ * be kept, why, in words for whoever gave it.
+ */
+export const setupOf = (given: {
+  readonly copy: ReadonlyArray<string>
+  readonly commands: ReadonlyArray<string>
+}): { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | { readonly refused: string } => {
+  const commands = given.commands.map((one) => one.trim()).filter((one) => one !== '')
+  const named = given.copy.map((one) => one.trim()).filter((one) => one !== '')
+  const outside = named.filter((one) => copyablePath(one) === null)
+  if (outside.length > 0)
+    return { refused: `Name each file to copy from the repository's root, inside it and not in .git: ${outside.join(', ')}.` }
+  if (commands.length > MOST_COMMANDS || commands.some((one) => one.length > LONGEST_COMMAND))
+    return {
+      refused: `Give at most ${MOST_COMMANDS} commands, each under ${LONGEST_COMMAND} characters: put a longer one in a script of the repository's.`,
+    }
+  return { copy: [...new Set(named.map(copyablePath).filter((one) => one !== null))], commands }
+}
 
 /** How long a setup may run, unless a test says otherwise. */
 const WITHIN = Duration.minutes(10)
@@ -620,20 +641,10 @@ export class Setups extends Context.Service<
               readonly commands?: unknown
               readonly repository?: unknown
             }
-            const strings = (value: unknown) =>
-              Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string').map((one) => one.trim()) : []
-            const commands = strings(asked.commands).filter((one) => one !== '')
-            const named = strings(asked.copy).filter((one) => one !== '')
-            const copy = [...new Set(named.map(copyablePath).filter((one) => one !== null))]
-            const outside = named.filter((one) => copyablePath(one) === null)
-            if (outside.length > 0)
-              return yield* new ToolRefused({
-                message: `Name each file to copy from the repository's root, inside it and not in .git: ${outside.join(', ')}.`,
-              })
-            if (commands.length > MOST_COMMANDS || commands.some((one) => one.length > LONGEST_COMMAND))
-              return yield* new ToolRefused({
-                message: `Give at most ${MOST_COMMANDS} commands, each under ${LONGEST_COMMAND} characters: put a longer one in a script of the repository's.`,
-              })
+            const strings = (value: unknown) => (Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : [])
+            const tidy = setupOf({ copy: strings(asked.copy), commands: strings(asked.commands) })
+            if ('refused' in tidy) return yield* new ToolRefused({ message: tidy.refused })
+            const { copy, commands } = tidy
             const repository = typeof asked.repository === 'string' && asked.repository.trim() !== '' ? asked.repository : undefined
             const all = yield* provide(againOf(taskId, repository))
             const [one] = all
@@ -645,7 +656,7 @@ export class Setups extends Context.Service<
               return yield* new ToolRefused({
                 message: `Say which repository it is for, as repository: ${all.map((each) => each.name).join(', ')}.`,
               })
-            const recorded: Recorded = { copy, commands, at: yield* provide(timestamp), taskId }
+            const recorded: Recorded = { copy: [...copy], commands: [...commands], at: yield* provide(timestamp), taskId }
             yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId))
             const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
             if (commands.length === 0 && copy.length === 0)

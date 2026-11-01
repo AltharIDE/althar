@@ -466,6 +466,13 @@ export const RepositoryHost = Schema.Struct({
 export type RepositoryHost = typeof RepositoryHost.Type
 
 /** One of a project's repositories, as this Mac has it. */
+/** A repository's setup (ADR-079): the ignored files to copy from the person's checkout, from its root, and the commands that get a task's folder ready, in order. */
+export const RepositorySetup = Schema.Struct({
+  copy: Schema.Array(Schema.String),
+  commands: Schema.Array(Schema.String),
+})
+export type RepositorySetup = typeof RepositorySetup.Type
+
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -482,6 +489,8 @@ export const ProjectRepository = Schema.Struct({
   fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
+  /** How each new task's folder of it gets ready (ADR-079): the files copied from the checkout here, and the commands; null until a lead records it. */
+  setup: Schema.NullOr(RepositorySetup),
 })
 export type ProjectRepository = typeof ProjectRepository.Type
 
@@ -3044,7 +3053,7 @@ export const Api = RpcGroup.make(
   command('AddRepositories', { projectId: Schema.String, grant: Schema.String }, Schema.Void),
   /** Leaves a repository out of the project: new tasks can't change it; tasks made with it keep it. */
   command('LeaveOutRepository', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
-  /** Sets a repository's role, or, for a fork, where its pull requests open. */
+  /** Sets a repository's role, or, for a fork, where its pull requests open, or how each new task's folder of it gets ready. */
   command(
     'SetRepository',
     {
@@ -3052,6 +3061,7 @@ export const Api = RpcGroup.make(
       repositoryId: Schema.String,
       role: Schema.optional(RepositoryRole),
       changeTarget: Schema.optional(ChangeTarget),
+      setup: Schema.optional(RepositorySetup),
     },
     Schema.Void,
   ),

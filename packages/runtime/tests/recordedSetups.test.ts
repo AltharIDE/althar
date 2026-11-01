@@ -128,6 +128,56 @@ describe('a setup a lead records', () => {
   )
 })
 
+describe('a setup the person changes in the project’s settings', () => {
+  it.live('replaces what the lead recorded, tidied, and is what the next task’s folder gets ready with', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      yield* callTool(first.lead, 'record_setup', { copy: ['.env'], commands: [step('one')] })
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      assert.deepStrictEqual(repository?.setup, { copy: ['.env'], commands: [step('one')] })
+
+      yield* projects.setRepository({
+        projectId: first.project.projectId,
+        repositoryId: repository?.id ?? '',
+        setup: { copy: [' .env ', './.env'], commands: [step('two'), '  ', step('three')] },
+      })
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, {
+        copy: ['.env'],
+        commands: [step('two'), step('three')],
+        taskId: null,
+      })
+      const [read] = yield* projects.repositories(first.project.projectId)
+      assert.deepStrictEqual(read?.setup, { copy: ['.env'], commands: [step('two'), step('three')] })
+
+      const later = yield* taskIn(path, 'Refund over budget')
+      assert.deepInclude(yield* setUpOf(later.task.taskId), { code: 0 })
+      assert.strictEqual(readFileSync(join(later.task.worktree, 'ran.txt'), 'utf8'), 'two\nthree\n')
+      assert.strictEqual(readFileSync(join(later.task.worktree, '.env'), 'utf8'), 'API_KEY=local\n')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is refused with a file outside the repository, and leaves the setup as it was', () =>
+    Effect.gen(function* () {
+      const { project } = yield* taskIn(withEnv())
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(project.projectId)
+      assert.isNull(repository?.setup)
+      const refused = yield* Effect.flip(
+        projects.setRepository({
+          projectId: project.projectId,
+          repositoryId: repository?.id ?? '',
+          setup: { copy: ['../secrets.env'], commands: ['make'] },
+        }),
+      )
+      assert.deepInclude(refused, { _tag: 'ProjectRefused', reason: 'bad_setup' })
+      assert.isNull(yield* recordedIn(project.projectId))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
 describe('a recorded setup with nothing in it', () => {
   it.live('says the repository needs nothing: later tasks run nothing, and their leads aren’t asked again', () =>
     Effect.gen(function* () {

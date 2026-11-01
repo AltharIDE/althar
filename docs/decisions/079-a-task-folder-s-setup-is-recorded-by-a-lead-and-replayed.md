@@ -54,7 +54,12 @@
     sandbox can read the person's checkout already, so asking for each file
     wouldn't keep it from the lead.
   - **The person reads it in the project's settings,** and can change it
-    there, or clear it so the next lead works it out again.
+    there: in Running, a tab for each repository, its commands and then the
+    files copied from the checkout, each as numbered, coloured lines typed
+    in place and kept as the person leaves them (`SetRepository`'s
+    `setup`). Lines and boxes, not named steps: the person turned down a
+    table of steps and plain text boxes alike. A change is checked as a
+    lead's is, and replaces what the lead recorded.
 - **Alternatives considered:**
   - **Althar suggests a setup from the repository, the person confirms
     it.** A step the person has to take for every project, and a guess from
