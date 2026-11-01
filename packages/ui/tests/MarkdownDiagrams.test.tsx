@@ -164,6 +164,7 @@ describe('drawDiagram', () => {
       '<a href="https://evil.example/e"><text>link</text></a>',
       '<use xlink:href="https://evil.example/f.svg#g"/><use href="#arrow"/>',
       '<rect style="fill: url(\'https://evil.example/h.png\')" onclick="alert(1)"/>',
+      '<rect fill="url(https://evil.example/k.svg#p)" filter="url(https://evil.example/l.svg#f)" marker-end="url(#arrow)"/>',
       '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><img src="https://evil.example/i.png"/><iframe src="https://evil.example"></iframe></div></foreignObject>',
       '<set attributeName="href" to="https://evil.example/j"/>',
       '</svg>',
@@ -171,6 +172,8 @@ describe('drawDiagram', () => {
     const drawn = clean(svg)
     expect(reaches(drawn.svg)).toMatchObject({ addresses: [], handlers: [], fetches: [] })
     expect(drawn.svg).not.toMatch(/<script|<image|<img|<iframe|<set|<a /)
+    expect(drawn.svg).not.toMatch(/(fill|filter)="url/)
+    expect(drawn.svg).toContain('marker-end="url(#arrow)"')
     /* an escape that spelled url( out is left meaningless */
     expect(drawn.svg).not.toMatch(/url\(\s*['"]?https?:/)
     /* what points within the drawing stays */

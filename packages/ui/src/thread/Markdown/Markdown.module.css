@@ -147,45 +147,19 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* opened bigger: the drawing fills the frame on its own sheet */
+/* opened bigger: the drawing larger than in the thread, on its own sheet, scrolling where it is longer than the frame */
 .bigDiagram {
+  position: absolute;
+  inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
   padding: 24px;
+  overflow: auto;
   background: var(--paper);
 }
+/* auto margins centre it while it fits, and leave its start in reach when it scrolls */
 .bigDiagram svg {
-  width: 100%;
-  height: 100%;
-}
-.md blockquote {
-  padding: 9px 12px;
-  border-radius: 8px;
-  /* pressed into whatever it sits on: the thread's own ground is --n-2 */
-  background: var(--sunk);
-  color: var(--t-2);
-}
-.md blockquote > * {
-  margin: 0;
-}
-.md hr {
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-
-.panel {
-  max-width: 620px;
-  font-size: 13.5px;
-  line-height: 1.65;
-}
-.panel .title {
-  margin-bottom: 14px;
-  font-size: 19px;
-}
-.panel .heading {
-  margin-top: 22px;
-  font-size: 14px;
+  flex: none;
+  width: var(--dw);
+  height: var(--dh);
+  margin: auto;
 }

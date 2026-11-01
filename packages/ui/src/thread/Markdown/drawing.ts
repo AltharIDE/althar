@@ -29,16 +29,18 @@ const FALLBACK: Record<string, string> = {
 const colours = (theme: Theme): DiagramColours => {
   const css = getComputedStyle(document.documentElement)
   const token = (name: string) => css.getPropertyValue(name).trim() || (FALLBACK[name] ?? '')
+  const dark = theme === 'dark'
+  /* shapes sit a step off the sheet: darker on paper, lighter at night, where raised means lighter */
   return {
-    dark: theme === 'dark',
+    dark,
     font: token('--font'),
     paper: token('--paper'),
-    fill: token('--n-2'),
+    fill: token(dark ? '--n-4' : '--n-2'),
     edge: token('--n-5'),
     ink: token('--t-1'),
     ink2: token('--t-2'),
     line: token('--t-3'),
-    fill2: token('--n-4'),
+    fill2: token(dark ? '--n-5' : '--n-4'),
     fill3: token('--n-3'),
   }
 }

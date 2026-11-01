@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import { useTheme } from '../../lib/theme'
@@ -43,6 +43,16 @@ export function CodeBlock({ text, copy, after }: { text: string; copy: Partial<C
       {after}
     </div>
   )
+}
+
+/** How much larger a diagram opens than the thread draws it. */
+const BIGGER = 1.6
+const PAD = 48
+/* the frame it opens in: its shape, but never so long or so tall that it is a sliver, the drawing scrolling inside it instead of shrinking to fit */
+const bigFrame = ({ width, height }: Drawn) => {
+  const w = width * BIGGER + PAD
+  const h = height * BIGGER + PAD
+  return { width: Math.round(Math.max(w, h / 1.5)), height: Math.round(Math.max(h, w / 3)) }
 }
 
 type Shown = { source: string; drawn: Drawn; error?: undefined } | { source: string; drawn?: undefined; error: string }
@@ -130,10 +140,16 @@ export function Diagram({
           images={[
             {
               name: t.name,
-              /* a small diagram opens larger than it is drawn in the thread; a wide one fits the window */
-              width: Math.round(drawn.width * 1.6),
-              height: Math.round(drawn.height * 1.6),
-              view: <div className={s.bigDiagram} role="img" aria-label={t.name} dangerouslySetInnerHTML={svg} />,
+              ...bigFrame(drawn),
+              view: (
+                <div
+                  className={s.bigDiagram}
+                  style={{ '--dw': `${drawn.width * BIGGER}px`, '--dh': `${drawn.height * BIGGER}px` } as CSSProperties}
+                  role="img"
+                  aria-label={t.name}
+                  dangerouslySetInnerHTML={svg}
+                />
+              ),
             },
           ]}
           onClose={() => setBig(false)}

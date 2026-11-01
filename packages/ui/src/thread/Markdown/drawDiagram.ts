@@ -68,8 +68,12 @@ const config = (c: DiagramColours): MermaidConfig => ({
   suppressErrorRendering: true,
   secure: SECURE,
   theme: 'base',
+  /* flat, as the kit draws: mermaid's newer look casts a shadow under every shape */
+  look: 'classic',
   darkMode: c.dark,
   fontFamily: c.font,
+  /* a sequence's words at a flowchart's size */
+  sequence: { actorFontSize: 13, messageFontSize: 13, noteFontSize: 13 },
   themeVariables: {
     darkMode: c.dark,
     fontFamily: c.font,
@@ -124,8 +128,10 @@ purify.addHook('afterSanitizeAttributes', (node) => {
     const value = node.getAttribute(name)
     if (value !== null && !value.trim().startsWith('#')) node.removeAttribute(name)
   }
-  const style = node.getAttribute('style')
-  if (style !== null) node.setAttribute('style', offline(style))
+  /* style, and fill, filter, mask and the rest, where a url() can stand as well */
+  for (const { name, value } of [...node.attributes]) {
+    if (/url|image-set|\\/i.test(value)) node.setAttribute(name, offline(value))
+  }
 })
 purify.addHook('uponSanitizeElement', (node, data) => {
   if (data.tagName === 'style') node.textContent = offline(node.textContent ?? '')
