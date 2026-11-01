@@ -394,7 +394,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                     signal
                     busy={actions?.sending?.has(work.taskId) ?? false}
                     doing={text.carryingOn}
-                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote)}
+                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
                   >
                     {text.carryOn}
                   </NextStep>
@@ -407,7 +407,6 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
-  if (call === null) return { ...base, word: text.status[TaskStatus.Yours] }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
@@ -502,15 +501,18 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
-        // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
-        ...(work.handedBack != null || work.conflictUnsent != null
-          ? unsentOf(work, work.handedBack ?? work.conflictUnsent ?? '', actions)
-          : // One merged or closed has nothing in its way, and nothing to do to it.
-            change === null || change.state !== 'open'
-            ? work.conflictUnchecked == null
-              ? {}
-              : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
-            : readyOf(work, change, actions)),
+        // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
+        // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
+        ...(work.handedBack != null
+          ? unsentOf(work, work.handedBack, undefined)
+          : work.conflictUnsent != null
+            ? unsentOf(work, work.conflictUnsent, actions)
+            : // One merged or closed has nothing in its way, and nothing to do to it.
+              change === null || change.state !== 'open'
+              ? work.conflictUnchecked == null
+                ? {}
+                : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
+              : readyOf(work, change, actions)),
       }
     }
     default:
@@ -686,7 +688,7 @@ export function BoardView({
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
   const asks = [
-    ...lanes.waiting.map((waiting) => ({ at: waiting.call?.createdAt ?? waiting.task.createdAt, waiting, call: null })),
+    ...lanes.waiting.map((waiting) => ({ at: waiting.call.createdAt, waiting, call: null })),
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 

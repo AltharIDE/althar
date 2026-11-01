@@ -129,6 +129,7 @@ import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
+import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
 /*
  * A task's change on its code host (docs/architecture/06; docs/plans/
@@ -417,6 +418,8 @@ export interface Fixing {
   readonly open: boolean
   /** While so, the checks on its fix run, or haven't shown yet: it is under way. */
   readonly running: boolean
+  /** While so, the checks on its head fail: its lead is told them, or at them, so it is under way, not the person's (DEV-173). */
+  readonly withLead: boolean
   /** Why the checks that fail on its head are the person's, as its card says: its lead's words, or that its tries are spent. */
   readonly why: string | null
 }
@@ -682,6 +685,13 @@ export class Changes extends Context.Service<
     askRemotes(taskId: string): Effect.Effect<void>
     /** The commit a task's worktree was at when its branch's remote last said where that branch is, this launch; null before. */
     askedAt(worktree: string, branch: string): Effect.Effect<string | null>
+    /**
+     * Whether Althar is opening a task's next pull request by itself, a round of work ended after its last merged or closed
+     * (ADR-034): under way, not the person's, until it opens or can't. This launch only, as the opening is.
+     */
+    openingNext(taskId: string): Effect.Effect<boolean>
+    /** Says Althar is opening a task's next pull request by itself, from before its round ends (`opening`), or is done with it. */
+    opensNext(taskId: string, opening: boolean): Effect.Effect<void>
     /** Pushes a task's branch to each of its repositories' remotes, with the person's own git, up to the commits they saw. */
     pushBranch(
       taskId: string,
@@ -820,6 +830,8 @@ export class Changes extends Context.Service<
       const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0]) =>
         Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change) }), scope))
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
+      // How long after its lead's turn ended its commits are still going up (DEV-173).
+      const goingFor = Duration.toMillis((yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS))
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
@@ -1326,8 +1338,9 @@ export class Changes extends Context.Service<
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
+          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034).
           const title = titleFor(rule ?? conventions.title?.pattern ?? null, {
-            title: task.title,
+            title: next?.change == null ? task.title : `After ${next.change.words.prefix}${next.change.number}: ${task.title}`,
             issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
           })
           const body = yield* bodyFor(
@@ -2588,6 +2601,7 @@ export class Changes extends Context.Service<
 
       /* Where each worktree was, by its branch, when its remote last said where that branch is; and the tasks being asked now. */
       const remotesAsked = new Map<string, string>()
+      const nextOpening = new Set<string>()
       const asking = new Set<string>()
 
       /**
@@ -3329,6 +3343,31 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * Someone else pushed to the pull request, such as with the host's
+       * "Update branch": its head is neither what Althar last pushed nor on
+       * the task's branch, so the two have parted and a plain push would be
+       * refused. Its lead is told once a head to merge it in (`mergeNote`),
+       * started again if it must be, rather than leaving it to the person
+       * (DEV-173). Not while a conflict round is under way: the round brings
+       * the branches together itself.
+       */
+      const bringTogether = (link: LinkRow, head: string | null, url: string) =>
+        Effect.gen(function* () {
+          // Only a commit, as the card tells one moved: a head that is none can't be fetched to merge.
+          if (head === null || !/^[0-9a-f]{40,64}$/.test(head) || head === (yield* sentTo(link.projectId, url))) return
+          const workspace = yield* worktreeOf(link.taskId, url)
+          if (workspace === undefined || (yield* onHead(workspace.path, head)) || (yield* roundUnderWay(link.taskId))) return
+          const sql = yield* SqlClient.SqlClient
+          const [told] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'parted' AND json_extract(payload, '$.sha') = ${head} LIMIT 1`
+          if (told !== undefined) return
+          // Fetched first, so the lead has the commits to merge; a fetch that fails is tried again on the next turn.
+          const { note } = yield* mergeNote(link.taskId, url)
+          if (yield* heard(link, 'parted', `parted:${head}`, { sha: head })) yield* tellLead(link, [note], true)
+        })
+
+      /**
        * A pull request's head as its host says, unless the host hasn't read
        * Althar's last push to it yet: for a moment after a push, GitHub still
        * answers with the head before, behind what was pushed. Where the
@@ -3480,6 +3519,23 @@ export class Changes extends Context.Service<
                   alone = true
                   forLead.push(checksSpentForLead(sum, name, logs, FIX_ROUNDS))
                 } else if (fixing?.stopped !== true) forLead.push(checksForLead(sum, name, logs))
+              } else if (reran === null && !(yield* roundUnderWay(link.taskId))) {
+                // None failed but some were cancelled, which a host holds a merge on as on a failure: run again once by Althar,
+                // whoever has looked, as the person would on the host (DEV-173). Cancelled again, they are the person's.
+                const cancelledChecks = ran.filter((candidate) => candidate.state === 'cancelled')
+                const ranThem =
+                  cancelledChecks.length > 0 &&
+                  (yield* Effect.forEach(cancelledChecks, (check) =>
+                    host.rerun(repository, check).pipe(Effect.orElseSucceed(() => false)),
+                  )).some(Boolean)
+                if (ranThem) {
+                  yield* heard(link, 'checks_rerun', `rerun:${sum.sha}`, { sha: sum.sha, cancelled: true })
+                  yield* sayOn(
+                    link,
+                    `Running ${cancelledChecks.length === 1 ? 'a cancelled check' : `${cancelledChecks.length} cancelled checks`} on ${name} again.`,
+                  )
+                  rerunning = true
+                }
               }
             }
             // Run again, they are running as far as Althar knows: how they end next is heard, however soon.
@@ -3564,6 +3620,12 @@ export class Changes extends Context.Service<
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
           yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
+          if (now.state === 'open' && !held)
+            yield* bringTogether(link, now.headSha, now.url).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning('Could not have the lead bring in what was pushed to its pull request', cause),
+              ),
+            )
           // Not worked out yet by its host, whether it conflicts is asked again next turn, a few turns running, not taken for a no.
           const unknown = now.state === 'open' && now.conflicts === undefined ? (unknownFor.get(link.id) ?? 0) + 1 : 0
           if (unknown === 0) unknownFor.delete(link.id)
@@ -5256,7 +5318,10 @@ export class Changes extends Context.Service<
        * How each of a task's pull requests stands for its lead's commits
        * (ADR-072), read from the record: going up as its turn ends while its
        * lead is in one, else held where Althar kept why since anything last
-       * went up. Null where the rules leave every push to the person.
+       * went up. Null where the rules leave every push to the person; and
+       * none for one held for no reason a moment after its lead's last turn
+       * ended, as commits made outside a turn, which nothing pushes, the
+       * person's to push as where the rules leave it to them (DEV-173).
        */
       const pushingOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -5265,6 +5330,11 @@ export class Changes extends Context.Service<
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
           const lead = thread === undefined ? Option.none() : yield* sessions.running(thread.id)
           const atWork = Option.isSome(lead) && lead.value.turnRunning
+          const [turn] =
+            atWork || thread === undefined
+              ? []
+              : yield* sql<{ ended: string | null }>`SELECT max(ended_at) AS ended FROM turn_deliveries WHERE thread_id = ${thread.id}`
+          const going = atWork || betweenAgents(turn?.ended ?? null, yield* Clock.currentTimeMillis, goingFor)
           const shown = new Map<string, { readonly held: string | null }>()
           for (const link of yield* linksOf(taskId)) {
             const snapshot = yield* decodeSnapshot(link.snapshot)
@@ -5276,7 +5346,8 @@ export class Changes extends Context.Service<
                     AND h.observed_at >= coalesce((SELECT max(p.observed_at) FROM observations p WHERE p.subject_type = 'external_link'
                       AND p.subject_id = ${link.id} AND p.kind = 'pushed'), '')
                   ORDER BY h.observed_at DESC, h.rowid DESC LIMIT 1`
-            shown.set(snapshot.url, { held: held?.why ?? null })
+            if (held !== undefined) shown.set(snapshot.url, { held: held.why })
+            else if (going) shown.set(snapshot.url, { held: null })
           }
           return shown
         })
@@ -5887,7 +5958,7 @@ export class Changes extends Context.Service<
           // Merged or closed, its commits after it go in the task's next pull request, which the person opens (ADR-034).
           if (now.state !== 'open')
             return yield* new ToolRefused({
-              message: `${where} is ${now.state}, so there's nothing to push to. What you committed after it goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.`,
+              message: `${where} is ${now.state}, so there's nothing to push to. What you committed after it goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.`,
             })
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined || !existsSync(workspace.path))
@@ -6119,7 +6190,7 @@ export class Changes extends Context.Service<
                     message:
                       refusals.length > 0
                         ? refusals.join(' ')
-                        : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
+                        : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
                   })
                 }
                 const { link, snapshot, where, ahead, left, path, branch } = chosen
@@ -6209,6 +6280,7 @@ export class Changes extends Context.Service<
                 : {
                     open: all.some((one) => one.open),
                     running: all.some((one) => one.running),
+                    withLead: all.some((one) => one.open && one.failing),
                     why: all.find((one) => one.why !== null)?.why ?? null,
                   },
             ),
@@ -6244,6 +6316,8 @@ export class Changes extends Context.Service<
             return Effect.asVoid(Effect.forkIn(provide(askRemotes(taskId)), scope))
           }),
         askedAt: (worktree, branch) => Effect.sync(() => remotesAsked.get(`${worktree} ${branch}`) ?? null),
+        openingNext: (taskId) => Effect.sync(() => nextOpening.has(taskId)),
+        opensNext: (taskId, opening) => Effect.sync(() => void (opening ? nextOpening.add(taskId) : nextOpening.delete(taskId))),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
         read: (taskId) => provide(read(taskId)),

@@ -294,6 +294,7 @@ describe('the client', () => {
           AbandonTask: () => Effect.die('unused'),
           MarkTaskDone: () => Effect.die('unused'),
           KeepTaskForLater: () => Effect.die('unused'),
+          SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),

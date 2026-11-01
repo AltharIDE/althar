@@ -166,6 +166,16 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps a task under way, out of Needs you, until the call it waits on is read (DEV-173)', () => {
+    const lanes = lanesOf(board({ calls: [] }))
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => [work.taskId, work.phase])).toEqual([
+      ['t2', 'running'],
+      ['t3', 'running'],
+    ])
+    expect(yoursOf(lanes)).toBe(2)
+  })
+
   describe('a task whose lead stopped, with no agent on it', () => {
     const NOW = '2026-10-01T10:00:00.000Z'
     const at = '2026-09-30T14:00:00.000Z'
@@ -448,7 +458,7 @@ describe('the board’s lanes', () => {
     })
   })
 
-  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
+  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet under way', () => {
     const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
     const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
     const lanes = lanesOf(
@@ -461,13 +471,13 @@ describe('the board’s lanes', () => {
       }),
     )
     expect(lanes.calls.map((call) => call.id)).toEqual(['q1', 'a2'])
-    expect(lanes.waiting.map(({ task: work, call }) => [work.taskId, call])).toEqual([['t9', null]])
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['t9'])
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
-      ['Waiting on you', 'Asks soon'],
       ['Question', 'Run make deploy'],
       ['Permission', 'Run make deploy'],
     ])
-    expect(yoursOf(lanes)).toBe(3)
+    expect(yoursOf(lanes)).toBe(2)
   })
 
   it('keeps a plain task that finished in Needs you, counted, until the person keeps it for later, the latest kept first', () => {
@@ -1997,11 +2007,47 @@ describe('a ready card’s next step, done from the card', () => {
       snapshot({ session: null, task: { ...base.task, lead: { agentId: 'claude-code', model: null, account: null } } }),
     )
     const onOpen = vi.fn()
-    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Stopped d')
     await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledWith({ taskId: 'sd', action: 'carry_on' }))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('counts Keep pressed in Needs you as settled with one press, and Done on one kept for later not (DEV-173)', async () => {
+    tasks = [
+      task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null }),
+      task({
+        taskId: 'p2',
+        threadId: 'thp2',
+        title: 'Spike the limits',
+        phase: 'kept',
+        kind: 'plain',
+        branch: null,
+        keptAt: '2026-09-30T11:00:00.000Z',
+      }),
+    ]
+    const markTaskDone = vi.fn(async () => {})
+    const keepTaskForLater = vi.fn(async () => {})
+    const settledWithOnePress = vi.fn(async () => {})
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ markTaskDone, keepTaskForLater, settledWithOnePress, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Prototype the tabs')
+    await userEvent.click(card.getByRole('button', { name: 'Keep for later' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 'p1', action: 'keep' }))
+    // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
+    const lane = within(screen.getByRole('region', { name: /^Settled/ }))
+    await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
+    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(settledWithOnePress).toHaveBeenCalledOnce()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
@@ -2009,7 +2055,8 @@ describe('a ready card’s next step, done from the card', () => {
     const onOpen = vi.fn()
     let finish = () => {}
     const push = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
-    withServices(<Board onOpen={onOpen} />, fakeClient({ push, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ push, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Commits to push')
     // A button of its own, named for what it does and to which pull request.
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
@@ -2021,9 +2068,12 @@ describe('a ready card’s next step, done from the card', () => {
     expect(busy.textContent).toBe('Pushing 3 commits')
     await userEvent.click(busy)
     expect(push).toHaveBeenCalledTimes(1)
+    expect(settledWithOnePress).not.toHaveBeenCalled()
     finish()
     await waitFor(() => expect(card.getByRole('button', { name: 'Push 3 commits to #12' }).getAttribute('aria-busy')).toBeNull())
     expect(onOpen).not.toHaveBeenCalled()
+    // Kept on this computer as settled with one press, once it went through (DEV-173).
+    expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 's5', action: 'push' })
     // The rest of the card still opens its task.
     await userEvent.click(screen.getByRole('button', { name: 'Commits to push' }))
     expect(onOpen).toHaveBeenCalledWith('th-s5')
@@ -2178,16 +2228,19 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
-  it('offers Resolve now where the lead couldn’t resolve a conflict, though neither branch moved', async () => {
+  it('says why the lead couldn’t resolve a conflict, and opens its task rather than asking the lead again (DEV-173)', async () => {
     const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
     tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={vi.fn()} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
     const card = await cardOf('Handed back')
     expect(card.getByText('Merge conflict')).toBeTruthy()
     expect(card.getByText(why)).toBeTruthy()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Handed back' }))
+    expect(onOpen).toHaveBeenCalledWith('th-s10')
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
   })
 
   it('shows only what fails where its lead brought its failing checks to the person', async () => {
