@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Composer } from '../../composer/Composer/Composer'
 import { UpstreamOffer } from './UpstreamOffer'
 
 const meta = {
@@ -33,4 +34,13 @@ export const Refused: Story = {
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('alert')).toHaveTextContent('Its owners can give you access.')
   },
+}
+
+/** Where the project's room shows it: on the composer's edge, over the end of the thread. */
+export const OverTheComposer: Story = {
+  render: (args) => (
+    <div style={{ paddingTop: 170 }}>
+      <Composer value="" placeholder="Tell the coordinator…" onChange={() => {}} onSubmit={() => {}} above={<UpstreamOffer {...args} />} />
+    </div>
+  ),
 }
