@@ -260,6 +260,17 @@ describe('a task’s rounds of work after its plan (ADR-034)', () => {
     expect(trackFor(steps, 'review', false, true).map((step) => step.label)).toEqual(['Follow-up', 'Review'])
   })
 
+  it('has every step done, none on, while its task is merging or in its merge queue', () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    // Neither the step it was on, nor a merge that is no step of its plan's, is left as the one on.
+    expect(trackFor(steps, 'merge_queue', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'merging', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'publish', false).map((step) => step.state)).toEqual(['done', 'now'])
+  })
+
   it('shows its latest pull request in each repository, and the earlier ones newest first', () => {
     const first = change({ number: 1, state: 'merged', url: 'https://github.test/meridian/api/pull/1' })
     const second = change({ number: 2, state: 'closed', url: 'https://github.test/meridian/api/pull/2' })
