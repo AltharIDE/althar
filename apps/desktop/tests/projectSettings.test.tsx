@@ -4,7 +4,15 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type ProjectTracker, type Service } from '@althar/contracts'
+import {
+  ApiError,
+  type BoardTask,
+  type ConnectionSummary,
+  type ProjectSummary,
+  type ProjectTracker,
+  type RepositorySetup,
+  type Service,
+} from '@althar/contracts'
 
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -71,7 +79,7 @@ const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}
       <RouterProvider router={router} />
     </ServicesProvider>,
   )
-  return { ...fake, router }
+  return { ...fake, router, cache: services.cache }
 }
 
 /** A project's tab, by its name, in the window's tabs. */
@@ -192,6 +200,44 @@ describe('a project’s settings', () => {
     )
   })
 
+  it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    const { cache } = windowAt('/projects/p1?room=settings&section=running', {
+      setRepository,
+      getRepositories: vi.fn(async () => kept),
+    })
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    const files = screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n.env.local')
+    await userEvent.tab()
+    // A read while the first is on its way says what was kept before; the newest change still shows.
+    await act(() => cache.refetchQueries({ queryKey: ['repositories', 'p1'] }))
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty('value', 'bun install --frozen-lockfile\nmake')
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(2))
+    expect(setRepository).toHaveBeenLastCalledWith({
+      projectId: 'p1',
+      repositoryId: repositories[0]?.id,
+      setup: { copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] },
+    })
+    await waitFor(() =>
+      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] }),
+    )
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+  })
+
   it('says why a change to a setup didn’t hold', async () => {
     windowAt('/projects/p1?room=settings&section=running', {
       setRepository: vi.fn(async () => {
@@ -203,6 +249,7 @@ describe('a project’s settings', () => {
     await userEvent.type(files, '{End}\n../secrets')
     await userEvent.tab()
     expect((await screen.findByRole('alert')).textContent).toBe('Name each file from the repository’s root.')
+    await waitFor(() => expect(files).toHaveProperty('value', '.env'))
   })
 
   it('renames the project in place: its front page and its tab take the new name, without a restart', async () => {

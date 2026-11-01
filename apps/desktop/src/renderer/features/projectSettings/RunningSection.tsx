@@ -145,7 +145,7 @@ export function RunningSection({
               id: repository.id,
               name: repository.name,
               checkout: repository.path === null ? null : shortFolder(repository.path),
-              setup: repository.setup,
+              setup: setups.shown(repository.id, repository.setup),
             }))}
             onChange={setups.change}
             error={setups.failed ?? undefined}
