@@ -1,0 +1,72 @@
+/* A new project's card for what its tasks will need later: a code host, a tracker. */
+.card {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 12px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.words {
+  flex: 1;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--t-1);
+}
+.line {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+/* One mark, or a kind's marks side by side, in one column down the card. */
+.marks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  min-width: 22px;
+}
+.name {
+  flex: none;
+  font-weight: 550;
+}
+.note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.end {
+  flex: none;
+  margin-left: auto;
+}

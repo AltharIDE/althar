@@ -1,39 +1,58 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 import { device } from '../../foundations/device'
+import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
+import { keys, modKey } from '../../foundations/keys'
+import { Light } from '../../foundations/Light/Light'
+import { RuntimeState, TaskStatus } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
-import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
+import { useDragOver } from '../../lib/dragOver'
 import { Button } from '../../primitives/Button/Button'
+import { Field } from '../../primitives/Field/Field'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Skeleton } from '../../primitives/Skeleton/Skeleton'
+import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import { Opening } from './Opening'
-import { frames, glide, transform, type Cam, type Focus, type Pt } from './camera'
-import { SCENES } from './scenes'
+import { RepositoryPick, type RepositoryChoice, type RepositoryPickText } from '../../setup/RepositoryPick/RepositoryPick'
+import { Runtimes, type RuntimeEntry, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
+import { AgentsScene, CallsScene, ReviewScene, TaskScene, type SceneProps } from './scenes'
 import { Station } from './Station'
 import s from './Welcome.module.css'
 
 /*
- * The first thing Althar shows after it is installed, once.
+ * The first thing Althar shows, before there is a project: one card, the
+ * same size on every step, with a track of its steps along its head.
  *
- * The welcome is a drafting table seen through a camera. It opens close on
- * the mark as it is drawn, and the camera pulls back. The opening is drawn
- * on the same table as the rest: Begin moves the camera off it, low across
- * the paper, to the first of five plots, and from each straight on to the
- * next, the pencil route drawn beside it as it goes. At each plot the real
- * components are sketched in pencil from their own layout, uncovered, and
- * set working: a task visits a project, a lead takes a task, work moves
- * across the board while one card waits on you, checks pass and a change is
- * accepted, agents sign in. A pointer shows what a person would do. At the
- * end the camera pulls back over the whole table, built.
+ * It opens on a short tour, a page for each of what Althar does: you ask
+ * the coordinator, agents from different makers build, only the calls come
+ * to you, and the work is reviewed before you see it. Each page plays a
+ * scene made of the real components, with notes pinned to its parts. Skip
+ * leaves the tour for the setup; once the tour has been seen it is left out.
  *
- * Enter, the arrows or Continue move on; Back goes back; Skip leaves.
- * Nothing loops: each scene plays once and holds its last frame, and only
- * running work keeps its pulse. With reduced motion, or `still`, the camera
- * cuts instead of flying and every scene arrives finished.
+ * Then the setup, one thing a step: the agents on this computer, signed in
+ * or not, with the one thing each needs; the first project, the
+ * repositories found ticked into it, or a folder added; where its code is,
+ * for pull requests; and a tracker, for issues. Only the project is needed:
+ * a project can be made with no agent ready, and the code host and the
+ * tracker can wait. The project is made on its step, so the last two steps
+ * know where its code is; the last step opens it.
+ *
+ * Return presses the step's main button, which takes the focus as each step
+ * arrives; the arrows walk the tour. With reduced motion, or `still`, every
+ * scene arrives finished.
  */
 
-export interface WelcomeStopText {
-  /** The stop's name on its plot. */
+/** Where the welcome is: the tour's four pages, then the setup's four steps. */
+export type WelcomeStep = 'ask' | 'build' | 'decide' | 'review' | 'agents' | 'project' | 'code' | 'issues'
+
+type TourStep = 'ask' | 'build' | 'decide' | 'review'
+const TOUR: readonly TourStep[] = ['ask', 'build', 'decide', 'review']
+const SETUP: readonly WelcomeStep[] = ['agents', 'project', 'code', 'issues']
+const SCENES: Record<TourStep, ComponentType<SceneProps>> = { ask: TaskScene, build: AgentsScene, decide: CallsScene, review: ReviewScene }
+
+export interface WelcomePageText {
+  /** Its name on the track. */
   label: string
   title: string
   body: string
@@ -41,408 +60,441 @@ export interface WelcomeStopText {
 
 export interface WelcomeText {
   name: string
-  line: string
-  begin: string
-  next: string
-  back: string
+  /** Over the tour's first page. */
+  greeting: string
+  /** The track, read out. */
+  steps: string
   skip: string
-  finish: string
-  sheet: (n: number, of: number) => string
-  stops: [WelcomeStopText, WelcomeStopText, WelcomeStopText, WelcomeStopText, WelcomeStopText]
-  end: { title: string; body: string }
+  back: string
+  next: string
+  /** The tour's last page goes on to the setup. */
+  setUp: string
+  tour: Record<TourStep, WelcomePageText>
+  agents: { label: string; title: string; line: string; list: string; asking: string; go: string; without: string }
+  project: {
+    label: string
+    title: string
+    line: string
+    over: string
+    name: string
+    make: string
+    makeKbd: string
+    /** Make the project, with nothing ticked. */
+    nothing: string
+  }
+  code: { label: string; title: string; line: string; go: string; notNow: string }
+  issues: { label: string; title: string; line: string; open: (project: string) => string; theProject: string }
+  /** The live region, as each step arrives. */
+  arrived: (n: number, of: number, title: string) => string
 }
 
 export const welcomeText: WelcomeText = {
   name: 'Althar',
-  line: 'Agents come and go. Your project stays.',
-  begin: 'Begin',
-  next: 'Continue',
-  back: 'Back',
+  greeting: 'Welcome to Althar',
+  steps: 'Steps',
   skip: 'Skip',
-  finish: 'Find my agents',
-  sheet: (n, of) => `Sheet ${String(n).padStart(2, '0')} of ${String(of).padStart(2, '0')}`,
-  stops: [
-    {
-      label: 'Project',
-      title: 'A project holds the work',
-      body: 'One body of work: the repositories its tasks may change, what those tasks have learned, and how often agents should ask you. Tasks come and go. The project keeps what they found.',
+  back: 'Back',
+  next: 'Next',
+  setUp: 'Set up Althar',
+  tour: {
+    ask: {
+      label: 'Ask',
+      title: 'Tell the coordinator what you want',
+      body: 'It plans the work into tasks and gives each one an agent to lead it. It writes no code itself.',
     },
-    {
-      label: 'Task',
-      title: 'Every task has a lead',
-      body: 'You tell the coordinator what you want. It plans the work and hands it out, but writes no code. Each task has one agent in charge, its lead, and steps such as review go to other agents, which report back to it.',
+    build: {
+      label: 'Build',
+      title: 'Agents from different makers',
+      body: 'Claude Code, Codex, OpenCode and others, each signed in as you on your own plan. One task can use several at once.',
     },
-    {
-      label: 'Calls',
-      title: 'You make the calls',
-      body: 'Work moves across the board on its own. When something comes up that only you can decide, it comes to you in violet, with what you need to answer it. Answer, and it carries on.',
+    decide: {
+      label: 'Decide',
+      title: 'Only the calls come to you',
+      body: 'Tasks move across the board on their own. What only you can decide waits under Needs you.',
     },
-    {
-      label: 'Change',
-      title: 'The change comes back to you',
-      body: 'A finished task hands back its change: the pull requests, the files and every check. It was made on a branch of its own, so the folders you work in were never touched. Merging stays yours.',
+    review: {
+      label: 'Review',
+      title: 'Reviewed before you see it',
+      body: 'Before its pull request opens, an agent from another maker reviews the change. The lead fixes what holds and says why it keeps the rest, and the pull request carries the review.',
     },
-    {
-      label: 'Agents',
-      title: 'Your agents, signed in as you',
-      body: 'Althar runs the agents you already use, like Claude Code and Codex, on your own plans. Each keeps its own sign-in; Althar never sees a password or a key. One task can use several labs, so one checks another.',
-    },
-  ],
-  end: { title: 'Ready when you are', body: `Next, Althar looks for the agents on ${device.this}. Then you make your first project.` },
+  },
+  agents: {
+    label: 'Agents',
+    title: 'Your agents',
+    line: 'Althar runs the agents you already use, on your own plans. One signed in is enough to start.',
+    list: `Agents on ${device.this}`,
+    asking: 'Asking the agents',
+    go: 'Continue',
+    without: 'Continue without one',
+  },
+  project: {
+    label: 'Project',
+    title: 'Your first project',
+    line: 'One repository or several. Each task works on a copy of its own, so these folders stay as they are.',
+    over: 'Let go to add it',
+    name: 'Project name',
+    make: 'Make the project',
+    makeKbd: modKey(keys.return),
+    nothing: 'Tick a repository, or add a folder.',
+  },
+  code: {
+    label: 'Code',
+    title: 'Pull requests',
+    line: 'So tasks can open pull requests and read their checks.',
+    go: 'Continue',
+    notNow: 'Not now',
+  },
+  issues: {
+    label: 'Issues',
+    title: 'Issues',
+    line: 'Hand the coordinator an issue, and its task links back to it.',
+    open: (project) => `Open ${project}`,
+    theProject: 'the project',
+  },
+  arrived: (n, of, title) => `Step ${n} of ${of}: ${title}`,
 }
 
-/*
- * The table: where each stop sits, in table pixels, the room its notes and
- * its number need around it, and which sides of its plot the route leaves
- * and arrives by. How big each scene is gets measured.
- */
-type Side = 'left' | 'right' | 'top' | 'bottom'
-interface Stop {
-  x: number
-  y: number
-  pad: { l: number; r: number; t: number; b: number }
-  in?: Side
-  out?: Side
-}
-const TABLE = { w: 5200, h: 3400 }
-const STOPS: readonly Stop[] = [
-  { x: 1150, y: 1000, pad: { l: 300, r: 60, t: 190, b: 150 }, out: 'right' },
-  { x: 2350, y: 820, pad: { l: 360, r: 40, t: 190, b: 120 }, in: 'left', out: 'right' },
-  { x: 3420, y: 1300, pad: { l: 40, r: 80, t: 190, b: 110 }, in: 'left', out: 'bottom' },
-  { x: 2650, y: 2250, pad: { l: 380, r: 40, t: 200, b: 120 }, in: 'right', out: 'left' },
-  { x: 1150, y: 2250, pad: { l: 40, r: 40, t: 200, b: 120 }, in: 'right' },
-]
-const LAST = STOPS.length + 1
-/**
- * Where the opening is drawn: on the same table, to the side of the stops, so
- * Begin is the camera moving off it and not a new screen. On a grid line both
- * ways, so its own grid meets the table's exactly.
- */
-const OPENING = { x: 320, y: 1760 }
-/** The plot's margin round its scene: Station's inset. */
-const PLOT = 28
-
-type Size = { w: number; h: number }
-const GUESS: Size = { w: 700, h: 500 }
-
-/* Where the camera looks for a step, for a window of this size. */
-function camFor(step: number, sizes: readonly Size[], vw: number, vh: number, wide: boolean): { cam: Cam; fx: number; fy: number } {
-  /* the words' column and the fade beside it, which nothing on the table should sit under */
-  /* the opening, close, where its crossing sits a little above the middle */
-  if (step === 0) return { cam: { ...OPENING, s: 1 }, fx: vw / 2, fy: vh / 2 - 65 }
-  const textRight = wide ? 56 + Math.min(360, vw * 0.3) + 64 : 0
-  const room = { w: (wide ? vw - textRight : vw) - 32, h: wide ? vh - 110 : vh * 0.6 }
-  const stop = STOPS[step - 1]
-  if (stop) {
-    const size = sizes[step - 1] ?? GUESS
-    const { l, r, t, b } = stop.pad
-    const k = Math.min(1, room.w / (size.w + l + r), room.h / (size.h + t + b))
-    const cam = { x: stop.x + (size.w + r - l) / 2, y: stop.y + (size.h + b - t) / 2, s: k }
-    return { cam, fx: wide ? textRight + (vw - textRight) / 2 : vw / 2, fy: wide ? (vh - 90) / 2 + 10 : room.h / 2 + 20 }
-  }
-  /* the whole table, above the words */
-  const box = STOPS.map((p, i) => ({
-    x0: p.x - 60,
-    y0: p.y - 200,
-    x1: p.x + (sizes[i] ?? GUESS).w + 60,
-    y1: p.y + (sizes[i] ?? GUESS).h + 60,
-  }))
-  const x0 = Math.min(...box.map((q) => q.x0))
-  const x1 = Math.max(...box.map((q) => q.x1))
-  const y0 = Math.min(...box.map((q) => q.y0))
-  const y1 = Math.max(...box.map((q) => q.y1))
-  const high = vh - 300
-  const k = Math.min((vw - 64) / (x1 - x0), high / (y1 - y0))
-  return { cam: { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s: k }, fx: vw / 2, fy: high / 2 + 24 }
-}
-
-/* Where the route meets a plot: the middle of one of its sides, and which way that side faces. */
-function anchor(i: number, side: Side, sizes: readonly Size[]) {
-  const p = STOPS[i]!
-  const z = sizes[i] ?? GUESS
-  const x0 = p.x - PLOT
-  const y0 = p.y - PLOT
-  const x1 = p.x + z.w + PLOT
-  const y1 = p.y + z.h + PLOT
-  if (side === 'left') return { x: x0, y: (y0 + y1) / 2, nx: -1, ny: 0 }
-  if (side === 'right') return { x: x1, y: (y0 + y1) / 2, nx: 1, ny: 0 }
-  if (side === 'top') return { x: (x0 + x1) / 2, y: y0, nx: 0, ny: -1 }
-  return { x: (x0 + x1) / 2, y: y1, nx: 0, ny: 1 }
-}
-
-/* The pencil line from one stop to the next: out of one plot's side and into the next's, square to both. */
-function leg(i: number, sizes: readonly Size[]) {
-  const a = anchor(i, STOPS[i]?.out ?? 'right', sizes)
-  const b = anchor(i + 1, STOPS[i + 1]?.in ?? 'left', sizes)
-  const k = Math.max(90, Math.hypot(b.x - a.x, b.y - a.y) * 0.42)
-  const c1 = { x: a.x + a.nx * k, y: a.y + a.ny * k }
-  const c2 = { x: b.x + b.nx * k, y: b.y + b.ny * k }
-  return { d: `M${a.x} ${a.y}C${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`, a, b, c1, c2 }
-}
-
-/* Points along a leg, from its first plot to its second. */
-function legPoints(i: number, sizes: readonly Size[]): Pt[] {
-  const { a, b, c1, c2 } = leg(i, sizes)
-  return Array.from({ length: 25 }, (_, k) => {
-    const t = k / 24
-    const u = 1 - t
-    const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t] as const
-    return { x: w[0] * a.x + w[1] * c1.x + w[2] * c2.x + w[3] * b.x, y: w[0] * a.y + w[1] * c1.y + w[2] * c2.y + w[3] * b.y }
-  })
-}
-
-export interface WelcomeProps {
-  /** Where it is: 0 the opening, 1 to 5 the stops, 6 the whole table. */
-  step?: number
-  defaultStep?: number
-  onStepChange?: (step: number) => void
-  /** Leaves the welcome, finished or skipped. */
-  onDone: () => void
-  /** Cut instead of flying, and arrive with every scene finished: for stills. Reduced motion does the same. */
+export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHelp' | 'onInstall'> {
+  /** The step on show. */
+  step?: WelcomeStep
+  defaultStep?: WelcomeStep
+  onStepChange?: (step: WelcomeStep) => void
+  /** The tour has been seen: the welcome starts at the agents, and its track leaves the tour out. */
+  toured?: boolean
+  /** The tour is over, finished or skipped. */
+  onToured?: () => void
+  /** The agents, as each answered; null while they are still being asked. */
+  runtimes: readonly RuntimeEntry[] | null
+  /** The agents' rows' own words, such as what this computer is called. */
+  runtimesText?: Partial<RuntimesText>
+  /** The repositories found, and any added; null while they are still being looked for. */
+  repositories: readonly RepositoryChoice[] | null
+  /** The repositories ticked, by id. */
+  picked: readonly string[]
+  onPick: (id: string) => void
+  /** Asks for a folder to add. */
+  onAdd: () => void
+  /** Folders dropped on the window, on the project's step. Without it, a drop does nothing. */
+  onDrop?: (files: readonly File[]) => void
+  repositoryText?: Partial<RepositoryPickText>
+  /** The project's name as it stands. */
+  name: string
+  onNameChange: (name: string) => void
+  /** Makes the project of what is ticked. */
+  onCreate: () => void
+  creating?: boolean
+  /** The project is made: the welcome goes on to its code, and the steps before can't be gone back to. */
+  made?: boolean
+  /** What went wrong, said on the step it belongs to: the agents', or the project's. */
+  error?: { readonly step: 'agents' | 'project'; readonly said: ReactNode }
+  /** The code hosts, to connect one: the consumer's list, and its walk in. */
+  hosts: ReactNode
+  /** A code host is connected: the code's step goes on with Continue, not Not now. */
+  hostConnected?: boolean
+  /** The trackers, to connect one, the same way. */
+  trackers: ReactNode
+  /** Opens the project, on the last step. */
+  onOpen: () => void
+  /** One quiet line in the card's foot on the agents' step, such as crash reports with their switch. */
+  foot?: ReactNode
+  /** Every scene arrives finished: for stills. Reduced motion does the same. */
   still?: boolean
   className?: string
   text?: Partial<WelcomeText>
 }
 
-/** The welcome, shown once after install: an opening, five working scenes on a drafting table, and the whole table. */
-export function Welcome({ step: stepProp, defaultStep = 0, onStepChange, onDone, still = false, className, text }: WelcomeProps) {
+/** The first run: a short tour of what Althar does, then the agents, the first project, its code host and a tracker. */
+export function Welcome({
+  step: stepProp,
+  defaultStep,
+  onStepChange,
+  toured = false,
+  onToured,
+  runtimes,
+  runtimesText,
+  repositories,
+  picked,
+  onPick,
+  onAdd,
+  onDrop,
+  repositoryText,
+  name,
+  onNameChange,
+  onCreate,
+  creating = false,
+  made = false,
+  error,
+  hosts,
+  hostConnected = false,
+  trackers,
+  onOpen,
+  foot,
+  still = false,
+  className,
+  text,
+  ...rows
+}: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const [step, setStep] = useControlled(stepProp, defaultStep, onStepChange)
-  const stepRef = useRef(step)
-  useLayoutEffect(() => {
-    stepRef.current = step
-  })
-  const reduced = useReducedMotion()
-  const cut = still || reduced
+  const steps: readonly WelcomeStep[] = toured ? SETUP : [...TOUR, ...SETUP]
+  const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
+  const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
+  const at = steps.indexOf(step)
+  const touring = isTour(step)
+  const instant = useReducedMotion() || still
+  const [nothing, setNothing] = useState(false)
   const root = useRef<HTMLDivElement>(null)
+  const primary = useRef<HTMLButtonElement>(null)
   const titleId = useId()
-  const view = useRef<HTMLDivElement>(null)
-  const world = useRef<HTMLDivElement>(null)
-  const tilt = useRef<HTMLDivElement>(null)
-  const next = useRef<HTMLButtonElement>(null)
-  /** Where the camera is resting: which stop is live. */
-  const [landed, setLanded] = useState(cut ? step : 0)
-  /** The furthest stop built so far. */
-  const [built, setBuilt] = useState(cut ? step : 0)
-  const cam = useRef<(Cam & Focus & { far: number }) | null>(null)
-  /** The step the camera is placed for. */
-  const aim = useRef(0)
-  const flight = useRef<Animation[] | null>(null)
-  const [wide, setWide] = useState(true)
-  const [sizes, setSizes] = useState<Size[]>([])
-  const sized = useRef<Size[]>([])
+  const nameId = useId()
+  const { over, handlers } = useDragOver(step === 'project' ? onDrop : undefined)
 
-  /* every scene is laid out from the start, hidden: measure them once */
-  useLayoutEffect(() => {
-    const w = world.current
-    if (!w) return
-    const found = STOPS.map((_, i) => {
-      const el = w.querySelector<HTMLElement>(`[data-stop="${i + 1}"]`)
-      return el ? { w: el.offsetWidth, h: el.offsetHeight } : GUESS
-    })
-    sized.current = found
-    setSizes(found)
-  }, [])
-
-  const go = (to: number) => (to > LAST ? onDone() : setStep(Math.max(0, to)))
-
-  /* the camera: cut when resizing, fly when the step changes; how long the flight takes */
-  const place = (target: number, animate: boolean): number => {
-    const v = view.current
-    const w = world.current
-    if (!v || !w) return 0
-    const prev = aim.current
-    aim.current = target
-    const isWide = v.clientWidth >= 900
-    setWide(isWide)
-    const { cam: to, fx, fy } = camFor(target, sized.current, v.clientWidth, v.clientHeight, isWide)
-    const from = cam.current
-    flight.current?.forEach((a) => a.finish())
-    /* seen whole, the table's lines and names are drawn heavier, so they read at a distance */
-    const far = target > STOPS.length ? Math.min(5, 1 / to.s) : 1
-    const reached = () => {
-      setLanded(target)
-      if (target <= STOPS.length) setBuilt((b) => Math.max(b, target))
-    }
-    w.style.setProperty('--far', String(far))
-    w.style.transform = transform(to, { fx, fy })
-    cam.current = { ...to, fx, fy, far }
-    const still = !from || (Math.abs(from.x - to.x) < 1 && Math.abs(from.y - to.y) < 1 && Math.abs(from.s - to.s) < 0.001)
-    if (!animate || still || typeof w.animate !== 'function') {
-      reached()
-      return 0
-    }
-    setLanded(-1)
-    /* one step along the way, from the opening to the last plot, is a glide; anything else is a zoom */
-    const hop = Math.abs(target - prev) === 1 && Math.max(target, prev) <= STOPS.length
-    const legIndex = Math.min(target, prev) - 1
-    const via = hop && legIndex >= 0 ? legPoints(legIndex, sized.current) : []
-    if (target < prev) via.reverse()
-    const f = hop
-      ? glide(from, to, from, { fx, fy }, [from.far, far], via)
-      : frames(from, to, from, { fx, fy }, v.clientWidth, [from.far, far])
-    const timing = { duration: f.ms, easing: f.easing }
-    const a = w.animate(f.world, timing)
-    const all = [a]
-    const lean = tilt.current?.animate(f.tilt, timing)
-    if (lean) all.push(lean)
-    /* the route is drawn beside the camera as it passes, or rubbed out going back */
-    const pencil = f.drawn && via.length > 0 ? w.querySelector<SVGPathElement>(`[data-leg="${legIndex}"]`) : null
-    const drawn = f.drawn
-    if (pencil && drawn) {
-      const n = drawn.length - 1
-      const at = drawn.map((u, k) => ({ offset: k / n, strokeDashoffset: String(target > prev ? 1 - u : u) }))
-      all.push(pencil.animate(at, timing))
-    }
-    flight.current = all
-    a.onfinish = () => {
-      if (flight.current !== all) return
-      flight.current = null
-      reached()
-    }
-    return f.ms
+  const go = (to: WelcomeStep) => {
+    if (isTour(step) && !isTour(to)) onToured?.()
+    setNothing(false)
+    setStep(to)
   }
+  const next = () => {
+    const to = steps[at + 1]
+    if (to !== undefined) go(to)
+  }
+  const previous = steps[at - 1]
+  // Once the project is made, the steps up to it are done with.
+  const canGoBack = previous !== undefined && !(made && (previous === 'project' || steps.indexOf(previous) < steps.indexOf('project')))
 
-  useLayoutEffect(() => {
-    place(step, !cut)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, cut])
-
-  /* a resized window keeps the camera where it is aimed, without flying */
-  const placeRef = useRef(place)
-  useLayoutEffect(() => {
-    placeRef.current = place
-  })
+  // Made, the welcome goes on to where its code is.
   useEffect(() => {
-    const v = view.current
-    if (!v || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
-      if (cam.current && !flight.current) placeRef.current(aim.current, false)
-    })
-    ro.observe(v)
-    return () => ro.disconnect()
-  }, [])
+    if (made && step === 'project') setStep('code')
+  }, [made, step, setStep])
 
-  /* Continue keeps focus, so Enter walks through */
-  useEffect(() => {
-    next.current?.focus({ preventScroll: true })
+  // Each step's main button takes the focus as the step arrives, so Return goes on.
+  useLayoutEffect(() => {
+    primary.current?.focus({ preventScroll: true })
   }, [step])
 
-  /* the arrows walk the stops while focus is in the welcome, not anywhere on the page it sits in */
+  // The arrows walk the tour while focus is in the welcome, not anywhere on the page it sits in.
   useEffect(() => {
     const el = root.current
-    if (!el) return
-    const key = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]')) return
-      if (e.key === 'ArrowRight') go(step + 1)
-      else if (e.key === 'ArrowLeft') go(step - 1)
-      else return
-      e.preventDefault()
+    if (!el || !touring) return
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return
+      const to = event.key === 'ArrowRight' ? steps[at + 1] : event.key === 'ArrowLeft' ? steps[at - 1] : undefined
+      if (to === undefined) return
+      event.preventDefault()
+      go(to)
     }
     el.addEventListener('keydown', key)
     return () => el.removeEventListener('keydown', key)
   })
 
-  const stop = step >= 1 && step <= STOPS.length ? t.stops[step - 1] : undefined
-  const words = stop ?? (step === LAST ? t.end : undefined)
+  const label = (one: WelcomeStep) => (isTour(one) ? t.tour[one].label : t[one].label)
+  const ready = runtimes?.filter((r) => r.state === RuntimeState.Ready).length ?? 0
+  const make = () => {
+    if (picked.length === 0) return setNothing(true)
+    setNothing(false)
+    onCreate()
+  }
+  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating })
+  const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
+
   return (
-    <div ref={root} className={cx(s.welcome, cut && s.cut, className)}>
-      <div ref={view} className={s.view}>
-        <div className={s.lens}>
-          <div ref={tilt} className={s.tilt}>
-            <div ref={world} className={cx(s.world, step > 0 && s.open)} style={{ width: TABLE.w, height: TABLE.h }}>
-              <svg className={s.route} width={TABLE.w} height={TABLE.h} aria-hidden="true">
-                {sizes.length > 0 &&
-                  STOPS.slice(1).map((_, i) => {
-                    const { d, a, b } = leg(i, sizes)
-                    const drawn = step >= i + 2
-                    return (
-                      <g key={i}>
-                        <path d={d} className={s.plan} />
-                        <path d={d} pathLength={1} data-leg={i} className={cx(s.leg, drawn && s.legDrawn)} />
-                        <circle cx={a.x} cy={a.y} className={cx(s.node, drawn && s.nodeDrawn)} />
-                        <circle cx={b.x} cy={b.y} className={cx(s.node, drawn && s.nodeDrawn)} />
-                      </g>
-                    )
-                  })}
-              </svg>
-              <div
-                className={s.openingSpot}
-                style={{ left: OPENING.x, top: OPENING.y }}
-                inert={step > 0}
-                aria-hidden={step > 0 || undefined}
-              >
-                <Opening name={t.name} line={t.line} still={cut} away={step > 0} />
-              </div>
-              {STOPS.map((p, i) => {
-                const Scene = SCENES[i]
-                if (!Scene) return null
-                const n = i + 1
-                return (
-                  <Station key={n} n={n} label={t.stops[i]?.label ?? ''} x={p.x} y={p.y} shown={step > 0} built={built >= n} instant={cut}>
-                    <Scene live={landed === n} instant={cut} />
-                  </Station>
-                )
-              })}
-            </div>
-          </div>
-        </div>
+    <div ref={root} className={cx(s.welcome, over && s.over, className)} {...handlers}>
+      <div className={s.field} aria-hidden="true">
+        <Light height={0.5} motion={instant ? 'still' : 'drift'} />
       </div>
-
-      {words && wide && step !== LAST && <i className={s.scrim} aria-hidden="true" />}
-      {step > 0 && words && (
-        <section className={cx(s.words, step === LAST && s.endWords, !wide && s.narrowWords)} key={step} aria-labelledby={titleId}>
-          <h1 id={titleId} className={s.heading}>
-            {words.title.split(' ').map((w, i) => (
-              <Fragment key={i}>
-                <span className={s.mask}>
-                  <span className={s.rise} style={cssVars({ '--i': i })}>
-                    {w}
-                  </span>
-                </span>{' '}
-              </Fragment>
-            ))}
-          </h1>
-          <p className={s.body}>{words.body}</p>
-        </section>
-      )}
-
-      <Button variant="quiet" className={s.skip} onClick={onDone}>
-        {t.skip}
-      </Button>
-      <footer className={s.block}>
-        {step > 0 && <Scale step={step} />}
-        <span className={s.cell}>
-          <span className={s.cellName}>{t.name}</span>
-          {stop && <span className={s.cellSheet}>{t.sheet(step, STOPS.length)}</span>}
-        </span>
-        <span className={s.buttons}>
-          {step > 0 && (
-            <Button variant="quiet" onClick={() => go(step - 1)}>
-              {t.back}
-            </Button>
+      <section className={s.card} aria-labelledby={titleId}>
+        <header className={s.head}>
+          <span className={s.brand}>
+            <HalftoneMark size={26} rise={false} />
+            {t.name}
+          </span>
+          <StepTrack
+            steps={trackOf(steps.map(label), at)}
+            status={TaskStatus.Running}
+            labels
+            className={s.track}
+            text={{ label: t.steps }}
+          />
+          {touring ? (
+            <LinkButton className={s.skip} onClick={() => go('agents')}>
+              {t.skip}
+            </LinkButton>
+          ) : (
+            <span className={s.skip} aria-hidden="true" />
           )}
-          <Button ref={next} kbd="↵" onClick={() => go(step + 1)} className={step === 0 ? s.begin : undefined}>
-            {step === 0 ? t.begin : step === LAST ? t.finish : t.next}
+        </header>
+
+        <div key={step} className={cx(s.body, !instant && s.arrive)}>
+          {isTour(step) ? (
+            <div className={s.tour}>
+              <SceneFrame scene={SCENES[step]} instant={instant} label={t.tour[step].label} />
+              <div className={s.words}>
+                {at === 0 && <span className={s.greeting}>{t.greeting}</span>}
+                <h1 id={titleId} className={s.title}>
+                  {title}
+                </h1>
+                <p className={s.line}>{t.tour[step].body}</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className={s.words}>
+                <h1 id={titleId} className={s.title}>
+                  {title}
+                </h1>
+                <p className={s.line}>{t[step].line}</p>
+              </div>
+              {step === 'agents' &&
+                (runtimes === null ? (
+                  <div className={s.waiting} aria-label={t.agents.asking} aria-busy="true">
+                    <Skeleton height={36} />
+                    <Skeleton height={36} />
+                    <Skeleton height={36} />
+                  </div>
+                ) : (
+                  <Runtimes
+                    label={t.agents.list}
+                    runtimes={runtimes}
+                    {...rows}
+                    {...(runtimesText === undefined ? {} : { text: runtimesText })}
+                  />
+                ))}
+              {step === 'project' && (
+                <>
+                  <RepositoryPick
+                    repositories={repositories}
+                    picked={picked}
+                    onPick={(id) => {
+                      setNothing(false)
+                      onPick(id)
+                    }}
+                    onAdd={onAdd}
+                    {...(repositoryText === undefined ? {} : { text: repositoryText })}
+                  />
+                  {nothing && (
+                    <p className={s.error} role="alert">
+                      {t.project.nothing}
+                    </p>
+                  )}
+                  {picked.length > 0 && (
+                    <div className={s.named}>
+                      <label htmlFor={nameId} className={s.namedLabel}>
+                        {t.project.name}
+                      </label>
+                      <Field id={nameId} value={name} onChange={(event) => onNameChange(event.target.value)} spellCheck={false} />
+                    </div>
+                  )}
+                </>
+              )}
+              {step === 'code' && hosts}
+              {step === 'issues' && trackers}
+              {error !== undefined && error.step === step && (
+                <div className={s.error} role="alert">
+                  {error.said}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <footer className={s.foot}>
+          {canGoBack && previous !== undefined && <LinkButton onClick={() => go(previous)}>{t.back}</LinkButton>}
+          {step === 'agents' && foot !== undefined && <div className={s.footLine}>{foot}</div>}
+          <span className={s.grow} />
+          <Button
+            ref={primary}
+            variant={main.quiet ? 'default' : 'signal'}
+            busy={main.busy}
+            {...(main.kbd === undefined ? {} : { kbd: main.kbd })}
+            onClick={main.act}
+          >
+            {main.label}
           </Button>
-        </span>
-      </footer>
+        </footer>
+      </section>
       <VisuallyHidden>
-        <span aria-live="polite">{stop ? `${t.sheet(step, STOPS.length)}. ${stop.title}` : step === LAST ? t.end.title : ''}</span>
+        <span aria-live="polite">{t.arrived(at + 1, steps.length, title)}</span>
       </VisuallyHidden>
     </div>
   )
 }
 
-/* Where you are, as the marks on a scale ruler. */
-function Scale({ step }: { step: number }) {
+const isTour = (step: WelcomeStep): step is TourStep => (TOUR as readonly string[]).includes(step)
+
+interface Main {
+  readonly label: string
+  readonly act: () => void
+  /** The lesser choice: going on without what the step offers. */
+  readonly quiet?: boolean
+  readonly busy?: boolean
+  readonly kbd?: string
+}
+
+/** A step's main button: what it says, and what it does. */
+function mainOf(
+  step: WelcomeStep,
+  w: {
+    readonly t: WelcomeText
+    readonly ready: number
+    readonly hostConnected: boolean
+    readonly name: string
+    readonly next: () => void
+    readonly make: () => void
+    readonly onOpen: () => void
+    readonly creating: boolean
+  },
+): Main {
+  switch (step) {
+    case 'ask':
+    case 'build':
+    case 'decide':
+      return { label: w.t.next, act: w.next }
+    case 'review':
+      return { label: w.t.setUp, act: w.next }
+    case 'agents':
+      return w.ready > 0 ? { label: w.t.agents.go, act: w.next } : { label: w.t.agents.without, act: w.next, quiet: true }
+    case 'project':
+      return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
+    case 'code':
+      return w.hostConnected ? { label: w.t.code.go, act: w.next } : { label: w.t.code.notNow, act: w.next, quiet: true }
+    case 'issues':
+      return { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
+  }
+}
+
+/** Room round a scene for the notes that point into it from outside: more at the sides, where the long ones reach. */
+const ROOM = { side: 200, end: 72 }
+
+/** A scene, playing, scaled to fit its frame on the drafting table's dots. */
+function SceneFrame({ scene: Scene, instant, label }: { scene: ComponentType<SceneProps>; instant: boolean; label: string }) {
+  const frame = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState<{ w: number; h: number; room: { w: number; h: number } } | null>(null)
+  useLayoutEffect(() => {
+    const box = frame.current
+    const station = box?.querySelector<HTMLElement>('[data-stop]')
+    if (!box || !station) return
+    const measure = () => setSize({ w: station.offsetWidth, h: station.offsetHeight, room: { w: box.clientWidth, h: box.clientHeight } })
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(station)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [])
+  const w = (size?.w ?? 0) + ROOM.side * 2
+  const h = (size?.h ?? 0) + ROOM.end * 2
+  const k = size === null || size.w === 0 ? 1 : Math.min(1, (size.room.w - 24) / w, (size.room.h - 16) / h)
   return (
-    <span className={s.scale} aria-hidden="true">
-      {STOPS.map((_, i) => (
-        <i key={i} className={cx(s.tick, i + 1 === step && s.here, i + 1 < step && s.past)} />
-      ))}
-    </span>
+    <div ref={frame} className={s.frame} aria-hidden="true">
+      <div
+        className={s.stage}
+        style={{ width: w, height: h, transform: `translate(-50%, -50%) scale(${k})`, opacity: size === null ? 0 : 1 }}
+      >
+        <Station n={1} label={label} x={ROOM.side} y={ROOM.end} shown built instant={instant} bare>
+          <Scene live={!instant} instant={instant} />
+        </Station>
+      </div>
+    </div>
   )
 }
 
