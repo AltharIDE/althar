@@ -1,7 +1,7 @@
-# ADR-081: The coordinator merges and releases on the person's word, and does what can be undone itself
+# ADR-081: The coordinator acts on the code host as the person's account can, and what can't be undone waits for their word
 
 - **Status:** Accepted, to build for 0.7.0 ([Build](#build-for-070))
-- **Date:** 2026-10-31
+- **Date:** 2026-10-31; reworked around one rule on 2026-11-01
 - **Amends:** [ADR-011](011-own-connectors-for-hosts-and-trackers.md),
   [ADR-024](024-signed-releases-and-updates.md),
   [ADR-048](048-where-the-runtime-runs-and-who-may-reach-it.md),
@@ -42,46 +42,70 @@
   Althar "a bit timid" (29 October), and asked of merging, the queue and
   releases: "Whats preventing us from doing this?" (30 October). Their
   calls, on 30 and 31 October, are what this records.
+
+  On 1 November the person asked that this not be a decision about one flow
+  and how to support it, but like Claude Code, which "by default does
+  pretty much anything and everything you give it": "certainly we should
+  have integrations for the things we're missing, but other than that …
+  we should not really be limiting what a lead can do." So this ADR starts
+  from what the coordinator, and a lead, can do, and keeps only what has a
+  reason no tool takes away.
 - **Decision:**
-  - **The coordinator does it, not a standing task's lead**
-    ([why](#the-coordinator-not-a-standing-task)). A fix stays a task with
-    a lead, which the coordinator plans.
-  - **What can be undone just happens. What can't happens when the person
-    asked for it, and never on the coordinator's own initiative**
-    ([the kinds](#what-happens-and-what-waits)). Merging and the merge queue
-    are of the second kind: only when the person asks.
+  - **The coordinator can do on the code host whatever the person's account
+    can, through Althar's tools. Four limits are all that stop it, and
+    anything else that stops it today is a tool nobody wrote, which the
+    [build](#build-for-070) writes** ([the rule](#the-rule)):
+    1. what can't be undone waits for the person's word, and never happens
+       on the coordinator's own initiative: merging and the merge queue
+       only when they ask;
+    2. a short never list stays the person's: the repository's settings,
+       its protection, who has access, and its secrets;
+    3. a change to the code is a task, with a lead and a review;
+    4. nothing approves its own work.
   - **The person's message is their word, for whatever the coordinator works
     out from it,** in the turn the message started, or for an errand kept
     from it ([The person's word](#the-persons-word)). This widens ADR-048,
     where their word was only a press.
-  - **On the code host, typed tools for what's frequent, and one gated call
-    to the host's API for the rest,** with a never list that holds whatever
-    anyone says. The call can't change the repository's content, which stays
-    a task's, nor stand in for a check or a review
+  - **Typed tools for what comes up often, and one gated call to the host's
+    API for everything else,** REST and GraphQL alike, so what nobody wrote
+    a tool for works the first time the person asks
     ([On the code host](#on-the-code-host)). This amends ADR-011 and
     ADR-058.
-  - **On every code host Althar supports,** GitHub, GitLab, Bitbucket Cloud
-    and Bitbucket Data Center, as ADR-082 asks. Where a host lacks
-    something, Althar stands in with what the host has, and where neither
-    can, the tool says so and links the host's own button
-    ([On every code host](#on-every-code-host)).
-  - **CI's news reaches the coordinator,** which is woken for what it can
-    act on ([CI news](#ci-news-and-what-the-coordinator-does-with-it)).
-  - **Every open pull request in the project's repositories is followed,**
-    for news, whoever opened it
-    ([Every open pull request](#every-open-pull-request)). This amends
-    ADR-052.
-  - **A release is an errand:** the version and notes as a task, then the
-    tag, the run's approval, the draft, Publish on the person's word, and
-    the Homebrew tap ([A release](#a-release)). This amends ADR-024.
-  - **Every restriction on the coordinator is kept or lifted,** each for a
-    reason
-    ([the list](#every-restriction-on-the-coordinator-kept-or-lifted)).
+  - **A task's lead follows the same rule,** on its task's pull requests and
+    repositories: the person's message in the task's thread is their word
+    for a tag or a merge, and the lead has the same tools and the gated
+    call ([Leads](#leads-under-the-same-rule)).
+  - **The coordinator runs merging and releases, not a standing task's
+    lead** ([why](#the-coordinator-not-a-standing-task)). A fix stays a task
+    with a lead, which the coordinator plans.
+  - **What's missing is built as integrations, not written as rules**
+    ([Integrations](#integrations-what-althar-adds)):
+    - on every code host Althar supports, GitHub, GitLab, Bitbucket Cloud
+      and Bitbucket Data Center, as ADR-082 asks: where a host lacks
+      something, Althar stands in with what the host has, and where neither
+      can, the tool says so and links the host's own button;
+    - CI's news reaches the coordinator, which is woken for what it can act
+      on;
+    - every open pull request in the project's repositories is followed, for
+      news, whoever opened it (this amends ADR-052);
+    - "merge it once it's green" is an errand, one merge at a time into a
+      branch where the host has no queue;
+    - a release is an errand: the version and notes as a task, then the
+      tag, the run's approval, the draft, Publish on the person's word, and
+      the Homebrew tap (this amends ADR-024).
+  - **Every restriction on the coordinator and on leads is kept or lifted,**
+    each for a reason ([the list](#every-restriction-kept-or-lifted)). What's
+    kept is one of the four limits, a fact of the host, or another
+    decision's.
   - **Edge cases are settled by rule,** and what nobody foresaw ends in a
     line in the chat, not in something done ([Edge cases](#edge-cases)).
-  - **The build is fourteen tasks, for 0.7.0** ([Build](#build-for-070)),
+  - **The build is sixteen tasks, for 0.7.0** ([Build](#build-for-070)),
     beside ADR-082's six.
 - **Alternatives considered:**
+  - **Rules for each flow** (this ADR as first written, on 31 October):
+    merging, queues and releases each had rules of their own, which read as
+    all the coordinator might do. The person asked on 1 November for one
+    rule, and integrations for what's missing.
   - **A standing release task's lead,** compared
     [below](#the-coordinator-not-a-standing-task).
   - **Althar's own green, reviewed pull requests into the queue unasked**
@@ -98,8 +122,9 @@
     for someone to write a tool. With the gated call, tomorrow's new thing
     works the first time the person asks, and gets a typed tool once it
     comes up often.
-  - **GraphQL mutations through the gated call:** what one does can't be
-    read off a method and a path.
+  - **GraphQL for queries only** (as first written): some writes are
+    GraphQL's alone, as GitHub's discussions are, and a mutation's name
+    places it as well as a method and a path do.
   - **A never list written endpoint by endpoint:** the Contents API's file
     writes, each a commit to a branch, showed how easily one path is missed.
     Families of paths, and a test against the host's published description
@@ -110,7 +135,9 @@
   - **Steering.** In a turn the person started, what the coordinator reads
     there could take it to a target or an action they didn't mean, and
     they see it in the chat after, not before
-    ([The person's word](#the-persons-word)).
+    ([The person's word](#the-persons-word)). The same holds for a lead, in
+    a turn the person started in its task's thread: it reads its pull
+    request's comments and, where the project lets it, the web (ADR-078).
   - **The keychain.** All of this holds against a mistake, and against text
     steering the coordinator through Althar's tools; not against a script
     set on going round Althar. On a Mac, a script inside Claude Code's
@@ -153,8 +180,9 @@
     same message) is where each host's part of tasks 5 to 8 and 14 is first
     tried for real, with each host's contract clauses.
 - **Revisit when:** Claude Code's sandbox can deny the keychain's service;
-  the coordinator acts on a target, or does something, the person didn't
-  mean; following every pull request reaches a host's rate limit; the
+  the coordinator or a lead acts on a target, or does something, the
+  person didn't mean; the person wants the coordinator on the web, which
+  ADR-078 keeps it off; following every pull request reaches a host's rate limit; the
   person wants something that can't be undone to go ahead unasked; a
   project is shared, and it matters whose word counts; a host opens an API
   for what Althar stands in for, such as entering Bitbucket Cloud's queue.
@@ -162,29 +190,45 @@
 Paths below are in `packages/runtime/src`, or in `packages/` where they
 start with another package's folder, as they stood at 3b4e42f1.
 
-## The coordinator, not a standing task
+## The rule
 
-| | The coordinator | A standing release task's lead |
-| --- | --- | --- |
-| Where its state lives | Althar's records: tasks, pull requests, and the errands below. Its session is disposable (ADR-004), and a fresh one is briefed from the records (ADR-031) | A task's thread and worktree, open for good: a task meant to finish that never does, in no lane of the board (ADR-065) |
-| How the person follows it | In the chat they already talk to it in, a line for each thing it did | A second thread to watch, and a card always at work |
-| What it costs to keep alive | A turn when the person writes, and one when news it can act on comes, batched | The same turns, plus a worktree, and a context that grows with every merge until it is handed over |
-| What it sees | Every task and pull request, through its own tools | Whatever of the coordinator's reads it is given |
-| How it fails | Talking and acting share one session: an errand's turn and the person's message wait behind each other | Two agents deciding about the same pull requests, and a second set of host powers to hold to the rules |
+The coordinator can do on the code host whatever the person's account can,
+through Althar's tools: typed tools for what comes up often, and the gated
+call for the rest ([On the code host](#on-the-code-host)). Four limits stop
+it, each for a reason no tool takes away:
 
-A fix stays a task with a lead: a flaky test, a race, CI's set-up. The
-coordinator plans it, and a change is always a task (ADR-004). An adapter
-bump comes from the nightly dependency check, an automation already, and its
-pull request merges on the person's word like any other.
+1. **What can't be undone waits for the person's word**
+   ([below](#the-persons-word)): a message they wrote, in the turn it
+   started, or an errand kept from it. It never happens on the
+   coordinator's own initiative. Merging and the merge queue are of this
+   kind, green and reviewed or not.
+2. **A short never list stays the person's,** in Althar's Settings or on
+   the host: the repository's settings, branch protection and rulesets, who
+   has access, secrets, webhooks, keys and runners
+   ([the lists](#on-the-code-host)). These decide what every agent may do,
+   so no agent changes them, whoever asks.
+3. **A change to the code is a task,** with a lead and a review (ADR-004).
+   The coordinator edits nothing, and no call to the host writes the
+   repository's content.
+4. **Nothing approves its own work.** No agent approves a pull request a
+   task opened, makes a commit status or a check run, dismisses a review,
+   or answers its own permission request, whoever asks: each would stand
+   where a check of the work belongs. The person still can, on the host or
+   in Althar.
 
-## What happens and what waits
+Anything else that stops the coordinator today is a tool nobody wrote, not a
+rule. The [build](#build-for-070) writes them, as typed tools and as
+[integrations](#integrations-what-althar-adds), and until then the gated
+call reaches what the host has. Where another decision stops it,
+[the list](#every-restriction-kept-or-lifted) says whose. The same holds for
+a task's lead ([Leads](#leads-under-the-same-rule)).
 
 | Kind | When the coordinator does it | What, here |
 | --- | --- | --- |
-| Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own, where the host can reopen it; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges |
-| **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push a tag; approve a run's `release` environment; publish a release; delete a branch; discard a task; reply on, or close, an outside author's pull request; close one on Bitbucket Cloud, where declining is final |
+| Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own, where the host can reopen it; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges; stop, hold, restart or settle a task; read anything the account can read |
+| **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push, move or delete a tag; approve a run's `release` environment; publish a release; start a workflow; post a review; delete a branch; turn an automation on; discard a task; comment on an issue; reply on, or close, an outside author's pull request; close one on Bitbucket Cloud, where declining is final; any other write through the gated call |
 | Can't be undone, and the person didn't ask | Never. It says so in a line in its chat, or, where there is a decision to make, on DEV-173's card | The same, prompted by what it read or by news |
-| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections; the host's settings, in the [never list](#on-the-code-host) |
+| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections; the host's settings, in the [never list](#on-the-code-host); approving a pull request a task opened, making a status or a check run, dismissing a review; answering its own permission request |
 
 - **What an action does in that repository decides its kind,** not its
   name. Here a `v*` tag builds a draft and waits for the `release`
@@ -192,8 +236,10 @@ pull request merges on the person's word like any other.
   could be taken back and only Publish can't. Althar still treats every
   tag as asked-for: the person says "tag 0.7.0" anyway, and where a tag
   publishes (a package to npm) it has to be.
-- **Merging and the merge queue happen only when the person asks,** never
-  on the coordinator's own initiative, green and reviewed or not.
+- **Approving a run's environment is permission, not a check of the work.**
+  The `release` environment's reviewer lets a run use the signing secrets,
+  and the person's word to release is that permission. So it is asked-for,
+  not the fourth limit.
 
 ## The person's word
 
@@ -201,7 +247,8 @@ ADR-048 took the person's word only from a press in the window. A message
 they write to the coordinator is now their word too, for whatever the
 coordinator works out from it, groups included: "merge the green ones"
 merges every green one it finds, and "release 0.7.0" is a
-[release](#a-release).
+[release](#a-release). A message in a task's thread is their word for that
+task's lead in the same way ([Leads](#leads-under-the-same-rule)).
 
 - **In the turn the message started.** Each turn records whether something
   the person wrote is among its inputs (`byPerson`, `Sessions.ts:1480`), so
@@ -249,13 +296,15 @@ merges every green one it finds, and "release 0.7.0" is a
   anyone wrote. The person chose this on 31 October over a card for a group,
   and over a card for every ask.
 - **Still the window's press,** as ADR-048 has it: answering a permission
-  request or a question, and widening what agents may do.
+  request or a question, and widening what agents may do: the fourth limit
+  and the second ([The rule](#the-rule)).
 
 ## On the code host
 
 Typed tools for what comes up often, each marked with its kind, and one
 gated call for the rest. Each works on any of the project's pull requests,
-whoever opened it.
+whoever opened it. A task's lead has them too, on its task's pull requests
+and repositories ([Leads](#leads-under-the-same-rule)).
 
 - **Can be undone:**
   - `rerun_check`: a failed job once more, on a pull request or on the
@@ -278,45 +327,51 @@ whoever opened it.
     merge at a time into each branch, with auto-merge as its merge where the
     host has it ([below](#on-every-code-host)). `leave_queue` takes it out
     until it merges, and can be undone;
-  - `push_tag`, on a commit of the default branch, made by Althar, never
-    moved or deleted. A lead's `push_tag` still asks the person each time
-    (`rules.ts:1939-1941`);
+  - `push_tag`, on the commit the person's words name, or the default
+    branch's where they name none, made by Althar. Moving or deleting a tag
+    is asked-for too, since people and CI may have read it;
   - `approve_release_run`: a run waiting for approval, where the person's
     account may give it: GitHub's environment, here `release`, or GitLab's
     deployment approval or manual job;
   - `publish_release`, as each host publishes one ([A release](#a-release));
+  - `post_review`: a review the person asked for, a review task's draft or
+    their own words, on any pull request. An approval of one a task opened
+    is refused, whoever asks ([the fourth limit](#the-rule));
   - `delete_branch`.
 - **One gated call, `code_host_api`, for everything else** (the person's
   call, 31 October): a REST request to the host's API with Althar's sign-in,
   which never leaves Althar.
-  - Reads (`GET`) go, in any turn, on the project's repositories and others
-    of their owners (such as the Homebrew tap). What comes back is data, cut
-    to size, a page at a time.
-  - Writes (`POST`, `PUT`, `PATCH`, `DELETE`) are asked-for.
+  - Reads (`GET`, and GraphQL queries) go, in any turn, on anything the
+    account can read. What comes back is data, cut to size, a page at a
+    time.
+  - Writes (`POST`, `PUT`, `PATCH`, `DELETE`, and GraphQL mutations) are
+    asked-for.
   - What a typed tool does (merging, bringing a branch up to date, tags,
-    releases, approving a run, deleting a branch) is refused with the tool's
-    name, so the head check and the line in the chat always happen.
+    releases, approving a run, posting a review, deleting a branch) is
+    refused with the tool's name, so the head check and the line in the
+    chat always happen.
   - **A change to the repository's content is refused, whichever path it
     takes,** and the refusal says to plan a task: a change is always a task,
-    with a lead and a review (ADR-004). On GitHub that is the Contents API's
+    with a lead and a review (ADR-004, the third limit). On GitHub that is the Contents API's
     file writes (`PUT` and `DELETE` on `contents/{path}`, each of which
     commits to a branch), the Git database's writes (`git/blobs`,
     `git/trees`, `git/commits`, `git/tags`, `git/refs`), merging one branch
     into another (`merges`), syncing a fork (`merge-upstream`), and making a
     repository from a template (`generate`).
-  - **What stands in for a gate is refused too:** a commit status
-    (`statuses/{sha}`) or a check run made, either of which can satisfy a
-    required check on a branch; and submitting or dismissing a review
-    (`pulls/{n}/reviews`), since an Approve can satisfy branch protection,
-    and posting a review stays the person's
-    ([below](#every-restriction-on-the-coordinator-kept-or-lifted)).
+  - **What stands in for a check of the work is refused too** (the fourth
+    limit): a commit status (`statuses/{sha}`) or a check run made, either
+    of which can satisfy a required check on a branch; an approval of a pull
+    request a task opened; and dismissing a review
+    (`pulls/{n}/reviews/{id}/dismissals`). Other reviews go through
+    `post_review`.
   - **Starting a workflow** (`dispatches`, and a workflow's own
-    `dispatches`) is asked-for, and only at the default branch, whose
-    workflow files were reviewed. Here that covers `post-merge` again, or
-    `release.yml`'s run by hand from main, which still stops for the
-    `release` environment's approval.
-  - The never list is refused whatever the person said, by method and path,
-    written for each host. On GitHub it is:
+    `dispatches`) is asked-for, on any branch: a push to that branch runs
+    its workflow files already, and an environment's required reviewers
+    still stop a run that needs them. Here that covers `post-merge` again,
+    or `release.yml`'s run by hand, which still stops for the `release`
+    environment's approval.
+  - The never list (the second limit) is refused whatever the person said,
+    by method and path, written for each host. On GitHub it is:
     - the repository's own settings: renaming it, its default branch, its
       visibility, transferring or deleting it;
     - branch protection and rulesets;
@@ -334,14 +389,18 @@ whoever opened it.
   - **Each list is written by family of paths, not endpoint by endpoint,** so
     a new endpoint under `contents` or `git` is refused with the rest. A test
     reads GitHub's published description of its API
-    (`github/rest-api-description`) and fails on any write it can't place:
-    let through, a typed tool's, content, a gate, or never. Each other
+    (`github/rest-api-description`), and every mutation in its GraphQL
+    schema, and fails on any write it can't place: let through, a typed
+    tool's, content, a gate, or never. Each other
     host's test reads its own. At run time a write Althar hasn't placed,
     such as one a host added since, is refused as never until it is. A host
     Althar adds later gets reads only until its lists are written.
-  - GraphQL, on GitHub and GitLab, is for queries only: what a mutation
-    does is in its name and arguments, which Althar would have to read one
-    at a time.
+  - **GraphQL mutations, on GitHub and GitLab, are placed by name,** in the
+    same families: `createCommitOnBranch` is content, `mergePullRequest` a
+    typed tool's, `updateRepository` never. A document is parsed and every
+    mutation in it placed, fragments included; one that doesn't parse, or
+    holds a mutation not placed, is refused whole. Some writes are
+    GraphQL's alone, as GitHub's discussions are.
   - It shares the connection's rate limit, and stops before what the
     [sweep](#every-open-pull-request) needs.
 - **The gate is Althar's, not the token's.** The GitHub connection here is a
@@ -357,7 +416,69 @@ whoever opened it.
   fine-grained token given only Contents, Pull requests, Issues and Actions
   would narrow it further.
 
-## On every code host
+### The gated call's lists on the other hosts
+
+The same families as GitHub's, in each host's paths, and GitLab's GraphQL
+mutations by name. Each is tested against
+the host's published description of its API. GitLab's OpenAPI covers only
+part of its API, so what it leaves out is placed by hand, and Data Center's
+is read for each version Althar supports. A write placed nowhere is refused.
+
+| Family | GitLab | Bitbucket Cloud | Bitbucket Data Center |
+| --- | --- | --- | --- |
+| A typed tool's | Merging, merge trains and auto-merge, releases, deployment approvals, a job played or retried | Merging, declining, Downloads, a pipeline run again | Merging, declining and reopening, auto-merge |
+| Content, pointing to a task | `repository/files`; `repository/commits`, a commit made of file actions; cherry-picks and reverts; branches and tags made or deleted | `src`, a commit made of files; `refs/branches`; `refs/tags` | A file edited through `browse`; `branch-utils`; tags made or deleted |
+| A gate, or `post_review`'s | Commit statuses; approving, unapproving and resetting approvals; approval rules | Build statuses; approving and requesting changes | Build statuses and builds; a reviewer's status |
+| Starting a pipeline, asked-for on any branch | A pipeline made, or triggered | A pipeline made | – |
+| Never | `rebase`, since nothing is rebased; the project's settings, transfer, archive and deletion; protected branches, tags and environments; push rules; members, invitations and shares; hooks; deploy keys and tokens; access tokens; CI/CD variables; runners; mirrors; integrations; Pages; anything under `groups`, `users`, `user`, `admin`, `application` and `namespaces` | The repository's settings and deletion; branch restrictions and the branching model; permissions; webhooks; deploy keys; default reviewers; Pipelines' settings, variables and deployment environments; forks made; anything under `workspaces`, `user` and `users` | The repository's settings, moves and deletion; branch permissions; permissions; hooks and webhooks; access keys and tokens; default reviewers; auto-merge's settings; anything under `admin`, `users` and a project's own settings |
+
+## Leads, under the same rule
+
+The rule isn't the coordinator's alone. A task's lead does on the code host
+what the person's account can, on its task's pull requests and
+repositories, with the same four limits:
+
+- **The person's word is their message in the task's thread,** in the turn
+  it started, as the coordinator's is in its chat. "Tag it 0.7.1" or "merge
+  it once it's green" there goes ahead with no card. A tag or a merge the
+  lead works out for itself asks the person, as `push_tag` does for every
+  tag today (`rules.ts:1939-1941`).
+- **The same tools:** `merge_pull_request`, through the same slot and the
+  same line as the coordinator's, so the two never merge into a branch at
+  once; `push_tag`; `update_branch`; `close_pull_request` and
+  `reopen_pull_request` on its own; and the gated call, on its task's
+  repositories.
+- **What it has stays:** pushing its branch, running checks again,
+  replying, reading the web where the project lets it (ADR-078), its
+  sandbox, and the rules' asks for its commands.
+- **The coordinator still runs a release,** and "merge the green ones":
+  both span tasks and pull requests that no one lead sees
+  ([why](#the-coordinator-not-a-standing-task)).
+
+## The coordinator, not a standing task
+
+| | The coordinator | A standing release task's lead |
+| --- | --- | --- |
+| Where its state lives | Althar's records: tasks, pull requests, and the errands below. Its session is disposable (ADR-004), and a fresh one is briefed from the records (ADR-031) | A task's thread and worktree, open for good: a task meant to finish that never does, in no lane of the board (ADR-065) |
+| How the person follows it | In the chat they already talk to it in, a line for each thing it did | A second thread to watch, and a card always at work |
+| What it costs to keep alive | A turn when the person writes, and one when news it can act on comes, batched | The same turns, plus a worktree, and a context that grows with every merge until it is handed over |
+| What it sees | Every task and pull request, through its own tools | Whatever of the coordinator's reads it is given |
+| How it fails | Talking and acting share one session: an errand's turn and the person's message wait behind each other | Two agents deciding about the same pull requests, and a second set of host powers to hold to the rules |
+
+A fix stays a task with a lead: a flaky test, a race, CI's set-up. The
+coordinator plans it, and a change is always a task (ADR-004). An adapter
+bump comes from the nightly dependency check, an automation already, and its
+pull request merges on the person's word like any other.
+
+## Integrations: what Althar adds
+
+None of this limits what the coordinator may do. Each part is something
+Althar builds so that it can act where a host, or Althar itself, lacks what
+it needs today: news to act on, pull requests it doesn't follow, a queue on
+a host without one, and any idea of a release. Until a part is built, the
+gated call reaches what the host has.
+
+### On every code host
 
 What this ADR builds, it builds for GitHub, GitLab, Bitbucket Cloud and
 Bitbucket Data Center (ADR-082). Where a host lacks something, Althar stands
@@ -437,22 +558,7 @@ words and links the host's own button, which is the person's press.
   (ADR-071); on another agent every command meets Althar's rules, as now,
   until ADR-082's task 4.
 
-### The gated call's lists on the other hosts
-
-The same families as GitHub's, in each host's paths. Each is tested against
-the host's published description of its API. GitLab's OpenAPI covers only
-part of its API, so what it leaves out is placed by hand, and Data Center's
-is read for each version Althar supports. A write placed nowhere is refused.
-
-| Family | GitLab | Bitbucket Cloud | Bitbucket Data Center |
-| --- | --- | --- | --- |
-| A typed tool's | Merging, merge trains and auto-merge, releases, deployment approvals, a job played or retried | Merging, declining, Downloads, a pipeline run again | Merging, declining and reopening, auto-merge |
-| Content, pointing to a task | `repository/files`; `repository/commits`, a commit made of file actions; cherry-picks and reverts; branches and tags made or deleted | `src`, a commit made of files; `refs/branches`; `refs/tags` | A file edited through `browse`; `branch-utils`; tags made or deleted |
-| A gate | Commit statuses; approving, unapproving and resetting approvals; approval rules | Build statuses; approving and requesting changes | Build statuses and builds; a reviewer's status |
-| Started only at the default branch | A pipeline made, or triggered | A pipeline made | – |
-| Never | `rebase`, since nothing is rebased; the project's settings, transfer, archive and deletion; protected branches, tags and environments; push rules; members, invitations and shares; hooks; deploy keys and tokens; access tokens; CI/CD variables; runners; mirrors; integrations; Pages; anything under `groups`, `users`, `user`, `admin`, `application` and `namespaces` | The repository's settings and deletion; branch restrictions and the branching model; permissions; webhooks; deploy keys; default reviewers; Pipelines' settings, variables and deployment environments; forks made; anything under `workspaces`, `user` and `users` | The repository's settings, moves and deletion; branch permissions; permissions; hooks and webhooks; access keys and tokens; default reviewers; auto-merge's settings; anything under `admin`, `users` and a project's own settings |
-
-## CI news, and what the coordinator does with it
+### CI news, and what the coordinator does with it
 
 Althar learns most of this already, for the pull requests it follows. Each
 poll, every 30 seconds and ten times slower after ten minutes with no news
@@ -502,7 +608,7 @@ coordinator now hears it too, beside plans and issue cards:
 - **What it acts on, it reads first.** A merge, a queue or a tag works from
   a read made then, not from the last poll, which is only news.
 
-## Every open pull request
+### Every open pull request
 
 - Every open pull request in the project's repositories is followed,
   whoever opened it, not only those a task opened or was attached to
@@ -526,7 +632,7 @@ coordinator now hears it too, beside plans and issue cards:
   open pull requests there is read more slowly. The sweep backs off as the
   remaining budget falls, as a failing service is waited out (ADR-060).
 
-## A release
+### A release
 
 "Release 0.7.0" is a release errand. Each step goes once the news before it
 comes:
@@ -563,7 +669,7 @@ comes:
   puts the files in Downloads; on Data Center the tag is the release, and
   the repository's CI does the rest.
 
-## Edge cases
+### Edge cases
 
 - **A new objection pauses an errand.** Changes requested, a reviewer's new
   unresolved thread, or the pull request turned back to draft after the
@@ -591,62 +697,72 @@ comes:
   moved is read again. So it ends in a line in the chat, not in something
   done.
 
-## Every restriction on the coordinator, kept or lifted
+## Every restriction, kept or lifted
+
+On the coordinator, and on a task's lead where a row says so. What's kept
+is one of [the four limits](#the-rule), a fact of the host, or another
+decision's, and its reason says which.
 
 | Restriction today | Where | Now | Why |
 | --- | --- | --- | --- |
 | **The code host** | | | |
-| It only reads the host: `read_pull_request`, `read_check_log`, `find_pull_requests` | ADR-058; `Reviews.ts:1321-1348`, `Coordinator.ts:1553` | Lifted | The rows below replace it |
+| It only reads the host: `read_pull_request`, `read_check_log`, `find_pull_requests` | ADR-058; `Reviews.ts:1321-1348`, `Coordinator.ts:1553` | Lifted | It does what the person's account can, through Althar's tools; the rows below say how |
 | No `rerun_check`, `read_default_branch_checks` or `reply_on_pull_request`: leads' alone | `Changes.ts:5861-6075` | Lifted | A rerun changes nothing that lasts, a read only reads, and a reply on Althar's or its own people's can be deleted |
 | No mark ready or close: the person's buttons alone | `Changes.ts:626-640`; `Api.ts:1250`, `:1382` | Lifted for Althar's own | Both can be undone: back to draft, reopened. On Bitbucket Cloud, where declining is final, closing is asked-for |
 | A reply on, or close of, an outside author's pull request | – | Asked-for | Their notification can't be taken back |
 | No branch update: no connector has one | `connectors/src/model.ts:292` | Lifted | A merge of the default branch into it can be undone; never a rebase |
-| "Agents never merge": the person's Merge alone | ADR-011; `Changes.ts:644`, `:2216`; `contracts/src/Api.ts:3511-3516` | Lifted, when the person asks | It can't be undone, so only on their word, never on its own |
+| "Agents never merge": the person's Merge alone | ADR-011; `Changes.ts:644`, `:2216`; `contracts/src/Api.ts:3511-3516` | Lifted, when the person asks | It can't be undone, so only on their word, never on its own: the first limit. A lead's too, in its task's thread |
 | The merge queue is entered only inside the person's press | `connectors/src/github.ts:775-786` | Lifted, when the person asks | As merging: on every host, through its queue or merge train, or the errand standing in, one merge at a time into each branch |
-| A merge goes at the head the person saw | `Changes.ts:2227` | Kept | It merges at the head it read, or reads again |
+| A merge goes at the head the person saw | `Changes.ts:2227` | Kept | Not a limit on what: it merges at the head it read, or reads again |
 | The merge method is the first the repository allows | `connectors/src/github.ts:770` | Lifted | It takes any method the repository allows |
-| No tag: `push_tag` is a running lead's, and asks the person each time | `Changes.ts:2708-2825`; `rules.ts:1939-1941` | Lifted, when the person asks | A tag may publish elsewhere; their message is the word, so no second card |
-| A tag is never moved or deleted | `Changes.ts:2781-2782` | Kept | People and CI have read it |
+| No tag: `push_tag` is a running lead's, and asks the person each time | `Changes.ts:2708-2825`; `rules.ts:1939-1941` | Lifted, when the person asks, for the coordinator and leads | A tag may publish elsewhere; their message, in the coordinator's chat or the task's thread, is the word, so no second card |
+| A tag is never moved or deleted | `Changes.ts:2781-2782` | Lifted, when the person asks | Whoever read it can't unread it, so it waits for their word, as anything that can't be undone does |
 | No release: no connector call, and `gh release create` held as a deploy | `connectors/src/model.ts:292`; `rules.ts:2019` | Lifted, when the person asks | Publishing reaches every updater at once |
-| Approving a run's `release` environment, and publishing, are the person's on GitHub | ADR-024 | Lifted, when the person asks | The approval lets only a draft be built; the person's word for the release covers both |
+| Approving a run's `release` environment, and publishing, are the person's on GitHub | ADR-024 | Lifted, when the person asks | The approval is their permission to deploy, not a check of the work; their word for the release covers both |
 | Deleting a branch is the person's | `Changes.ts:2323-2363` | Asked-for | A deleted branch can't always be brought back |
 | Only pull requests a task opened or attached are followed | ADR-052; `Changes.ts:5304-5310` | Lifted | Every open one, slowly, for news |
 | A contributor's fork can't be attached or pushed to; the task's own fork can | `Changes.ts:1585-1596` | Kept here | DEV-170 decides it |
-| It posts no review; an outside pull request's waits for the person | `Reviews.ts:59`, `:223-227`, `:957-961` | Kept | An Approve can satisfy branch protection; a review task's lead drafts one |
-| Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Althar's tools are the one way to the host, which is what lets the gate hold |
-| A rerun reaches the host's own CI only: Actions' jobs, GitLab's jobs, and now Bitbucket Pipelines', whole | `connectors/src/github.ts:867-872`, `gitlab.ts:719-724`, `bitbucketCloud.ts:598` | Kept | No host can run another service's; Bitbucket Data Center's builds are all another's |
-| *New:* the gated call can't change the repository's content, make a status or a check run, submit or dismiss a review, or start a workflow off the default branch | [On the code host](#on-the-code-host) | Added | A change is always a task, and CI's and a review's gates stay as they are |
+| It posts no review; an outside pull request's waits for the person | `Reviews.ts:59`, `:223-227`, `:957-961` | Lifted, when the person asks, but never an approval of a task's own | A review they asked for is their word; an approval of a task's pull request would stand where a check of the work belongs: the fourth limit |
+| Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Not a limit on what: the gated call reaches all the host has, and one way to the host is what lets the limits hold |
+| A rerun reaches the host's own CI only: Actions' jobs, GitLab's jobs, and now Bitbucket Pipelines', whole | `connectors/src/github.ts:867-872`, `gitlab.ts:719-724`, `bitbucketCloud.ts:598` | Kept | Not Althar's limit: no host can run another service's, and Bitbucket Data Center's builds are all another's |
+| *New:* the gated call can't change the repository's content, make a status or a check run, approve a task's pull request or dismiss a review | [On the code host](#on-the-code-host) | Added | The third and fourth limits |
+| *New:* the gated call starts a workflow on any branch, and places GraphQL mutations by name | [On the code host](#on-the-code-host) | Added, asked-for | A push to a branch runs its workflow files already; some writes are GraphQL's alone, and a mutation's name places it as a path does |
 | *New:* what a host lacks is stood in for, or said with a link to the host's own button; never a no-op that looks done | [On every code host](#on-every-code-host) | Added | ADR-082 |
 | **Git and its copies** | | | |
-| It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | News brings what it would have fetched for |
-| Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The record and the review |
-| Where no sandbox holds it, only commands that look | ADR-058; `provider-adapters/src/registry.ts:743-744` | Kept | ADR-071 runs Claude Code's inside its sandbox unread already; DEV-179 is the rest |
+| It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | Not a limit on what: news brings what it would have fetched for |
+| It can't read the web | ADR-078 | Kept here | It reads strangers' words on every open pull request, and with the web such text could have it leak the code in a URL, which is why ADR-078 keeps outside reviews offline |
+| Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The third limit: the record and the review |
+| Where no sandbox holds it, only commands that look | ADR-058; `provider-adapters/src/registry.ts:743-744` | Kept | ADR-071 runs Claude Code's inside its sandbox unread already; ADR-082's task 4 and DEV-179 are the rest |
 | **Tasks** | | | |
 | It can't stop, hold, restart or settle a task; `settle_task` is a lead's | `Coordinator.ts:1480-1776`, `:1808` | Lifted | Each can be undone: a stopped task starts again, a settled one goes back to work (ADR-034). Discarding one is asked-for |
 | It can't swap a task's lead | No such tool | Lifted in DEV-177 | DEV-177 decides how |
 | `message_lead` to a stopped lead: "nobody reads this yet … Tell the person" | `Coordinator.ts:1106-1108` | Lifted | It starts the lead, as the person's message does |
 | Resuming an automation, or running it now, is a card | `Coordinator.ts:1728-1739` | Lifted, when the person asks | Their message is the word for spending their plan |
-| Turning an automation on is the person's | `propose_automation` | Kept | It spends the plan on a schedule from then on |
+| Turning an automation on is the person's | `propose_automation` | Lifted, when the person asks | It spends their plan on a schedule from then on, so it waits for their word, which their message is |
 | `attach_pull_request` starts from the pull request's head "only once the person agreed" (its brief) | `Coordinator.ts:657`, `:1538` | Lifted | The task's old head is kept, so nothing is lost |
-| `list_tasks` shows the newest 50, `find_pull_requests` 30 a repository | `Coordinator.ts:376`; `pullRequestList.ts:22` | Kept | `find_tasks` reaches the rest |
+| `list_tasks` shows the newest 50, `find_pull_requests` 30 a repository | `Coordinator.ts:376`; `pullRequestList.ts:22` | Kept | Not a limit on what: `find_tasks` reaches the rest |
 | Its brief says a task's lead can't fetch | `Sessions.ts:2933` | Lifted | Untrue since ADR-066 |
 | **Issues** | | | |
 | Every issue it drafts waits on the person's card | `IssueDrafts.ts:100` | Lifted | It files at once or drafts, as it judges from the person's notes; a card's "always" or "never" becomes a note |
 | `draft_issue` takes no project, milestone, assignee or parent | `Coordinator.ts:1426-1455` | Lifted | It was the minimum, not a decision |
 | Issue changes wait on a card unless "Change issues without asking" is on, which it is not by default | `Policies.ts:84-90`, `:184`; `IssueChanges.ts:851` | Lifted | The same judgment; the switch becomes a note |
-| It comments on an issue only when the person asks (its brief) | `IssueChanges.ts:1140`; `Sessions.ts:2941` | Kept, and held in code as asked-for | Others read it under the person's name |
-| `gh` and `glab` issue writes are refused | `rules.ts:423-449` | Kept | One way to the tracker, with receipts |
+| It comments on an issue only when the person asks (its brief) | `IssueChanges.ts:1140`; `Sessions.ts:2941` | Asked-for, held in code | Others read it under the person's name: the first limit |
+| `gh` and `glab` issue writes are refused | `rules.ts:423-449` | Kept | Not a limit on what: Althar's tracker tools are the one way, with receipts |
+| The tracker has no general call: only Althar's issue tools | – | Lifted, in task 16 | The same gate as the host's: Linear's writes are GraphQL mutations, placed by name, and Jira's and Trello's REST, by path |
 | **Hearing** | | | |
 | It speaks only when spoken to | `Sessions.ts:1320-1322` | Lifted | It is woken for what it can act on, in a batch |
 | Its news is plans, issue cards, issues started and quick tasks made changes | `coordinatorNews.ts:32`, `:102-104` | Lifted | Pull requests' and main's news join them |
 | Main's checks are never polled | `Changes.ts:5443-5472` | Lifted | The sweep reads main's head, and its checks when it moves, while a run goes, and while main is red or a release waits on it |
 | **The person's word** | | | |
-| Merging, pushing and posting a review are the person's press | ADR-048 | Lifted for merging and releasing | Their message is their word; posting a review stays theirs, above |
-| Answering a permission request or a question is the person's press | ADR-019, ADR-048 | Kept | What can't be undone asks only the person |
-| Widening what agents may do is the person's, in Settings | ADR-048 | Kept | The never list |
+| Merging, pushing and posting a review are the person's press | ADR-048 | Lifted for what they ask | Their message is their word; an approval of a task's own pull request stays theirs, on the host: the fourth limit |
+| Answering a permission request or a question is the person's press | ADR-019, ADR-048 | Kept | An agent answering its own would approve its own work: the fourth limit |
+| Widening what agents may do is the person's, in Settings | ADR-048 | Kept | The second limit |
 | A client on the local socket can't answer for the person | ADR-048 | Kept, and widened | Its messages aren't the person's word either |
-| *New:* a turn the person didn't start does nothing that can't be undone, except an errand's next step | [The person's word](#the-persons-word) | Added | So news, and what it reads, can't set off a merge by themselves |
-| A step's turns, fix rounds, review rounds and stuck checks are capped | `Stalls.ts`; `Changes.ts`; `Runs.ts` | Kept | Each hands the work to the person rather than refusing it |
+| *New:* a turn the person didn't start does nothing that can't be undone, except an errand's next step | [The person's word](#the-persons-word) | Added | The first limit: news, and what it reads, can't set off a merge by themselves |
+| A step's turns, fix rounds, review rounds and stuck checks are capped | `Stalls.ts`; `Changes.ts`; `Runs.ts` | Kept | Not a limit on what: each hands the work to the person rather than refusing it |
+| **Leads** | | | |
+| A lead can't merge its pull request | ADR-011; `Changes.ts:644` | Lifted, when the person asks in the task's thread | The same tool, slot and line as the coordinator's, so the two never merge into a branch at once |
+| A lead has no branch update, no closing or reopening of its own, and no gated call | `connectors/src/model.ts:292`; `Changes.ts:626-640` | Lifted | The same tools as the coordinator's, on its task's repositories |
 
 ## Build, for 0.7.0
 
@@ -655,25 +771,28 @@ title is a task's, in at most 60 characters.
 
 | # | Task | Scope | Size | After |
 | ---: | --- | --- | :---: | --- |
-| 1 | Coordinator: rerun, mark ready, close and reply on PRs | The coordinator gets `rerun_check`, `read_default_branch_checks`, `mark_ready`, `close_pull_request`, `reopen_pull_request` (a new connector call) and `reply_on_pull_request`, on any of the project's pull requests, within the kinds above. Its brief says what it does unasked, and no longer that a lead can't fetch. Reruns on every host: GitLab's jobs, Bitbucket Cloud's pipeline again, whole, on the same commit, and on Data Center a line saying whose build it is. Reopening on GitHub, GitLab and Data Center; closing on Bitbucket Cloud asked-for. Doc 04's tools | M | – |
+| 1 | Coordinator: rerun, ready, close, reply and review PRs | The coordinator gets `rerun_check`, `read_default_branch_checks`, `mark_ready`, `close_pull_request`, `reopen_pull_request` (a new connector call) and `reply_on_pull_request`, on any of the project's pull requests, within the kinds above, and `post_review` on the person's word: a review task's draft or their own words, never an approval of a task's own. Its brief says what it does unasked, and no longer that a lead can't fetch. Reruns on every host: GitLab's jobs, Bitbucket Cloud's pipeline again, whole, on the same commit, and on Data Center a line saying whose build it is. Reopening on GitHub, GitLab and Data Center; closing on Bitbucket Cloud asked-for. Doc 04's tools | M | – |
 | 2 | PR and CI news reach the coordinator | News for each followed pull request: checks done, merged, closed, sent back by the queue and why as each host says it, reviews, checks handed to the person; what a poll records grows to carry the head and the queue. Main's head and checks in the sweep, on every host: red, and green again, read again at an unchanged head while main is red. The watch, for task 3's errands and DEV-176: what it watches is read as a task's pull request is until it ends, finished results included, with conditional reads. The quiet wake, batched, only for what it can act on; woken by news, only what can be undone. Tests: a failed run that passes when run again at the same head is heard, on main and on a watched pull request | M | – |
-| 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. The [edge cases](#edge-cases): an objection pauses an errand, one that hears nothing says so, each step reads before it acts, and a lost answer is read back. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes, an objection pauses it, a lost answer isn't acted on twice | L | – |
+| 3 | The person's word: errands, receipts, who sent it | A message records who sent it: the window, a paired device, the socket. Tool calls see `byPerson`, the coordinator's and leads' alike. An asked-for kind on tools, run only in a turn the person's message started or for an open errand. Errands as records (words, message, targets, heads, what each step waits on), a line when kept and when done, the task's card, the handover brief. ADR-048's marks on the contract. The [edge cases](#edge-cases): an objection pauses an errand, one that hears nothing says so, each step reads before it acts, and a lost answer is read back. Tests: a turn news started is refused, a socket's message is refused, an errand's step goes, an objection pauses it, a lost answer isn't acted on twice | L | – |
 | 4 | A stopped lead hears what's meant for it | `message_lead` starts a stopped lead. Reviews, comments and the queue sending its pull request back are queued for it, and wake it (today `Changes.ts:3261` drops them). Shared with DEV-176 | S | – |
 | 5 | Coordinator merges and queues when you ask | `merge_pull_request` at a head, with a method the repository allows: GitHub's queue (at `expectedHeadOid`), GitLab's merge train, and elsewhere the errand standing in for a queue: one slot per repository and branch, taken in the order asked and held until a read shows the merge landed, each branch brought up to date and green against the target's new head (three tries for someone else's writes), auto-merge as its merge where the host has it (GitLab's, Data Center's), the person's "merge it now" waiting only for a merge in flight, and a link to the host's Add to queue where a plain merge is refused; `leave_queue` on each. What each server has, read and kept. A merge that lands later is done once read. Any of the project's pull requests, in any of its repositories. "Once it's green" as an errand. The line in the chat. Contract clauses on every host's fake. Tests: two errands with the first merge held pending, where the second waits, then starts again from the new head; the person's "merge it now" ahead of the line; a write by someone else in the gap, heard as main red; a restart keeps the line | L | 2, 3 |
 | 6 | Bring a PR's branch up to date with main | `update_branch` in the connectors, for the coordinator and leads: GitHub's update-branch, a merge; GitLab and Bitbucket by Althar's merge in a copy of its own, pushed plainly. An outside author's branch where the host lets the account push to it, else a reply asks them, asked-for. Never a rebase, never forced | M | 1 |
 | 7 | Follow every open PR in the project, for news | The open list every five minutes, with conditional requests; checks when a head moves or a check runs, and at an unchanged head for a day after they fail, conditionally; one an errand waits on is polled as a task's. At most a fifth of each host's hourly allowance, by its headers or Althar's own count, backing off as it falls; Bitbucket's lists carry no checks. News only: no card, no lead. Test: an outside author's rerun at the same head reaches the errand that waits on it | M | 2, 3 |
-| 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on a commit of the default branch, on every host. In the connectors: read a release, and publish one as each host does (GitHub's draft, GitLab's release made, Bitbucket Cloud's files in Downloads); approve a run (GitHub's environment, GitLab's deployment approval or manual job), and link the host's own button where only the person can (Bitbucket's manual steps); run a run's failed jobs again; read a run on a tag (with DEV-94). Another repository's release steps, read from it and kept as a note | L | 3 |
+| 8 | Coordinator tags, approves and publishes releases | `push_tag` for the coordinator, on the commit the person names or the default branch's, on every host; moving or deleting a tag, asked-for. In the connectors: read a release, and publish one as each host does (GitHub's draft, GitLab's release made, Bitbucket Cloud's files in Downloads); approve a run (GitHub's environment, GitLab's deployment approval or manual job), and link the host's own button where only the person can (Bitbucket's manual steps); run a run's failed jobs again; read a run on a tag (with DEV-94). Another repository's release steps, read from it and kept as a note | L | 3 |
 | 9 | Release 0.7.0 through the coordinator | The release errand above: the version-and-notes task, then merge, tag, approve, the draft, the decision to try and publish it, Publish, the tap. Each step in the chat. The coordinator's brief for releasing. Proven by releasing 0.7.0 itself, so it goes last | M | 2, 5, 8 |
-| 10 | A gated call to the code host's API | `code_host_api`: REST reads; writes asked-for; GitHub's lists by family of paths: typed tools' (by name), the repository's content (pointing to a task), what stands in for a gate, workflows started only at the default branch, and never. A test that places every write in GitHub's published description of its API; a write not placed is refused at run time. The other hosts' lists are task 14; GraphQL queries only; receipts and the line in the chat; a floor under the rate limit | L | 3 |
-| 11 | Coordinator acts on tasks when you ask | Stop, hold, restart and settle a task; discard one, asked-for; `attach_pull_request` from its head without asking; resume an automation, or run it now, on the person's word. Swapping a lead is DEV-177 | M | 3 |
+| 10 | A gated call to the code host's API | `code_host_api`: REST reads and GraphQL queries; writes asked-for, REST by method and path and GraphQL mutations by name, a document parsed whole; GitHub's lists by family: typed tools' (by name), the repository's content (pointing to a task), what stands in for a check of the work, and never; a workflow started on any branch, asked-for. A test that places every write in GitHub's published description of its API, and every mutation in its GraphQL schema; a write not placed is refused at run time, and a document holding one is refused whole. The other hosts' lists are task 14; receipts and the line in the chat; a floor under the rate limit | L | 3 |
+| 11 | Coordinator acts on tasks when you ask | Stop, hold, restart and settle a task; discard one, asked-for; `attach_pull_request` from its head without asking; resume an automation, run it now, or turn one on, on the person's word. Swapping a lead is DEV-177 | M | 3 |
 | 12 | Coordinator files issues at once or as a card | `draft_issue` files at once or drafts, as the coordinator judges from the project's notes; a card's "always" or "never" is kept as a note; "Change issues without asking" becomes a note. Commenting on an issue becomes asked-for in code | M | 3 |
 | 13 | draft_issue takes project, milestone and assignee | On every tracker: project or milestone, assignee, parent, and Jira's issue type; set right after creating where a tracker's create can't take them | M | – |
-| 14 | The gated call on GitLab and both Bitbuckets | GitLab's, Bitbucket Cloud's and Data Center's lists, by [the same families](#the-gated-calls-lists-on-the-other-hosts), each tested against the host's published description: GitLab's, which is partial, completed by hand, and Data Center's for each version Althar supports. A write placed nowhere is refused | M | 10 |
+| 14 | The gated call on GitLab and both Bitbuckets | GitLab's, Bitbucket Cloud's and Data Center's lists, by [the same families](#the-gated-calls-lists-on-the-other-hosts), each tested against the host's published description: GitLab's, which is partial, completed by hand, and Data Center's for each version Althar supports. GitLab's GraphQL mutations by name. A write placed nowhere is refused | M | 10 |
+| 15 | Leads merge, tag and call the host when you ask | A lead's `merge_pull_request` on its task's pull requests, through task 5's slot and line; `push_tag` with no card where the person asked in the task's thread, and asking as now where they didn't; `update_branch`, and closing and reopening its own; `code_host_api` on its task's repositories. Its brief says what it does unasked. Tests: a merge the person asked for in the thread goes, one the lead works out for itself asks, a turn a review started can't merge | M | 3, 5, 10 |
+| 16 | A gated call to the tracker's API | `tracker_api`, as task 10's is for the host: reads in any turn, writes asked-for; Linear's GraphQL mutations by name, Jira's and Trello's REST by method and path, in the same families: a typed tool's (`draft_issue`, `change_issue`, comments), and never (the workspace's or site's settings, teams' and projects' settings, members and permissions, keys and tokens, webhooks, apps and integrations). GitHub's and GitLab's issues go through `code_host_api`. Each list tested against the tracker's published schema or description, placed by hand where it has none; a write placed nowhere is refused | L | 10 |
 
 In order:
 1. **First, side by side:** 1, 2, 3 and 4. None waits on another.
 2. **Then:** 5, 6, 7 and 8.
 3. **Then:** 10, 11, 12 and 13.
-4. **Then:** 14, beside ADR-082's tasks 1, 2 and 4.
-5. **Then:** ADR-082's tasks 3, 5 and 6.
-6. **Last:** 9, which is 0.7.0's own release.
+4. **Then:** 14, 15 and 16, beside ADR-082's task 1.
+5. **Then:** ADR-082's tasks 2, 3 and 4.
+6. **Then:** ADR-082's tasks 5 and 6.
+7. **Last:** 9, which is 0.7.0's own release.

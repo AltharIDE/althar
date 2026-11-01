@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-10-19
-- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): a message the person writes to the coordinator, in the window or on a paired device, is their word for merging and releasing what the coordinator works out from it, in the turn it started; a message over the socket never is.
+- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): a message the person writes to the coordinator, or to a task's lead in its thread, in the window or on a paired device, is their word for what can't be undone that the agent works out from it, in the turn it started, posting a review included; a message over the socket never is. Answering a permission request and widening what agents may do stay the window's press.
 - **Owner:** Repository maintainers
 - **Context:** ADR-003 put the runtime in a utility process, to revisit "when
   work must outlive the app and a daemon is needed". The command line,

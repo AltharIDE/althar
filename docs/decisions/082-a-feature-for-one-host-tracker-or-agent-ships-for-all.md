@@ -81,9 +81,9 @@
   adapter, and ships later where the services differ most. The models keep
   the extra in the adapters, and the rest can follow as tasks in the same
   release, so one service doesn't hold up a feature's first change.
-- **Applies first to:** [ADR-081](081-the-coordinator-merges-and-releases-on-the-person-s-word.md),
+- **Applies first to:** [ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md),
   whose build now covers every code host
-  ([On every code host](081-the-coordinator-merges-and-releases-on-the-person-s-word.md#on-every-code-host)).
+  ([On every code host](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md#on-every-code-host)).
   The gaps outside it are the tasks [below](#build).
 - **Revisit when:** a service joins; a new kind of service joins, such as a
   CI service like Jenkins, whose builds Bitbucket Data Center only links
@@ -96,13 +96,13 @@ list. Each title is a task's, in at most 60 characters.
 
 | # | Task | Scope | Size | After |
 | ---: | --- | --- | :---: | --- |
-| 1 | Review outside PRs on GitLab and Bitbucket | `capabilities.reviews` on GitLab, Bitbucket Cloud and Data Center: read a change to review, with whether its author is one of the repository's people and its fork; post a review as comments on lines and a summary, never an approval (ADR-081). Bitbucket Cloud's membership needs the token's `read:workspace`, and without it everyone counts as an outsider, as now. Contract clause on each fake, recorded answers, real accounts | L | – |
+| 1 | Review outside PRs on GitLab and Bitbucket | `capabilities.reviews` on GitLab, Bitbucket Cloud and Data Center: read a change to review, with whether its author is one of the repository's people and its fork; post a review as comments on lines and a summary, an approval only on the person's word (ADR-081). Bitbucket Cloud's membership needs the token's `read:workspace`, and without it everyone counts as an outsider, as now. Contract clause on each fake, recorded answers, real accounts | L | – |
 | 2 | Start issues on GitHub and GitLab | `capabilities.starts`: GitLab's statuses where the server has them (its started category), GitHub's project Status field where the issue is on a project the notes name, else a label the notes name; said where none is | M | – |
 | 3 | Priority and project on every tracker | Priority where a tracker has no field (GitHub's and GitLab's issues, Trello): a label the project's notes name, or GitHub's organization issue fields where they exist. Project: Jira Cloud moves an issue to another project, Trello a card to another board; Jira Data Center where its API can, said where it can't | M | – |
 | 4 | Sandbox the coordinator on every agent that can | Read each agent's own sandbox, Codex's first, which has one of its own; `contains`, `holds` and `upFront` where it keeps commands to the folder and off the network as Claude Code's does (ADR-071); doc 03 says why for each that can't | M | – |
 | 5 | The permission judge on every agent that can | `permissionJudge` where an agent's session can drop its built-in tools, hooks and own MCP servers; without it the person is asked, as now (ADR-019) | M | 4 |
 | 6 | Outside reviews on every agent that can | `reviewing.outside` where an agent can be held to asking before every command, with nothing of the repository's loaded and nothing of its own on the network; Codex's entry says `false` today | M | 4 |
 
-In order, after ADR-081's first three waves: 1, 2 and 4, beside ADR-081's
-task 14; then 3, 5 and 6. ADR-081's task 9, 0.7.0's own release, still goes
-last.
+In order, after ADR-081's first three waves: 1, beside ADR-081's tasks 14,
+15 and 16; then 2, 3 and 4; then 5 and 6. ADR-081's task 9, 0.7.0's own
+release, still goes last.

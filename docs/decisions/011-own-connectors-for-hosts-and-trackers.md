@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-01
-- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-merges-and-releases-on-the-person-s-word.md), to build for 0.7.0): merging stays the person's, but their message to the coordinator is their word for it, and the coordinator merges, queues and releases when they ask, never on its own.
+- **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): an agent does on the code host what the person's account can, through Althar's tools, and merging waits for the person's word, which their message to the coordinator or to a task's lead now is, never an agent's own initiative; agents still carry no sign-in of their own.
 - **Owner:** Repository maintainers
 - **Context:** A task ends in a pull request, listens to it, and often starts
   from an issue. Teams keep their code on GitHub, GitLab or Bitbucket, hosted
