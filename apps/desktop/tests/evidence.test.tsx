@@ -117,7 +117,7 @@ describe('evidence, as the window draws it', () => {
     ).toEqual([])
   })
 
-  it('shows a change as it is now: its pictures since it became one, each view once, as last taken', () => {
+  it('shows a change as it is now: its pictures since it became one, a later round’s replacing earlier ones, never an option', () => {
     const at = (time: string, item: ReturnType<typeof items.step>) => ({ ...item, createdAt: time })
     const shot = (caption: string, digest: string) =>
       piece({ kind: 'screenshot', caption, picture: { ...PICTURE, digest: digest.repeat(64) } })
@@ -131,8 +131,20 @@ describe('evidence, as the window draws it', () => {
     const made = (madeChangeAt: string | null) =>
       outcomeOf(snapshot({ items: rounds, task: { ...snapshot().task, kind: 'change', changes: [change()], madeChangeAt } })).shots
     expect(made('2026-10-18T11:00:00.000Z').map((one) => one.caption)).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
-    // A change from the start: every round is its own, each view once.
-    expect(made(null).map((one) => one.caption)).toEqual(['B1 · A direction', 'A1 · Settings as a page', 'A2 · Its rules, fixed'])
+    // A change from the start: a later round replaces the directions before it, and one that only takes a view again keeps the rest.
+    expect(made(null).map((one) => one.caption)).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
+    // Directions marked as options never show, though nothing came after them.
+    const options = items.step({
+      evidence: [
+        { ...shot('A · Cards', 'f'), option: true },
+        { ...shot('B · Tabs', 'g'), option: true },
+      ],
+    })
+    expect(
+      outcomeOf(snapshot({ items: [...rounds, options], task: { ...snapshot().task, kind: 'change', changes: [change()] } })).shots.map(
+        (one) => one.caption,
+      ),
+    ).toEqual(['A1 · Settings as a page', 'A2 · Its rules, fixed'])
     // A task that isn't a change: its last round that showed pictures, and those after.
     expect(
       outcomeOf(snapshot({ items: rounds.slice(0, 2), task: { ...snapshot().task, kind: 'plain' } })).shots.map((one) => one.caption),

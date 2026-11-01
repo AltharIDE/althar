@@ -54,7 +54,7 @@ import { Coordinator } from './Coordinator'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverifiedIn } from './evidence'
+import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
@@ -539,6 +539,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           evidence: evidenceOf(field(content, 'evidence')),
           unverified: unverifiedIn(field(content, 'unverified')),
           ...descriptionsIn(field(content, 'descriptions')),
+          ...keptViewsIn(field(content, 'keptViews')),
           agentId: agentId === '' ? null : agentId,
         },
       }

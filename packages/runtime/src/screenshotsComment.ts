@@ -8,8 +8,8 @@ import { signed } from './pullRequestWords'
  * (ADR-077), and what Althar keeps of it: one comment, written anew as the
  * screenshots change, rather than a new one each time, so the conversation
  * isn't buried in pictures and the comment is always the one to read. What
- * a view showed before stays in it, folded away under the views as they are
- * now. A hidden mark says which comment it is, so one whose record was lost
+ * a view it still shows looked like before stays in it, folded away under
+ * the views as they are now. A hidden mark says which comment it is, so one whose record was lost
  * is found again rather than posted twice; and it is signed, as every
  * reply Althar posts is, so listening knows it as Althar's own.
  */
@@ -107,8 +107,10 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
 }
 
 /**
- * What the comment showed that it no longer does, newest first, before what
- * it kept from earlier: a view taken again, or gone. At most EARLIER_KEPT.
+ * What the views the comment shows looked like before, newest first: a view
+ * taken again keeps its earlier pictures, folded away. A view gone, as one
+ * a later round replaced or an option, goes with all of them: it no longer
+ * says anything of the change (ADR-079). At most EARLIER_KEPT.
  */
 export const earlierAfter = (
   shown: ReadonlyArray<PostedShot>,
@@ -117,7 +119,7 @@ export const earlierAfter = (
 ): ReadonlyArray<PostedShot> => {
   const now = new Map(posted.map((shot) => [shot.key, shot.digest]))
   const replaced = shown.filter((shot) => now.get(shot.key) !== shot.digest)
-  return [...replaced, ...earlier].slice(0, EARLIER_KEPT)
+  return [...replaced, ...earlier].filter((shot) => now.has(shot.key)).slice(0, EARLIER_KEPT)
 }
 
 /** A caption as text in the comment: nothing in it reads as markup. */

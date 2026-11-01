@@ -10,11 +10,11 @@ import { pieceOf, piecesOf } from './evidence'
  * part that says what it is apart from the rest. A change in several
  * repositories is one task with a pull request in each: what it built says
  * what it is, and each description follows under its repository's name. How it looks now: the
- * pictures of its last state, each view once, as last taken. A change shows
- * those since it became one, so a prototype's rounds before don't count; any
- * other task, its last round that showed pictures and those after: as
- * `screenshotsNow` works them out, which the runtime posts to its pull
- * request by too (ADR-077). And what its lead last checked of it, and what
+ * pictures of its last state, each view once, as last taken: a later round's
+ * replace an earlier one's but for the views it keeps, and a change's are
+ * never the options the person chose between, as `screenshotsNow` works
+ * them out, which the runtime posts to its pull request by too (ADR-077,
+ * ADR-079). And what its lead last checked of it, and what
  * it couldn't.
  */
 
@@ -80,7 +80,13 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
 
   const rounds = lead.map((item) => piecesOf(item.id, item.content.evidence).filter((piece) => piece.form !== 'picture'))
   const now = screenshotsNow(
-    lead.map((item) => ({ id: item.id, sequence: item.sequence, createdAt: item.createdAt, evidence: item.content.evidence })),
+    lead.map((item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      createdAt: item.createdAt,
+      evidence: item.content.evidence,
+      keptViews: item.content.keptViews,
+    })),
     { change: task.kind === 'change' || task.changes.length > 0, since: task.madeChangeAt ?? null },
   )
   return {

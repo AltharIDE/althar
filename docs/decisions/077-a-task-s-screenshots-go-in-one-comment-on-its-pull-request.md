@@ -1,6 +1,6 @@
 # ADR-077: A task's screenshots go in one comment on its pull request
 
-- **Status:** Accepted
+- **Status:** Accepted; what counts and when a posted comment follows, amended by ADR-079
 - **Date:** 2026-10-31
 - **Owner:** Repository maintainers
 - **Context:** A task's Outputs show what it looks like: the screenshots its
