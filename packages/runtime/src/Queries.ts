@@ -58,7 +58,7 @@ import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverified
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -2100,6 +2100,8 @@ export class Queries extends Context.Service<
             slug: task.slug,
             phase,
             ...(stopped === undefined ? {} : { stopped }),
+            // Stopped, with its pull request ready to merge as it is: still the person's to accept, next to Carry on.
+            ...(phase === 'stopped' && isMergeable(shown) ? { mergeable: true } : {}),
             // Its folder being set up before its lead's first turn: the install its lockfile names, or the setup kept for it.
             ...(settingUp ? { settingUp: task.settingUp === 1 ? ('kept' as const) : ('install' as const) } : {}),
             kind,
@@ -2793,6 +2795,7 @@ export class Queries extends Context.Service<
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
               ...(card?.stopped == null ? {} : { stopped: card.stopped }),
+              ...(card?.mergeable === true ? { mergeable: true as const } : {}),
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
               checksBack: card?.checksBack ?? null,

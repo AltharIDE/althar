@@ -465,6 +465,66 @@ describe('automations', () => {
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] }))))
   })
 
+  it.live(
+    'a run whose lead finished, and only its review has worked past its minutes, goes on without the review and succeeds, not stopped',
+    () => {
+      const clock = clockAt('2026-10-21T07:59:00Z')
+      // A lead that finishes at once, and a reviewer that never does, kept to five minutes.
+      const reviewed: AutomationDefinition = {
+        ...NOTES,
+        prompt: 'Check the dependencies. [lead:finish] [review:wait]',
+        work: { kind: 'task', review: { agentId: 'codex', model: null }, end: 'ready' },
+        minutes: 5,
+      }
+      const { at, github } = withOneToReview()
+      return Effect.gen(function* () {
+        const automations = yield* Automations
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const projectId = yield* openedOn(at.working)
+        const automationId = yield* automations.make({ projectId, definition: reviewed, on: true, actorId: instance.personId })
+        clock.set('2026-10-21T08:00:05Z')
+        const [running] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running')
+        const taskId = running?.taskId ?? ''
+        // Its review is what works on: its lead's step is done.
+        yield* until(
+          sql<{ n: number }>`
+          SELECT count(*) AS n FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND n.node_key = 'review' AND a.state = 'running'`,
+          (rows) => (rows[0]?.n ?? 0) > 0,
+        )
+        // Its turns, as if the review had gone on for ten minutes.
+        yield* sql`
+        UPDATE turn_deliveries SET delivered_at = ${new Date(clock.now() - 10 * 60_000).toISOString()}
+        WHERE thread_id IN (SELECT id FROM threads WHERE task_id = ${taskId})`
+        const [made] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state !== 'running')
+        assert.deepInclude(made, { state: 'made', reason: null })
+        const [run] = yield* until(
+          sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`,
+          (rows) => rows[0]?.state === 'succeeded',
+        )
+        assert.strictEqual(run?.state, 'succeeded')
+        const [review] = yield* sql<{ state: string }>`
+        SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND n.execution_id IN
+          (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId})`
+        assert.strictEqual(review?.state, 'cancelled')
+        // Its card is the person's to settle, not stopped.
+        const cards = yield* Effect.map(Effect.orDie((yield* Queries).coordinator(projectId)), (snapshot) =>
+          snapshot.items.flatMap((item) => (item.kind === 'task' && item.content.taskId === taskId ? [item.content] : [])),
+        )
+        assert.strictEqual(cards[0]?.phase, 'ready')
+      }).pipe(
+        Effect.provide(
+          clock.on(
+            Queries.layer.pipe(
+              Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })),
+            ),
+          ),
+        ),
+      )
+    },
+  )
+
   it.live('stop a run that has worked its minutes, which failed saying so', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     // A lead that never reports, kept to five minutes.

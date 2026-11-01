@@ -31,6 +31,17 @@ export const byItself = (change: ChangeSummary | null): ByItself | null => {
   return checks.running > 0 || checks.outcome === 'running' ? 'checks_running' : null
 }
 
+/**
+ * Whether an open pull request can be merged as it stands: not a draft, nothing of the lead's still to push, no conflict and
+ * checks that all passed. A stopped task with one is no less the person's to merge: stopped never hides the way to it.
+ */
+export const isMergeable = (change: ChangeSummary | null): boolean => {
+  if (change === null || change.state !== 'open' || change.draft || change.queued === true) return false
+  if (change.diverged !== null || change.conflicts === true || (change.localHead !== null && change.unpushed > 0)) return false
+  const checks = change.checks
+  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0
+}
+
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */
 export const BETWEEN_AGENTS_MS = 30_000
 
