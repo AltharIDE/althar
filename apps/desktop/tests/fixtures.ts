@@ -69,6 +69,7 @@ export const projectRules: ProjectRulesView = {
   resolveConflicts: false,
   pushCommits: true,
   postScreenshots: false,
+  leadsReachWeb: true,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,

@@ -854,9 +854,9 @@ What keeps each agent asking, whatever its own settings say:
 
 | Agent | How | Checked against |
 |---|---|---|
-| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit and WebFetch, has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
 | Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
-| OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits, commands and fetches to ask, for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
+| OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits and commands to ask, and webfetch/websearch to allow for project leads when web access is on (otherwise asking), for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
 **Sandboxes are the boundary for commands.** A permission request for a shell
 command carries only its text, and no rule can tell what a script will write.
@@ -884,6 +884,33 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
   leads. It adds no writable paths, and readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
+
+**Project leads can read the web** ([ADR-078](../decisions/078-project-leads-can-read-the-web.md)).
+“Leads can reach the web”, on by default in project Settings → General,
+allows implementers and the project’s own reviewers to use Claude Code’s
+WebSearch/WebFetch, Codex’s live web_search and page opening, and OpenCode’s
+websearch/webfetch without a permission request reaching Althar. Outside
+pull request reviews remain offline (ADR-058); Codex remains ineligible to
+lead them. The coordinator’s settings are unchanged. Changes apply to new
+sessions; restart an existing session after changing the switch.
+
+Shell networking stays constrained: Codex’s all-or-nothing switch stays off,
+and Claude’s known-host allowlist stays in place. Neither can grant GETs
+without also granting POSTs and uploads. Instead the rules allow plain
+HTTP(S) reads to stdout, such as `curl -q -fsSL https://example.com` and
+`wget --no-config --no-netrc --no-hsts -qO- https://example.com`, while the project switch is on.
+Disabling local config prevents it from silently selecting an upload or
+another method. Explicit command rules still win. Scripts, compound
+commands, custom headers, output files and uploads retain the existing
+rules; a host-only sandbox request is not proof of a GET and receives no new
+exemption. Prefer native web tools when a sandbox cannot express that read.
+Off, native fetches ask again, native search is gated (disabled for Codex),
+and shell commands receive no new read exemption.
+
+A lead reading a private repository could be steered by a web page into
+leaking code through a URL or search query. Read-only requests still carry
+that risk. The project switch and offline outside reviews mitigate it;
+credential denials and the rules for irreversible operations remain.
 
 **Known commands and hosts, from the start.** Some commands can't work inside
 Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
@@ -918,7 +945,8 @@ out later. A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
 modes don't use, so its leads are given neither; OpenCode has no sandbox.
-Every network request keeps its host on the record.
+Every sandbox network request keeps its host on the record. Native web tools
+allowed by the session do not reach Althar’s permission record.
 
 Installing a worktree's dependencies would have to leave it, and needn't:
 Althar does it before the lead starts ([below](#setting-up-a-worktree)).

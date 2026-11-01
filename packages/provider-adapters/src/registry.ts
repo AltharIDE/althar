@@ -296,6 +296,8 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /** Per-session process config, applied after own-tool removal and review hardening. */
+  readonly sessionEnv?: (own: Readonly<Record<string, string>>, options: SessionOptions) => Readonly<Record<string, string>>
   /**
    * `'althar'` where a message that starts with `/` runs one of its own
    * commands, and one of them turns its asking off (Copilot's `/yolo`, Grok's
@@ -323,6 +325,8 @@ export interface AgentDefinition {
  * from the start, where the agent's settings can say it.
  */
 export interface SessionOptions {
+  /** Native web tools, for project leads and reviewers; never an offline review or coordinator. */
+  readonly web?: boolean
   readonly offline?: boolean
   readonly untrusted?: boolean
   /**
@@ -565,7 +569,8 @@ const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Reco
  * Codex as the lead of a review of someone else's pull request, through the
  * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
  * as dotted keys, beside the person's MCP servers switched off): its own web
- * search off (`web_search = "disabled"`, as Codex 0.159 names it), and hooks
+ * search initially off (`web_search = "disabled"`), then enabled by sessionEnv
+ * only for a project's own reviews with web access on; and hooks
  * off (`features.hooks`), since codex-acp trusts every session's folder, so a
  * repository's `.codex` config would otherwise apply. It isn't held to
  * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
@@ -625,14 +630,18 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * rules would let them through anyway. Both are settings Claude Code takes
  * only from trusted sources, which these, given as the session's own, are.
  */
-const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = claudeSandboxStarts()) => ({
+const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = claudeSandboxStarts(), web = false) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
-        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        permissions: {
+          deny: secretReadRules(),
+          ...(web ? { allow: ['WebFetch', 'WebSearch'] } : {}),
+          ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...(web ? [] : ['WebFetch', 'WebSearch'])],
+        },
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
@@ -667,7 +676,7 @@ const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, starts = cla
  * permission judge. Its rules and sandbox below are the programmatic
  * settings, which load whatever the sources.
  */
-const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
@@ -676,7 +685,11 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
       settings: {
         permissions: offline
           ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', ...secretReadRules()], ask: ['Bash'] }
-          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['Bash', 'WebFetch'] },
+          : {
+              deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()],
+              ...(web ? { allow: ['WebFetch', 'WebSearch'] } : {}),
+              ask: ['Bash', ...(web === true ? [] : web === false ? ['WebFetch', 'WebSearch'] : ['WebFetch'])],
+            },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
         ...(untrusted ? { disableAllHooks: true } : {}),
       },
@@ -829,10 +842,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     sessionMeta: (role = 'lead', options = {}) =>
       role !== 'reader'
-        ? claudeAsks(options.sandbox)
+        ? claudeAsks(options.sandbox, claudeSandboxStarts(), options.web === true && options.offline !== true)
         : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
           ? claudeContains(options.contained)
-          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
+          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true, options.web),
     contains: claudeSandboxStarts,
     upFront: true,
     holds: claudeHolds,
@@ -911,6 +924,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
+    sessionEnv: (own, options) =>
+      options.web === undefined && options.offline !== true
+        ? {}
+        : {
+            CODEX_CONFIG: JSON.stringify({
+              ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+              web_search: options.web === true && options.offline !== true ? 'live' : 'disabled',
+              // Opening this would also allow uploads and POSTs without the rules.
+              'sandbox_workspace_write.network_access': false,
+            }),
+          },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -927,11 +951,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * and its network is one switch (`sandbox_workspace_write.network_access`).
      * Codex 0.160's list of allowed domains belongs to its permission
      * profiles' network proxy, experimental, which codex-acp's modes don't
-     * use. So each of those still asks first, and meets Althar's rules.
+     * use. Network stays off: enabling it would also let POSTs and uploads
+     * bypass the rules. Native web_search is live with the project switch
+     * on; clear HTTP reads that reach the rules may be allowed there.
      */
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
-      "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
+      "Shell network stays off because its sandbox cannot allow only GETs. Native web search and page opening are live when the project's web switch is on.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
     ],
@@ -998,6 +1024,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     reviewing: { outside: true, env: openCodeReviewing },
+    sessionEnv: (own, options) => {
+      if (options.web === undefined && options.offline !== true) return {}
+      const web = options.web === true && options.offline !== true ? 'allow' : 'ask'
+      const permission = { ...asks, webfetch: web, websearch: web }
+      return {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          ...JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig),
+          permission,
+          agent: { build: { permission }, plan: { permission } },
+        }),
+      }
+    },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',

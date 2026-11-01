@@ -60,7 +60,11 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {because && <p className={s.because}>{because}</p>}
+      {because && (
+        <p className={s.because} title={because}>
+          {because}
+        </p>
+      )}
       {options.length > 0 && (
         <ol className={s.options}>
           {options.map((o, i) => (
