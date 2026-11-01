@@ -54,6 +54,7 @@ import { statements as decisionKind } from './0049_decision_kind'
 import { statements as moreInks } from './0050_more_inks'
 import { statements as pullRequestPictures } from './0051_pull_request_pictures'
 import { statements as onePressSettles } from './0052_one_press_settles'
+import { statements as recordedSetups } from './0053_recorded_setups'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -125,6 +126,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0050_more_inks', statements: moreInks },
   { key: '0051_pull_request_pictures', statements: pullRequestPictures },
   { key: '0052_one_press_settles', statements: onePressSettles },
+  { key: '0053_recorded_setups', statements: recordedSetups },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
