@@ -20,8 +20,10 @@ export const stepText = {
     // A conflict round's lead, once the task's steps are done: the conflict with its default branch, or the checks on the merge.
     conflict: 'Resolving a conflict',
     checks: 'Fixing the checks',
-    // A change the person hasn't seen yet, while its checks run (ADR-040).
+    // A change while its checks run, whether or not the person has seen it (ADR-040, DEV-173).
     checks_running: 'Checks running',
+    // Its commits going up on their own as its lead's turn ends (ADR-072), until they're on its pull request.
+    pushing: 'Pushing',
     // Its pull request, as the person pressed Merge, until its host says it merged (data/merges).
     merging: 'Merging',
     // Its pull request in its branch's merge queue, until its host merges it or the queue takes it out (data/merges).
@@ -29,6 +31,8 @@ export const stepText = {
   } as Readonly<Record<string, string>>,
   /** Stopped, no agent on it, as its card and its header say it: by what stopped its lead, where something says. */
   stopped: 'Stopped',
+  /** Stopped with its pull request ready to merge as it is: the word, and that it can be accepted all the same. */
+  stoppedMergeable: 'Stopped, ready to merge',
   stoppedBy: {
     declined: 'Stopped when you declined a command',
     interrupted: 'Stopped when you interrupted it',
@@ -36,9 +40,17 @@ export const stepText = {
   } satisfies Record<'declined' | 'interrupted' | 'althar', string>,
 }
 
-/** Whether a step comes after the plan's steps: a conflict round's, the checks of a change Althar sees through, or its merge. */
+/** Whether a step comes after the plan's steps: a conflict round's, the checks of a change, its commits going up, or its merge. */
 export const afterSteps = (step: string | null) =>
-  step === 'conflict' || step === 'checks' || step === 'checks_running' || step === 'merging' || step === 'merge_queue'
+  step === 'conflict' ||
+  step === 'checks' ||
+  step === 'checks_running' ||
+  step === 'pushing' ||
+  step === 'merging' ||
+  step === 'merge_queue'
+
+/** Whether a task is being merged, or waits in its merge queue: its merge is no step of its plan's, so its planned steps are all done, none on. */
+export const isMergeStep = (step: string | null) => step === 'merging' || step === 'merge_queue'
 
 /** The names of the steps it takes: on a round of work after its plan (ADR-034), its lead's follow-up in place of Implement. */
 export const stepNames = (steps: ReadonlyArray<PlanStep>, followUp = false): ReadonlyArray<string> =>
@@ -56,5 +68,5 @@ export const stepIndex = (names: ReadonlyArray<string>, step: string | null): nu
 export const trackFor = (steps: ReadonlyArray<PlanStep>, step: string | null, done: boolean, followUp = false): TrackItem[] => {
   const names = stepNames(steps, followUp)
   const at = stepIndex(names, step)
-  return trackOf(names, at, at, done)
+  return trackOf(names, at, at, done || isMergeStep(step))
 }

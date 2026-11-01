@@ -116,10 +116,10 @@ const factsFrom = async (ask: () => Promise<unknown>): Promise<RuntimeFacts | nu
 /**
  * The runtime's answers to what the reports ask it, by request: asked over
  * its port, answered with a message of the same type, `facts` by default
- * (runtime/facts.ts), or `names` for a crash report's names to hide.
+ * (runtime/facts.ts), `names` for a crash report's names to hide, or `work` for what Quit would stop (runtime/atWork.ts).
  * Whatever is waiting when the runtime goes is answered with nothing.
  */
-export const factsAsker = (type: 'facts' | 'names' = 'facts') => {
+export const factsAsker = (type: 'facts' | 'names' | 'work' = 'facts') => {
   const waiting = new Map<string, (value: unknown) => void>()
   return {
     ask: (runtime: { postMessage: (message: unknown) => void } | undefined, threadId: string | null) =>

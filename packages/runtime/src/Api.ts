@@ -50,6 +50,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -64,6 +65,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
   allowsEverything,
@@ -75,6 +77,7 @@ import {
   repositoryFilesOf,
   resolvesConflicts,
   pushesCommits,
+  postsScreenshots,
   ruleSetOf,
   usageLimitOf,
 } from './Policies'
@@ -220,6 +223,7 @@ export const handlers = Api.toLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
@@ -438,6 +442,8 @@ export const handlers = Api.toLayer(
         end: rules.end ?? null,
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
+        postScreenshots: postsScreenshots(rules),
+        leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -762,17 +768,18 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, setup }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget }, commandId)
+              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget, setup }, commandId)
               yield* projects.setRepository({
                 projectId,
                 repositoryId,
                 ...(role === undefined ? {} : { role }),
                 ...(changeTarget === undefined ? {} : { changeTarget }),
+                ...(setup === undefined ? {} : { setup }),
                 commandId: said.commandId,
               })
             }),
@@ -830,6 +837,8 @@ export const handlers = Api.toLayer(
         ),
       // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
       SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
+      SettledWithOnePress: ({ taskId, attentionId, action }) =>
+        api(tasks.pressed({ ...(taskId === undefined ? {} : { taskId }), ...(attentionId === undefined ? {} : { attentionId }), action })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,
@@ -902,6 +911,7 @@ export const handlers = Api.toLayer(
             const atOnce = yield* busy.atOnce
             return {
               coAuthor: { on, line: coAuthorLine },
+              reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
@@ -914,6 +924,9 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSealStyle: ({ commandId, style }) =>
+        once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       GetTaskFolders: () => api(cleanup.list),
@@ -1323,6 +1336,7 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
+      PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
       AddAccount: ({ commandId, agentId, name, grant }) =>
         once(
           commandId,
@@ -1438,6 +1452,8 @@ export const handlers = Api.toLayer(
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
               // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
               if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
+              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-077).
+              if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* screenshots.syncNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),
           ),

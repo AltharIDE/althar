@@ -226,7 +226,9 @@ export const statusOf = (
   // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
   if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
     const by = snapshot.task.stopped?.by
-    return { status: TaskStatus.Stopped, state: stepText.stopped, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+    // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
+    const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
+    return { status: TaskStatus.Stopped, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
   }
   return { status: TaskStatus.Running, state: text.idle }
 }
@@ -995,6 +997,7 @@ export function TaskView({
                 })
               }
               onMarkReady={(url) => void model.markReady(url)}
+              onPostScreenshots={model.postScreenshots}
               onOpenFile={changes.show}
               conflict={model.conflict}
               onPushHere={() => void model.pushHere()}

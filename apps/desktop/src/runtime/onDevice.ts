@@ -37,6 +37,8 @@ const FROM_THE_EXECUTOR = [
   'CODEX_HOME',
   'CODEX_CONFIG',
   'CLAUDE_CONFIG_DIR',
+  // Claude Code's launch: Node's fetch takes the proxy its sandbox names.
+  'NODE_USE_ENV_PROXY',
   'XDG_DATA_HOME',
   'XDG_CONFIG_HOME',
   'OPENCODE_CONFIG_DIR',

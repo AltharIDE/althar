@@ -44,7 +44,7 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
  * that isn't one, or a pull request target for a repository that isn't a fork.
  */
 export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
-  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken']),
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken', 'bad_setup']),
 }) {}
 
 /** Something the caller named does not exist. */
@@ -304,3 +304,12 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
 
 /** A skills store operation that couldn't be done, in words for the person, is `@althar/skills`' own `SkillRefused`. */
 export { SkillRefused } from '@althar/skills'
+/**
+ * A task's screenshots can't go in a comment on its pull request as asked
+ * (ADR-077): its host takes no pictures, there are none to post, or a
+ * picture of them is no longer kept. Said in words for the person.
+ */
+export class ScreenshotsRefused extends Schema.TaggedError<ScreenshotsRefused>()('ScreenshotsRefused', {
+  why: Schema.Literals(['no_pictures', 'none', 'unkept']),
+  message: Schema.String,
+}) {}

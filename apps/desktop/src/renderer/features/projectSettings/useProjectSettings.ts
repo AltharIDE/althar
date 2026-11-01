@@ -22,7 +22,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'moveIssues' | 'changeIssues' | 'repositoryFiles'
+export type RuleSwitch = 'leadsReachWeb' | 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'changeIssues' | 'repositoryFiles'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -50,6 +50,10 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
   readonly setPushCommits: (on: boolean) => void
+  /** Allows native web reads for new lead and reviewer sessions (ADR-078). */
+  readonly setLeadsReachWeb: (on: boolean) => void
+  /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
+  readonly setPostScreenshots: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
@@ -151,6 +155,8 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     client.lookForConflicts(projectId).catch((failure: unknown) => setLooked({ failed: messageOf(failure) }))
   }, [client, projectId])
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
+  const setLeadsReachWeb = useCallback((on: boolean) => setRule('leadsReachWeb', on), [setRule])
+  const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
   const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
@@ -238,6 +244,8 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     noteFailed,
     setResolveConflicts,
     setPushCommits,
+    setPostScreenshots,
+    setLeadsReachWeb,
     lookForConflicts,
     looked,
     setMoveIssues,

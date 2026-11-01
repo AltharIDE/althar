@@ -35,6 +35,12 @@
   color: var(--t-2);
   text-wrap: pretty;
   overflow-wrap: anywhere;
+  /* as much as two lines; a question's whole text is in its task */
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .track {
   margin: 2px 0;

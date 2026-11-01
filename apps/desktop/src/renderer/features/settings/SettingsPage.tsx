@@ -26,6 +26,8 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  ReviewSeal,
+  ReviewSealGlyph,
   Segmented,
   SettingList,
   SettingRow,
@@ -69,6 +71,7 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
 import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
+import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
@@ -432,6 +435,7 @@ const face = <img src={altharFace} alt="" />
 function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
   const postTeam = usePostTeamReviews()
   const coAuthor = useCoAuthor()
+  const seal = useReviewSeal()
   // The person, on the commit co-author is shown on, as GitHub names them.
   const author = connections.list?.connections.find((connection) => connection.product === 'github')?.account.login ?? text.you
   return (
@@ -460,7 +464,23 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
           <CoAuthor on={coAuthor.on} onChange={coAuthor.set} trailer={coAuthor.line} author={author} commit={text.commit} picture={face} />
         </div>
       )}
-      <Failed when={postTeam?.failed === true || coAuthor?.failed === true} />
+      {seal !== null && (
+        <>
+          <SettingList>
+            <SettingSwitch
+              title={text.reviewSealTitle}
+              note={text.reviewSealNote}
+              mark={<ReviewSealGlyph facts={text.pullRequest.facts} />}
+              checked={seal.on}
+              onChange={seal.set}
+            />
+          </SettingList>
+          <div className={s.coAuthor}>
+            <ReviewSeal on={seal.on} style={seal.style} onStyle={seal.choose} sample={text.pullRequest} />
+          </div>
+        </>
+      )}
+      <Failed when={postTeam?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
     </>
   )
 }

@@ -15,6 +15,7 @@ import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
 import { useCoAuthor } from '../src/renderer/features/settings/useCoAuthor'
 import { useEdgePlace } from '../src/renderer/features/settings/useEdgePlace'
 import { usePostTeamReviews } from '../src/renderer/features/settings/usePostTeamReviews'
+import { useReviewSeal } from '../src/renderer/features/settings/useReviewSeal'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { fakeClient, fakeHost, home, withoutOpenCode } from './fixtures'
 import { servicesFor, withServices } from './render'
@@ -51,6 +52,18 @@ describe('a setting changed twice quickly', () => {
       'setPostTeamReviews',
       () => usePostTeamReviews(),
       (model: ReturnType<typeof usePostTeamReviews>, n: number) => model?.set(n === 0),
+    ],
+    [
+      'the review seal',
+      'setReviewSeal',
+      () => useReviewSeal(),
+      (model: ReturnType<typeof useReviewSeal>, n: number) => model?.set(n === 0),
+    ],
+    [
+      'the review seal’s look',
+      'setReviewSealStyle',
+      () => useReviewSeal(),
+      (model: ReturnType<typeof useReviewSeal>, n: number) => model?.choose(n === 0 ? 'wax' : 'colophon'),
     ],
     [
       'how many agents run at once',

@@ -70,6 +70,8 @@ export const projectRules: ProjectRulesView = {
   end: null,
   resolveConflicts: false,
   pushCommits: true,
+  postScreenshots: false,
+  leadsReachWeb: true,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -207,6 +209,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'service',
     fork: null,
     tasks: 1,
+    setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile'] },
   },
   {
     id: 'repo_web',
@@ -225,6 +228,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'frontend',
     fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
     tasks: 0,
+    setup: null,
   },
   {
     id: 'repo_infra',
@@ -243,6 +247,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'infrastructure',
     fork: null,
     tasks: 0,
+    setup: null,
   },
 ]
 
@@ -1033,6 +1038,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
     seeTask: vi.fn(async () => {}),
+    settledWithOnePress: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
@@ -1074,6 +1080,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      reviewSeal: { on: true, style: 'ring' as const },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
       automationsPaused: false,
@@ -1081,6 +1088,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setReviewSeal: vi.fn(async () => {}),
+    setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
     getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
     makeAutomation: vi.fn(async () => 'auto2'),
@@ -1192,6 +1201,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     cancelAccountSignIn: vi.fn(async () => {}),
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
+    postScreenshots: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),

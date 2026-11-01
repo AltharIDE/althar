@@ -15,6 +15,7 @@ import {
 } from '../../fixtures/kinds'
 import { BoardLane, Outcome, TaskStatus, Wait } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { States, statesOn } from '../../storybook/States'
 import { AcceptCard } from '../AcceptCard/AcceptCard'
 import { BoardCard } from '../BoardCard/BoardCard'
@@ -25,20 +26,23 @@ import { NextRow } from '../NextRow/NextRow'
 import { SettledRow } from '../SettledRow/SettledRow'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { WorkCard } from '../WorkCard/WorkCard'
-import { Board, BoardColumn, BoardDivider, type BoardFolds, BoardList, boardText } from './Board'
+import { Board, BoardColumn, BoardDivider, BoardEmpty, type BoardFolds, BoardList, boardText } from './Board'
 
 /* Meridian's board, with the one you open ringed, as it is while the dock shows it; with lanes collapsed where the person did. */
 function Meridian({
   empty = false,
+  upNextEmpty = false,
   defaultFolds,
   onPointerLane,
 }: {
   empty?: boolean
+  /** Up next holds nothing on a board that has other work. */
+  upNextEmpty?: boolean
   defaultFolds?: BoardFolds
   onPointerLane?: (lane: BoardLane | null) => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
-  const next = empty ? [] : NEXT
+  const next = empty || upNextEmpty ? [] : NEXT
   const running = empty ? [] : RUNNING
   const calls = empty ? [] : CALLS
   const settled = empty ? [] : SETTLED
@@ -48,7 +52,15 @@ function Meridian({
       {...(defaultFolds === undefined ? {} : { defaultFolds })}
       {...(onPointerLane === undefined ? {} : { onPointerLane })}
     >
-      <BoardColumn lane={BoardLane.Next} count={next.length}>
+      <BoardColumn
+        lane={BoardLane.Next}
+        count={next.length}
+        empty={
+          <BoardEmpty title="Nothing queued" action={<LinkButton>Talk to the coordinator</LinkButton>}>
+            Tell the coordinator what you want done. The tasks it plans line up here.
+          </BoardEmpty>
+        }
+      >
         <BoardList>
           {next.map((x, i) => (
             <NextRow key={x.task} {...x} place={i + 1} current={open === x.task} onOpen={() => setOpen(x.task)} />
@@ -457,8 +469,11 @@ type Story = StoryObj<typeof meta>
 
 /** A project's work in four lanes, in the order it moves. */
 export const Default: Story = {}
-/** A new project: every lane says it is empty. */
+/** A new project: Up next says how work gets here, and every other lane is an empty box. */
 export const Empty: Story = { args: { empty: true } }
+
+/** A busy board with nothing in Up next: the same words and the way to the coordinator, not a bare box. */
+export const UpNextEmpty: Story = { args: { upNextEmpty: true } }
 /** Cards with nothing to press, by kind: a change, a review and plain tasks, in the lanes each reaches. */
 export const ByKind: Story = {
   render: () => <Kinds />,

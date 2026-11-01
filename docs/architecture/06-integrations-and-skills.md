@@ -181,6 +181,33 @@ Both models were laid against all six services before any adapter was
 written. A model whose terms only one service has is a sign it is that
 service's model.
 
+### Every service alike
+
+A feature built for one code host or tracker is built for every one that can
+have it, in the same release. Where a service lacks it, Althar stands in with
+what the service has, and where neither can, it says so and why
+([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+The feature is written against the model, adds its clause to the contract
+suite, and is turned off in the adapter's capabilities where it can't be had.
+What isn't alike, as read on 31 October 2026:
+
+| What | Where it's missing | Why | What follows |
+| --- | --- | --- | --- |
+| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
+| Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
+| Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
+| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-081, task 5, with an errand standing in, one merge at a time into each branch |
+| Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
+| A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-081, task 8, publishing as each host does |
+| Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
+| The gated call's writes | GitLab, Bitbucket Cloud and Data Center | Not built | ADR-081, task 14 |
+| Moving an issue to started (`starts`) | GitHub's and GitLab's issues | Not built: GitLab's statuses where the server has them, GitHub's project Status field, or a label the project's notes name | ADR-082, task 2 |
+| Priority | GitHub's and GitLab's issues, Trello | No field of their own: a label the project's notes name, or GitHub's organization issue fields | ADR-082, task 3 |
+| Project or milestone | Jira, Trello | Not built: Jira Cloud moves an issue to another project, Trello a card to another board | ADR-082, task 3 |
+
+Linking a pull request to GitHub's and GitLab's issues isn't a gap: a pull
+request that names the issue links it.
+
 ### Code hosts
 
 | | GitHub (and Enterprise Server) | GitLab (and self-managed) | Bitbucket Cloud | Bitbucket Data Center | The model |
@@ -254,6 +281,12 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
+- **A pull request shows the review its change had** (ADR-076), unless the
+  person turned it off in Settings: on GitHub, a seal in its corner, drawn
+  by the site from its address, names the reviewer, how many passes, and
+  the commit the last pass read. Folded at the description's end, what
+  changed after review, with the commits that made it, and what the lead
+  kept, with why. Never how many findings there were.
 - **After the first push, a lead's commits go up as its turn ends** (ADR-072),
   where the project's rules say so (`pushCommits`, "Push the lead's commits
   automatically", on unless the person turns it off). When a plan's steps are
@@ -954,9 +987,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-076](../decisions/076-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-083](../decisions/083-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-077](../decisions/077-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-084](../decisions/084-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

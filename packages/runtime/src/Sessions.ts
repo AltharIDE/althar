@@ -62,11 +62,12 @@ import { Limits, type PlanOnly } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
-import type { Policies } from './Policies'
+import { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
@@ -286,6 +287,9 @@ export const upFrontSaid = (upFront: Reach): string =>
       ? ''
       : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
     upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
+    upFront.writes.length === 0
+      ? ''
+      : `Your sandbox writes to the caches of the tools the project installs with: ${upFront.writes.join(', ')}, so an install that downloads into one, such as Electron's build or Playwright's browsers, works inside it.`,
   ]
     .filter((said) => said !== '')
     .join(' ')
@@ -812,6 +816,7 @@ export class Sessions extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const live = yield* Live
+      const policies = yield* Policies
       const permissions = yield* Permissions
       const questions = yield* Questions
       const failures = yield* Failures
@@ -833,6 +838,8 @@ export class Sessions extends Context.Service<
       const setups = yield* Setups
       const skillsConfig = (yield* RuntimeConfig).skills
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      // How long a task is under way after its last agent went or its lead's turn ended, before its card is read again (DEV-173).
+      const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
@@ -1668,7 +1675,11 @@ export class Sessions extends Context.Service<
               },
             )
           // A step can report mid-turn, so its task is ready only once the turn is over: its card is read again.
-          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
+          // Its commits go up a moment after (ADR-072), under way meanwhile: once that moment is over, it is read again (DEV-173).
+          if (thread.role !== 'coordinator') {
+            yield* touchCard(thread.taskId)
+            yield* Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(thread.taskId), betweenAgents))), sessionsScope)
+          }
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
@@ -1941,7 +1952,18 @@ export class Sessions extends Context.Service<
                   Scope.close(running.scope, Exit.void),
                   ended === undefined
                     ? Effect.void
-                    : live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state: ended }),
+                    : Effect.andThen(
+                        live.publish({
+                          _tag: 'SessionEnded',
+                          threadId: running.thread.threadId,
+                          sessionId: running.sessionId,
+                          state: ended,
+                        }),
+                        // Its task is between agents a moment (`betweenAgents`), under way: once that is over, its card is read again.
+                        running.thread.role === 'coordinator'
+                          ? Effect.void
+                          : Effect.forkIn(run(Effect.ignore(Effect.delay(touchCard(running.thread.taskId), betweenAgents))), sessionsScope),
+                      ),
                 ),
                 Deferred.succeed(running.ended, undefined),
               ),
@@ -2015,10 +2037,6 @@ export class Sessions extends Context.Service<
                 )
               : { skills: undefined }
           const { skills } = setUp
-          const transportOptions: SessionOptions = {
-            ...(untrusted ? { untrusted } : {}),
-            ...(skills === undefined ? {} : { skills: skills.folder }),
-          }
           // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
           const work = workOf({
             kind: thread.role === 'coordinator' ? 'coordinator' : 'task',
@@ -2035,10 +2053,18 @@ export class Sessions extends Context.Service<
                   count: SIGNED_OUT_GIT_CONFIG,
                 })
               : {}
+          const web =
+            thread.role !== 'coordinator' && !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
+          const transportOptions: SessionOptions = {
+            ...(thread.role === 'coordinator' ? {} : { web }),
+            ...(untrusted ? { untrusted } : {}),
+            ...(untrusted && offline ? { offline } : {}),
+            ...(skills === undefined ? {} : { skills: skills.folder }),
+          }
           const transport = entry.transport(
             cwdOf(thread),
             { ...accounts.env(account), [WORK]: work, ...guarded },
-            untrusted || skills !== undefined ? transportOptions : undefined,
+            thread.role === 'coordinator' ? undefined : transportOptions,
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
@@ -2082,6 +2108,7 @@ export class Sessions extends Context.Service<
                   }
                 : {
                     role: 'reader',
+                    web,
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-058): never a review's lead.
@@ -2102,16 +2129,17 @@ export class Sessions extends Context.Service<
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
-          const sessionOptions: SessionOptions | undefined = untrusted
-            ? { untrusted, ...(offline ? { offline } : {}), ...(skills === undefined ? {} : { skills: skills.folder }) }
-            : thread.role === 'coordinator'
-              ? {
-                  contained: { folder: thread.folder.folder, reads: thread.folder.reads },
-                  ...(skills === undefined ? {} : { skills: skills.folder }),
-                }
-              : upFront === undefined && skills === undefined
-                ? undefined
-                : { ...(upFront === undefined ? {} : { sandbox: upFront }), ...(skills === undefined ? {} : { skills: skills.folder }) }
+          const sessionOptions: SessionOptions = {
+            ...(thread.role === 'coordinator' ? {} : { web }),
+            ...(untrusted
+              ? { untrusted, ...(offline ? { offline } : {}) }
+              : thread.role === 'coordinator'
+                ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
+                : upFront === undefined
+                  ? {}
+                  : { sandbox: upFront }),
+            ...(skills === undefined ? {} : { skills: skills.folder }),
+          }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
           let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
@@ -2954,13 +2982,15 @@ export class Sessions extends Context.Service<
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
-            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
+            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them; Althar's screenshot tool takes one of a page served on this computer); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
             // Each screenshot shows once, with its caption.
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
+            // Outputs, and the pull request, show the work as built: options and explorations stay in the thread.
+            'A change\'s Outputs and its pull request show the work as it is now, from your screenshots in finish_step. Give each picture of the work as built a `view`, a short name you keep each time you take it again ("Running page"), so a later picture replaces it. Mark each option or direction the person chooses between, and each exploration, with `option`: those stay in the thread, where the person saw them. A step\'s pictures replace the earlier ones, but for the views it takes again and those it names in `kept_views`; one that only takes known views again leaves the others as they were.',
             // Pictures the person asks to see show in the thread at any time, not as file names (show_pictures).
             "When the person asks to see something, at any time, a step open or not, show it in the thread with Althar's show_pictures tool, each picture with a caption, rather than naming the files: they can't open those. What shows a step's work still goes in finish_step's evidence when you finish it.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
@@ -2990,6 +3020,8 @@ export class Sessions extends Context.Service<
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of a page served on this computer, drawn by Althar, so you needn't start a browser. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
             // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-066).
             "You carry no sign-in to the code host, so a `git fetch` or `git pull` that needs one fails, in your sandbox or out of it. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
+            // A question shows on the person's cards as its headline; the whole of it is in the thread (Questions.ts).
+            'When you ask the person something, make the question one line, the decision in a few words, with options where there are any; put the background in what you write just before, which stays in the thread.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
