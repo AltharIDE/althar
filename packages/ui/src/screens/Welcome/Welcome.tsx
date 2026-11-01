@@ -195,8 +195,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   hosts: ReactNode
   /** A code host is connected: the code's step goes on with Continue, not Not now. */
   hostConnected?: boolean
-  /** The trackers, to connect one, the same way. */
-  trackers: ReactNode
+  /** The trackers, to connect one, the same way. Without them, where none can be connected, there is no step for issues. */
+  trackers?: ReactNode
   /** Opens the project, on the last step. */
   onOpen: () => void
   /** One quiet line in the card's foot on the agents' step, such as crash reports with their switch. */
@@ -240,13 +240,16 @@ export function Welcome({
   ...rows
 }: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const steps: readonly WelcomeStep[] = toured ? SETUP : [...TOUR, ...SETUP]
+  const setup = trackers === undefined ? SETUP.filter((one) => one !== 'issues') : SETUP
+  const steps: readonly WelcomeStep[] = toured ? setup : [...TOUR, ...setup]
   const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
   const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
   const at = steps.indexOf(step)
   const touring = isTour(step)
   const instant = useReducedMotion() || still
-  const [nothing, setNothing] = useState(false)
+  const [nothingTicked, setNothing] = useState(false)
+  // Said only while nothing is ticked: a folder added, ticked, answers it.
+  const nothing = nothingTicked && picked.length === 0
   const root = useRef<HTMLDivElement>(null)
   const primary = useRef<HTMLButtonElement>(null)
   const titleId = useId()
@@ -303,7 +306,7 @@ export function Welcome({
     setNothing(false)
     onCreate()
   }
-  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating })
+  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1 })
   const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
 
   return (
@@ -432,10 +435,10 @@ export function Welcome({
             {main.label}
           </Button>
         </footer>
+        <VisuallyHidden>
+          <span aria-live="polite">{t.arrived(at + 1, steps.length, title)}</span>
+        </VisuallyHidden>
       </section>
-      <VisuallyHidden>
-        <span aria-live="polite">{t.arrived(at + 1, steps.length, title)}</span>
-      </VisuallyHidden>
     </div>
   )
 }
@@ -463,8 +466,11 @@ function mainOf(
     readonly make: () => void
     readonly onOpen: () => void
     readonly creating: boolean
+    /** The last step: it opens the project. */
+    readonly last: boolean
   },
 ): Main {
+  const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
   switch (step) {
     case 'ask':
     case 'build':
@@ -477,9 +483,10 @@ function mainOf(
     case 'project':
       return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
     case 'code':
+      if (w.last) return open
       return w.hostConnected ? { label: w.t.code.go, act: w.next } : { label: w.t.code.notNow, act: w.next, quiet: true }
     case 'issues':
-      return { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
+      return open
   }
 }
 

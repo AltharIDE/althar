@@ -123,7 +123,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await remove.getByRole('button', { name: 'Remove project' }).click()
     await expect(remove).toBeHidden()
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeHidden()
-    await expect(page.getByRole('button', { name: /Add a folder/ })).toBeVisible()
+    // With no project left, the welcome again, past the tour already seen.
+    await expect(page.getByRole('heading', { name: 'Your agents', level: 1 })).toBeVisible()
     expect([asLeft(meridian), asLeft(web)]).toEqual(before)
   } finally {
     await electronApp.close()

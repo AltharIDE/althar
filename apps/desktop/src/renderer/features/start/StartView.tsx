@@ -238,6 +238,7 @@ function First({
       const service = serviceOf(list.products, connection.product)
       return service !== undefined && hostsCode(service)
     }) ?? false
+  const trackersOffered = list === null || list.products.some((product) => !hostsCode(product.service))
   const words = text.first()
   return (
     <div className={`${s.window} ${s.bare}`}>
@@ -273,7 +274,8 @@ function First({
             : {})}
         hosts={<ConnectionsView model={connections} only="hosts" />}
         hostConnected={hostConnected}
-        trackers={<ConnectionsView model={connections} only="trackers" />}
+        // Issues are a step only where a tracker can be connected; until the list is read, as though one can.
+        {...(trackersOffered ? { trackers: <ConnectionsView model={connections} only="trackers" /> } : {})}
         onOpen={open}
         foot={
           <CrashReportsLine

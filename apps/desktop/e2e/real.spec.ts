@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { mainWindow, say } from './support'
+import { mainWindow, openMadeProject, say, toFirstProject } from './support'
 
 /*
  * The app with a real agent, as a process started from the runtime's utility
@@ -52,8 +52,10 @@ test('a real agent plans a task, leads it and answers', async () => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
     }, repo)
     const page = await mainWindow(app)
+    await toFirstProject(page)
     await page.getByRole('button', { name: /Add a folder/ }).click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     // The coordinator on the agent, from the composer, told in plain words what to plan.

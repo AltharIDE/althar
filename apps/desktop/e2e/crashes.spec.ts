@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, still } from './support'
+import { launch, openMadeProject, pastTheTour, still, toFirstProject } from './support'
 
 /*
  * Crash reports (ADR-046), from the app as it fails: the window's error, a
@@ -68,12 +68,13 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
   mkdirSync('test-results', { recursive: true })
   let { electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url })
   try {
-    // Asked once, on the first screen, as one quiet line with its switch: on until it is turned off.
+    // Asked once, on the welcome's agents, as one quiet line with its switch: on until it is turned off.
+    await pastTheTour(page)
     const line = page.getByRole('switch', { name: 'Crash reports' })
     await expect(line).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    // Once the launch has played over the screen and the repositories are found.
-    await expect(page.getByRole('list', { name: 'Repositories for the project' })).toBeVisible()
+    // Once the launch has played over the screen and the agents have answered.
+    await expect(page.getByRole('list', { name: /^Agents on/ })).toBeVisible()
     await still(page)
     await line.locator('xpath=ancestor::section[1]').screenshot({
       path: 'test-results/crash-reports-first-screen.png',
@@ -116,11 +117,13 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     expect(crashes(fake.events).filter((crash) => crash === 'window Native crash')).toHaveLength(1)
 
     // Once there is a project, its name and its repository's are hidden too.
+    await toFirstProject(page)
     await page
       .getByRole('list', { name: 'Repositories for the project' })
       .getByRole('checkbox', { name: /meridian/ })
       .click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.evaluate(() => {
       queueMicrotask(() => {
@@ -178,6 +181,7 @@ test('keeps an agent it couldn’t check to that agent, shows the others as they
   // Codex's status command isn't there: its check fails, and nothing else's does.
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url, ALTHAR_FAKE_UNCHECKED: 'codex' })
   try {
+    await pastTheTour(page)
     const agents = page.getByRole('list', { name: /^Agents on / })
     await expect(agents.getByText('Claude Code')).toBeVisible()
     await expect(agents.getByText('Codex')).toBeVisible()

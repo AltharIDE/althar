@@ -210,6 +210,16 @@ describe('the welcome’s code host and tracker', () => {
   })
 })
 
+describe('the welcome where no tracker can be connected', () => {
+  it('leaves out the step for issues, and opens the project from the code’s', () => {
+    const onOpen = vi.fn()
+    render(<FirstRun toured start="code" made picked={['meridian']} trackers={undefined} onOpen={onOpen} />)
+    expect(within(screen.getByRole('list', { name: 'Steps' })).queryByText('Issues')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open meridian' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('a scene in the welcome', () => {
   it('plays live, scaled to fit its frame once measured, and again as either changes', () => {
     vi.useFakeTimers()
