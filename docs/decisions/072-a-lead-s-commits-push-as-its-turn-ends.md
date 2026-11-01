@@ -33,7 +33,8 @@
     never the default branch, as a plain push, never forced: a branch whose
     pushed commits were rewritten waits for the person's Replace, as before.
     Only an open pull request takes commits; one merged or closed sends them
-    to the task's next, which the person opens (ADR-034). A task with no pull
+    to the task's next, which opens by itself as the round ends (ADR-034, as
+    amended on 2026-10-31). A task with no pull
     request yet publishes as before. The push is Althar's own, as the
     person's Push is, so the rules on agents' commands (ADR-067) have nothing
     new to ask about.

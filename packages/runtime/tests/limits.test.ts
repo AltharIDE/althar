@@ -450,6 +450,21 @@ describe('an agent out of usage, where the project asks', () => {
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
 
+  it.live('waits for the reset, asking nothing, where the project asks but no one else could take it over', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* asks(projectId)
+      yield* start
+      // Codex and OpenCode are signed out: there is nothing to choose, so it is held, under way, not a call.
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+      assert.deepStrictEqual([held?.phase, held?.waits?.until, held?.waits?.why], ['running', reset(back), 'nothing_free'])
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      assert.match((yield* said(task.threadId))[0] ?? '', /No other model is free: .+\.$/)
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } }, ['codex', 'opencode'])))
+  })
+
   it.live('moves the step to the account and model the person picks', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {

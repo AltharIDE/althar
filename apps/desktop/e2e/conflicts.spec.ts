@@ -13,8 +13,8 @@ import { backToWork, launch, openFirstProject, projectSettings, startTask, still
  * the fake agent: a task's branch stops merging with main, the project's
  * leads are told to resolve conflicts from its settings, which then offer to
  * look at every task again; its lead can't resolve it (`[lead:resolve-fails]`),
- * and its card and its task say why, each with Resolve now, which asks the
- * lead again though nothing moved. The screenshots it takes are this
+ * and its card and its task say why; its task, which the card opens, with
+ * Resolve now, which asks the lead again though nothing moved (DEV-173). The screenshots it takes are this
  * change's own evidence (test-results/conflicts-*.png).
  */
 
@@ -52,13 +52,13 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
       .screenshot({ path: 'test-results/conflicts-settings.png', animations: 'disabled', scale: 'css' })
     await backToWork(page)
 
-    // The lead couldn't resolve it: the card says why, with Resolve now.
+    // The lead couldn't resolve it: the card says why, and opens its task, as asking again from it asks what the lead couldn't do.
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
     const card = work.getByRole('article').filter({ hasText: 'Add a retry' })
     await expect(card.getByText('Merge conflict')).toBeVisible()
     await expect(card.getByText(/The lead couldn’t resolve the conflict with main/)).toBeVisible()
-    await expect(card.getByRole('button', { name: 'Resolve now' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Resolve now' })).toHaveCount(0)
     await still(page)
     await card.screenshot({ path: 'test-results/conflicts-card.png', animations: 'disabled', scale: 'css' })
 

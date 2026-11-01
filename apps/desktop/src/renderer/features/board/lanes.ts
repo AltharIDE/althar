@@ -26,10 +26,10 @@ import { readyOf, standingCalls } from '../../shared/calls'
  * moves once they look away.
  */
 
-/** A task that waits on the person, with the call it waits on: the oldest, where it has several; null for a moment, before its call is read. */
+/** A task that waits on the person, with the call it waits on: the oldest, where it has several. One whose call isn't read yet isn't among them. */
 export interface Waiting {
   readonly task: BoardTask
-  readonly call: BoardCall | null
+  readonly call: BoardCall
 }
 
 /** A task started that waits for a free agent before any agent has worked on it, whatever its kind: it is in its project's line, up next. */
@@ -162,11 +162,14 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
   const of = (...phases: ReadonlyArray<BoardTask['phase']>) => tasks.filter((task) => phases.includes(task.phase))
   // A waiting task's calls are one, its oldest (`standingCalls`, as the home counts them too).
   const standing = standingCalls(tasks, board.calls)
-  const waiting = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
-  const folded = new Set(waiting.map(({ task }) => task.taskId))
+  const all = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
+  // One whose call isn't read yet has nothing to say: it stays under way until it is, never in Needs you for a moment (DEV-173).
+  const waiting = all.flatMap(({ task, call }) => (call === null ? [] : [{ task, call }]))
+  const unread = all.flatMap(({ task, call }) => (call === null ? [{ ...task, phase: 'running' as const }] : []))
+  const folded = new Set(all.map(({ task }) => task.taskId))
   return {
     ...laid(
-      of('running'),
+      [...of('running'), ...unread],
       of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
       null,
     ),
