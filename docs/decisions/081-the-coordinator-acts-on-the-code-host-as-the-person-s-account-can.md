@@ -6,7 +6,8 @@
   [ADR-024](024-signed-releases-and-updates.md),
   [ADR-048](048-where-the-runtime-runs-and-who-may-reach-it.md),
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md),
-  [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)
+  [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
+  [ADR-078](078-project-leads-can-read-the-web.md)
 - **Owner:** Repository maintainers
 - **Context:** A separate Claude Code session, with `gh` signed in, gets the
   person's changes into main and releases them (DEV-180):
@@ -75,6 +76,10 @@
     repositories: the person's message in the task's thread is their word
     for a tag or a merge, and the lead has the same tools and the gated
     call ([Leads](#leads-under-the-same-rule)).
+  - **The coordinator reads the web under the project's switch, as a lead
+    does** (ADR-078), and in a turn an outside author's words reached, a web
+    read asks the person ([The web](#the-web)). This amends ADR-078, which
+    left the coordinator out.
   - **The coordinator runs merging and releases, not a standing task's
     lead** ([why](#the-coordinator-not-a-standing-task)). A fix stays a task
     with a lead, which the coordinator plans.
@@ -99,9 +104,14 @@
     decision's.
   - **Edge cases are settled by rule,** and what nobody foresaw ends in a
     line in the chat, not in something done ([Edge cases](#edge-cases)).
-  - **The build is sixteen tasks, for 0.7.0** ([Build](#build-for-070)),
+  - **The build is seventeen tasks, for 0.7.0** ([Build](#build-for-070)),
     beside ADR-082's six.
 - **Alternatives considered:**
+  - **The coordinator off the switch** (as first written, after ADR-078):
+    each of its web reads asked. The switch is the person's call on that
+    leak, for the coordinator as for a lead; what the coordinator alone
+    meets, strangers' words from every pull request, is held by asking in a
+    turn they reached ([The web](#the-web)).
   - **Rules for each flow** (this ADR as first written, on 31 October):
     merging, queues and releases each had rules of their own, which read as
     all the coordinator might do. The person asked on 1 November for one
@@ -138,6 +148,8 @@
     ([The person's word](#the-persons-word)). The same holds for a lead, in
     a turn the person started in its task's thread: it reads its pull
     request's comments and, where the project lets it, the web (ADR-078).
+    The coordinator reads the web under the same switch, short of a turn an
+    outside author's words reached ([The web](#the-web)).
   - **The keychain.** All of this holds against a mistake, and against text
     steering the coordinator through Althar's tools; not against a script
     set on going round Althar. On a Mac, a script inside Claude Code's
@@ -181,8 +193,8 @@
     tried for real, with each host's contract clauses.
 - **Revisit when:** Claude Code's sandbox can deny the keychain's service;
   the coordinator or a lead acts on a target, or does something, the
-  person didn't mean; the person wants the coordinator on the web, which
-  ADR-078 keeps it off; following every pull request reaches a host's rate limit; the
+  person didn't mean; a web read asks too often in turns an
+  outside author's words reached; following every pull request reaches a host's rate limit; the
   person wants something that can't be undone to go ahead unasked; a
   project is shared, and it matters whose word counts; a host opens an API
   for what Althar stands in for, such as entering Bitbucket Cloud's queue.
@@ -454,6 +466,35 @@ repositories, with the same four limits:
 - **The coordinator still runs a release,** and "merge the green ones":
   both span tasks and pull requests that no one lead sees
   ([why](#the-coordinator-not-a-standing-task)).
+
+## The web
+
+The coordinator reads the web as a task's lead does, under the project's
+switch "Leads can reach the web" (ADR-078). On, it searches and reads pages
+with its agent's web tools without asking, as ADR-078 gives a lead's; off,
+each read asks the person, as each does today
+(`provider-adapters/src/registry.ts:754`). The switch is the person's call
+on the leak ADR-078 weighs, a page or other text steering an agent into
+sending private code out in a URL, and it is theirs for the coordinator as
+for a lead. Its words name the coordinator too.
+
+Two things stay:
+
+- **Its commands reach no network.** Its sandbox allows no host, which is
+  why they run without asking (ADR-058). The web is its web tools.
+- **In a turn an outside author's words reached, a web read asks the
+  person,** for the rest of that turn, whatever the switch says. Following
+  every open pull request brings the coordinator strangers' words unasked:
+  a description, a comment or a review from outside the repository's own
+  people, as `reply_on_pull_request` has them
+  ([On the code host](#on-the-code-host)), and their code where it looks.
+  ADR-078 keeps outside reviews offline for the same reason. Althar marks
+  the turn when one of its tools hands the coordinator such words: news
+  carrying a comment or a review of theirs, `read_pull_request` on their
+  pull request, or the gated call's read of one. The ask shows the address
+  the read would send. A lead's turns aren't marked: an outside author's
+  words reach it only on a pull request the person attached to its task
+  (ADR-052), not unasked from every pull request in the project.
 
 ## The coordinator, not a standing task
 
@@ -730,7 +771,8 @@ decision's, and its reason says which.
 | *New:* what a host lacks is stood in for, or said with a link to the host's own button; never a no-op that looks done | [On every code host](#on-every-code-host) | Added | ADR-082 |
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | Not a limit on what: news brings what it would have fetched for |
-| It can't read the web | ADR-078 | Kept here | It reads strangers' words on every open pull request, and with the web such text could have it leak the code in a URL, which is why ADR-078 keeps outside reviews offline |
+| Each web read asks the person, and the project's web switch passes it by | ADR-078; `provider-adapters/src/registry.ts:754` | Lifted: it follows the switch, as a lead does | The switch is the person's call on the leak ADR-078 weighs, for the coordinator as for a lead |
+| *New:* in a turn an outside author's words reached, a web read asks | [The web](#the-web) | Added | A URL sent can't be called back, and in that turn a stranger may have chosen it: the first limit. ADR-078 keeps outside reviews offline for the same reason |
 | Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The third limit: the record and the review |
 | Where no sandbox holds it, only commands that look | ADR-058; `provider-adapters/src/registry.ts:743-744` | Kept | ADR-071 runs Claude Code's inside its sandbox unread already; ADR-082's task 4 and DEV-179 are the rest |
 | **Tasks** | | | |
@@ -787,12 +829,13 @@ title is a task's, in at most 60 characters.
 | 14 | The gated call on GitLab and both Bitbuckets | GitLab's, Bitbucket Cloud's and Data Center's lists, by [the same families](#the-gated-calls-lists-on-the-other-hosts), each tested against the host's published description: GitLab's, which is partial, completed by hand, and Data Center's for each version Althar supports. GitLab's GraphQL mutations by name. A write placed nowhere is refused | M | 10 |
 | 15 | Leads merge, tag and call the host when you ask | A lead's `merge_pull_request` on its task's pull requests, through task 5's slot and line; `push_tag` with no card where the person asked in the task's thread, and asking as now where they didn't; `update_branch`, and closing and reopening its own; `code_host_api` on its task's repositories. Its brief says what it does unasked. Tests: a merge the person asked for in the thread goes, one the lead works out for itself asks, a turn a review started can't merge | M | 3, 5, 10 |
 | 16 | A gated call to the tracker's API | `tracker_api`, as task 10's is for the host: reads in any turn, writes asked-for; Linear's GraphQL mutations by name, Jira's and Trello's REST by method and path, in the same families: a typed tool's (`draft_issue`, `change_issue`, comments), and never (the workspace's or site's settings, teams' and projects' settings, members and permissions, keys and tokens, webhooks, apps and integrations). GitHub's and GitLab's issues go through `code_host_api`. Each list tested against the tracker's published schema or description, placed by hand where it has none; a write placed nowhere is refused | L | 10 |
+| 17 | The coordinator reads the web under the switch | The coordinator's session follows `leadsReachWeb` as a lead's does: on, its web tools go without asking, on each agent as ADR-078 has them; off, they ask, as now. Its sandbox still allows no host. Althar marks a turn when a tool hands it an outside author's words: news carrying their comment or review, `read_pull_request` on their pull request, the gated call's read of one; in a marked turn a web read asks the person, showing the address, whatever the switch says. The switch's words name the coordinator too. Tests: on, a read goes; off, it asks; after an outside author's comment in the turn, it asks; the person's next turn goes again | M | 2, 7, 10 |
 
 In order:
 1. **First, side by side:** 1, 2, 3 and 4. None waits on another.
 2. **Then:** 5, 6, 7 and 8.
 3. **Then:** 10, 11, 12 and 13.
-4. **Then:** 14, 15 and 16, beside ADR-082's task 1.
+4. **Then:** 14, 15, 16 and 17, beside ADR-082's task 1.
 5. **Then:** ADR-082's tasks 2, 3 and 4.
 6. **Then:** ADR-082's tasks 5 and 6.
 7. **Last:** 9, which is 0.7.0's own release.

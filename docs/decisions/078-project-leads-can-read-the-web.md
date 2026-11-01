@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-31
+- **Amended:** 2026-11-01 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): the coordinator follows the switch too, and its commands still reach no network. In a turn an outside author's words reached, its web reads ask the person, whatever the switch says.
 - **Owner:** Repository maintainers
 - **Context:** Leads need documentation, changelogs, public issues and competitors’
   pages to do their work. Asking for each website interrupts it. This follows

@@ -103,6 +103,6 @@ list. Each title is a task's, in at most 60 characters.
 | 5 | The permission judge on every agent that can | `permissionJudge` where an agent's session can drop its built-in tools, hooks and own MCP servers; without it the person is asked, as now (ADR-019) | M | 4 |
 | 6 | Outside reviews on every agent that can | `reviewing.outside` where an agent can be held to asking before every command, with nothing of the repository's loaded and nothing of its own on the network; Codex's entry says `false` today | M | 4 |
 
-In order, after ADR-081's first three waves: 1, beside ADR-081's tasks 14,
-15 and 16; then 2, 3 and 4; then 5 and 6. ADR-081's task 9, 0.7.0's own
+In order, after ADR-081's first three waves: 1, beside ADR-081's tasks 14
+to 17; then 2, 3 and 4; then 5 and 6. ADR-081's task 9, 0.7.0's own
 release, still goes last.
