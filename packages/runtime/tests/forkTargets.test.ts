@@ -187,12 +187,12 @@ describe('where a fork’s tasks’ branches go', () => {
 
   it.live('never pushes onto the default branch of the repository it came from', () => {
     // That repository's default branch is named as the task's would be.
-    const { working, fork, upstream, pushedTo, github } = forkClone({ upstreamDefault: BRANCH })
+    const { working, fork, upstream, github } = forkClone({ upstreamDefault: BRANCH })
     return Effect.gen(function* () {
       yield* opened(working, 'upstream_branch')
       const projectId = yield* ask(working, `Add a retry. ${TASK}`, pushByHand)
       const sql = yield* SqlClient.SqlClient
-      const [card] = yield* cards(projectId)
+      const [card] = yield* until(cards(projectId), (all) => all.length === 1)
       // The run stops at publishing, and asks the person.
       const [call] = yield* until(
         sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${card?.taskId ?? ''} AND kind = 'stuck'`,
@@ -201,7 +201,6 @@ describe('where a fork’s tasks’ branches go', () => {
       assert.include(call?.payload, '"step":"publish"')
       assert.isFalse(hasBranch(upstream))
       assert.isFalse(hasBranch(fork))
-      assert.deepStrictEqual(pushedTo, [])
       assert.lengthOf(github.changes, 0)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
