@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { LONG_RUNS, type LimitCall, LimitChoice } from '@althar/contracts'
+import { PLANS_AND_REVIEWS, type LimitCall, LimitChoice } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -34,7 +34,7 @@ import { makeKeyedLock } from './keyedLock'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
-import { roundsNow } from './longRuns'
+import { roundsNow } from './plansAndReviews'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
@@ -582,7 +582,10 @@ export class Runs extends Context.Service<
         const [known] = yield* sql<{ id: string }>`
           SELECT v.id FROM workflow_versions v JOIN workflow_definitions d ON d.id = v.definition_id WHERE d.name = 'task' AND v.version = 1`
         if (known !== undefined) return known.id
-        const definition = JSON.stringify({ steps: ['implement', 'review'], review: { rounds: LONG_RUNS.rounds, settledBy: 'lead' } })
+        const definition = JSON.stringify({
+          steps: ['implement', 'review'],
+          review: { rounds: PLANS_AND_REVIEWS.rounds, settledBy: 'lead' },
+        })
         const definitionId = yield* newId(Ids.workflowDefinition)
         const versionId = yield* newId(Ids.workflowVersion)
         const at = yield* timestamp
@@ -3118,7 +3121,7 @@ export class Runs extends Context.Service<
                 : 'Althar has your summary. A review starts now; wait for its findings.',
             )
           }
-          // Another round only if settling changed the code, and rounds are left: as many as the person's setting says (longRuns.ts).
+          // Another round only if settling changed the code, and rounds are left: as many as the person's setting says (plansAndReviews.ts).
           if (workAfter !== workBefore && attempt.iteration + 1 < (yield* roundsNow)) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'

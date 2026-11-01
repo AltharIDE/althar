@@ -277,32 +277,25 @@ export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'nev
 export type FolderWait = typeof FolderWait.Type
 
 /**
- * How long work goes on alone. Each is a choice from a few; the first of each list but the check-in is today's value, kept
- * until the person changes it, and applies from the next plan, round or look at a running turn.
+ * How plans start and how long review goes on. Each is a choice from a few, today's value kept until the person changes it;
+ * it applies from the next plan proposed or round of review.
  */
 export const COUNTDOWNS = [0, 10, 25, 60] as const
 export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
-export const QUIET_MINUTES = [5, 10, 20] as const
-/** Hours of work before the agents check in; 0 is never. */
-export const CHECK_INS = [2, 6, 12, 0] as const
 
-export const LongRuns = Schema.Struct({
+export const PlansAndReviews = Schema.Struct({
   /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
   countdown: Schema.Literals(COUNTDOWNS),
   /** Review rounds before a task is left to the person with findings open. */
   rounds: Schema.Literals(REVIEW_ROUNDS),
-  /** Minutes a turn may show no sign of life before it is stopped and told to carry on; twice as long while a command runs. */
-  quiet: Schema.Literals(QUIET_MINUTES),
-  /** Hours of work, or 40 turns, since the person last wrote in a thread before its agent is stopped to check in; 0 never. */
-  checkIn: Schema.Literals(CHECK_INS),
 })
-export type LongRuns = typeof LongRuns.Type
+export type PlansAndReviews = typeof PlansAndReviews.Type
 
 /** What of them is changed: the rest stays. */
-export type LongRunsChange = { readonly [Key in keyof LongRuns]?: LongRuns[Key] | undefined }
+export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: PlansAndReviews[Key] | undefined }
 
 /** Today's values, which a setting keeps until the person changes it. */
-export const LONG_RUNS: LongRuns = { countdown: 25, rounds: 3, quiet: 10, checkIn: 6 }
+export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3 }
 
 /**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
@@ -332,7 +325,7 @@ export type SealStyle = typeof SealStyle.Type
 
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
-  longRuns: LongRuns,
+  plansAndReviews: PlansAndReviews,
   newProjects: NewProjectDefaults,
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
@@ -3348,14 +3341,12 @@ export const Api = RpcGroup.make(
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   /** When finished tasks' folders go from now on; a sweep runs at once by it. */
   command('SetFolderWait', { wait: FolderWait }, Schema.Void),
-  /** Changes how long work goes on alone, from the next plan, round or look at a running turn; what isn't given stays. */
+  /** Changes how plans start and how long review goes on, from the next plan or round; what isn't given stays. */
   command(
-    'SetLongRuns',
+    'SetPlansAndReviews',
     {
-      countdown: Schema.optional(LongRuns.fields.countdown),
-      rounds: Schema.optional(LongRuns.fields.rounds),
-      quiet: Schema.optional(LongRuns.fields.quiet),
-      checkIn: Schema.optional(LongRuns.fields.checkIn),
+      countdown: Schema.optional(PlansAndReviews.fields.countdown),
+      rounds: Schema.optional(PlansAndReviews.fields.rounds),
     },
     Schema.Void,
   ),

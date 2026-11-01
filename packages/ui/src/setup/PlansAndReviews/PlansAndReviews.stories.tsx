@@ -3,13 +3,19 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
-import { LongRuns, type LongRunsValue, longRunsDefault } from './LongRuns'
+import { PlansAndReviews, type PlansAndReviewsValue, plansAndReviewsDefault } from './PlansAndReviews'
 
-/* The four rows, their choices kept as Settings keeps them. */
-function Rows({ start = longRunsDefault, onChange }: { start?: LongRunsValue; onChange?: (change: Partial<LongRunsValue>) => void }) {
+/* The two rows, their choices kept as Settings keeps them. */
+function Rows({
+  start = plansAndReviewsDefault,
+  onChange,
+}: {
+  start?: PlansAndReviewsValue
+  onChange?: (change: Partial<PlansAndReviewsValue>) => void
+}) {
   const [value, setValue] = useState(start)
   return (
-    <LongRuns
+    <PlansAndReviews
       value={value}
       onChange={(change) => {
         onChange?.(change)
@@ -25,12 +31,12 @@ const onChange = fn()
 const page = within(document.body)
 
 const meta = {
-  title: 'Setup/LongRuns',
-  component: LongRuns,
+  title: 'Setup/PlansAndReviews',
+  component: PlansAndReviews,
   parameters: { layout: 'centered' },
   decorators: [(Story) => <div style={{ width: 680 }}>{Story()}</div>],
-  args: { value: longRunsDefault, onChange },
-} satisfies Meta<typeof LongRuns>
+  args: { value: plansAndReviewsDefault, onChange },
+} satisfies Meta<typeof PlansAndReviews>
 export default meta
 type Story = StoryObj<typeof meta>
 
@@ -41,8 +47,6 @@ export const Today: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('25 seconds')
     await expect(c.getByRole('combobox', { name: 'Rounds of review' })).toHaveTextContent('3 rounds')
-    await expect(c.getByRole('combobox', { name: 'Restart a quiet turn after' })).toHaveTextContent('10 minutes')
-    await expect(c.getByRole('combobox', { name: 'Check in after' })).toHaveTextContent('6 hours')
     await expect(c.queryByRole('button', { name: /^Use / })).toBeNull()
   },
 }
@@ -63,21 +67,11 @@ export const Changed: Story = {
 
 /** The plan starts at once: no wait to hold it in. */
 export const NoCountdown: Story = {
-  render: () => <Rows start={{ ...longRunsDefault, countdown: 0 }} />,
+  render: () => <Rows start={{ ...plansAndReviewsDefault, countdown: 0 }} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('Right away')
     await expect(c.getByText(/The plan starts as soon as it’s proposed\./)).toBeVisible()
-  },
-}
-
-/** Never checking in: the line says agents go on, and the turns' limit goes with the hours. */
-export const NeverChecksIn: Story = {
-  render: () => <Rows start={{ ...longRunsDefault, checkIn: 0 }} />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement)
-    await expect(c.getByRole('combobox', { name: 'Check in after' })).toHaveTextContent('Never')
-    await expect(c.getByText(/Agents go on until you stop them\./)).toBeVisible()
   },
 }
 
@@ -86,19 +80,16 @@ export const AllStates: Story = {
     <States
       size="thread"
       cells={[
-        { state: 'today’s values', node: <LongRuns value={longRunsDefault} onChange={fn()} /> },
+        { state: 'today’s values', node: <PlansAndReviews value={plansAndReviewsDefault} onChange={fn()} /> },
         {
-          state: 'shorter everywhere',
-          node: <LongRuns value={{ countdown: 10, rounds: 1, quiet: 5, checkIn: 2 }} onChange={fn()} />,
+          state: 'shorter',
+          node: <PlansAndReviews value={{ countdown: 10, rounds: 1 }} onChange={fn()} />,
         },
         {
-          state: 'longer everywhere',
-          node: <LongRuns value={{ countdown: 60, rounds: 5, quiet: 20, checkIn: 12 }} onChange={fn()} />,
+          state: 'longer',
+          node: <PlansAndReviews value={{ countdown: 60, rounds: 5 }} onChange={fn()} />,
         },
-        {
-          state: 'right away, never checks in',
-          node: <LongRuns value={{ ...longRunsDefault, countdown: 0, checkIn: 0 }} onChange={fn()} />,
-        },
+        { state: 'right away', node: <PlansAndReviews value={{ ...plansAndReviewsDefault, countdown: 0 }} onChange={fn()} /> },
       ]}
     />
   ),

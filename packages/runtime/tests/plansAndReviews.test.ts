@@ -1,17 +1,16 @@
-import { LONG_RUNS, NEW_PROJECT_DEFAULTS } from '@althar/contracts'
+import { PLANS_AND_REVIEWS, NEW_PROJECT_DEFAULTS } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { longRunsOf, newProjectDefaultsOf, setLongRuns, setNewProjectDefaults } from '../src/longRuns'
+import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { limitsOf } from '../src/Stalls'
 import { repository, runtime } from './support'
 
 /*
@@ -28,18 +27,18 @@ const settings = Effect.gen(function* () {
 describe('how long work goes on alone', () => {
   it.effect('is today’s values until the person changes one, and keeps a row only for what differs', () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual(yield* longRunsOf, LONG_RUNS)
-      yield* setLongRuns({ countdown: 10, rounds: 2 })
-      assert.deepStrictEqual(yield* longRunsOf, { ...LONG_RUNS, countdown: 10, rounds: 2 })
+      assert.deepStrictEqual(yield* plansAndReviewsOf, PLANS_AND_REVIEWS)
+      yield* setPlansAndReviews({ countdown: 10, rounds: 2 })
+      assert.deepStrictEqual(yield* plansAndReviewsOf, { ...PLANS_AND_REVIEWS, countdown: 10, rounds: 2 })
       assert.deepStrictEqual(yield* settings, [
         ['plan_countdown_seconds', '10'],
         ['review_rounds', '2'],
       ])
       // Back at today's value, it is no setting at all; what wasn't given stays.
-      yield* setLongRuns({ countdown: 25 })
+      yield* setPlansAndReviews({ countdown: 25 })
       assert.deepStrictEqual(yield* settings, [['review_rounds', '2']])
-      yield* setLongRuns({ checkIn: 0, quiet: 20 })
-      assert.deepStrictEqual(yield* longRunsOf, { countdown: 25, rounds: 2, quiet: 20, checkIn: 0 })
+      yield* setPlansAndReviews({ countdown: 60 })
+      assert.deepStrictEqual(yield* plansAndReviewsOf, { countdown: 60, rounds: 2 })
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -47,7 +46,7 @@ describe('how long work goes on alone', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* sql`INSERT INTO settings (key, value, updated_at) VALUES ('review_rounds', '9', '2026-10-31T10:00:00.000Z'), ('plan_countdown_seconds', 'soon', '2026-10-31T10:00:00.000Z')`
-      assert.deepStrictEqual(yield* longRunsOf, LONG_RUNS)
+      assert.deepStrictEqual(yield* plansAndReviewsOf, PLANS_AND_REVIEWS)
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -79,9 +78,9 @@ describe('how long work goes on alone', () => {
           return row?.wait
         })
       assert.strictEqual(yield* proposed('Today'), 25)
-      yield* setLongRuns({ countdown: 10 })
+      yield* setPlansAndReviews({ countdown: 10 })
       assert.strictEqual(yield* proposed('Shorter'), 10)
-      yield* setLongRuns({ countdown: 60 })
+      yield* setPlansAndReviews({ countdown: 60 })
       assert.strictEqual(yield* proposed('Longer'), 60)
     }).pipe(Effect.provide(runtime(undefined, {}, { countdown: null }))),
   )
@@ -94,7 +93,7 @@ describe('the plan card', () => {
       const plans = yield* Plans
       const instance = yield* Instance
       const queries = yield* Queries
-      yield* setLongRuns({ countdown: 10 })
+      yield* setPlansAndReviews({ countdown: 10 })
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const task = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
@@ -114,37 +113,6 @@ describe('the plan card', () => {
       assert.strictEqual(cards[0]?.plan?.startsAfter, 10)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(undefined, {}, { countdown: null }))))),
   )
-})
-
-describe('the limits for running turns', () => {
-  it('are today’s: ten minutes quiet, twenty while a tool runs, six hours or forty turns', () => {
-    assert.deepStrictEqual(limitsOf(LONG_RUNS), {
-      quiet: Duration.toMillis(Duration.minutes(10)),
-      quietInTool: Duration.toMillis(Duration.minutes(20)),
-      work: Duration.toMillis(Duration.hours(6)),
-      turns: 40,
-    })
-  })
-
-  it('follow the settings, a quiet turn waiting twice as long while a tool runs', () => {
-    assert.deepStrictEqual(limitsOf({ ...LONG_RUNS, quiet: 5, checkIn: 2 }), {
-      quiet: Duration.toMillis(Duration.minutes(5)),
-      quietInTool: Duration.toMillis(Duration.minutes(10)),
-      work: Duration.toMillis(Duration.hours(2)),
-      turns: 40,
-    })
-  })
-
-  it('have no end of time or turns where the check-in is never', () => {
-    const limits = limitsOf({ ...LONG_RUNS, checkIn: 0 })
-    assert.strictEqual(limits.work, Number.POSITIVE_INFINITY)
-    assert.strictEqual(limits.turns, Number.POSITIVE_INFINITY)
-  })
-
-  it('give way to a test’s own', () => {
-    assert.deepStrictEqual(limitsOf({ ...LONG_RUNS, quiet: 20 }, { quiet: Duration.seconds(1), turns: 3 }).quiet, 1000)
-    assert.strictEqual(limitsOf(LONG_RUNS, { turns: 3 }).turns, 3)
-  })
 })
 
 describe('the rules a new project starts with', () => {

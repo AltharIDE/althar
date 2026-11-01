@@ -20,7 +20,7 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
-  LongRuns,
+  PlansAndReviews,
   LinkButton,
   NewProjectDefaults,
   NotificationSettings,
@@ -71,7 +71,7 @@ import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
 import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
-import { useLongRuns } from './useLongRuns'
+import { usePlansAndReviews } from './usePlansAndReviews'
 import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
@@ -201,8 +201,8 @@ function SectionBody({
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
-    case 'long-runs':
-      return <LongRunsSection />
+    case 'plans-and-reviews':
+      return <PlansAndReviewsSection />
     case 'new-projects':
       return <NewProjectsSection />
     case 'reviews':
@@ -380,14 +380,14 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   )
 }
 
-/* ---- long runs --------------------------------------------------------------------- */
+/* ---- plans and reviews ------------------------------------------------------------- */
 
-function LongRunsSection() {
-  const longRuns = useLongRuns()
+function PlansAndReviewsSection() {
+  const plansAndReviews = usePlansAndReviews()
   return (
     <>
-      {longRuns !== null && <LongRuns value={longRuns.value} onChange={longRuns.set} />}
-      <Failed when={longRuns?.failed === true} />
+      {plansAndReviews !== null && <PlansAndReviews value={plansAndReviews.value} onChange={plansAndReviews.set} />}
+      <Failed when={plansAndReviews?.failed === true} />
     </>
   )
 }

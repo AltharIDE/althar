@@ -25,32 +25,28 @@ const choose = async (page: HTMLElement, row: string, option: string) => {
   await userEvent.click(within(document.body).getByRole('option', { name: option }))
 }
 
-describe('long runs', () => {
+describe('plans and reviews', () => {
   it('shows today’s values and keeps another choice at once, with the way back to today’s', async () => {
     const { client } = fakeClient()
-    withServices(<Settings section="long-runs" />, client)
+    withServices(<Settings section="plans-and-reviews" />, client)
     const page = screen.getByRole('main')
     expect(await within(page).findByRole('combobox', { name: 'Start a plan after' })).toHaveProperty('textContent', '25 seconds')
     expect(within(page).getByRole('combobox', { name: 'Rounds of review' }).textContent).toBe('3 rounds')
-    expect(within(page).getByRole('combobox', { name: 'Restart a quiet turn after' }).textContent).toBe('10 minutes')
-    expect(within(page).getByRole('combobox', { name: 'Check in after' }).textContent).toBe('6 hours')
     await choose(page, 'Start a plan after', '10 seconds')
-    expect(client.setLongRuns).toHaveBeenLastCalledWith({ countdown: 10 })
+    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 10 })
     expect(within(page).getByRole('combobox', { name: 'Start a plan after' }).textContent).toBe('10 seconds')
     await choose(page, 'Rounds of review', '2 rounds')
-    expect(client.setLongRuns).toHaveBeenLastCalledWith({ rounds: 2 })
-    await choose(page, 'Check in after', 'Never')
-    expect(client.setLongRuns).toHaveBeenLastCalledWith({ checkIn: 0 })
+    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ rounds: 2 })
     await userEvent.click(within(page).getByRole('button', { name: 'Use 25 seconds' }))
-    expect(client.setLongRuns).toHaveBeenLastCalledWith({ countdown: 25 })
+    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 25 })
   })
 
   it('says a choice couldn’t be kept', async () => {
-    const { client } = fakeClient({ setLongRuns: vi.fn(async () => Promise.reject(new Error('disk full'))) })
-    withServices(<Settings section="long-runs" />, client)
+    const { client } = fakeClient({ setPlansAndReviews: vi.fn(async () => Promise.reject(new Error('disk full'))) })
+    withServices(<Settings section="plans-and-reviews" />, client)
     const page = screen.getByRole('main')
-    await within(page).findByRole('combobox', { name: 'Restart a quiet turn after' })
-    await choose(page, 'Restart a quiet turn after', '5 minutes')
+    await within(page).findByRole('combobox', { name: 'Rounds of review' })
+    await choose(page, 'Rounds of review', '2 rounds')
     await waitFor(() => expect(within(page).getByRole('alert').textContent).toBe('That couldn’t be kept. Try again.'))
   })
 })

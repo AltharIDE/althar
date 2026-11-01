@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import type { AppSettings, LongRuns, LongRunsChange } from '@althar/contracts'
+import type { AppSettings, PlansAndReviews, PlansAndReviewsChange } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -14,15 +14,15 @@ import { useServices } from '../../data/services'
  * the view reads again what the runtime kept, and says so.
  */
 
-export interface LongRunsModel {
-  readonly value: LongRuns
+export interface PlansAndReviewsModel {
+  readonly value: PlansAndReviews
   /** The last change couldn't be kept. */
   readonly failed: boolean
-  readonly set: (change: LongRunsChange) => void
+  readonly set: (change: PlansAndReviewsChange) => void
 }
 
 /** Null until the settings are read. */
-export const useLongRuns = (): LongRunsModel | null => {
+export const usePlansAndReviews = (): PlansAndReviewsModel | null => {
   const { client, cache } = useServices()
   const settings = useQuery(reads(client).settings()).data
   const [failed, setFailed] = useState(false)
@@ -30,13 +30,13 @@ export const useLongRuns = (): LongRunsModel | null => {
   const made = useRef(0)
 
   const set = useCallback(
-    (change: LongRunsChange) => {
+    (change: PlansAndReviewsChange) => {
       const at = ++made.current
       cache.setQueryData<AppSettings>(keys.settings, (was) =>
-        was === undefined ? was : { ...was, longRuns: { ...was.longRuns, ...definedOf(change) } },
+        was === undefined ? was : { ...was, plansAndReviews: { ...was.plansAndReviews, ...definedOf(change) } },
       )
       setFailed(false)
-      client.setLongRuns(change).then(
+      client.setPlansAndReviews(change).then(
         () => undefined,
         () => {
           if (at !== made.current) return
@@ -48,7 +48,7 @@ export const useLongRuns = (): LongRunsModel | null => {
     [cache, client],
   )
 
-  return settings === undefined ? null : { value: settings.longRuns, failed, set }
+  return settings === undefined ? null : { value: settings.plansAndReviews, failed, set }
 }
 
 /** A change without what it leaves as it is. */

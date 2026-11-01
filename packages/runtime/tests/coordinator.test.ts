@@ -15,7 +15,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
-import { setLongRuns } from '../src/longRuns'
+import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -279,7 +279,7 @@ describe('the coordinator loop', () => {
   it.live('stops after two rounds when the person set two', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* setLongRuns({ rounds: 2 })
+      yield* setPlansAndReviews({ rounds: 2 })
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')

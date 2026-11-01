@@ -6,7 +6,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
-import { newProjectDefaultsOf } from './longRuns'
+import { newProjectDefaultsOf } from './plansAndReviews'
 import { fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
@@ -253,7 +253,7 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
   })
 
 /**
- * The rules a project is made with: the first revision's, with what the person chose for new projects (longRuns.ts) over the
+ * The rules a project is made with: the first revision's, with what the person chose for new projects (plansAndReviews.ts) over the
  * built-in. Only what differs from the built-in is written, so a profile that chose nothing makes the same rules as always.
  */
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {

@@ -272,7 +272,7 @@ export const runtime = (
   more: {
     readonly signedOut?: ReadonlyArray<string>
     readonly agents?: Layer.Layer<Agents>
-    /** A plan's countdown; null leaves it to the person's setting (longRuns.ts). */
+    /** A plan's countdown; null leaves it to the person's setting (plansAndReviews.ts). */
     readonly countdown?: Duration.Duration | null
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration

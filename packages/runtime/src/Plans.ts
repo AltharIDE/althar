@@ -7,7 +7,7 @@ import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
-import { countdownNow } from './longRuns'
+import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -72,7 +72,7 @@ export class Plans extends Context.Service<
       const instance = yield* Instance
       const runs = yield* Runs
       const reviews = yield* Reviews
-      // The person's setting (longRuns.ts), read as each plan is proposed; a test's own takes its place.
+      // The person's setting (plansAndReviews.ts), read as each plan is proposed; a test's own takes its place.
       const testCountdown = (yield* RuntimeConfig).countdown
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
