@@ -748,7 +748,7 @@ describe('the board', () => {
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
-    expect(next.getByText('Nothing lined up yet')).toBeTruthy()
+    expect(next.getByText('Nothing queued')).toBeTruthy()
     expect(next.getByText('Tell the coordinator what you want done. The tasks it plans line up here.')).toBeTruthy()
     // Only Up next says so; the other lanes stay empty boxes.
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
@@ -759,7 +759,7 @@ describe('the board', () => {
     expect(screen.getByRole('region', { name: 'The project’s work' })).toBeTruthy()
   })
 
-  it('says nothing in an empty Up next while there is other work on the board', async () => {
+  it('says the same in an empty Up next while there is other work on the board, and puts the person in the composer', async () => {
     const { client } = fakeClient({
       getBoard: vi.fn(async () =>
         board({ tasks: [task({ taskId: 't2', threadId: 'th2', title: 'Mine', slug: 'mine', phase: 'running' })], calls: [] }),
@@ -768,7 +768,11 @@ describe('the board', () => {
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
-    expect(next.queryByText('Nothing lined up yet')).toBeNull()
+    expect(next.getByText('Nothing queued')).toBeTruthy()
+    // Only Up next says so; the other lanes stay plain boxes.
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
+    await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
   })
 
   it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {

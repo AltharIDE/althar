@@ -31,15 +31,18 @@ import { Board, BoardColumn, BoardDivider, BoardEmpty, type BoardFolds, BoardLis
 /* Meridian's board, with the one you open ringed, as it is while the dock shows it; with lanes collapsed where the person did. */
 function Meridian({
   empty = false,
+  upNextEmpty = false,
   defaultFolds,
   onPointerLane,
 }: {
   empty?: boolean
+  /** Up next holds nothing on a board that has other work. */
+  upNextEmpty?: boolean
   defaultFolds?: BoardFolds
   onPointerLane?: (lane: BoardLane | null) => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
-  const next = empty ? [] : NEXT
+  const next = empty || upNextEmpty ? [] : NEXT
   const running = empty ? [] : RUNNING
   const calls = empty ? [] : CALLS
   const settled = empty ? [] : SETTLED
@@ -53,7 +56,7 @@ function Meridian({
         lane={BoardLane.Next}
         count={next.length}
         empty={
-          <BoardEmpty title="Nothing lined up yet" action={<LinkButton>Talk to the coordinator</LinkButton>}>
+          <BoardEmpty title="Nothing queued" action={<LinkButton>Talk to the coordinator</LinkButton>}>
             Tell the coordinator what you want done. The tasks it plans line up here.
           </BoardEmpty>
         }
@@ -468,6 +471,9 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {}
 /** A new project: Up next says how work gets here, and every other lane is an empty box. */
 export const Empty: Story = { args: { empty: true } }
+
+/** A busy board with nothing in Up next: the same words and the way to the coordinator, not a bare box. */
+export const UpNextEmpty: Story = { args: { upNextEmpty: true } }
 /** Cards with nothing to press, by kind: a change, a review and plain tasks, in the lanes each reaches. */
 export const ByKind: Story = {
   render: () => <Kinds />,
