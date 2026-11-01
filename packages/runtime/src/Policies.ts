@@ -78,6 +78,8 @@ export const ProjectRules = Schema.Struct({
    * as the person posts them. Off without it.
    */
   postScreenshots: Schema.optional(Schema.Boolean),
+  /** Native web reads by project leads and reviewers. On without it. */
+  leadsReachWeb: Schema.optional(Schema.Boolean),
   /**
    * How a task's branch and its pull request's title are named, by a pattern
    * (`@althar/contracts`' names): the person's own, over what each
@@ -136,6 +138,7 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   never: (rules.never ?? []).filter(isRule),
   allow: (rules.alwaysAllow ?? []).filter(isRule),
   commands: rules.commands ?? [],
+  web: rules.leadsReachWeb ?? true,
 })
 
 /** A rule an "always" answer keeps (ADR-018): a kind, or a command by how it starts or exactly, let through or never allowed. */
