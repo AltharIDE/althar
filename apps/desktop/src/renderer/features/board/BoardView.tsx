@@ -76,9 +76,9 @@ export const text = {
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
   planned: 'Planned',
-  /** Up next on a board with nothing on it yet, as on a new project: how work gets here. */
-  nothingYet: {
-    title: 'Nothing lined up yet',
+  /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
+  upNextEmpty: {
+    title: 'Nothing queued',
     how: 'Tell the coordinator what you want done. The tasks it plans line up here.',
     talk: 'Talk to the coordinator',
   },
@@ -663,17 +663,6 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   }
 }
 
-/** Nothing on the board at all: nothing up next, under way, waiting on the person, kept or settled. */
-const nothingYet = (lanes: Lanes) =>
-  lanes.next.length === 0 &&
-  lanes.running.length === 0 &&
-  lanes.waiting.length === 0 &&
-  lanes.stopped.length === 0 &&
-  lanes.calls.length === 0 &&
-  lanes.ready.length === 0 &&
-  lanes.kept.length === 0 &&
-  lanes.settledTotal === 0
-
 export function BoardView({
   lanes,
   agents,
@@ -776,15 +765,15 @@ export function BoardView({
         lane={BoardLane.Next}
         count={shown.upNext}
         filled={shown.next.length > 0}
-        // Nothing anywhere on the board, as on a new project, Up next says where work comes from; otherwise it is an empty box.
-        {...(nothingYet(lanes)
+        // Whenever nothing is in Up next, it says where work comes from.
+        {...(shown.next.length === 0
           ? {
               empty: (
                 <BoardEmpty
-                  title={text.nothingYet.title}
-                  {...(onTalk === undefined ? {} : { action: <LinkButton onClick={onTalk}>{text.nothingYet.talk}</LinkButton> })}
+                  title={text.upNextEmpty.title}
+                  {...(onTalk === undefined ? {} : { action: <LinkButton onClick={onTalk}>{text.upNextEmpty.talk}</LinkButton> })}
                 >
-                  {text.nothingYet.how}
+                  {text.upNextEmpty.how}
                 </BoardEmpty>
               ),
             }
