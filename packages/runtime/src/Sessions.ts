@@ -2901,7 +2901,7 @@ export class Sessions extends Context.Service<
             // Each screenshot shows once, with its caption.
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
             // Althar draws a mermaid block as a diagram, in the thread and in a Markdown file the thread opens (packages/ui, Diagram).
-            'Where a diagram explains something better than words, draw it: a ```mermaid block, in a message or in a Markdown file you link, is drawn as a diagram in Althar.',
+            'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block, in a message or in a Markdown file you link, is drawn as a diagram in Althar.',
             // Outputs, and the pull request, show the work as built: options and explorations stay in the thread.
             'A change\'s Outputs and its pull request show the work as it is now, from your screenshots in finish_step. Give each picture of the work as built a `view`, a short name you keep each time you take it again ("Running page"), so a later picture replaces it. Mark each option or direction the person chooses between, and each exploration, with `option`: those stay in the thread, where the person saw them. A step\'s pictures replace the earlier ones, but for the views it takes again and those it names in `kept_views`; one that only takes known views again leaves the others as they were.',
             // Pictures the person asks to see show in the thread at any time, not as file names (show_pictures).
@@ -2998,7 +2998,7 @@ export class Sessions extends Context.Service<
           STANDING_DICTATED,
           'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
           // Althar draws a mermaid block as a diagram, in the thread and in a document it opens (packages/ui, Diagram).
-          'Where a diagram explains something better than words, such as how a part of the code works, draw it: a ```mermaid block in your reply is drawn as a diagram in Althar.',
+          'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block in your reply is drawn as a diagram in Althar.',
         ]
       }
 
