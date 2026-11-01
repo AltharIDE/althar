@@ -1,3 +1,4 @@
+import { errandLines } from './Errands'
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -1843,6 +1844,7 @@ export class Queries extends Context.Service<
               ? yield* (yield* Changes).unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{
+            projectId: string
             threadId: string
             title: string
             slug: string
@@ -1876,7 +1878,7 @@ export class Queries extends Context.Service<
             turnWaits: number
             runPlan: string | null
           }>`
-            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
+            SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
@@ -2097,6 +2099,7 @@ export class Queries extends Context.Service<
           for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           return {
             taskId,
+            errands: yield* errandLines(task.projectId, taskId),
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,

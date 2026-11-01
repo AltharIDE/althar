@@ -219,6 +219,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
   return (
     <TaskCard
+      errands={card.errands}
       task={card.slug}
       title={card.title}
       status={status}

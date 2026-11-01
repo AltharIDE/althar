@@ -6,6 +6,9 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  ClientAuthority,
+  SocketAllowed,
+  type MessageSender,
   Api,
   ApiError,
   type AgentStatus,
@@ -19,7 +22,7 @@ import {
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Context, Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -152,9 +155,15 @@ const requestOf = (title: string, description: string | undefined, issue: string
   const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
   return words.trim() === '' ? {} : { request: words }
 }
+/** Authority attached by the host to this connection. */
+export const ConnectionSender = Context.Reference<MessageSender>('@althar/runtime/ConnectionSender', {
+  defaultValue: () => ({ kind: 'internal' }),
+})
+
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
+    const sender = yield* ConnectionSender
     const artifacts = yield* Artifacts
     const projects = yield* Projects
     const sessions = yield* Sessions
@@ -808,6 +817,7 @@ export const handlers = Api.toLayer(
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
+                      sender,
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(copied.length === 0 ? {} : { files: copied }),
                       ...(dictated === true ? { dictated: true } : {}),
@@ -824,7 +834,7 @@ export const handlers = Api.toLayer(
                 ...(effort === undefined ? {} : { effort }),
                 ...(message === undefined ? {} : { message }),
                 // The person's switch: its first turn goes on at once (ADR-037).
-                byPerson: true,
+                byPerson: sender.kind === 'window' || sender.kind === 'paired_device',
               })
               // Links in what the person said unfurl on their message, as when it is sent on its own.
               if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
@@ -1026,6 +1036,7 @@ export const handlers = Api.toLayer(
               ),
               threadId,
               body,
+              sender,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
               ...(copied.length === 0 ? {} : { files: copied }),
@@ -1128,6 +1139,7 @@ export const handlers = Api.toLayer(
                 envelope: yield* envelope('attention.answer_stuck', { attentionId, answer }, commandId),
                 attentionId,
                 answer,
+                sender,
               })
             }),
           ),
@@ -1575,10 +1587,24 @@ export const services = (options: Runtime.RuntimeLayerOptions) =>
   )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
-export const connection = (port: PortLike) => RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(port)))
+export const connection = (port: PortLike, sender: MessageSender) =>
+  RpcServer.layer(Api).pipe(
+    Layer.provide(handlers.pipe(Layer.provide(Layer.succeed(ConnectionSender, sender)))),
+    Layer.provide(
+      Layer.succeed(ClientAuthority, (effect, { rpc }) =>
+        sender.kind === 'socket' && !Context.get(rpc.annotations, SocketAllowed)
+          ? Effect.fail(
+              new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' }),
+            )
+          : effect,
+      ),
+    ),
+    Layer.provide(serverProtocol(port)),
+  )
 
 /**
  * The runtime serving the API over one port. Closing the layer's scope stops
  * every session and ends the launch.
  */
-export const serve = (port: PortLike, options: Runtime.RuntimeLayerOptions) => connection(port).pipe(Layer.provideMerge(services(options)))
+export const serve = (port: PortLike, options: Runtime.RuntimeLayerOptions, sender: MessageSender) =>
+  connection(port, sender).pipe(Layer.provideMerge(services(options)))

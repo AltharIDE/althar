@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { ConnectorFailed } from '@althar/connectors'
-import { PLANS_AND_REVIEWS, type LimitCall, LimitChoice } from '@althar/contracts'
+import { PLANS_AND_REVIEWS, type LimitCall, LimitChoice, type MessageSender } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -425,7 +425,12 @@ export type Place =
   /** The step after the one before it, as a review after the lead's, or the lead settling after a review. */
   | { readonly how: 'next'; readonly reviewer?: PlanStep }
   /** A lead's step that needed the person, carried on as they answered once it has a place. */
-  | { readonly how: 'answered'; readonly info: StuckInfo; readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }> }
+  | {
+      readonly how: 'answered'
+      readonly info: StuckInfo
+      readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }>
+      readonly sender?: MessageSender | undefined
+    }
   /** A lead's step held for a usage limit that the person handed to another agent: the work of a task under way, so it waits its turn. */
   | { readonly how: 'handed'; readonly info: StuckInfo; readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }> }
   /** Back from a usage limit, or, `connection`, from waiting for its service (ADR-060), with how often that had failed in a row. */
@@ -508,6 +513,7 @@ export class Runs extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly attentionId: string
       readonly answer: StuckAnswer
+      readonly sender?: MessageSender | undefined
     }): Effect.Effect<void, unknown>
     /**
      * Carries on the run a task's stop suspended, from the step it was on:
@@ -3528,7 +3534,12 @@ export class Runs extends Context.Service<
        * Abandoning stops the run; for a review, the task goes on without it
        * and is ready.
        */
-      const answerStuck = (input: { readonly envelope: CommandEnvelope; readonly attentionId: string; readonly answer: StuckAnswer }) =>
+      const answerStuck = (input: {
+        readonly envelope: CommandEnvelope
+        readonly attentionId: string
+        readonly answer: StuckAnswer
+        readonly sender?: MessageSender | undefined
+      }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { answer } = input
@@ -3594,7 +3605,7 @@ export class Runs extends Context.Service<
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
           if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
-          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope)
+          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender)
         })
 
       /**
@@ -3611,11 +3622,12 @@ export class Runs extends Context.Service<
         info: StuckInfo,
         answer: Exclude<StuckAnswer, { readonly kind: 'wait' }>,
         envelope: CommandEnvelope,
+        sender?: MessageSender,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if (attemptId === null || answer.kind === 'abandon' || (info.step !== 'implement' && info.step !== 'settle'))
-            return yield* carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person')
+            return yield* carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person', sender)
           yield* busy.enter(
             current.taskId,
             (room) =>
@@ -3626,7 +3638,7 @@ export class Runs extends Context.Service<
                       // Stopped since the answer, the step is the person's to resume, not to carry on.
                       const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
                       if (still?.state !== 'waiting_attention' || !(yield* going(current))) return false
-                      yield* waitForPlace(current, attemptId, { how: 'answered', info, answer })
+                      yield* waitForPlace(current, attemptId, { how: 'answered', info, answer, sender })
                       return false
                     }),
                   ),
@@ -3635,7 +3647,7 @@ export class Runs extends Context.Service<
               order: 'person',
               next: (room) =>
                 room
-                  ? provide(carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person'))
+                  ? provide(carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person', sender))
                   : Effect.void,
             },
           )
@@ -3813,6 +3825,7 @@ export class Runs extends Context.Service<
         effort?: string | null,
         /** Whose doing it is: the person's (their answer, their resume), or Althar's own, as for a usage limit or a restart (ADR-037). */
         by: Order = 'underway',
+        sender?: MessageSender,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3894,7 +3907,7 @@ export class Runs extends Context.Service<
                 id: string
               }>`SELECT id FROM threads WHERE task_id = ${current.taskId} AND kind = 'step' AND node_key = 'review'`
               if (thread !== undefined && round !== undefined)
-                yield* sessions.send({ envelope: envelope, threadId: thread.id, body: answer.note })
+                yield* sessions.send({ envelope: envelope, threadId: thread.id, body: answer.note, sender: sender ?? { kind: 'internal' } })
             }
             return
           }
@@ -3916,7 +3929,13 @@ export class Runs extends Context.Service<
           // The lead's step: its agent (or the one picked) on the task's thread, told again what the step is.
           const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, on, said, effort, accountId)
           if (!(yield* resume(sessionId))) return
-          if (answer.kind === 'tell') yield* sessions.send({ envelope: envelope, threadId: current.threadId, body: answer.note })
+          if (answer.kind === 'tell')
+            yield* sessions.send({
+              envelope: envelope,
+              threadId: current.threadId,
+              body: answer.note,
+              sender: sender ?? { kind: 'internal' },
+            })
           else
             yield* sessions.send({
               envelope: envelope,
@@ -4700,6 +4719,7 @@ export class Runs extends Context.Service<
                 undefined,
                 undefined,
                 'person',
+                place.sender,
               )
             case 'handed': {
               // As one handed on at once: an agent that can't start leaves the step needing the person, not admitted with nothing at work.
