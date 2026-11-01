@@ -104,6 +104,9 @@ describe('a change whose checks Althar sees through', () => {
       yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
       state = 'failed'
       yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      const [failedSnapshot] = yield* sql<{ id: string; snapshot: string }>`
+        SELECT id, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
+      assert.isDefined(failedSnapshot)
       state = 'passed'
       yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
       const results = yield* sql<{ outcome: string }>`
@@ -122,6 +125,33 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [after] = yield* (yield* Changes).ofTask(taskId)
       assert.strictEqual(after?.headSha, head)
+      const changes = yield* Changes
+      const readResults = sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      // Several unchanged polls must not deliver another finished result.
+      yield* changes.refresh(taskId)
+      yield* Effect.sleep(Duration.millis(400))
+      assert.deepStrictEqual(yield* readResults, results)
+      // Model an observation committed before its snapshot write failed. The retry must repair the revision too.
+      if (failedSnapshot === undefined) throw new Error('Missing failed snapshot')
+      yield* sql`UPDATE external_links SET snapshot = ${failedSnapshot.snapshot} WHERE id = ${failedSnapshot.id}`
+      yield* changes.refresh(taskId)
+      const repaired = yield* until(
+        sql<{ snapshot: string }>`SELECT snapshot FROM external_links WHERE id = ${failedSnapshot.id}`,
+        (rows) => JSON.parse(rows[0]?.snapshot ?? '{}').checks?.outcome === 'passed',
+      )
+      assert.strictEqual(JSON.parse(repaired[0]?.snapshot ?? '{}').checksRevision, JSON.parse(failedSnapshot.snapshot).checksRevision + 1)
+      assert.deepStrictEqual(yield* readResults, results)
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      assert.lengthOf(
+        (yield* readResults).filter((one) => one.outcome === 'passed'),
+        3,
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

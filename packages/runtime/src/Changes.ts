@@ -3456,13 +3456,14 @@ export class Changes extends Context.Service<
             }
             const settled =
               reran === null || reran.started || (yield* Clock.currentTimeMillis) - Date.parse(reran.at) > Duration.toMillis(RERUN_SHOWS)
+            const transitioned = finished && settled && (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome)
+            // Advance even when this observation already exists: a previous poll may have recorded it and then failed before
+            // saving its snapshot. Reusing that observation repairs the snapshot without delivering the result twice.
+            if (transitioned) checksRevision += 1
             if (
-              finished &&
-              settled &&
-              (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision + 1}${reran?.again ?? ''}`, { ...sum }))
+              transitioned &&
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision}${reran?.again ?? ''}`, { ...sum }))
             ) {
-              checksRevision += 1
               happened = true
               // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
               const reads =
