@@ -31,6 +31,8 @@ export const stepText = {
   } as Readonly<Record<string, string>>,
   /** Stopped, no agent on it, as its card and its header say it: by what stopped its lead, where something says. */
   stopped: 'Stopped',
+  /** Stopped with its pull request ready to merge as it is: the word, and that it can be accepted all the same. */
+  stoppedMergeable: 'Stopped, ready to merge',
   stoppedBy: {
     declined: 'Stopped when you declined a command',
     interrupted: 'Stopped when you interrupted it',

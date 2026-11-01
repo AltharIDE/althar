@@ -1675,6 +1675,11 @@ export const TaskCard = Schema.Struct({
     ),
   ),
   /**
+   * Stopped, with its open pull request ready to merge as it stands (not a draft, no conflict, every check passed): the
+   * person can accept it all the same, next to Carry on. Absent otherwise.
+   */
+  mergeable: Schema.optional(Schema.Literal(true)),
+  /**
    * Its folder being set up before its lead's first turn (ADR-023): the install its lockfile names, or the setup kept for its
    * repository. Absent otherwise.
    */
@@ -2505,6 +2510,8 @@ export const ThreadSnapshot = Schema.Struct({
         Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
       ),
     ),
+    /** Stopped, with its open pull request ready to merge as it stands: it can be accepted all the same, as its card says. */
+    mergeable: Schema.optional(Schema.Literal(true)),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
