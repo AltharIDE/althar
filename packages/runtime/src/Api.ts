@@ -703,17 +703,18 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, setup }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget }, commandId)
+              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget, setup }, commandId)
               yield* projects.setRepository({
                 projectId,
                 repositoryId,
                 ...(role === undefined ? {} : { role }),
                 ...(changeTarget === undefined ? {} : { changeTarget }),
+                ...(setup === undefined ? {} : { setup }),
                 commandId: said.commandId,
               })
             }),

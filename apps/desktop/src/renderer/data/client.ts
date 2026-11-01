@@ -50,6 +50,7 @@ import {
   type OutputText,
   type Product,
   type ChangeTarget,
+  type RepositorySetup,
   type ProjectInk,
   type ProjectTracker,
   type ProjectList,
@@ -391,6 +392,7 @@ export interface Client {
     readonly repositoryId: string
     readonly role?: RepositoryRole
     readonly changeTarget?: ChangeTarget
+    readonly setup?: RepositorySetup
   }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** A project's notes, oldest first: the decisions its coordinator keeps. */

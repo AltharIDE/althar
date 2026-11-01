@@ -206,6 +206,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'service',
     fork: null,
     tasks: 1,
+    setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile'] },
   },
   {
     id: 'repo_web',
@@ -224,6 +225,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'frontend',
     fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
     tasks: 0,
+    setup: null,
   },
   {
     id: 'repo_infra',
@@ -242,6 +244,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'infrastructure',
     fork: null,
     tasks: 0,
+    setup: null,
   },
 ]
 
