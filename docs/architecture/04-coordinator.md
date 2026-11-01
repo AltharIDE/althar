@@ -291,3 +291,49 @@ in the tools assumes one coordinator: every command carries its actor.
   and running tasks as they were.
 - Switching the coordinator's agent keeps the thread.
 - A coordinator out of usage pauses no task.
+
+## The person's word and errands
+
+The host records each message's sender on the connection: `window`,
+`paired_device` (with its device id), `socket`, or `internal`. A client never
+supplies its own authority in a message payload. New RPC calls are refused
+to a socket until the contract marks them `SocketAllowed` (ADR-048).
+Permission answers and widening rules remain the person's calls.
+
+Each delivered turn records `person`, `news`, or `system` as its origin.
+`Sessions.send` accepts an explicit `origin: 'news'` for a quiet wake.
+`ToolAccess` exposes `byPerson`, `origin`, `turnId` and the person's message
+ids, resolved from the live delivery on every call. A session's old messages,
+a socket's visible message, and a caller-supplied `byPerson` cannot authorize
+a new action. `read_turn` gives the agent the same facts.
+
+`Errands` owns durable ordered steps. `keep_errand` requires a person's
+message in the live turn and keeps its exact words and id, each tool and its
+semantic arguments, target, head, target branch, task and waits. Kept, paused,
+resumed and completed errands leave lines in the thread. Task cards show the
+open wait, and fresh coordinator and lead briefs include the open records.
+`read_errands` reads the complete steps. Resuming records the fresh message
+separately, preserving the original request. An objection uses `pause_errand`;
+only fresh word can resume or cancel. The shared change sweep reports a day
+without news, or a `required-check-missing` wait whose `since` marks an hour
+after the other checks finished, at most once a day. The news watch can read
+`errand_steps.waits` and call `Errands.news` when something changes.
+
+An acting tool declares `kind: 'asked-for'` and supplies an `AskedAction`
+instead of an ordinary call. The shared tool server owns its authorization,
+fresh read and mutation receipt. It accepts a person's message id from this
+turn or an exact open errand step in this thread. Steps run in order. A read
+reporting an objection pauses the errand; another writer, a changed target
+branch or someone else settling the target ends it. A head that moved is
+refused, except an errand's head moved by the task's lead or Althar, which the
+action receives from that fresh read.
+
+The same tool, target, head, branch and semantic request share a serialized
+receipt across messages, errands and sessions. Include an observed task
+revision or operation generation in the request where the same operation may
+legitimately recur. A lost answer or `{ pending: true, answer }` stays
+uncertain. Only a read proving it done confirms it; only `absent`, positive
+proof it neither happened nor remains in flight, permits another attempt.
+A confirmed receipt repairs an interrupted completion and its chat line
+without acting again. Host-specific reads and acting tools are later parts
+of ADR-081; this foundation is shared by every host and agent.

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import { type MessageSender, Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
 import {
   type AgentDefinition,
   AgentExited,
@@ -40,6 +40,8 @@ import {
   TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
+import { Projects } from '../src/Projects'
+import * as Runtime from '../src/Runtime'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
@@ -60,6 +62,7 @@ const opened: Array<string> = []
 /** The runtime serving the API on one end of a channel, and a client on the other, as the app's window has it. */
 const connected = (
   options: {
+    readonly sender?: MessageSender
     readonly countdown?: Duration.Duration
     readonly signedOut?: ReadonlyArray<string>
     readonly connectors?: Layer.Layer<Connectors>
@@ -100,7 +103,14 @@ const connected = (
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          options.sender ?? { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     /** A folder the person chose, as the app's main process allows it. */
@@ -2792,4 +2802,59 @@ describe('thread items', () => {
       },
     )
   })
+})
+
+describe('connection authority', () => {
+  for (const sender of [{ kind: 'window' }, { kind: 'paired_device', deviceId: 'phone-1' }, { kind: 'socket' }] as const) {
+    it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, context, store } = yield* connected({ sender })
+          // Seed the project internally, since a socket is not allowed to open folders on the person's behalf.
+          const project = yield* Effect.provideContext(
+            Effect.gen(function* () {
+              const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+              return yield* (yield* Projects).createTask({
+                envelope: yield* Runtime.envelope('task.create', {}),
+                projectId: opened.projectId,
+                title: 'Connection authority',
+              })
+            }),
+            context,
+          )
+          const id = commandId()
+          yield* client.Send({ commandId: id, threadId: project.threadId, body: scenarios.hello, disposition: 'after_current' })
+          yield* client.StartSession({ commandId: commandId(), threadId: project.threadId, agentId: 'codex' })
+          yield* until(
+            client.GetThread({ threadId: project.threadId }),
+            (thread) =>
+              thread.session !== null && !thread.session.turnRunning && thread.items.some((item) => item.kind === 'agent_message'),
+          )
+          const rows = yield* store(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return yield* sql<{
+                senderKind: string
+                senderDeviceId: string | null
+                origin: string
+              }>`SELECT i.sender_kind, i.sender_device_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.command_id = ${id}`
+            }),
+          )
+          assert.isNotEmpty(rows)
+          assert.isTrue(
+            rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
+          )
+          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          if (sender.kind === 'socket') {
+            const denied = yield* Effect.exit(
+              client.SetTaskAllowEverything({ commandId: commandId(), taskId: project.taskId, allowEverything: true }),
+            )
+            assert.isTrue(denied._tag === 'Failure')
+            if (denied._tag === 'Failure')
+              assert.strictEqual(Option.getOrUndefined(Cause.findErrorOption(denied.cause))?.reason, 'PersonRequired')
+          }
+        }),
+      ),
+    )
+  }
 })

@@ -276,7 +276,7 @@ const program = Effect.gen(function* () {
   for (;;) {
     const port = yield* Queue.take(ports)
     // Each window's connection lives until its port closes, as when it reloads.
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port), { kind: 'window' })).pipe(Effect.provideContext(context)))
   }
 })
 
