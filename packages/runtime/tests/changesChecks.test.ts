@@ -88,6 +88,80 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('hears another success at the same head after checks fail', () => {
+    const { working, bare } = hosted()
+    let state: 'passed' | 'failed' = 'passed'
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const [before] = yield* (yield* Changes).ofTask(taskId)
+      const head = before?.headSha
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      const [failedSnapshot] = yield* sql<{ id: string; snapshot: string }>`
+        SELECT id, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
+      assert.isDefined(failedSnapshot)
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      const results = yield* sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      assert.strictEqual(results[0]?.outcome, 'passed')
+      assert.include(
+        results.map((one) => one.outcome),
+        'failed',
+      )
+      assert.strictEqual(results.at(-1)?.outcome, 'passed')
+      assert.lengthOf(
+        results.filter((one) => one.outcome === 'passed'),
+        2,
+      )
+      const [after] = yield* (yield* Changes).ofTask(taskId)
+      assert.strictEqual(after?.headSha, head)
+      const changes = yield* Changes
+      const readResults = sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      // Several unchanged polls must not deliver another finished result.
+      yield* changes.refresh(taskId)
+      yield* Effect.sleep(Duration.millis(400))
+      assert.deepStrictEqual(yield* readResults, results)
+      // Model an observation committed before its snapshot write failed. The retry must repair the revision too.
+      if (failedSnapshot === undefined) throw new Error('Missing failed snapshot')
+      yield* sql`UPDATE external_links SET snapshot = ${failedSnapshot.snapshot} WHERE id = ${failedSnapshot.id}`
+      yield* changes.refresh(taskId)
+      const repaired = yield* until(
+        sql<{ snapshot: string }>`SELECT snapshot FROM external_links WHERE id = ${failedSnapshot.id}`,
+        (rows) => JSON.parse(rows[0]?.snapshot ?? '{}').checks?.outcome === 'passed',
+      )
+      assert.strictEqual(JSON.parse(repaired[0]?.snapshot ?? '{}').checksRevision, JSON.parse(failedSnapshot.snapshot).checksRevision + 1)
+      assert.deepStrictEqual(yield* readResults, results)
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      assert.lengthOf(
+        (yield* readResults).filter((one) => one.outcome === 'passed'),
+        3,
+      )
+      // Every new finished result is also durable coordinator news, with no duplicate after snapshot recovery.
+      const delivered = yield* sql<{ outcome: string }>`
+        SELECT json_extract(e.payload, '$.outcome') AS outcome FROM record_events e
+        JOIN external_links l ON l.id = e.aggregate_id
+        WHERE l.task_id = ${taskId} AND e.type = 'external_link.news'
+          AND json_extract(e.payload, '$.kind') = 'checks' ORDER BY e.sequence`
+      assert.deepStrictEqual(delivered, yield* readResults)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('brings a change in a repository that has never had checks to the person at once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
@@ -481,7 +555,9 @@ describe('a change whose checks Althar sees through', () => {
       // again: the person has it.
       hold = false
       yield* until(
-        sql<{ id: string }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.id') LIKE '%:failed:again'`,
+        sql<{
+          id: string
+        }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' AND json_extract(payload, '$.id') LIKE '%:again'`,
         (heard) => heard.length > 0,
       )
       const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
