@@ -54,17 +54,17 @@ proto.subscribe(() => {
   void cache.invalidateQueries()
 })
 
-const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string; section: string }> = [
-  { value: 'A', name: 'Rows', section: 'running' },
-  { value: 'B', name: 'Script', section: 'running' },
-  { value: 'C', name: 'Its own section', section: 'folders' },
+const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
+  { value: 'A', name: 'Steps' },
+  { value: 'B', name: 'Switches' },
+  { value: 'C', name: 'As it last ran' },
+  { value: 'D', name: 'Say it' },
 ]
 
-/** Swaps the direction in place, on the section it puts the setups in. */
+/** Swaps the direction in place, on Running, where the setups are. */
 const go = (direction: Direction) => {
   proto.set({ direction })
-  const section = DIRECTIONS.find((one) => one.value === direction)?.section ?? 'running'
-  window.location.hash = `#/projects/p1?room=settings&section=${section}`
+  window.location.hash = '#/projects/p1?room=settings&section=running'
 }
 
 window.addEventListener(
@@ -79,7 +79,7 @@ window.addEventListener(
         ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
         : event.key === 'ArrowLeft'
           ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
-          : /^[1-3]$/.test(event.key)
+          : /^[1-4]$/.test(event.key)
             ? DIRECTIONS[Number(event.key) - 1]
             : undefined
     if (picked === undefined) return
@@ -110,7 +110,7 @@ function Switcher() {
         onChange={(next) => proto.set({ which: next })}
         options={[
           { value: 'althar', label: 'althar' },
-          { value: 'meridian', label: 'meridian, three repositories' },
+          { value: 'meridian', label: 'meridian, three repositories, one failing' },
         ]}
       />
       <Segmented<Moment>
@@ -123,7 +123,7 @@ function Switcher() {
         ]}
       />
       <span className={s.grow} />
-      <span>1–3 or ← → switch</span>
+      <span>1–4 or ← → switch</span>
       <LinkButton onClick={() => go(p.direction)}>Back to settings</LinkButton>
     </div>
   )

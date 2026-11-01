@@ -8,8 +8,8 @@ import { defineConfig } from 'vite-plus'
  * Scrappy: the real desktop app, on the tests' fake client, in a browser,
  * opened on a project's settings. A few lines of the real screens are
  * patched as they load, so each direction's view of a repository's recorded
- * setup sits where it would: in Running (A, B) or as a section of its own
- * (C). Nothing in the app's own files changes.
+ * setup sits where it would: in Running, after what the project runs.
+ * Nothing in the app's own files changes.
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -22,29 +22,7 @@ const patches = [
     file: 'features/projectSettings/RunningSection.tsx',
     edits: [
       [/^/, `import { ProtoFolders } from '${folders}'\n`],
-      ['<SettingGroup title={text.where}', '<ProtoFolders where="running" />\n      <SettingGroup title={text.where}'],
-    ],
-  },
-  {
-    file: 'features/projectSettings/ProjectSettingsPage.tsx',
-    edits: [
-      [/^/, `import { ProtoFolders, protoGroups, useProtoDirection } from '${folders}'\n`],
-      ['PROJECT_GROUPS.map(', 'protoGroups().map('],
-      ['  const [connecting, setConnecting]', '  useProtoDirection()\n  const [connecting, setConnecting]'],
-      [
-        "    case 'notes':",
-        "    // @ts-expect-error the prototype's section\n    case 'folders':\n      return <ProtoFolders where=\"section\" />\n    case 'notes':",
-      ],
-    ],
-  },
-  {
-    file: 'features/projectSettings/sections.ts',
-    edits: [
-      ["['general', 'code', 'rules', 'running', 'notes'] as const", "['general', 'code', 'rules', 'running', 'folders', 'notes'] as const"],
-      [
-        "  notes: { title: 'Notes', icon: 'quote' },",
-        "  notes: { title: 'Notes', icon: 'quote' },\n  folders: { title: 'Task folders', icon: 'folder' },",
-      ],
+      ['<SettingGroup title={text.where}', '<ProtoFolders />\n      <SettingGroup title={text.where}'],
     ],
   },
 ]
