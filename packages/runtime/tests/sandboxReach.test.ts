@@ -229,10 +229,15 @@ const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
     yield* sessions.start({ threadId: made.threadId, agentId: 'claude-code' })
     yield* until(turns(made.threadId), (rows) => rows.length >= 1)
     const lead = sessionMetas.find((meta) => meta.role === 'lead')
+    assert.strictEqual(lead?.options?.web, rules.leadsReachWeb ?? true)
     return lead?.options?.sandbox
   })
 
 describe('a lead’s session', () => {
+  it.live('starts a new lead with native web tools off when the project switch is off', () =>
+    leading({ permissions: 'rules', leadsReachWeb: false }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('runs the project’s known commands outside its sandbox, and reaches its code host, registry and tracker without asking', () =>
     Effect.gen(function* () {
       const sandbox = yield* leading({ permissions: 'rules' })

@@ -116,6 +116,8 @@ export type AllowRule = { readonly kind: RuleId } | { readonly pattern: string; 
 
 /** A project's rules, as the rules read them (ADR-013, ADR-018, Policies). */
 export interface ProjectRuleSet {
+  /** Read-only web commands may go through, even when the rest asks. */
+  readonly web?: boolean
   /**
    * What happens to what no rule keeps: it is allowed (`rules`), it waits
    * for the person (`ask`), or the coordinator judges (`coordinator`);
@@ -2855,6 +2857,66 @@ const allowedBy = (
 
 const CHANGES: ReadonlyArray<PermissionRequest['kind']> = ['edit', 'delete', 'move']
 
+/**
+ * A plain HTTP read to stdout, with no config, upload, output file, extra
+ * command, substitution or arbitrary option. Keep the network sandbox closed:
+ * domain allowlists cannot distinguish these from POSTs. More elaborate calls
+ * still meet the existing rules.
+ */
+export const readsWeb = (command: string): boolean => {
+  const parsed = parseCommandLine(command)
+  if (parsed.opaque || parsed.commands.length !== 1) return false
+  const words = parsed.commands[0] ?? []
+  const [program = '', ...args] = words
+  const name = program.slice(program.lastIndexOf('/') + 1)
+  if (program.includes('/') && !INSTALLED.test(program)) return false
+  if (name !== 'curl' && name !== 'wget') return false
+  // The person's config could otherwise select a method or upload a file.
+  if (
+    name === 'curl'
+      ? args[0] !== '-q' && args[0] !== '--disable'
+      : !['--no-config', '--no-netrc', '--no-hsts'].every((flag) => args.includes(flag))
+  )
+    return false
+  let urls = 0
+  let stdout = name === 'curl'
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at]!
+    if (/^https?:\/\//i.test(arg)) {
+      try {
+        const url = new URL(arg)
+        if (url.username || url.password) return false
+      } catch {
+        return false
+      }
+      urls++
+    } else if (name === 'curl') {
+      if (
+        /^-[qfsSIL]+$/.test(arg) ||
+        ['--disable', '--fail', '--silent', '--show-error', '--location', '--head', '--get', '--compressed'].includes(arg)
+      )
+        continue
+      if (['--max-time', '--connect-timeout', '--max-redirs'].includes(arg) && /^\d+$/.test(args[at + 1] ?? '')) {
+        at++
+        continue
+      }
+      return false
+    } else {
+      if (arg === '-qO-' || arg === '-O-') {
+        stdout = true
+        continue
+      }
+      if (arg === '--output-document=-') {
+        stdout = true
+        continue
+      }
+      if (['--no-config', '--no-netrc', '--no-hsts', '-q', '--quiet', '--https-only'].includes(arg)) continue
+      return false
+    }
+  }
+  return stdout && urls > 0
+}
+
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
   if (request.kind === 'execute' || request.kind === 'other') return commandKinds(commandOf(request), context)
@@ -2994,7 +3056,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (floor !== undefined) return ask(floor.reason, false)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  const routine = LOOKS.includes(request.kind) || ownFiles
+  const routine = LOOKS.includes(request.kind) || ownFiles || (project.web === true && found.length === 0 && readsWeb(commandOf(request)))
   const reason =
     asked?.reason ??
     (everyRunAnswered(project) && !routine
@@ -4610,6 +4672,7 @@ export const OFFLINE =
 
 /** How a reader is held: see `decideReader`. */
 export interface ReaderOptions {
+  readonly web?: boolean
   readonly offline?: boolean
   readonly cwd?: string
   readonly trusted?: boolean
@@ -4799,6 +4862,7 @@ export const decideReader = (request: PermissionRequest, options: ReaderOptions 
     default: {
       const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
       if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
+      if (options.web === true && options.offline !== true && readsWeb(command)) return ALLOW
       const reason = readerLineReason(command, options)
       return reason === undefined ? ALLOW : deny(reason)
     }

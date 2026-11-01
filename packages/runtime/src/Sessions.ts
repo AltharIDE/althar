@@ -61,7 +61,7 @@ import { Limits, type PlanOnly } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
-import type { Policies } from './Policies'
+import { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
@@ -795,6 +795,7 @@ export class Sessions extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const live = yield* Live
+      const policies = yield* Policies
       const permissions = yield* Permissions
       const questions = yield* Questions
       const failures = yield* Failures
@@ -1989,10 +1990,12 @@ export class Sessions extends Context.Service<
                   count: SIGNED_OUT_GIT_CONFIG,
                 })
               : {}
+          const web =
+            thread.role !== 'coordinator' && !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
           const transport = entry.transport(
             cwdOf(thread),
             { ...accounts.env(account), [WORK]: work, ...guarded },
-            untrusted ? { untrusted } : undefined,
+            thread.role === 'coordinator' ? undefined : { web, ...(untrusted ? { untrusted, offline } : {}) },
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
@@ -2036,6 +2039,7 @@ export class Sessions extends Context.Service<
                   }
                 : {
                     role: 'reader',
+                    web,
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-058): never a review's lead.
@@ -2056,13 +2060,16 @@ export class Sessions extends Context.Service<
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
-          const sessionOptions: SessionOptions | undefined = untrusted
-            ? { untrusted, ...(offline ? { offline } : {}) }
-            : thread.role === 'coordinator'
-              ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
-              : upFront === undefined
-                ? undefined
-                : { sandbox: upFront }
+          const sessionOptions: SessionOptions = {
+            ...(thread.role === 'coordinator' ? {} : { web }),
+            ...(untrusted
+              ? { untrusted, ...(offline ? { offline } : {}) }
+              : thread.role === 'coordinator'
+                ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
+                : upFront === undefined
+                  ? {}
+                  : { sandbox: upFront }),
+          }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
           let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
@@ -2901,6 +2908,8 @@ export class Sessions extends Context.Service<
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of a page served on this computer, drawn by Althar, so you needn't start a browser. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
             // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-066).
             "You carry no sign-in to the code host, so a `git fetch` or `git pull` that needs one fails, in your sandbox or out of it. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
+            // A question shows on the person's cards as its headline; the whole of it is in the thread (Questions.ts).
+            'When you ask the person something, make the question one line, the decision in a few words, with options where there are any; put the background in what you write just before, which stays in the thread.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),

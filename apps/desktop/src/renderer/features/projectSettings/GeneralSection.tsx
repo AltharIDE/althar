@@ -16,6 +16,10 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 
 export const text = {
   tasks: 'Tasks',
+  leadsReachWeb: {
+    title: 'Leads can reach the web',
+    line: 'Search and read websites without asking. Pages could steer a lead into sending private code in a URL. Outside pull request reviews stay offline. Applies to new sessions.',
+  },
   conflicts: {
     title: 'Resolve merge conflicts automatically',
     /** Looks at every open task now, rather than as each default branch moves. */
@@ -84,6 +88,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
     rules === null
       ? []
       : [
+          { rule: 'leadsReachWeb', words: text.leadsReachWeb, on: rules.leadsReachWeb, set: model.setLeadsReachWeb },
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
           { rule: 'pushCommits', words: text.pushCommits, on: rules.pushCommits, set: model.setPushCommits },
           { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },
