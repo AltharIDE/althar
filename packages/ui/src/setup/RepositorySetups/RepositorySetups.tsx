@@ -63,7 +63,7 @@ export const shellColours = (line: string): ReactNode[] => {
         </span>
       ),
     )
-  const re = /(#.*$)|("(?:[^"\\]|\\.)*"?|'[^']*'?)|(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)|(&&|\|\||[|;])|(\s+)|([^\s"'|;&$#]+|[&$#])/g
+  const re = /(#[\s\S]*)|("(?:[^"\\]|\\.)*"?|'[^']*'?)|(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)|(&&|\|\||[|;])|(\s+)|([^\s"'|;&$#]+|[&$#])/g
   let first = true
   for (const m of line.matchAll(re)) {
     const [all, comment, string, variable, joint, space, word] = m
