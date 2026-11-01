@@ -550,6 +550,7 @@ const projectRefused = {
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork.",
   id_taken: "Couldn't make the project. Close the tab and start again.",
+  bad_setup: 'Name each file from the repository’s root, inside it and not in .git, and give at most 20 commands.',
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */

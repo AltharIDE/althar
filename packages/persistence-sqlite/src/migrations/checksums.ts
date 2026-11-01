@@ -56,4 +56,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0050_more_inks': '8bd8c79145c1f91953e59cb51709a65e12bcbcd061a422836e9f347c5b0085bd',
   '0051_pull_request_pictures': '98d2e81298fa7b9afa8ee1652186ad04aff6bd2fdd392081db6bf4ec0f209155',
   '0052_one_press_settles': 'c92d648953c29dccbb49a2838fa0510a9ab5432d7663698fa237994e57c13aac',
+  '0053_recorded_setups': 'b3b271687cc75403921fcd7c8d48c1621a3b363781d119f0cbd3f220dc74311c',
 }
