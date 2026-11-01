@@ -129,7 +129,7 @@ purify.addHook('afterSanitizeAttributes', (node) => {
     if (value !== null && !value.trim().startsWith('#')) node.removeAttribute(name)
   }
   /* style, and fill, filter, mask and the rest, where a url() can stand as well */
-  for (const { name, value } of [...node.attributes]) {
+  for (const { name, value } of node.attributes) {
     if (/url|image-set|\\/i.test(value)) node.setAttribute(name, offline(value))
   }
 })
