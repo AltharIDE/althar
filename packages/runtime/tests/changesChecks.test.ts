@@ -88,6 +88,43 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('hears another success at the same head after checks fail', () => {
+    const { working, bare } = hosted()
+    let state: 'passed' | 'failed' = 'passed'
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const [before] = yield* (yield* Changes).ofTask(taskId)
+      const head = before?.headSha
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      const results = yield* sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      assert.strictEqual(results[0]?.outcome, 'passed')
+      assert.include(
+        results.map((one) => one.outcome),
+        'failed',
+      )
+      assert.strictEqual(results.at(-1)?.outcome, 'passed')
+      assert.lengthOf(
+        results.filter((one) => one.outcome === 'passed'),
+        2,
+      )
+      const [after] = yield* (yield* Changes).ofTask(taskId)
+      assert.strictEqual(after?.headSha, head)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('brings a change in a repository that has never had checks to the person at once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

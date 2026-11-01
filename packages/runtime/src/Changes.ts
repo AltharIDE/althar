@@ -186,6 +186,8 @@ const Snapshot = Schema.Struct({
       ),
     }),
   ),
+  /** Number of finished-check transitions heard, including reruns at the same head. */
+  checksRevision: Schema.optional(Schema.Number),
   /** The branch it merges into; absent from a snapshot kept before this was. */
   target: Schema.optional(Schema.String),
   /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
@@ -3413,6 +3415,7 @@ export class Changes extends Context.Service<
           let rerunning = false
           let happened = false
           let checks = before.checks
+          let checksRevision = before.checksRevision ?? 0
           // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
           // and a failure goes where it should (ADR-040).
           const held = now.headSha !== null && (yield* publishing(link.taskId))
@@ -3457,8 +3460,9 @@ export class Changes extends Context.Service<
               finished &&
               settled &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran?.again ?? ''}`, { ...sum }))
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision + 1}${reran?.again ?? ''}`, { ...sum }))
             ) {
+              checksRevision += 1
               happened = true
               // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
               const reads =
@@ -3586,6 +3590,7 @@ export class Changes extends Context.Service<
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
+            checksRevision,
             ...(before.attached === true ? { attached: true } : {}),
             ...(lands || unsaid ? { queued: true } : {}),
             ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
