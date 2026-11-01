@@ -108,6 +108,9 @@ const RECENT_COMMANDS = 1_000
 /** How long what a host said about who can push to a repository is kept: opening a project again soon after doesn't ask again. */
 const PUSHABLE_KEPT = 5 * 60_000
 
+/** How long a repository's page waits for a host to say who can push: it reads on without. */
+const PUSHABLE_WAIT = Duration.seconds(5)
+
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 const realpathOf = (path: string) => {
   try {
@@ -311,8 +314,10 @@ export const handlers = Api.toLayer(
         if (!fresh && kept !== undefined && now - kept.at < PUSHABLE_KEPT) return kept.can
         const found = yield* Effect.orElseSucceed(connections.hostOf([url]), () => null)
         if (found === null) return null
+        // Read as the repositories' page is: a host that doesn't answer soon doesn't hold it up.
         const can = yield* found.host.repository(found.path).pipe(
           Effect.map((repository) => repository.canPush),
+          Effect.timeout(PUSHABLE_WAIT),
           Effect.orElseSucceed(() => null),
         )
         if (can !== null) pushable.set(url, { at: now, can })
@@ -324,8 +329,7 @@ export const handlers = Api.toLayer(
      * remote, with the code host Althar knows there and who it is signed in
      * as; a host it doesn't know by its address alone. A fork says whether
      * the person can push to the repository it was forked from, and offers
-     * once to push its tasks' branches there, where its pull requests open
-     * already, once they can.
+     * once to push its tasks' branches there, once they can.
      */
     const repositoryOf = ({ remote, fork: forked, ...repository }: ProjectRepository) =>
       Effect.gen(function* () {
@@ -337,7 +341,7 @@ export const handlers = Api.toLayer(
                 upstream: forked.upstream,
                 target: forked.target,
                 canPush,
-                offer: canPush === true && forked.target === 'upstream' && !forked.offered,
+                offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
               }))
         const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
         const path = place?.path.join('/')

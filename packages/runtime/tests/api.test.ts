@@ -1687,7 +1687,7 @@ describe('a project’s menu, through the API', () => {
 
 describe('a fork’s branches upstream, through the API', () => {
   /** A fork of meridian/api, with GitHub connected, whose pull requests open on meridian/api from the fork's branches. */
-  const forkOpened = (can: boolean) =>
+  const forkOpened = (can: boolean, target: 'upstream' | 'fork' = 'upstream') =>
     Effect.gen(function* () {
       const github = makeFakeService()
       github.addRepository(['you', 'api'])
@@ -1699,7 +1699,7 @@ describe('a fork’s branches upstream, through the API', () => {
       const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'api')) })
       const [repository] = yield* client.GetRepositories({ projectId: project.id })
       const repositoryId = repository?.id ?? ''
-      yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId, changeTarget: 'upstream' })
+      yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId, changeTarget: target })
       const fork = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one?.fork)
       return { client, github, projectId: project.id, repositoryId, fork }
     })
@@ -1714,6 +1714,15 @@ describe('a fork’s branches upstream, through the API', () => {
         )
         assert.strictEqual(refused.message, "You can't push to the repository it was forked from yet. Its owners can give you access.")
         assert.deepInclude(yield* fork, { target: 'upstream' })
+      }),
+    ),
+  )
+
+  it.live('offers the same to one whose pull requests open on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fork } = yield* forkOpened(true, 'fork')
+        assert.deepInclude(yield* fork, { target: 'fork', canPush: true, offer: true })
       }),
     ),
   )

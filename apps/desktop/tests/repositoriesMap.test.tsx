@@ -2,10 +2,11 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ConnectionList, ProjectRepository } from '@althar/contracts'
-import { Brand, HostReach, RepositoryRole } from '@althar/ui'
+import { ApiError, type ConnectionList, type ProjectRepository } from '@althar/contracts'
+import { Brand, ChangeTarget, HostReach, RepositoryRole } from '@althar/ui'
 
 import type { Opening } from '../src/renderer/features/connections/ConnectDialog'
+import { ForkOffer, useForkOffer } from '../src/renderer/features/repositories/ForkOffer'
 import { entryOf, hostsOf, Repositories } from '../src/renderer/features/repositories/Repositories'
 import { useRepositories } from '../src/renderer/features/repositories/useRepositories'
 import { connectionList, fakeClient, project, repositories } from './fixtures'
@@ -82,5 +83,65 @@ describe('a project’s repositories part', () => {
     withServices(<Part connections={null} onConnect={vi.fn()} />, client)
     await waitFor(() => expect(screen.getByText(/Tasks work in their own worktrees, in/)).toBeTruthy())
     expect(screen.getByText('~/Althar/meridian')).toBeTruthy()
+  })
+})
+
+describe('a fork’s branches going upstream', () => {
+  const fork = (set: Partial<NonNullable<ProjectRepository['fork']>>): ProjectRepository => ({
+    ...web,
+    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream', canPush: true, offer: true, ...set },
+  })
+
+  function Offer() {
+    return <ForkOffer offer={useForkOffer('p1', useRepositories('p1').repositories)} />
+  }
+
+  it('tells the map what the host said, and nothing where it hasn’t', () => {
+    expect(entryOf(fork({ canPush: false })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream, canPush: false })
+    expect(entryOf(fork({ target: 'upstream_branch' })).fork).toEqual({
+      upstream: 'meridian/web',
+      target: ChangeTarget.UpstreamBranch,
+      canPush: true,
+    })
+    expect(entryOf(fork({ canPush: null })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream })
+  })
+
+  it('offers it once: accepting sets the project and takes the offer away, with no remote touched', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({})]) })
+    withServices(<Offer />, client)
+    expect(await screen.findByText('You can push to meridian/web now. Push new tasks’ branches there instead of your fork?')).toBeTruthy()
+    vi.mocked(client.getRepositories).mockResolvedValue([fork({ target: 'upstream_branch', offer: false })])
+    await userEvent.click(screen.getByRole('button', { name: 'Push there' }))
+    expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: web.id, changeTarget: 'upstream_branch' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Push there' })).toBeNull())
+  })
+
+  it('takes not now for an answer, changing nothing but the offer', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({})]) })
+    withServices(<Offer />, client)
+    await screen.findByRole('button', { name: 'Not now' })
+    vi.mocked(client.getRepositories).mockResolvedValue([fork({ offer: false })])
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: web.id, notNow: true })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Not now' })).toBeNull())
+  })
+
+  it('says why, where it was answered, if the host has taken the access away since', async () => {
+    const { client } = fakeClient({
+      getRepositories: vi.fn(async () => [fork({})]),
+      setRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'ProjectRefused', message: 'You can’t push to the repository it was forked from yet.' })
+      }),
+    })
+    withServices(<Offer />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Push there' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('You can’t push to the repository it was forked from yet.')
+  })
+
+  it('offers nothing without access or once answered', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ offer: false, canPush: false })]) })
+    withServices(<Offer />, client)
+    await waitFor(() => expect(client.getRepositories).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: 'Push there' })).toBeNull()
   })
 })

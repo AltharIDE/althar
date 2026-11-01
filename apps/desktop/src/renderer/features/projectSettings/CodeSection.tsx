@@ -5,6 +5,7 @@ import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { serviceOfProduct } from '../connections/ways'
 import { text as frontText, type Tracker } from '../project/front'
+import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -107,9 +108,11 @@ export function CodeSection({
   onManage: () => void
 }) {
   const repositories = useRepositories(projectId)
+  const offer = useForkOffer(projectId, repositories.repositories)
   const bound = useProjectTracker(projectId, list)
   return (
     <>
+      <ForkOffer offer={offer} />
       <Repositories model={repositories} connections={list} onConnect={onConnect} />
       <SettingGroup
         title={text.trackers}

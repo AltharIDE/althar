@@ -220,7 +220,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
       account: { login: 'you', state: 'ready' },
     },
     role: 'frontend',
-    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
+    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork', canPush: null, offer: false },
     tasks: 0,
   },
   {
