@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters, and on 1 November with GitLab's rate limits and the ChatGPT Pro cut taking effect; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -55,6 +55,27 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'chatgpt-pro-allowance-ended',
+    date: '2026-10-30',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
+    what: 'People already on the plan had kept 20x Plus usage through 29 October. They now get the reopened plan’s 10x, roughly half, in Codex and Work.',
+    source: {
+      name: 'Engadget',
+      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
+    },
+  },
+  {
+    id: 'gitlab-rate-limits',
+    date: '2026-10-19',
+    kind: ShiftKind.Limits,
+    who: 'GitLab',
+    title: 'GitLab.com sets rate limits by plan, citing coding agents',
+    what: 'Free and unauthenticated traffic is limited from 19 October; Premium and Ultimate follow in January 2027. Limits apply to service accounts too, so agents and CI that poll hard will hit them.',
+    source: { name: 'GitLab blog', url: 'https://about.gitlab.com/blog/rate-limit-change-2026/' },
+  },
   {
     id: 'claude-api-sampling-removed',
     date: '2026-10-21',
@@ -399,19 +420,6 @@ export const SHIFTS: readonly Shift[] = [
  * passed; move it into SHIFTS then, with what actually happened.
  */
 export const UPCOMING: readonly Upcoming[] = [
-  {
-    id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-30',
-    announced: '2026-09-29',
-    kind: ShiftKind.Limits,
-    who: 'OpenAI',
-    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
-    source: {
-      name: 'Engadget',
-      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
-    },
-  },
   {
     id: 'usage-policy-takes-effect',
     date: '2026-11-12',
