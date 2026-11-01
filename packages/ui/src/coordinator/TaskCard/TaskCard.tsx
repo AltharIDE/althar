@@ -45,6 +45,7 @@ export const taskCardText: TaskCardText = {
 
 export interface TaskCardProps {
   task: string
+  errands?: readonly string[] | undefined
   title: string
   status: TaskStatus
   /** Its steps, by name, in order. */
@@ -91,6 +92,7 @@ export function TaskCard({
   from,
   pr,
   meta,
+  errands,
   fresh,
   found,
   onOpen,
@@ -119,6 +121,11 @@ export function TaskCard({
       <p className={s.title} id={titleId}>
         {title}
       </p>
+      {errands?.map((line) => (
+        <p className={s.errand} key={line}>
+          {line}
+        </p>
+      ))}
       {steps.length > 0 && (
         <StepTrack steps={trackOf(steps, at, seen, status === TaskStatus.Done)} status={status} labels fresh={fresh} className={s.track} />
       )}
