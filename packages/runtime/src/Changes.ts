@@ -18,7 +18,7 @@ import {
 } from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
 import type { PermissionRequest } from '@althar/provider-adapters'
-import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
+import { type ActorId, type ChangeTarget, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, type Ledger } from '@althar/persistence-sqlite'
 import {
   Cause,
@@ -66,7 +66,7 @@ import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
-import { forkOf } from './forks'
+import { forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
@@ -203,8 +203,18 @@ const Snapshot = Schema.Struct({
   queued: Schema.optional(Schema.Boolean),
   /** How many times the merge queue took it out unmerged: a merge after each is another, at the same head too. */
   leftQueue: Schema.optional(Schema.Number),
+  /**
+   * The repository its branch is on, as its host last said, where its
+   * commits are pushed: a fork's path, or null for a branch of its own
+   * repository. Absent where the host hasn't said, and from one kept before
+   * this was (ADR-078).
+   */
+  head: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
 })
 type Snapshot = typeof Snapshot.Type
+
+/** Whether two paths on a host are one repository's: GitHub and GitLab don't mind the case. */
+const samePath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
 
 /** The branch a pull request's commits go to on its host: its own, as last seen, else the task's, as one Althar opened has. */
 const sourceOf = (snapshot: Snapshot, branch: string) => snapshot.source ?? branch
@@ -286,7 +296,7 @@ interface PublishRow {
   readonly remotes: string
   readonly defaultBase: string | null
   /** For a fork: where its pull requests open, the repository it was forked from or the fork itself. */
-  readonly changeTarget: 'upstream' | 'fork' | null
+  readonly changeTarget: ChangeTarget | null
 }
 
 /**
@@ -449,6 +459,8 @@ const snapshotOf = (
   repository: ReadonlyArray<string>,
   words: Snapshot['words'],
   checks: Snapshot['checks'],
+  /** As it was seen before: where its branch is stays as last said where the host doesn't say now. */
+  before?: Snapshot,
 ): Snapshot => ({
   number: change.number,
   title: change.title,
@@ -466,6 +478,7 @@ const snapshotOf = (
   conflicts: change.conflicts ?? null,
   source: change.source,
   ...(change.queued === true ? { queued: true } : {}),
+  ...(change.headRepository !== undefined ? { head: change.headRepository } : before?.head !== undefined ? { head: before.head } : {}),
 })
 
 type Store =
@@ -1182,13 +1195,14 @@ export class Changes extends Context.Service<
           // A plain task's worktree with no branch yet holds nothing of its own: there is no branch to push (DEV-96).
           if (given.branched === 0) return { kind: 'nothing', left: [] } as const
           let task = given
-          // A fork's branch goes to the fork, whatever else its clone's remotes name; its pull request, where the project says.
-          const fork = yield* namedRemotes(task.path).pipe(
-            Effect.map(forkOf),
-            Effect.orElseSucceed(() => null),
-          )
+          // A fork's branch goes to the fork, whatever else its clone's remotes name, unless the project sends it to the repository
+          // it was forked from; its pull request, where the project says.
+          const named = yield* namedRemotes(task.path).pipe(Effect.orElseSucceed(() => []))
+          const fork = forkOf(named)
           const remotes =
-            fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes) : [fork.fork.url]
+            fork === null
+              ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes))
+              : [fork.fork.url]
           // A connection there that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can:
           // publishing, and trying again after it couldn't, need no more of the person than that.
           const found = yield* connections.hostOf(remotes, { fromCli: true })
@@ -1204,21 +1218,38 @@ export class Changes extends Context.Service<
             return yield* new NotConnected({ product: known?.product ?? 'github', what: remotes[0] ?? 'the repository' })
           }
           const { host } = found
-          const own = yield* host.repository(found.path)
-          // Into the repository it was forked from, on the same host, from the fork's branch.
-          const repository = fork !== null && task.changeTarget === 'upstream' ? yield* host.repository(fork.upstream.path) : own
-          const from = repository === own ? undefined : own
+          const forked = yield* host.repository(found.path)
+          const upstream =
+            fork !== null && (task.changeTarget === 'upstream' || task.changeTarget === 'upstream_branch')
+              ? yield* host.repository(fork.upstream.path)
+              : null
+          // Into the repository it was forked from, on the same host: from the fork's branch, or, where the project sends its
+          // branches there too and its host says the person can push there, from a branch of its own.
+          let repository = upstream ?? forked
+          let own = upstream !== null && task.changeTarget === 'upstream_branch' && upstream.canPush ? upstream : forked
+          // A pull request already open from the branch stays where it is, its commits going where its branch is, whatever the
+          // project says now: switching where a fork's work goes moves only its next ones (ADR-078). So does one opened from a
+          // fork before its clone's remotes were renamed for the repository it came from.
+          const standing = next === undefined ? yield* openFrom(input.taskId, task.workspaceId, task.branch) : undefined
+          if (standing !== undefined) {
+            repository = samePath(standing.repository, repository.path) ? repository : yield* host.repository(standing.repository)
+            own = yield* branchRepositoryOf(host, repository, task.path, standing)
+          }
+          const from = samePath(repository.path, own.path) ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
           const pushTarget = yield* host.pushTarget(own)
           // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
           // was chosen, that repository's default.
           const target =
-            from === undefined
+            fork === null || !samePath(repository.path, fork.upstream.path)
               ? (task.baseRef ?? '').replace(/^origin\//, '') || task.defaultBase || repository.defaultBranch
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
                 : repository.defaultBranch
+          // Never onto a default branch, wherever the branch goes (ADR-071): a task's branch is its own.
+          if (task.branch === own.defaultBranch || (from === undefined && task.branch === target))
+            return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
           // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-052).
           const attached = next === undefined ? yield* attachedOf(input.taskId, task.workspaceId) : undefined
           if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget)
@@ -1433,6 +1464,18 @@ export class Changes extends Context.Service<
             : undefined
         })
 
+      /** The pull request open from a repository's branch in the task, as last seen, if there is one. */
+      const openFrom = (taskId: string, workspaceId: string, branch: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [open] = yield* sql<{ snapshot: string }>`
+            SELECT l.snapshot FROM repository_changes c
+            JOIN external_links l ON l.task_id = ${taskId} AND l.kind = 'change' AND l.url = c.pull_request_url
+            WHERE c.workspace_id = ${workspaceId} AND c.branch = ${branch} AND json_extract(l.snapshot, '$.state') = 'open'
+            ORDER BY c.created_at DESC, c.rowid DESC LIMIT 1`
+          return open === undefined ? undefined : yield* decodeSnapshot(open.snapshot)
+        })
+
       /**
        * Publishes a repository of the task to the open pull request it was
        * attached to (ADR-052): its branch goes onto that pull request's own
@@ -1467,7 +1510,7 @@ export class Changes extends Context.Service<
           const { host, repository } = yield* current(input.taskId, snapshot.url)
           const read = yield* host.change(repository, snapshot.number)
           const seen: Snapshot = {
-            ...snapshotOf(read, snapshot.repository, snapshot.words, snapshot.checks),
+            ...snapshotOf(read, snapshot.repository, snapshot.words, snapshot.checks, snapshot),
             headSha: head,
             attached: true,
           }
@@ -1515,7 +1558,7 @@ export class Changes extends Context.Service<
             bindingId: string
             name: string
             remotes: string
-            changeTarget: 'upstream' | 'fork' | null
+            changeTarget: ChangeTarget | null
           }>`
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.branched_at IS NOT NULL AS branched, b.id AS binding_id,
               b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target
@@ -1526,12 +1569,12 @@ export class Changes extends Context.Service<
           const places = (yield* Effect.forEach(rows, (row) =>
             Effect.gen(function* () {
               if (!existsSync(row.path)) return []
-              const fork = yield* namedRemotes(row.path).pipe(
-                Effect.map(forkOf),
-                Effect.orElseSucceed(() => null),
-              )
+              const named = yield* namedRemotes(row.path).pipe(Effect.orElseSucceed(() => []))
+              const fork = forkOf(named)
               const remotes =
-                fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes) : [fork.fork.url]
+                fork === null
+                  ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes))
+                  : [fork.fork.url]
               const found = yield* connections.hostOf(remotes, { fromCli: true })
               return found === null ? [] : [{ row, fork, found }]
             }),
@@ -1565,7 +1608,10 @@ export class Changes extends Context.Service<
                 `The task changes several repositories (${places.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
               )
             // By its number, where the repository's pull requests open: the one a fork came from, where the project sends them there.
-            const path = only.fork !== null && only.row.changeTarget === 'upstream' ? only.fork.upstream.path : only.found.path
+            const path =
+              only.fork !== null && (only.row.changeTarget === 'upstream' || only.row.changeTarget === 'upstream_branch')
+                ? only.fork.upstream.path
+                : only.found.path
             return { ...only, path, number: Number(number) }
           })
           const { row, fork, found } = chosen
@@ -1582,18 +1628,21 @@ export class Changes extends Context.Service<
           const path = repository.path
           const name = `${host.words.short} ${host.words.prefix}${pull.number}`
           if (pull.state !== 'open') return yield* refuse(`${name} is ${pull.state}: only an open one can be attached.`)
-          // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself.
+          // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself;
+          // for a fork whose branches go to the repository it came from (ADR-078), that one too, as the person can push there.
           // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
-          const own = fork?.fork.path ?? found.path
+          const pushes = fork?.fork.path ?? found.path
           const headOn = pull.headRepository
           if (headOn === undefined)
             return yield* refuse(`The host doesn’t say where ${name}’s branch is, so Althar can’t tell it’s one this task pushes to.`)
           if (headOn !== null && headOn.length === 0) return yield* refuse(`${name}’s branch was on a fork that is gone.`)
           const headPath = headOn ?? path
-          if (!same(headPath, own))
+          const upstreamBranches = fork !== null && row.changeTarget === 'upstream_branch' && same(headPath, fork.upstream.path)
+          if (!same(headPath, pushes) && !(upstreamBranches && repository.canPush))
             return yield* refuse(
-              `${name}’s branch, ${pull.source}, is on ${headPath.join('/')}, which this task doesn’t push to: it pushes to ${own.join('/')}.`,
+              `${name}’s branch, ${pull.source}, is on ${headPath.join('/')}, which this task doesn’t push to: it pushes to ${pushes.join('/')}.`,
             )
+          const own = same(headPath, pushes) ? pushes : headPath
           const [other] = yield* sql<{ slug: string }>`
             SELECT k.slug FROM external_links x JOIN tasks k ON k.id = x.task_id
             WHERE x.project_id = ${task.projectId} AND x.kind = 'change' AND x.url = ${pull.url} AND x.listening = 1
@@ -1873,18 +1922,40 @@ export class Changes extends Context.Service<
       /* ---- Pushes the lead asks the person for, as items in the task's thread ---- */
 
       /**
-       * Where a pull request's commits are pushed: its own repository, or, for
-       * one from a fork into the repository it was forked from, the fork.
+       * The repository a pull request's branch is on, where its commits are
+       * pushed, whatever the project says of the task's next ones (ADR-078):
+       * where its host last said, else where it says now; where it doesn't
+       * say, its own repository, or for one from a fork into the repository it
+       * was forked from, the fork, as the clone's remotes say.
        */
-      const pushTargetOf = (host: CodeHost, repository: Repository, path: string) =>
+      const branchRepositoryOf = (
+        host: CodeHost,
+        repository: Repository,
+        path: string,
+        pull: { readonly number: number; readonly head?: ReadonlyArray<string> | null | undefined },
+      ) =>
         Effect.gen(function* () {
+          const head =
+            pull.head !== undefined
+              ? pull.head
+              : (yield* host.change(repository, pull.number).pipe(Effect.orElseSucceed(() => null)))?.headRepository
+          if (head === null) return repository
+          if (head !== undefined && head.length > 0) return samePath(head, repository.path) ? repository : yield* host.repository(head)
           const fork = yield* namedRemotes(path).pipe(
             Effect.map(forkOf),
             Effect.orElseSucceed(() => null),
           )
-          const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
-          return yield* host.pushTarget(into ? yield* host.repository(fork.fork.path) : repository)
+          const into = fork !== null && samePath(repository.path, fork.upstream.path)
+          return into ? yield* host.repository(fork.fork.path) : repository
         })
+
+      /** Where a pull request's commits are pushed: the repository its branch is on. */
+      const pushTargetOf = (
+        host: CodeHost,
+        repository: Repository,
+        path: string,
+        pull: { readonly number: number; readonly head?: ReadonlyArray<string> | null | undefined },
+      ) => Effect.flatMap(branchRepositoryOf(host, repository, path, pull), (on) => host.pushTarget(on))
 
       /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
       const madeFrom = (commit: string) =>
@@ -2027,7 +2098,7 @@ export class Changes extends Context.Service<
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const pushTarget = yield* pushTargetOf(host, repository, workspace.path)
+          const pushTarget = yield* pushTargetOf(host, repository, workspace.path, snapshot)
           return { link, snapshot, workspace, pushTarget, sent: yield* sentTo(link.projectId, snapshot.url) }
         })
 
@@ -3284,7 +3355,7 @@ export class Changes extends Context.Service<
           if (sent === null || sent === said) return said
           const workspace = yield* worktreeOf(link.taskId, read.url)
           if (workspace === undefined || !(yield* behindAny(workspace.path, [said], [sent]))) return said
-          const target = yield* pushTargetOf(host, repository, workspace.path)
+          const target = yield* pushTargetOf(host, repository, workspace.path, { number: read.number, head: read.headRepository })
           return (yield* remoteTip(workspace.path, target, onto)) === sent ? sent : said
         }).pipe(Effect.orElseSucceed(() => read.headSha))
 
@@ -3469,7 +3540,7 @@ export class Changes extends Context.Service<
           const entered = before.queued !== true && now.state === 'open' && now.queued === true
           // Attached to the task, it stays so (ADR-052).
           const after = {
-            ...snapshotOf(now, before.repository, before.words, checks),
+            ...snapshotOf(now, before.repository, before.words, checks, before),
             ...(before.attached === true ? { attached: true } : {}),
             ...(lands || unsaid ? { queued: true } : {}),
             ...(leftQueue || before.leftQueue !== undefined ? { leftQueue: (before.leftQueue ?? 0) + (leftQueue ? 1 : 0) } : {}),
@@ -5028,7 +5099,7 @@ export class Changes extends Context.Service<
           const { host, repository } = yield* current(taskId, snapshot.url)
           const onto = sourceOf(snapshot, branch)
           if (onto === repository.defaultBranch) return `${name} is from ${onto}`
-          const tip = yield* remoteTip(path, yield* pushTargetOf(host, repository, path), onto)
+          const tip = yield* remoteTip(path, yield* pushTargetOf(host, repository, path, snapshot), onto)
           const sent = yield* sentTo(link.projectId, snapshot.url)
           const there = tip ?? snapshot.headSha
           if (there === null || there !== sent) return `Someone else pushed to ${name}`
@@ -5099,7 +5170,7 @@ export class Changes extends Context.Service<
           // As its host has it now: one merged since Althar last asked takes nothing more (ADR-034).
           if ((yield* host.change(repository, snapshot.number)).state !== 'open') return
           const onto = sourceOf(snapshot, workspace.branch)
-          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), onto)
+          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path, snapshot), onto)
           const ahead = yield* aheadOf(workspace.path, tip, [sent, snapshot.headSha])
           if (ahead.kind === 'ahead' && ahead.count === 0) return
           const why = yield* heldOf(taskId, link, snapshot, workspace.path, workspace.branch, ahead)
@@ -5797,7 +5868,14 @@ export class Changes extends Context.Service<
               message: `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
             })
           // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
-          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), now.source)
+          const tip = yield* remoteTip(
+            workspace.path,
+            yield* pushTargetOf(host, repository, workspace.path, {
+              number: now.number,
+              head: now.headRepository !== undefined ? now.headRepository : snapshot.head,
+            }),
+            now.source,
+          )
           const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
           const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
           if (ahead.kind === 'behind')

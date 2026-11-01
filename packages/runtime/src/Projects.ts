@@ -192,8 +192,17 @@ export interface ProjectRepository {
   /** Where its work goes: its `origin`, else its first remote, without credentials, as its clone here has them, or as it was added. */
   readonly remote: string | null
   readonly role: RepositoryRole
-  /** The fork its remotes make it, with where its tasks open pull requests: as before, on the fork, until the person says. */
-  readonly fork: { readonly fork: string; readonly upstream: string; readonly target: ChangeTarget } | null
+  /**
+   * The fork its remotes make it, with where its tasks' work goes: as before, on the fork, until the person says; the address
+   * of the repository it was forked from, to ask its host who can push there; and whether the offer to push there was answered.
+   */
+  readonly fork: {
+    readonly fork: string
+    readonly upstream: string
+    readonly upstreamUrl: string
+    readonly target: ChangeTarget
+    readonly offered: boolean
+  } | null
   /** Tasks under way that change it, which keep it if it is left out. */
   readonly tasks: number
 }
@@ -366,12 +375,16 @@ export class Projects extends Context.Service<
      * folder changes. The last one stays.
      */
     leaveOut(projectId: string, repositoryId: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
-    /** Sets a repository's role, and for a fork, where its tasks open pull requests. */
+    /**
+     * Sets a repository's role, and for a fork, where its tasks' work goes, which answers the offer to push its branches
+     * upstream, as `notNow` does alone. Whether the person can push upstream is the caller's to ask its host.
+     */
     setRepository(input: {
       readonly projectId: string
       readonly repositoryId: string
       readonly role?: string
       readonly changeTarget?: string
+      readonly notNow?: boolean
       readonly commandId?: CommandId
     }): Effect.Effect<void, NotFound | ProjectRefused | GitFailed | Failure>
     /**
@@ -553,10 +566,12 @@ export class Projects extends Context.Service<
           })
         })
 
-      /** Where a task starts in a repository: its default branch, or, for a fork whose pull requests open on the repository it came from, that repository's. */
+      /** Where a task starts in a repository: its default branch, or, for a fork whose work goes to the repository it came from, that repository's. */
       const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
         Effect.gen(function* () {
-          const upstream = binding.changeTarget === 'upstream' && (yield* forkAt(binding.repository)) !== null
+          const upstream =
+            (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') &&
+            (yield* forkAt(binding.repository)) !== null
           return upstream
             ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
             : { remote: 'origin', base: binding.base ?? 'main' }
@@ -800,10 +815,11 @@ export class Projects extends Context.Service<
             folder: string | null
             role: string
             changeTarget: ChangeTarget | null
+            upstreamOfferAt: string | null
             remotes: string
             tasks: number
           }>`
-            SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target, b.remote_fingerprints AS remotes,
+            SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target, b.upstream_offer_at, b.remote_fingerprints AS remotes,
               (SELECT count(DISTINCT w.task_id) FROM workspaces w JOIN tasks k ON k.id = w.task_id
                 WHERE w.binding_id = b.id AND k.state NOT IN ('done', 'abandoned')) AS tasks
             FROM repository_bindings b
@@ -831,7 +847,13 @@ export class Projects extends Context.Service<
                 fork:
                   fork === null
                     ? null
-                    : { fork: fork.fork.path.join('/'), upstream: fork.upstream.path.join('/'), target: row.changeTarget ?? 'fork' },
+                    : {
+                        fork: fork.fork.path.join('/'),
+                        upstream: fork.upstream.path.join('/'),
+                        upstreamUrl: fork.upstream.url,
+                        target: row.changeTarget ?? 'fork',
+                        offered: row.upstreamOfferAt !== null,
+                      },
                 tasks: row.tasks,
               } satisfies ProjectRepository
             }),
@@ -1013,6 +1035,7 @@ export class Projects extends Context.Service<
         readonly repositoryId: string
         readonly role?: string
         readonly changeTarget?: string
+        readonly notNow?: boolean
         readonly commandId?: CommandId
       }) =>
         Effect.gen(function* () {
@@ -1021,9 +1044,15 @@ export class Projects extends Context.Service<
           const role = input.role
           if (role !== undefined && !Schema.is(RepositoryRole)(role)) return yield* new ProjectRefused({ reason: 'no_role' })
           const target = input.changeTarget
-          if (target !== undefined && (!Schema.is(ChangeTarget)(target) || (yield* forkAt(binding.path)) === null))
+          const forked = target !== undefined || input.notNow === true
+          if (forked && ((target !== undefined && !Schema.is(ChangeTarget)(target)) || (yield* forkAt(binding.path)) === null))
             return yield* new ProjectRefused({ reason: 'not_a_fork' })
-          const set = { ...(role === undefined ? {} : { role }), ...(target === undefined ? {} : { changeTarget: target }) }
+          // Pushing upstream, chosen here or from the offer, answers the offer, as not now does: it isn't made again, switched back or not.
+          const set = {
+            ...(role === undefined ? {} : { role }),
+            ...(target === undefined ? {} : { changeTarget: target }),
+            ...(target === 'upstream_branch' || input.notNow === true ? { upstreamOfferAt: yield* timestamp } : {}),
+          }
           if (Object.keys(set).length === 0) return
           yield* sql.withTransaction(
             Effect.gen(function* () {

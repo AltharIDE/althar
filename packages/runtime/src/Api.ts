@@ -19,7 +19,7 @@ import {
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Cause, Clock, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -29,7 +29,7 @@ import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
 import { codeRootOf } from './code'
-import { NotFound } from './errors'
+import { NotFound, ProjectRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
@@ -104,6 +104,9 @@ const FEED_FALLBACK = '1 second'
 
 /** How many session commands' results are kept for retries, per launch. */
 const RECENT_COMMANDS = 1_000
+
+/** How long what a host said about who can push to a repository is kept: opening a project again soon after doesn't ask again. */
+const PUSHABLE_KEPT = 5 * 60_000
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 const realpathOf = (path: string) => {
@@ -291,13 +294,51 @@ export const handlers = Api.toLayer(
       workspace: info.workspace,
     })
 
+    /** What a host last said about who can push where, by the repository's address, and when it said it. */
+    const pushable = new Map<string, { readonly at: number; readonly can: boolean }>()
+
+    /**
+     * Whether the person can push to a repository, as its host says through
+     * the connection that reaches it (ADR-078): asked as a project's
+     * repositories are read, and kept a few minutes, so opening the project
+     * again doesn't ask again; `fresh` asks now. Null where no connection
+     * reaches it, or the host couldn't say.
+     */
+    const canPushTo = (url: string, fresh = false) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        const kept = pushable.get(url)
+        if (!fresh && kept !== undefined && now - kept.at < PUSHABLE_KEPT) return kept.can
+        const found = yield* Effect.orElseSucceed(connections.hostOf([url]), () => null)
+        if (found === null) return null
+        const can = yield* found.host.repository(found.path).pipe(
+          Effect.map((repository) => repository.canPush),
+          Effect.orElseSucceed(() => null),
+        )
+        if (can !== null) pushable.set(url, { at: now, can })
+        return can
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
-     * as; a host it doesn't know by its address alone.
+     * as; a host it doesn't know by its address alone. A fork says whether
+     * the person can push to the repository it was forked from, and offers
+     * once to push its tasks' branches there, where its pull requests open
+     * already, once they can.
      */
-    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+    const repositoryOf = ({ remote, fork: forked, ...repository }: ProjectRepository) =>
       Effect.gen(function* () {
+        const fork =
+          forked === null
+            ? null
+            : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
+                fork: forked.fork,
+                upstream: forked.upstream,
+                target: forked.target,
+                canPush,
+                offer: canPush === true && forked.target === 'upstream' && !forked.offered,
+              }))
         const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
         const path = place?.path.join('/')
         const host =
@@ -311,7 +352,7 @@ export const handlers = Api.toLayer(
                 url: place.url,
                 account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
               }
-        return { ...repository, host }
+        return { ...repository, fork, host }
       })
 
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
@@ -687,17 +728,24 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget }, commandId)
+              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget, notNow }, commandId)
+              // Its branches go upstream only where its host says now that the person can push there.
+              if (changeTarget === 'upstream_branch') {
+                const fork = (yield* projects.repositories(projectId)).find((one) => one.id === repositoryId)?.fork ?? null
+                if (fork !== null && (yield* canPushTo(fork.upstreamUrl, true)) !== true)
+                  return yield* new ProjectRefused({ reason: 'no_upstream_access' })
+              }
               yield* projects.setRepository({
                 projectId,
                 repositoryId,
                 ...(role === undefined ? {} : { role }),
                 ...(changeTarget === undefined ? {} : { changeTarget }),
+                ...(notNow === undefined ? {} : { notNow }),
                 commandId: said.commandId,
               })
             }),

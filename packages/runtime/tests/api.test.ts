@@ -1546,7 +1546,14 @@ describe('a project’s menu, through the API', () => {
           ],
         )
         const docs = again[2]
-        assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
+        // GitHub isn't connected, so whether the person can push to the repository it was forked from isn't known, and nothing is offered.
+        assert.deepStrictEqual(docs?.fork, {
+          fork: 'you/refund-docs',
+          upstream: 'meridian/refund-docs',
+          target: 'fork',
+          canPush: null,
+          offer: false,
+        })
         // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
         assert.deepStrictEqual(docs?.host, {
           product: 'github',
@@ -1673,6 +1680,63 @@ describe('a project’s menu, through the API', () => {
           "That project isn't there any more.",
         )
         assert.notStrictEqual((yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })).id, project.id)
+      }),
+    ),
+  )
+})
+
+describe('a fork’s branches upstream, through the API', () => {
+  /** A fork of meridian/api, with GitHub connected, whose pull requests open on meridian/api from the fork's branches. */
+  const forkOpened = (can: boolean) =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'api'])
+      github.addRepository(['meridian', 'api'])
+      github.letPush(['meridian', 'api'], can)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ api: [`origin=${HOST}/you/api.git`, `upstream=${HOST}/meridian/api.git`] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'api')) })
+      const [repository] = yield* client.GetRepositories({ projectId: project.id })
+      const repositoryId = repository?.id ?? ''
+      yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId, changeTarget: 'upstream' })
+      const fork = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one?.fork)
+      return { client, github, projectId: project.id, repositoryId, fork }
+    })
+
+  it.live('says plainly the person can’t push there yet, offers nothing, and keeps its branches on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, repositoryId, fork } = yield* forkOpened(false)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: false, offer: false })
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.message, "You can't push to the repository it was forked from yet. Its owners can give you access.")
+        assert.deepInclude(yield* fork, { target: 'upstream' })
+      }),
+    ),
+  )
+
+  it.live('offers once to push upstream when the host says the person can, and not again after not now or a choice', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, github, projectId, repositoryId, fork } = yield* forkOpened(true)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: true })
+        // Not now: the offer goes, and where the work goes stays.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, notNow: true })
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: false })
+        // Still a choice in its settings: its branches go upstream, and back to the fork, with no offer after.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' })
+        assert.deepInclude(yield* fork, { target: 'upstream_branch', offer: false })
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream' })
+        assert.deepInclude(yield* fork, { target: 'upstream', offer: false })
+        // The host is asked again as it is chosen: access taken away since, it isn't.
+        github.letPush(['meridian', 'api'], false)
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.reason, 'ProjectRefused')
       }),
     ),
   )

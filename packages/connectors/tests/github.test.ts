@@ -88,6 +88,21 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('says the account can push to a repository it was forked from only once its owners let it', () =>
+    Effect.gen(function* () {
+      const upstream = { id: 9, full_name: 'AltharIDE/althar', default_branch: 'main', html_url: 'https://github.com/AltharIDE/althar' }
+      const before = github([
+        ['GET', `${API}/repos/AltharIDE/althar`, { json: { ...upstream, permissions: { admin: false, push: false, pull: true } } }],
+      ])
+      assert.isFalse((yield* before.host.repository(['AltharIDE', 'althar'])).canPush)
+      // Invited as a collaborator, GitHub says so on the same read.
+      const after = github([
+        ['GET', `${API}/repos/AltharIDE/althar`, { json: { ...upstream, permissions: { admin: false, push: true, pull: true } } }],
+      ])
+      assert.isTrue((yield* after.host.repository(['AltharIDE', 'althar'])).canPush)
+    }),
+  )
+
   it.effect('merges in the first way the repository allows, only the head it last saw, and says why it can’t', () =>
     Effect.gen(function* () {
       const { host, sent } = github([

@@ -117,6 +117,8 @@ const PROJECTS = ['Q4 launch', 'Payments v2']
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
   addRepository(path: ReadonlyArray<string>, defaultBranch?: string): Repository
+  /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
+  letPush(path: ReadonlyArray<string>, can: boolean): void
   addIssue(issue: {
     readonly ref: string
     readonly key?: string
@@ -769,6 +771,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }
       repositories.set(path.join('/').toLowerCase(), repository)
       return repository
+    },
+    letPush: (path, can) => {
+      const key = path.join('/').toLowerCase()
+      const found = repositories.get(key)
+      if (found !== undefined) repositories.set(key, { ...found, canPush: can })
     },
     addIssue: (input) => {
       const container = input.ref.includes('#') ? (input.ref.split('#')[0] ?? null) : (input.ref.split('-')[0] ?? null)

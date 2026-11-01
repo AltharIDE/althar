@@ -417,8 +417,13 @@ export type ProjectTracker = typeof ProjectTracker.Type
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
 export type RepositoryRole = typeof RepositoryRole.Type
 
-/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
-export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+/**
+ * Where a fork's tasks' work goes: pull requests on the repository it was
+ * forked from, from the fork's branches; on the fork; or, where its host says
+ * the person can push there, branches and pull requests both on the
+ * repository it was forked from (ADR-078).
+ */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branch'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
@@ -459,8 +464,20 @@ export const ProjectRepository = Schema.Struct({
   /** Where its work goes, from its `origin` (else its first remote); null with no remote, or one that is a folder. */
   host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
-  /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
-  fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
+  /**
+   * The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its work goes; whether
+   * its host says the person can push to the repository it was forked from, null where Althar couldn't ask; and whether Althar
+   * offers, once, to push its tasks' branches there now that they can (ADR-078).
+   */
+  fork: Schema.NullOr(
+    Schema.Struct({
+      fork: Schema.String,
+      upstream: Schema.String,
+      target: ChangeTarget,
+      canPush: Schema.NullOr(Schema.Boolean),
+      offer: Schema.Boolean,
+    }),
+  ),
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
 })
@@ -2964,7 +2981,10 @@ export const Api = RpcGroup.make(
   command('AddRepositories', { projectId: Schema.String, grant: Schema.String }, Schema.Void),
   /** Leaves a repository out of the project: new tasks can't change it; tasks made with it keep it. */
   command('LeaveOutRepository', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
-  /** Sets a repository's role, or, for a fork, where its pull requests open. */
+  /**
+   * Sets a repository's role, or, for a fork, where its work goes: choosing answers the offer to push its branches upstream, as
+   * `notNow` does without changing it. Its branches go upstream only where its host says the person can push there.
+   */
   command(
     'SetRepository',
     {
@@ -2972,6 +2992,7 @@ export const Api = RpcGroup.make(
       repositoryId: Schema.String,
       role: Schema.optional(RepositoryRole),
       changeTarget: Schema.optional(ChangeTarget),
+      notNow: Schema.optional(Schema.Boolean),
     },
     Schema.Void,
   ),

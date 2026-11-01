@@ -540,6 +540,7 @@ const projectRefused = {
   last_repository: 'A project needs a repository. Add another first.',
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork.",
+  no_upstream_access: "You can't push to the repository it was forked from yet. Its owners can give you access.",
   id_taken: "Couldn't make the project. Close the tab and start again.",
 } as const satisfies Record<ProjectRefused['reason'], string>
 
