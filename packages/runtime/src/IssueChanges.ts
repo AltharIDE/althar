@@ -44,7 +44,10 @@ import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServe
  * through (`changeIssues`), when it is applied at once and its card is a
  * line saying so. That default is this one place: `waitsOnThePerson`. A
  * comment and a link to a pull request apply at once, either way, and their
- * card is a line too.
+ * card is a line too. So do the moves of a task's own issue with its pull
+ * request (In Review as it opens, Done as it merges) where the project moves
+ * issues along with its tasks (`moveIssues`), whatever `changeIssues` says;
+ * one the tracker refuses makes a card with the reason, to try again.
  *
  * Names are read against the tracker as the change is proposed, so a card
  * never asks the person to apply what the tracker can't take: a status its
@@ -82,6 +85,12 @@ interface Entry {
   readonly url: string
   readonly title: string
   readonly change: IssueChange
+  /** Its status as it stood when the change was read, in its tracker's words. */
+  readonly from?: string
+  /** Its status once the change applied, as its tracker answered. */
+  readonly became?: string
+  /** The pull request that moved it, and the task's title: what its note links to. */
+  readonly why?: { readonly url: string; readonly task: string }
   readonly comment?: string
   readonly link?: { readonly url: string; readonly title: string }
   /** The receipt's key, where it is shared with another action: a pull request's link, which Althar may have made as it opened. */
@@ -170,10 +179,17 @@ const ME = /^(me|myself|the person|the user|you)$/i
 
 const decodeEntries = (changes: string) => JSON.parse(changes) as ReadonlyArray<Entry>
 
+/** What a card's note links to and whose task it is, where a pull request moved its issue. */
+const whyOf = (entries: ReadonlyArray<Entry>) => {
+  const why = entries.find((entry) => entry.why !== undefined)?.why
+  return why === undefined ? {} : { noteUrl: why.url, task: why.task }
+}
+
 /** A card, from its row. */
 export const cardOf = (row: Row): IssueChangesCard => ({
   changesId: row.id,
   note: row.note,
+  ...whyOf(decodeEntries(row.changes)),
   state: row.state,
   error: row.error,
   direct: row.direct === 1,
@@ -183,6 +199,8 @@ export const cardOf = (row: Row): IssueChangesCard => ({
     key: entry.key,
     url: entry.url,
     title: entry.title,
+    from: entry.from ?? null,
+    became: entry.became ?? null,
     changes: linesOf(entry),
     applied: entry.applied,
     error: entry.error,
@@ -325,6 +343,10 @@ export class IssueChanges extends Context.Service<
       readonly threadId: string
       readonly issues: ReadonlyArray<{ readonly target: Target; readonly change: Wanted }>
       readonly note?: string
+      /** Where the pull request is and whose task it is, as the note links it: a pull request's move of its task's issue. */
+      readonly why?: { readonly url: string; readonly task: string }
+      /** Applied at once, whatever the project's rules for changes say: set by what the project let through by its own rule. */
+      readonly direct?: boolean
       readonly by: Proposer
       readonly actorId: ActorId
     }): Effect.Effect<IssueChangesCard, unknown>
@@ -359,7 +381,11 @@ export class IssueChanges extends Context.Service<
      * where the tracker has no such status, or the issue is there or past it
      * already. Never fails: what it meets is logged.
      */
-    followPullRequest(taskId: string, event: 'opened' | 'merged', pullRequest: { readonly key: string }): Effect.Effect<void>
+    followPullRequest(
+      taskId: string,
+      event: 'opened' | 'merged',
+      pullRequest: { readonly key: string; readonly url: string },
+    ): Effect.Effect<void>
   }
 >()('@althar/runtime/IssueChanges') {
   static readonly layer: Layer.Layer<IssueChanges, never, Store> = Layer.effect(
@@ -736,7 +762,15 @@ export class IssueChanges extends Context.Service<
               entry.applied === true
                 ? Effect.succeed(entry)
                 : Effect.map(Effect.result(applyEntry(row, entry, index)), (made): Entry => {
-                    if (made._tag === 'Success') return { ...entry, applied: true, error: null }
+                    if (made._tag === 'Success')
+                      return {
+                        ...entry,
+                        applied: true,
+                        error: null,
+                        ...(typeof made.success === 'object' && made.success !== null && 'status' in made.success
+                          ? { became: made.success.status.name }
+                          : {}),
+                      }
                     return { ...entry, applied: false, error: failureWords(made.failure, entry.tracker, entry.comment !== undefined) }
                   }),
             )
@@ -830,6 +864,7 @@ export class IssueChanges extends Context.Service<
         key: at.issue.key,
         url: at.issue.url,
         title: at.issue.title,
+        from: at.issue.status.name,
         change: {},
         applied: null,
         error: null,
@@ -843,12 +878,12 @@ export class IssueChanges extends Context.Service<
             const entries = yield* Effect.forEach(input.issues, ({ target, change: wanted }) =>
               Effect.gen(function* () {
                 const at = yield* found(input.projectId, target)
-                return entryOf(at, { change: yield* resolve(at, wanted) })
+                return entryOf(at, { change: yield* resolve(at, wanted), ...(input.why === undefined ? {} : { why: input.why }) })
               }),
             )
             const keys = entries.map((entry) => `${entry.connectionId}:${entry.ref}`)
             if (new Set(keys).size !== keys.length) return yield* refused('Name each issue once, with everything that changes on it.')
-            const direct = !waitsOnThePerson((yield* policies.current(input.projectId)).rules)
+            const direct = input.direct ?? !waitsOnThePerson((yield* policies.current(input.projectId)).rules)
             return yield* proposeEntries({
               projectId: input.projectId,
               threadId: input.threadId,
@@ -929,20 +964,20 @@ export class IssueChanges extends Context.Service<
               event === 'merged'
                 ? yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${own.projectId} AND kind = 'coordinator' LIMIT 1`
                 : []
-            const [task] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${taskId}`
+            const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
             const card = yield* propose({
               projectId: own.projectId,
               threadId: coordinator?.id ?? own.threadId,
               issues: [{ target: { connectionId: own.connectionId, ref: own.ref }, change: wanted }],
-              note:
-                event === 'merged'
-                  ? `${coordinator === undefined ? '' : `${task?.slug ?? 'Its task'}: `}${pullRequest.key} merged.`
-                  : `${pullRequest.key} opened.`,
+              note: `${pullRequest.key} ${event}`,
+              why: { url: pullRequest.url, task: task?.title ?? '' },
+              // The project moves issues along with its tasks: it doesn't wait on `changeIssues`. A move the tracker refuses stays a card to try again.
+              direct: true,
               by: 'althar',
               actorId: instance.systemId,
             })
-            yield* Effect.logDebug('Offered to move a task’s issue with its pull request', card.changesId)
-          }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not offer to move a task’s issue with its pull request', cause))),
+            yield* Effect.logDebug('Moved a task’s issue with its pull request', card.changesId)
+          }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issue with its pull request', cause))),
         )
 
       // A card Althar closed while applying may have applied in part: said so, and applying it again is safe.

@@ -1067,7 +1067,7 @@ A lead starts in a fresh worktree with nothing installed, and nothing of
 what git ignores, such as `.env`. So Althar sets the worktree up itself, as
 Superset, Conductor and Codex do, before the lead starts
 ([ADR-023](../decisions/023-althar-runs-the-project.md),
-[ADR-079](../decisions/079-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)):
+[ADR-080](../decisions/080-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)):
 
 - **What runs** is the setup a lead recorded for the repository with
   `record_setup` (`recorded_setup`): the ignored files to copy from the

@@ -5,7 +5,7 @@ import s from './RepositorySetups.module.css'
 
 /*
  * How each new task's folder of a project's repositories gets ready
- * (ADR-079): a tab for each repository, its checkout at the tabs' end; in
+ * (ADR-080): a tab for each repository, its checkout at the tabs' end; in
  * it, the commands Althar runs, one a line, then the ignored files it copies
  * from the checkout, each as code to change in place: numbered lines,
  * coloured shell, and what is typed laid letter for letter over the colours.

@@ -202,7 +202,7 @@ export interface ProjectRepository {
   readonly fork: { readonly fork: string; readonly upstream: string; readonly target: ChangeTarget } | null
   /** Tasks under way that change it, which keep it if it is left out. */
   readonly tasks: number
-  /** How each new task's folder of it gets ready (ADR-079); null until a lead records it. */
+  /** How each new task's folder of it gets ready (ADR-080); null until a lead records it. */
   readonly setup: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
 }
 
@@ -374,7 +374,7 @@ export class Projects extends Context.Service<
      * folder changes. The last one stays.
      */
     leaveOut(projectId: string, repositoryId: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
-    /** Sets a repository's role, for a fork where its tasks open pull requests, or how each new task's folder of it gets ready (ADR-079). */
+    /** Sets a repository's role, for a fork where its tasks open pull requests, or how each new task's folder of it gets ready (ADR-080). */
     setRepository(input: {
       readonly projectId: string
       readonly repositoryId: string
@@ -1025,7 +1025,7 @@ export class Projects extends Context.Service<
         readonly repositoryId: string
         readonly role?: string
         readonly changeTarget?: string
-        /** Its setup as the person changed it in the project's settings (ADR-079). */
+        /** Its setup as the person changed it in the project's settings (ADR-080). */
         readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
         readonly commandId?: CommandId
       }) =>

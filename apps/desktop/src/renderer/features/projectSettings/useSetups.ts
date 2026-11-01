@@ -8,7 +8,7 @@ import { keys } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
- * Each repository's setup as the person changes it in Running (ADR-079):
+ * Each repository's setup as the person changes it in Running (ADR-080):
  * shown at once, kept by the runtime, and the repositories read again
  * either way, so one that didn't hold goes back as it was, and says why.
  *

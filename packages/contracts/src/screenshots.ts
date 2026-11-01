@@ -4,17 +4,23 @@ import type { Evidence, Picture } from './Api'
  * The screenshots a task's Outputs show as it is now (What it looks like),
  * worked out in one place: the window draws them, and the runtime puts the
  * same ones in a comment on the task's pull request (ADR-077), so what the
- * person sees is what goes there. A view taken again shows once, where it
- * was last taken: a view is a picture's name, A1, from its caption, and a
- * picture with no name is a view of its own.
+ * person sees is what goes there. Each picture is of a view: the one its
+ * lead named it by, else the name its caption starts with (A1), else a view
+ * of its own. A round that pictures the work again replaces what came
+ * before, so pictures that no longer hold drop out rather than pile up: but
+ * for the views it names again, which it takes anew, and those it says
+ * still hold. A round that only takes known views again keeps the rest. In
+ * a change, the options the person chose between, and explorations, never
+ * count: they stay in the thread, where the person saw them (ADR-079).
  */
 
-/** A lead's report, as far as its pictures go: what it showed, in order. */
+/** A lead's report, as far as its pictures go: what it showed, in order, and the views from before it said still hold. */
 export interface PictureReport {
   readonly id: string
   readonly sequence: number
   readonly createdAt: string
   readonly evidence: ReadonlyArray<Evidence>
+  readonly keptViews?: ReadonlyArray<string> | undefined
 }
 
 /** A screenshot as it is now: its view, by which it is kept or left out, and the picture last taken of it. */
@@ -51,37 +57,43 @@ export const viewOf = (caption: string): string | null => {
 /**
  * The screenshots as the task is now, from its lead's reports: a change's
  * since it became one (`since`), so a prototype's rounds before don't
- * count; any other task's from its last report that showed one. Each view
- * once, as last taken, in the order the reports showed them.
+ * count, and never an option or exploration; any other task's, a
+ * prototype's, its directions too. Each round that pictures it replaces the
+ * rounds before, but for the views it takes again or says still hold; one
+ * that only takes known views again keeps the rest. Each view once, as last
+ * taken, where it was first shown in the round that set it.
  */
 export const screenshotsNow = (
   reports: ReadonlyArray<PictureReport>,
   options: { readonly change: boolean; readonly since: string | null },
 ): ReadonlyArray<ScreenshotNow> => {
-  const rounds = reports
-    .toSorted((one, other) => one.sequence - other.sequence)
-    .map((report) => ({
-      at: report.createdAt,
-      shots: report.evidence.flatMap((piece, index): ScreenshotNow[] =>
-        piece.picture === null
-          ? []
-          : [
-              {
-                key: viewOf(piece.caption) ?? `${report.id}:${index}`,
-                id: `${report.id}:${index}`,
-                caption: piece.caption,
-                picture: piece.picture,
-              },
-            ],
-      ),
-    }))
-  const lastShown = rounds.findLastIndex((round) => round.shots.length > 0)
-  const now = options.change
-    ? rounds.filter((round) => options.since === null || round.at >= options.since)
-    : lastShown === -1
-      ? []
-      : rounds.slice(lastShown)
-  const latest = new Map<string, string>()
-  for (const round of now) for (const shot of round.shots) latest.set(shot.key, shot.id)
-  return now.flatMap((round) => round.shots.filter((shot) => latest.get(shot.key) === shot.id))
+  const shown = new Map<string, ScreenshotNow>()
+  for (const report of reports.toSorted((one, other) => one.sequence - other.sequence)) {
+    if (options.change && options.since !== null && report.createdAt < options.since) continue
+    const shots = report.evidence.flatMap((piece, index): ScreenshotNow[] =>
+      piece.picture === null || (options.change && piece.option === true)
+        ? []
+        : [
+            {
+              key: keyOf(piece) ?? `${report.id}:${index}`,
+              id: `${report.id}:${index}`,
+              caption: piece.caption,
+              picture: piece.picture,
+            },
+          ],
+    )
+    const kept = (report.keptViews ?? []).map((view) => view.trim())
+    if (shots.length === 0 && kept.length === 0) continue
+    // Only views taken again: a follow-up that leaves the others as they were.
+    const retaken = shots.length > 0 && shots.every((shot) => shown.has(shot.key))
+    if (!retaken) for (const key of shown.keys()) if (!kept.includes(key)) shown.delete(key)
+    for (const shot of shots) shown.set(shot.key, shot)
+  }
+  return [...shown.values()]
+}
+
+/** A picture's view where it has a name: the one its lead gave, else its caption's. */
+const keyOf = (piece: Evidence): string | null => {
+  const given = piece.view?.trim()
+  return given !== undefined && given !== '' ? given : viewOf(piece.caption)
 }

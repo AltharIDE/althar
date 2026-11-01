@@ -466,7 +466,7 @@ export const RepositoryHost = Schema.Struct({
 export type RepositoryHost = typeof RepositoryHost.Type
 
 /** One of a project's repositories, as this Mac has it. */
-/** A repository's setup (ADR-079): the ignored files to copy from the person's checkout, from its root, and the commands that get a task's folder ready, in order. */
+/** A repository's setup (ADR-080): the ignored files to copy from the person's checkout, from its root, and the commands that get a task's folder ready, in order. */
 export const RepositorySetup = Schema.Struct({
   copy: Schema.Array(Schema.String),
   commands: Schema.Array(Schema.String),
@@ -489,7 +489,7 @@ export const ProjectRepository = Schema.Struct({
   fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
-  /** How each new task's folder of it gets ready (ADR-079): the files copied from the checkout here, and the commands; null until a lead records it. */
+  /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
   setup: Schema.NullOr(RepositorySetup),
 })
 export type ProjectRepository = typeof ProjectRepository.Type
@@ -1385,6 +1385,10 @@ export const Evidence = Schema.Struct({
   text: Schema.NullOr(Schema.String),
   /** Lines from the start of the text that weren't kept. */
   dropped: Schema.Number,
+  /** For a picture of the work as built: the view it shows, by a name its lead keeps each time it takes it again ("Running page"). Absent where it gave none. */
+  view: Schema.optional(Schema.String),
+  /** For a picture: one of the options the person chose between, or an exploration, not the work as built. It stays in the thread, and out of a change's Outputs and its pull request. */
+  option: Schema.optional(Schema.Boolean),
 })
 export type Evidence = typeof Evidence.Type
 
@@ -1409,6 +1413,8 @@ export const StepResultItem = Schema.Struct({
     built: Schema.NullOr(Schema.String),
     /** For the lead's steps: what it showed of its change working. */
     evidence: Schema.Array(Evidence),
+    /** For the lead's steps: the views an earlier step pictured that still show the work as it is, carried beside this step's own pictures. */
+    keptViews: Schema.optional(Schema.Array(Schema.String)),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
@@ -1683,6 +1689,11 @@ export const TaskCard = Schema.Struct({
       Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
     ),
   ),
+  /**
+   * Stopped, with its open pull request ready to merge as it stands (not a draft, no conflict, every check passed): the
+   * person can accept it all the same, next to Carry on. Absent otherwise.
+   */
+  mergeable: Schema.optional(Schema.Literal(true)),
   /**
    * Its folder being set up before its lead's first turn (ADR-023): the install its lockfile names, or the setup kept for its
    * repository. Absent otherwise.
@@ -1959,6 +1970,10 @@ export const IssueChangesCard = Schema.Struct({
   changesId: Schema.String,
   /** Why, in a sentence, where whoever proposed it said: its pull request merged. */
   note: Schema.NullOr(Schema.String),
+  /** Where the note links to, where a pull request moved its task's issue: the pull request. */
+  noteUrl: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The title of the task whose pull request moved its issue. */
+  task: Schema.optional(Schema.NullOr(Schema.String)),
   state: IssueChangeState,
   /** Why not all of it applied, while it stands failed. */
   error: Schema.NullOr(Schema.String),
@@ -1971,6 +1986,10 @@ export const IssueChangesCard = Schema.Struct({
       key: Schema.String,
       url: Schema.String,
       title: Schema.String,
+      /** Its status before the change, in its tracker's words; unset on cards from before it was kept. */
+      from: Schema.optional(Schema.NullOr(Schema.String)),
+      /** Its status once a close applied, in its tracker's words. */
+      became: Schema.optional(Schema.NullOr(Schema.String)),
       changes: Schema.Array(IssueChangeLine),
       /** Applied, or not and why; null until it was tried. */
       applied: Schema.NullOr(Schema.Boolean),
@@ -2079,7 +2098,7 @@ export const SetupItem = Schema.Struct({
      * How it ended: its exit code, 0 for done, null where it didn't end by
      * itself; out of time; stopped because Althar quit; what it copied and
      * the end of what it printed; and the files a recorded setup names that
-     * it couldn't copy, which fail it too (ADR-079). Null while it runs.
+     * it couldn't copy, which fail it too (ADR-080). Null while it runs.
      */
     ended: Schema.NullOr(
       Schema.Struct({
@@ -2516,6 +2535,8 @@ export const ThreadSnapshot = Schema.Struct({
         Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.NullOr(Schema.String) }),
       ),
     ),
+    /** Stopped, with its open pull request ready to merge as it stands: it can be accepted all the same, as its card says. */
+    mergeable: Schema.optional(Schema.Literal(true)),
     /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */

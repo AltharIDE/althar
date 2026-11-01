@@ -9,7 +9,7 @@ import { backToWork, launch, openFirstProject, projectSettings, still } from './
 
 /*
  * A repository's setup changed in the project's settings, in a real window
- * (ADR-079): typed into Running's lines and kept as the person leaves them,
+ * (ADR-080): typed into Running's lines and kept as the person leaves them,
  * still there once the window reads the project afresh, and an edit the
  * runtime refuses said in a line and put back as it was. The screenshots are
  * this change's own evidence (test-results/setups-*.png).

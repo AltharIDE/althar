@@ -13,7 +13,7 @@ import { useSetups } from './useSetups'
  * What a project runs with no agent (ADR-044), in the person's order, the
  * first what one press of Run starts: reordered, made the default, changed
  * and removed in place, and added to in the same dialogs as from Run. Then
- * how each new task's folder gets ready before its lead starts (ADR-079): a
+ * how each new task's folder gets ready before its lead starts (ADR-080): a
  * tab for each repository, its commands and the files copied from the
  * person's checkout, as a lead recorded them, changed in place. Then
  * where its tasks' work goes: their worktrees on this computer, how their

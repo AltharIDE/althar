@@ -35,11 +35,15 @@ export function ChangesCard({ changes, actions }: { changes: IssueChangesContent
         key: issue.key,
         href: issue.url,
         title: issue.title,
+        ...(issue.from == null ? {} : { from: issue.from }),
+        ...(issue.became == null ? {} : { became: issue.became }),
         changes: issue.changes,
         applied: issue.applied,
         ...(issue.error === null ? {} : { error: issue.error }),
       }))}
       {...(changes.note === null ? {} : { note: changes.note })}
+      {...(changes.noteUrl == null ? {} : { noteHref: changes.noteUrl })}
+      {...(changes.task == null || changes.task === '' ? {} : { task: changes.task })}
       state={STATES[changes.state]}
       onApply={() => actions.onApply(changes.changesId)}
       onDiscard={() => actions.onDiscard(changes.changesId)}
