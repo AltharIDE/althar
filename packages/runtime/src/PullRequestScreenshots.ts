@@ -1,4 +1,4 @@
-import { type PictureReport, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
+import { type PictureReport, type ScreenshotNow, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
@@ -10,7 +10,7 @@ import { type ChangeSummary, Changes, type OnHost } from './Changes'
 import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { ScreenshotsRefused } from './errors'
-import { evidenceOf } from './evidence'
+import { evidenceOf, keptViewsIn } from './evidence'
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { Policies, postsScreenshots } from './Policies'
@@ -32,8 +32,9 @@ import {
  * show as it is now (`screenshotsNow`, which the window draws by too), in
  * one comment Althar writes, and writes anew as they change. The person
  * posts them, leaving out the views they choose, which stay out of that
- * pull request from then on; or, where the project's rules say, Althar posts
- * them on its own as they change, as listening goes round. Each picture is
+ * pull request from then on, and the comment follows Outputs from then on,
+ * as listening goes round; or, where the project's rules say, Althar posts
+ * them on its own too (ADR-079). Each picture is
  * uploaded to the host once, by its digest: the host keeps an upload for
  * good, so one never goes twice. Where reviewers have reviewed since the
  * comment was last written, a line says the screenshots changed, as an edit
@@ -98,6 +99,7 @@ export class PullRequestScreenshots extends Context.Service<
             sequence: row.sequence,
             createdAt: row.createdAt,
             evidence: evidenceOf(parsed(row.content).evidence),
+            ...keptViewsIn(parsed(row.content).keptViews),
           }))
           // A task with a pull request is a change: its screenshots are those since it became one.
           return screenshotsNow(reports, { change: true, since: made?.at ?? null })
@@ -237,10 +239,10 @@ export class PullRequestScreenshots extends Context.Service<
               return yield* refuse('no_pictures', on.change)
             const kept = yield* keptOf(on.linkId)
             const leftOut = [...(input.leftOut ?? kept?.leftOut ?? [])]
-            // What is left out is kept first: it holds whatever happens to the rest.
-            if (input.leftOut !== undefined) yield* keep(on.linkId, on.projectId, { leftOut })
             const posting = postingOf(yield* nowOf(input.taskId), leftOut)
-            if (posting.length === 0)
+            // Nothing to show: refused where the person left every view out, or nothing is posted yet; else the
+            // comment is written anew without them, never left showing what Outputs dropped.
+            if (posting.length === 0 && (input.leftOut !== undefined || kept?.commentId == null || kept.shown.length === 0))
               return yield* new ScreenshotsRefused({
                 why: 'none',
                 message:
@@ -248,6 +250,8 @@ export class PullRequestScreenshots extends Context.Service<
                     ? 'Every screenshot is left out. Choose at least one to post.'
                     : 'There are no screenshots to post yet.',
               })
+            // What is left out is kept first: it holds whatever happens to the rest.
+            if (input.leftOut !== undefined) yield* keep(on.linkId, on.projectId, { leftOut })
             const uploads = yield* uploaded(on, posting, kept)
             const head = on.change.headSha
             const shown = posting.map((shot): PostedShot => ({
@@ -278,11 +282,13 @@ export class PullRequestScreenshots extends Context.Service<
                       () => Effect.succeed(Option.none()),
                     ),
                   )
-            const comment =
-              written !== null && Option.isSome(written)
-                ? written.value
-                : yield* on.host.reply(on.repository, on.change.number, { body, threadId: null })
             const updating = written !== null && Option.isSome(written)
+            // A comment someone deleted isn't posted again only to say there is nothing to show.
+            if (!updating && posting.length === 0) {
+              yield* keep(on.linkId, on.projectId, { commentId: null, commentUrl: null, shown: [], earlier: [], leftOut, failed: null })
+              return yield* touchTask(input.taskId)
+            }
+            const comment = updating ? written.value : yield* on.host.reply(on.repository, on.change.number, { body, threadId: null })
             // An edit tells nobody: reviewers who reviewed since it was last written are told it changed, in a line.
             if (updating && changed > 0 && kept?.postedAt != null) {
               const since = yield* on.host.activity(on.repository, on.change.number, kept.postedAt)
@@ -316,19 +322,26 @@ export class PullRequestScreenshots extends Context.Service<
           ),
         )
 
-      /** Posts what changed on a task's open pull requests, where its project's rules say: one that fails keeps to itself. */
+      /**
+       * Posts what changed on a task's open pull requests: on each, where its
+       * project's rules say; else where the comment is posted already, so it
+       * never shows pictures Outputs dropped. One that fails keeps to itself.
+       */
       const syncTask = (taskId: string, force: boolean) =>
         Effect.gen(function* () {
           const open = yield* openOf(taskId)
-          if (open.length === 0 || !(yield* synced(open[0]?.projectId ?? ''))) return
-          const now = yield* nowOf(taskId)
+          if (open.length === 0) return
+          const rules = yield* synced(open[0]?.projectId ?? '')
           const clock = yield* Clock.currentTimeMillis
+          let now: ReadonlyArray<ScreenshotNow> | undefined
           for (const one of open) {
             const kept = yield* keptOf(one.linkId)
+            // The rules off, the person posts first: from then on, the comment follows Outputs.
+            if (!rules && (kept === undefined || kept.commentId === null)) continue
+            now ??= yield* nowOf(taskId)
             const standing = standingOf(now, kept, true)
+            // Nothing to post, as every view is left out or none is kept, is 'unposted' with none changed; a posted comment it empties is 'changed'.
             if (standing.standing === 'posted' || (standing.standing === 'unposted' && standing.changed === 0)) continue
-            // Every view left out: there is nothing to post, by the person's choice.
-            if (postingOf(now, kept?.leftOut ?? []).length === 0) continue
             // One that failed waits a while before it is tried again by itself.
             if (!force && kept?.failed != null && Date.parse(kept.updatedAt) + Duration.toMillis(RETRY_AFTER) > clock) continue
             yield* post({ taskId, url: one.change.url }).pipe(contained('Screenshots.sync', () => undefined))
@@ -376,7 +389,7 @@ export class PullRequestScreenshots extends Context.Service<
   )
 }
 
-const parsed = (content: string): { readonly evidence?: unknown } => {
+const parsed = (content: string): { readonly evidence?: unknown; readonly keptViews?: unknown } => {
   try {
     const value: unknown = JSON.parse(content)
     return typeof value === 'object' && value !== null ? value : {}

@@ -1376,6 +1376,10 @@ export const Evidence = Schema.Struct({
   text: Schema.NullOr(Schema.String),
   /** Lines from the start of the text that weren't kept. */
   dropped: Schema.Number,
+  /** For a picture of the work as built: the view it shows, by a name its lead keeps each time it takes it again ("Running page"). Absent where it gave none. */
+  view: Schema.optional(Schema.String),
+  /** For a picture: one of the options the person chose between, or an exploration, not the work as built. It stays in the thread, and out of a change's Outputs and its pull request. */
+  option: Schema.optional(Schema.Boolean),
 })
 export type Evidence = typeof Evidence.Type
 
@@ -1400,6 +1404,8 @@ export const StepResultItem = Schema.Struct({
     built: Schema.NullOr(Schema.String),
     /** For the lead's steps: what it showed of its change working. */
     evidence: Schema.Array(Evidence),
+    /** For the lead's steps: the views an earlier step pictured that still show the work as it is, carried beside this step's own pictures. */
+    keptViews: Schema.optional(Schema.Array(Schema.String)),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
