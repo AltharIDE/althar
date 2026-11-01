@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { CHANGES_IN_REVIEW, CHANGES_LINEAR, COMMENTED_LINEAR } from '../../fixtures/coordinator'
+import { CHANGES_DONE, CHANGES_IN_REVIEW, CHANGES_LINEAR, COMMENTED_LINEAR } from '../../fixtures/coordinator'
 import { IssueChangesState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -26,7 +26,7 @@ export const Pending: Story = {
     // Each change, a name and the value it takes.
     const change = (text: string) =>
       c.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === text && node.childElementCount > 0)
-    await expect(change('Status Done')).toBeInTheDocument()
+    await expect(change('In Progress → Done')).toBeInTheDocument()
     await expect(change('Priority Low')).toBeInTheDocument()
     await expect(change('Labels +perf −bug')).toBeInTheDocument()
     await expect(change('Assignee Ana Ruiz')).toBeInTheDocument()
@@ -41,7 +41,8 @@ export const ToReview: Story = {
   args: CHANGES_IN_REVIEW,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('PR #212 opened.')).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: /PR #212 opened/ })).toHaveAttribute('href', 'https://github.com/meridian/api/pull/212')
+    await expect(c.getByText('In Progress')).toBeInTheDocument()
     await expect(c.getByText('In Review')).toBeInTheDocument()
   },
 }
@@ -74,12 +75,23 @@ export const Failed: Story = {
   },
 }
 
+/** A move that applied at once as its pull request merged: one quiet line, from where the issue was to where it is, and why. */
+export const MovedWithItsPullRequest: Story = {
+  args: { ...CHANGES_DONE, state: IssueChangesState.Applied },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/In Review → Done/)).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: /PR #212 merged/ })).toBeInTheDocument()
+    await expect(c.queryByRole('button')).not.toBeInTheDocument()
+  },
+}
+
 /** Applied: one line with each issue and what changed on it. */
 export const Applied: Story = {
   args: { state: IssueChangesState.Applied },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Changed')).toBeInTheDocument()
+    await expect(c.getByText(/DEV-67/)).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /DEV-142/ })).toBeInTheDocument()
     await expect(c.queryByRole('button')).not.toBeInTheDocument()
   },
@@ -126,7 +138,7 @@ export const ApplyingFolds: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Apply' }))
-    await expect(c.getByText('Changed')).toBeInTheDocument()
+    await expect(c.getByText(/Backlog → Done|In Progress → Done/)).toBeInTheDocument()
     await waitFor(() => expect(c.getByRole('article')).toHaveFocus())
   },
 }
@@ -168,6 +180,7 @@ export const AllStates: Story = {
             />
           ),
         },
+        { state: 'moved with its pull request', node: <IssueChanges {...args} {...CHANGES_DONE} state={IssueChangesState.Applied} /> },
         { state: 'applied', node: <IssueChanges {...args} state={IssueChangesState.Applied} /> },
         { state: 'commented', node: <IssueChanges {...args} {...COMMENTED_LINEAR} state={IssueChangesState.Applied} /> },
         { state: 'discarded', node: <IssueChanges {...args} state={IssueChangesState.Discarded} /> },

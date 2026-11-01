@@ -26,7 +26,7 @@ import { Projects } from './Projects'
 import { failureWords } from './pullRequestList'
 import { change, fact, timestamp } from './records'
 import { ReviewRefused, Reviews } from './Reviews'
-import type { PlanStep } from './Runs'
+import { type PlanStep, Runs } from './Runs'
 import { instantOf, lastCome, localOf, localZone, nextToCome, type Slot, staggerOf, windowOf } from './slots'
 import { Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
@@ -87,6 +87,7 @@ type Store =
   | Plans
   | Reviews
   | Tasks
+  | Runs
   | Connections
   | Limits
 
@@ -249,6 +250,7 @@ export class Automations extends Context.Service<
       const plans = yield* Plans
       const reviews = yield* Reviews
       const tasks = yield* Tasks
+      const runs = yield* Runs
       const connections = yield* Connections
       const limits = yield* Limits
       const options = (yield* RuntimeConfig).automations ?? {}
@@ -1007,7 +1009,8 @@ export class Automations extends Context.Service<
 
       /**
        * Looks at every run under way: one whose task ended says how it went;
-       * one that has worked its minutes is stopped. A run of the review kind
+       * one that has worked its minutes is stopped, or, where only its review
+       * is still at work, goes on without it. A run of the review kind
        * made something once its review is drafted, and failed where its lead
        * went before drafting one: stopped, gone, or its last turn failed or
        * was stopped from the composer, with nothing since for as long as the
@@ -1030,6 +1033,8 @@ export class Automations extends Context.Service<
           turnState: string | null
           turnEnded: number | null
           queued: number
+          inReview: number
+          publishing: number
           worked: number | null
           parts: string
           name: string
@@ -1047,6 +1052,13 @@ export class Automations extends Context.Service<
               WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_ended,
             (SELECT count(*) FROM user_inputs i JOIN threads h ON h.id = i.thread_id
               WHERE h.task_id = k.id AND h.kind = 'task' AND i.state = 'queued') AS queued,
+            (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions x ON x.id = n.execution_id
+              JOIN runs r ON r.id = x.run_id
+              WHERE r.task_id = k.id AND r.state = 'running' AND n.node_key = 'review'
+                AND a.state IN ('admitted', 'running', 'waiting_attention', 'held')) AS in_review,
+            (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions x ON x.id = n.execution_id
+              JOIN runs r ON r.id = x.run_id
+              WHERE r.task_id = k.id AND r.state = 'running' AND n.node_key = 'publish' AND a.state IN ('admitted', 'running')) AS publishing,
             (SELECT sum((julianday(coalesce(t.ended_at, ${at})) - julianday(t.delivered_at)) * 86400000)
               FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id WHERE h.task_id = k.id AND t.delivered_at IS NOT NULL) AS worked,
             d.parts, d.name, d.prompt
@@ -1087,6 +1099,19 @@ export class Automations extends Context.Service<
             const definition = Option.getOrUndefined(definitionOf(one))
             const minutes = definition?.minutes ?? 45
             if ((one.worked ?? 0) > minutes * 60_000) {
+              // Its lead's work is done and its review is what runs on: the review is what stops, not the task. It goes on
+              // without one and ends as it was to, its work published, not stopped with it kept from the person.
+              if (one.inReview > 0) {
+                yield* runs
+                  .skipReview({
+                    envelope: yield* envelope('task.skip_review', { taskId: one.taskId }, undefined, instance.systemId),
+                    taskId: one.taskId,
+                  })
+                  .pipe(Effect.ignore)
+                return
+              }
+              // Its work being published, as after a review it went on without, isn't cut short: it ends on its own, or waits on the person.
+              if (one.publishing > 0) return
               yield* tasks
                 .stop({ envelope: yield* envelope('task.stop', { taskId: one.taskId }, undefined, instance.systemId), taskId: one.taskId })
                 .pipe(Effect.ignore)

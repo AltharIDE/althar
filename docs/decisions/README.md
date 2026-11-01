@@ -85,5 +85,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
 | [077](077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md) | A task's screenshots go in one comment on its pull request, written anew as they change, by hand or by a project rule |
 | [078](078-project-leads-can-read-the-web.md) | Project leads and their own reviewers can read the web, with a default-on project switch and outside reviews kept offline |
-| [079](079-the-coordinator-merges-and-releases-on-the-person-s-word.md) | The coordinator merges, queues and releases on the person's word, does what can be undone itself, and hears every pull request and main |
-| [080](080-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |
+| [079](079-outputs-show-the-change-as-built.md) | Outputs show the change as built: the lead marks options, a later round replaces earlier views, and a posted comment follows |
+| [080](080-the-coordinator-merges-and-releases-on-the-person-s-word.md) | The coordinator merges, queues and releases on the person's word, does what can be undone itself, and hears every pull request and main |
+| [081](081-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |

@@ -149,20 +149,27 @@ describe('where the screenshots stand', () => {
 })
 
 describe('what the comment showed before', () => {
-  it('keeps each view taken again or gone, newest first, up to its limit', () => {
+  it('keeps each view taken again, newest first, up to its limit, and nothing of a view gone', () => {
     const before = [posted('A1', 'a'), posted('A2', 'b'), posted('A3', 'c')]
     const after = [posted('A1', 'z'), posted('A2', 'b')]
-    const earlier = earlierAfter(before, [posted('A1', 'y', 'older00')], after)
+    const earlier = earlierAfter(before, [posted('A1', 'y', 'older00'), posted('A3', 'x')], after)
     assert.deepStrictEqual(
       earlier.map((shot) => [shot.key, shot.digest]),
       [
         ['A1', 'a'],
-        ['A3', 'c'],
         ['A1', 'y'],
       ],
     )
     const many = Array.from({ length: EARLIER_KEPT + 5 }, (_, i) => posted(`B${i}`, `d${i}`))
-    assert.lengthOf(earlierAfter(many, many, []), EARLIER_KEPT)
+    assert.lengthOf(
+      earlierAfter(
+        many,
+        many,
+        many.map((shot) => ({ ...shot, digest: 'new' })),
+      ),
+      EARLIER_KEPT,
+    )
+    assert.lengthOf(earlierAfter(many, many, []), 0)
   })
 })
 

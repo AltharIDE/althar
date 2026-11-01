@@ -42,7 +42,7 @@ import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } f
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
-import { afterSteps, stepText } from '../../shared/steps'
+import { afterSteps, isMergeStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
@@ -170,17 +170,21 @@ const HANDED_SHOWN = 3
 /** What the home's dock holds: a task, by its id, or a call. */
 export type DockTarget = { readonly kind: 'task'; readonly id: string } | { readonly kind: 'call'; readonly id: string }
 
-/** A task's steps as its card's track names them, and the one it is on. */
+/**
+ * A task's steps as its card's track names them, the one it is on, and whether they are all done: a task being merged, or in its
+ * merge queue, has finished its steps, so none of them is on.
+ */
 export const trackOf = (task: BoardTask) => {
   const planned = (task.plan?.steps ?? []).filter((step) => !step.skipped).map((step) => step.key)
-  if (planned.length === 0) return { steps: [text.conversation], at: 0 }
+  const done = isMergeStep(task.step)
+  if (planned.length === 0) return { steps: [text.conversation], at: 0, done }
   // Settling a review's findings is part of the review.
   const on =
     task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' || afterSteps(task.step) ? null : 'review'
   // Publishing, and a conflict round, come after the steps.
   const at = on === null ? (task.step === 'publish' || afterSteps(task.step) ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
   // A round of work after its plan is its lead's follow-up, then its review where the plan has one.
-  return { steps: planned.map((key) => (key === 'implement' && task.followUp === true ? text.followUp : text.step[key])), at }
+  return { steps: planned.map((key) => (key === 'implement' && task.followUp === true ? text.followUp : text.step[key])), at, done }
 }
 
 /** A card names its task by its title alone: its slug says the same again, in code. */
@@ -325,7 +329,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
           : { object: theirs(work.reviewing), foot: <Fact>{text.findingsSoFar(work.reviewing.findings)}</Fact> }),
       }
     case 'change': {
-      const { steps, at } = trackOf(work)
+      const { steps, at, done } = trackOf(work)
       const change = work.change
       const status = still?.status ?? TaskStatus.Running
       return {
@@ -334,7 +338,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
         word: stepWordOf(work),
         ...still,
         // A track of one step says nothing more than its word; before any work it has no progress to show.
-        ...(steps.length > 1 && !beforeWork ? { track: trackItems(steps, at) } : {}),
+        ...(steps.length > 1 && !beforeWork ? { track: trackItems(steps, at, at, done) } : {}),
         ...(beforeWork
           ? {}
           : change !== null && change.state === 'open'
@@ -361,6 +365,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
   const card = runningCard(work, '', () => '')
   const sendBack = actions?.sendBack
+  const merges = work.mergeable === true && work.change?.state === 'open' && actions !== undefined
   const { at: _, ...rest } = card
   return {
     ...rest,
@@ -375,7 +380,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
       : {
           // What stopped it leads; a conflict is one line under it, which Carry on settles on the way.
           ...(work.conflictUnsent == null
-            ? {}
+            ? merges && work.change != null
+              ? // How its pull request stands, as a ready card says: every check passed, nothing in the way.
+                { foot: readyOf(work, work.change, undefined).foot }
+              : {}
             : {
                 foot: (
                   <FactLine>
@@ -385,19 +393,35 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                   </FactLine>
                 ),
               }),
-          // Carry on, the card's one step, on the strip at its foot.
-          ...(sendBack === undefined
+          // Carry on on the strip at its foot, and, where its pull request is ready as it stands, Accept and merge before it: a
+          // stopped task never hides the way to merge work that is ready.
+          ...(sendBack === undefined && !merges
             ? {}
             : {
                 next: (
-                  <NextStep
-                    signal
-                    busy={actions?.sending?.has(work.taskId) ?? false}
-                    doing={text.carryingOn}
-                    onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote)}
-                  >
-                    {text.carryOn}
-                  </NextStep>
+                  <>
+                    {merges && (
+                      <NextStep
+                        signal
+                        busy={actions?.merging?.has(work.taskId) ?? false}
+                        doing={doingWords({ kind: 'merge' })}
+                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                      >
+                        {nextWords({ kind: 'merge' })}
+                      </NextStep>
+                    )}
+                    {sendBack !== undefined && (
+                      <NextStep
+                        signal={!merges}
+                        busy={actions?.sending?.has(work.taskId) ?? false}
+                        doing={text.carryingOn}
+                        onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
+                      >
+                        {text.carryOn}
+                      </NextStep>
+                    )}
+                  </>
                 ),
               }),
         }),
@@ -407,7 +431,6 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
-  if (call === null) return { ...base, word: text.status[TaskStatus.Yours] }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
@@ -502,15 +525,18 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
-        // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
-        ...(work.handedBack != null || work.conflictUnsent != null
-          ? unsentOf(work, work.handedBack ?? work.conflictUnsent ?? '', actions)
-          : // One merged or closed has nothing in its way, and nothing to do to it.
-            change === null || change.state !== 'open'
-            ? work.conflictUnchecked == null
-              ? {}
-              : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
-            : readyOf(work, change, actions)),
+        // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
+        // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
+        ...(work.handedBack != null
+          ? unsentOf(work, work.handedBack, undefined)
+          : work.conflictUnsent != null
+            ? unsentOf(work, work.conflictUnsent, actions)
+            : // One merged or closed has nothing in its way, and nothing to do to it.
+              change === null || change.state !== 'open'
+              ? work.conflictUnchecked == null
+                ? {}
+                : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
+              : readyOf(work, change, actions)),
       }
     }
     default:
@@ -686,7 +712,7 @@ export function BoardView({
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
   const asks = [
-    ...lanes.waiting.map((waiting) => ({ at: waiting.call?.createdAt ?? waiting.task.createdAt, waiting, call: null })),
+    ...lanes.waiting.map((waiting) => ({ at: waiting.call.createdAt, waiting, call: null })),
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
