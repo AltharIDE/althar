@@ -276,7 +276,7 @@ export function Outputs({
           }))
           const checked = open.some((one) => one.checks != null)
           // What the lead committed since goes up first: accepting merges what the pull request has.
-          const accepting = ready && state === ChangeState.Ready && pushes.length === 0
+          const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0
           const actions: ReactNode[] = [
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
             ...pushes.filter(personPushes).map((one) => (

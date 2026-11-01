@@ -62,6 +62,32 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('keeps a stopped task’s pull request, whose checks passed, ready to merge: and not one whose checks failed', () => {
+    const { working, bare } = hosted()
+    let checks: 'passed' | 'failed' = 'passed'
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: checks }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      assert.isUndefined(ready?.mergeable)
+      // Its run ended some way other than succeeded, as when Althar stopped it after its pull request opened.
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${ready?.taskId ?? ''}`
+      // Its draft pull request isn't merged as it is: until it is marked ready, by hand here.
+      const [draft] = yield* until(cards(projectId), (all) => all[0]?.phase === 'stopped')
+      assert.isUndefined(draft?.mergeable)
+      github.readyByHand(1)
+      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'stopped' && all[0].mergeable === true)
+      const { task } = yield* (yield* Queries).thread(stopped?.threadId ?? '', { limit: 0 })
+      assert.deepStrictEqual([task.phase, task.mergeable], ['stopped', true])
+      // Its checks fail: stopped, and no longer to be merged as it is.
+      checks = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.failed === 1 && all[0].mergeable === undefined)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('brings a change in a repository that has never had checks to the person at once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

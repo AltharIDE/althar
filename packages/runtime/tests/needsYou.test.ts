@@ -1,7 +1,7 @@
 import type { ChangeSummary, ChecksSummary } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself } from '../src/needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable } from '../src/needsYou'
 
 const checks = (more: Partial<ChecksSummary> = {}): ChecksSummary => ({
   outcome: 'passed',
@@ -66,6 +66,24 @@ describe('a ready change that goes on by itself (DEV-173)', () => {
     assert.isNull(byItself(change()))
     assert.isNull(byItself(change({ state: 'merged', checks: running })))
     assert.isNull(byItself(null))
+  })
+})
+
+describe('a pull request that can be merged as it stands', () => {
+  it('is open, not a draft, with no conflict, nothing to push and every check passed', () => {
+    assert.isTrue(isMergeable(change()))
+  })
+
+  it('is not so with a check failing or running, a conflict, a draft, commits to push, a parted branch or no checks read', () => {
+    assert.isFalse(isMergeable(change({ checks: checks({ outcome: 'failed', failed: 1, failing: ['test'] }) })))
+    assert.isFalse(isMergeable(change({ checks: running })))
+    assert.isFalse(isMergeable(change({ checks: null })))
+    assert.isFalse(isMergeable(change({ conflicts: true })))
+    assert.isFalse(isMergeable(change({ draft: true })))
+    assert.isFalse(isMergeable(change({ unpushed: 1 })))
+    assert.isFalse(isMergeable(change({ diverged: { kind: 'rewritten', local: 1, onPullRequest: 1 } })))
+    assert.isFalse(isMergeable(change({ state: 'merged' })))
+    assert.isFalse(isMergeable(null))
   })
 })
 

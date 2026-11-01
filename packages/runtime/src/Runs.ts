@@ -58,6 +58,7 @@ import {
   readEvidence,
   readShown,
   SHOWN_MOST,
+  keptViewsIn,
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
@@ -187,6 +188,8 @@ const Finished = Schema.Struct({
   /** What shows the change does what it should; and what couldn't be shown. */
   evidence: Schema.optional(Schema.Array(EvidenceGiven)),
   unverified: Schema.optional(Schema.Array(Schema.String)),
+  /** The views an earlier step pictured that still show the work as it is, beside this step's pictures. */
+  kept_views: Schema.optional(Schema.Array(Schema.String)),
   /** A round of work where the person only asked something, and what the lead committed came with answering: it opens no pull request. */
   answered: Schema.optional(Schema.Boolean),
   /** When settling a review: what became of each finding, by its id. */
@@ -3050,6 +3053,7 @@ export class Runs extends Context.Service<
             descriptions: given = [],
             evidence: handed = [],
             unverified,
+            kept_views: keptViews,
             built: said,
             answered: answering = false,
           } = yield* read(Finished, input)
@@ -3079,6 +3083,7 @@ export class Runs extends Context.Service<
             return {
               ...(kept.length === 0 ? {} : { evidence: kept }),
               ...(unverified === undefined ? {} : { unverified: unverifiedOf(unverified) }),
+              ...keptViewsIn(keptViews),
             }
           })
           // What it gave before Althar sent the step back, and what it gives now.
@@ -3392,9 +3397,25 @@ export class Runs extends Context.Service<
                       description: 'What it printed: the part that shows the result, such as the summary of a test run.',
                     },
                     text: { type: 'string', description: 'For a response, log or note: the text.' },
+                    view: {
+                      type: 'string',
+                      description:
+                        'For a screenshot or recording of the work as built: the view it shows, by a short name you keep the same each time you take it again ("Running page", "Running page, a refused file"). A later picture of the same view replaces it in Outputs and on the pull request.',
+                    },
+                    option: {
+                      type: 'boolean',
+                      description:
+                        "For a screenshot or recording: true where it isn't the work as built but one of the options or directions the person chooses between, or an exploration. It stays in the thread, and out of the change's Outputs and its pull request.",
+                    },
                   },
                   required: ['kind', 'caption'],
                 },
+              },
+              kept_views: {
+                type: 'array',
+                description:
+                  "The views you pictured in an earlier step that still show the work as it is, by their names, where this step pictures something new. A step's pictures replace the earlier ones in Outputs and on the pull request, but for the views it takes again and those named here; a step that only takes known views again leaves the others as they were.",
+                items: { type: 'string' },
               },
               answered: {
                 type: 'boolean',

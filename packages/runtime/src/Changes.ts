@@ -827,8 +827,8 @@ export class Changes extends Context.Service<
       const scope = yield* Scope.Scope
       const issueChanges = yield* IssueChanges
       /** Offers to move a task's issue along with its pull request, in the background: nothing it meets holds the pull request up. */
-      const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0]) =>
-        Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change) }), scope))
+      const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0] & { readonly url: string }) =>
+        Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change), url: change.url }), scope))
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
       // How long after its lead's turn ended its commits are still going up (DEV-173).
       const goingFor = Duration.toMillis((yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS))
@@ -1476,7 +1476,7 @@ export class Changes extends Context.Service<
                 decode: () => true,
               })
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
-          // Its issue, moved on to review, where the person applies it.
+          // Its issue, moved on to review.
           if (issueLink !== undefined) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
