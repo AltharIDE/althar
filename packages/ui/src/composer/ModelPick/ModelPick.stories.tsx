@@ -147,9 +147,25 @@ export const Room: Story = {
     await expect(page.getByText('Side · 62%')).toBeInTheDocument()
     await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
     await expect(page.getByText('no reading')).toBeInTheDocument()
-    await expect(within(canvasElement).getByText('3% left')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('3% left · until 14:00')).toBeInTheDocument()
   },
 }
+
+/** Nearly out, beside the chip: one run in the chip's ink, deeper as it runs down; out says so. */
+const nearly = (left: number): Story => ({
+  args: {
+    model: model('gpt-5.2-codex'),
+    pinned: [OPUS, model('gpt-5.2-codex')],
+    room: () => ({ left, until: 'Mon 11:00', account: null }),
+  },
+  play: async ({ canvasElement }) => {
+    const said = left === 0 ? 'Out · until Mon 11:00' : `${left}% left · until Mon 11:00`
+    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+  },
+})
+export const TenPercentLeft: Story = nearly(10)
+export const ThreePercentLeft: Story = nearly(3)
+export const Out: Story = nearly(0)
 
 /** Claude Code offers six efforts: they share the row without spilling. */
 const SIX = { ...OPUS, efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'] }

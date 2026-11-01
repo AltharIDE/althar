@@ -41,6 +41,7 @@ import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
+import { Errands } from './Errands'
 import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
@@ -81,7 +82,12 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
+  const base = Layer.mergeAll(
+    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(Instance.layer)))),
+    Live.layer,
+    ModelFacts.layer,
+    Artifacts.layer,
+  ).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),

@@ -664,7 +664,7 @@ never under running work.
   none) and then the form with what was chosen. Dropping folders on the window
   does the same. This departs from the two entrances in architecture doc 01;
   if it holds, the doc should change.
-- [x] **The welcome.** Settled in [ADR-081](decisions/081-a-welcome-on-first-launch.md):
+- [x] **The welcome.** Settled in [ADR-083](decisions/083-a-welcome-on-first-launch.md):
   the first screen is one card of steps, a tour of four scenes of the real
   components first (once on a computer, and skippable), then the agents, the
   first project, its code host and a tracker; a new project's empty

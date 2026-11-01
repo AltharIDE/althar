@@ -1,5 +1,14 @@
 // @vitest-environment node
-import { Api, ApiError, type DomMessagePort, emitterPort, type PlanStep, serverProtocol, type WatchEvent } from '@althar/contracts'
+import {
+  ClientAuthority,
+  Api,
+  ApiError,
+  type DomMessagePort,
+  emitterPort,
+  type PlanStep,
+  serverProtocol,
+  type WatchEvent,
+} from '@althar/contracts'
 import { Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -52,6 +61,7 @@ const standIn = async (): Promise<{ client: Client; heard: Array<Heard> }> => {
   scopes.push(scope)
   // Every handler the stand-in has needs nothing, whatever the contract allows them.
   const server = RpcServer.layer(Api).pipe(
+    Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
     Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
     Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
   ) as Layer.Layer<never>

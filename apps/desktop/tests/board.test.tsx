@@ -692,13 +692,21 @@ describe('the board’s lanes', () => {
     expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
   })
 
-  it('has every step done, none on, while a task is merging or in its merge queue', () => {
-    // Its steps are finished; the merge is what is left, and the words at the top say so.
+  it('has every step done, none on, while no agent is on a task: its checks run, its commits push, or it merges', () => {
+    // Its steps are finished; the checks, the push or the merge is what is left, and the words at the top say so.
+    expect(trackOf(task({ step: 'checks_running', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: 'pushing', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     expect(trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     expect(trackOf(task({ step: MERGING_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
     // Drawn with that flag, no step is left as the one on it.
-    const { steps, at, done } = trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))
-    expect(trackItems(steps, at, at, done).map((step) => step.state)).toEqual([TrackStep.Done, TrackStep.Done])
+    for (const step of ['checks_running', 'pushing', MERGE_QUEUE_STEP]) {
+      const { steps, at, done } = trackOf(task({ step, phase: 'running' }))
+      expect(trackItems(steps, at, at, done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Done])
+    }
+    // A checks round is a lead's work: its last step stays on.
+    const round = trackOf(task({ step: 'checks', phase: 'running' }))
+    expect(round.done).toBe(false)
+    expect(trackItems(round.steps, round.at, round.at, round.done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Now])
   })
 
   it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
@@ -748,7 +756,7 @@ describe('the board', () => {
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
-    expect(next.getByText('Nothing lined up yet')).toBeTruthy()
+    expect(next.getByText('Nothing queued')).toBeTruthy()
     expect(next.getByText('Tell the coordinator what you want done. The tasks it plans line up here.')).toBeTruthy()
     // Only Up next says so; the other lanes stay empty boxes.
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
@@ -759,7 +767,7 @@ describe('the board', () => {
     expect(screen.getByRole('region', { name: 'The project’s work' })).toBeTruthy()
   })
 
-  it('says nothing in an empty Up next while there is other work on the board', async () => {
+  it('says the same in an empty Up next while there is other work on the board, and puts the person in the composer', async () => {
     const { client } = fakeClient({
       getBoard: vi.fn(async () =>
         board({ tasks: [task({ taskId: 't2', threadId: 'th2', title: 'Mine', slug: 'mine', phase: 'running' })], calls: [] }),
@@ -768,7 +776,11 @@ describe('the board', () => {
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
-    expect(next.queryByText('Nothing lined up yet')).toBeNull()
+    expect(next.getByText('Nothing queued')).toBeTruthy()
+    // Only Up next says so; the other lanes stay plain boxes.
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
+    await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
   })
 
   it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {
