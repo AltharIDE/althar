@@ -119,6 +119,7 @@ describe('what the coordinator hears since it last spoke', () => {
       yield* record({ kind: 'closed' })
       yield* spoken(threadId)
       assert.isNull(yield* news(threadId, projectId))
+
       for (const payload of [
         { kind: 'checks', outcome: 'failed' },
         { kind: 'checks', outcome: 'passed' },
@@ -147,6 +148,14 @@ describe('what the coordinator hears since it last spoke', () => {
       assert.notInclude(said, 'Closed.')
       yield* spoken(threadId)
       assert.isNull(yield* news(threadId, projectId))
+      // A partial snapshot cannot identify the PR; omit its news until the host supplies its number.
+      for (const snapshot of [{}, { number: null }]) {
+        yield* sql`UPDATE external_links SET snapshot = ${JSON.stringify(snapshot)} WHERE id = ${id}`
+        yield* record({ kind: 'closed' })
+        assert.isNull(yield* news(threadId, projectId))
+      }
+      yield* sql`UPDATE external_links SET snapshot = ${JSON.stringify({ number: 42 })} WHERE id = ${id}`
+      assert.include(yield* news(threadId, projectId), 'Pull request #42: Closed.')
     }).pipe(Effect.provide(withQueries({}))),
   )
 

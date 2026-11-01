@@ -327,12 +327,13 @@ const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
 const pullRequestNews = (projectId: string, since: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ payload: string; number: number }>`
+    const rows = yield* sql<{ payload: string; number: number | null }>`
       SELECT e.payload, json_extract(l.snapshot, '$.number') AS number
       FROM record_events e JOIN external_links l ON l.id = e.aggregate_id
       WHERE e.project_id = ${projectId} AND e.sequence > ${since} AND e.type = 'external_link.news'
       ORDER BY e.sequence`
     return rows.flatMap((row) => {
+      if (row.number === null) return []
       const news = JSON.parse(row.payload) as { kind?: string; outcome?: string; verdict?: string; reason?: string }
       const words =
         news.kind === 'checks'
