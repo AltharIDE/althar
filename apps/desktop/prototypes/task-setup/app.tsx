@@ -15,7 +15,7 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeClient, fakeHost, project, repositories, snapshot } from '../../tests/fixtures'
 import s from './proto.module.css'
-import { type Direction, type Moment, proto, useProto, type Which } from './state'
+import { type Moment, proto, useProto, type Which } from './state'
 
 const PROJECTS = {
   althar: {
@@ -54,63 +54,22 @@ proto.subscribe(() => {
   void cache.invalidateQueries()
 })
 
-const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
-  { value: 'A', name: 'Steps' },
-  { value: 'B', name: 'Switches' },
-  { value: 'C', name: 'As it last ran' },
-  { value: 'D', name: 'Say it' },
-]
-
-/** Swaps the direction in place, on Running, where the setups are. */
-const go = (direction: Direction) => {
-  proto.set({ direction })
+/** Opens Running, where the setups are. */
+const go = () => {
   window.location.hash = '#/projects/p1?room=settings&section=running'
 }
-
-window.addEventListener(
-  'keydown',
-  (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return
-    const target = event.target instanceof Element ? event.target : null
-    if (target?.closest('input, textarea, select, [contenteditable], [role=menu], [role=dialog]')) return
-    const at = DIRECTIONS.findIndex((one) => one.value === proto.get().direction)
-    const picked =
-      event.key === 'ArrowRight'
-        ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
-        : event.key === 'ArrowLeft'
-          ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
-          : /^[1-4]$/.test(event.key)
-            ? DIRECTIONS[Number(event.key) - 1]
-            : undefined
-    if (picked === undefined) return
-    event.preventDefault()
-    event.stopPropagation()
-    go(picked.value)
-  },
-  { capture: true },
-)
 
 function Switcher() {
   const p = useProto()
   return (
     <div className={s.strip}>
-      <Segmented<Direction>
-        label="Direction"
-        value={p.direction}
-        onChange={go}
-        options={DIRECTIONS.map((one, at) => ({
-          value: one.value,
-          label: `${one.value} · ${one.name}`,
-          tooltip: { label: one.name, kbd: String(at + 1) },
-        }))}
-      />
       <Segmented<Which>
         label="Project"
         value={p.which}
         onChange={(next) => proto.set({ which: next })}
         options={[
           { value: 'althar', label: 'althar' },
-          { value: 'meridian', label: 'meridian, three repositories, one failing' },
+          { value: 'meridian', label: 'meridian, three repositories' },
         ]}
       />
       <Segmented<Moment>
@@ -123,16 +82,13 @@ function Switcher() {
         ]}
       />
       <span className={s.grow} />
-      <span>1–4 or ← → switch</span>
-      <LinkButton onClick={() => go(p.direction)}>Back to settings</LinkButton>
+      <LinkButton onClick={go}>Back to settings</LinkButton>
     </div>
   )
 }
 
 const params = new URLSearchParams(window.location.search)
-const d = DIRECTIONS.find((one) => one.value === params.get('d')?.toUpperCase())?.value ?? 'A'
 proto.set({
-  direction: d,
   which: params.get('p') === 'meridian' ? 'meridian' : 'althar',
   moment: params.get('s') === 'none' ? 'none' : 'recorded',
 })
@@ -140,7 +96,7 @@ which = proto.get().which
 // What the address said is read once: the router reads the hash alone, and a query before it would be read into its routes.
 window.history.replaceState(null, '', window.location.pathname)
 window.localStorage.removeItem('althar.tabs')
-go(d)
+go()
 
 const router = makeRouter({ client, cache })
 createRoot(document.getElementById('root')!).render(
