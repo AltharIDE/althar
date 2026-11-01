@@ -1955,6 +1955,10 @@ export const IssueChangesCard = Schema.Struct({
   changesId: Schema.String,
   /** Why, in a sentence, where whoever proposed it said: its pull request merged. */
   note: Schema.NullOr(Schema.String),
+  /** Where the note links to, where a pull request moved its task's issue: the pull request. */
+  noteUrl: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The title of the task whose pull request moved its issue. */
+  task: Schema.optional(Schema.NullOr(Schema.String)),
   state: IssueChangeState,
   /** Why not all of it applied, while it stands failed. */
   error: Schema.NullOr(Schema.String),
@@ -1967,6 +1971,10 @@ export const IssueChangesCard = Schema.Struct({
       key: Schema.String,
       url: Schema.String,
       title: Schema.String,
+      /** Its status before the change, in its tracker's words; unset on cards from before it was kept. */
+      from: Schema.optional(Schema.NullOr(Schema.String)),
+      /** Its status once a close applied, in its tracker's words. */
+      became: Schema.optional(Schema.NullOr(Schema.String)),
       changes: Schema.Array(IssueChangeLine),
       /** Applied, or not and why; null until it was tried. */
       applied: Schema.NullOr(Schema.Boolean),

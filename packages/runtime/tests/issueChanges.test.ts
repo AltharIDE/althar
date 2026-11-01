@@ -118,6 +118,8 @@ describe('changes to issues', () => {
             key: 'MER-231',
             url: 'https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges',
             title: 'Rate-limit refunds like charges',
+            from: 'Todo',
+            became: null,
             changes: [{ field: 'status', to: 'Done' }],
             applied: null,
             error: null,
@@ -128,6 +130,8 @@ describe('changes to issues', () => {
             key: 'MER-232',
             url: 'https://linear.app/fake/issue/MER-232/webhooks-retry-forever',
             title: 'Webhooks retry forever',
+            from: 'In Progress',
+            became: null,
             changes: [
               { field: 'priority', to: 'Low' },
               { field: 'assignee', to: 'Sam Rivera' },
@@ -411,7 +415,45 @@ describe('changes to issues', () => {
   })
 
   describe('as a task’s pull request opens and merges', () => {
-    it.live('offer its issue to In Review in the task’s thread, then to Done in the coordinator’s', () => {
+    const pr = (number: number) => ({ key: `PR #${number}`, url: `https://github.com/meridian/api/pull/${number}` })
+
+    it.live('move its issue at once, to In Review in the task’s thread and to Done in the coordinator’s, without changeIssues', () => {
+      const tracker = linear()
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, threadId, access } = yield* project()
+        const changes = yield* IssueChanges
+        const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        yield* changes.followPullRequest(task.id, 'opened', pr(12))
+        const [review] = yield* cardsIn(task.threadId)
+        assert.deepStrictEqual(
+          [review?.state, review?.direct, review?.note, review?.noteUrl, review?.task, review?.issues[0]?.from, review?.issues[0]?.changes],
+          [
+            'applied',
+            true,
+            'PR #12 opened',
+            'https://github.com/meridian/api/pull/12',
+            'Rate-limit refunds',
+            'Todo',
+            [{ field: 'status', to: 'In Review' }],
+          ],
+        )
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'In Review')
+
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        const [done] = yield* cardsIn(threadId)
+        assert.deepStrictEqual(
+          [done?.state, done?.note, done?.issues[0]?.from, done?.issues[0]?.became, done?.issues[0]?.changes],
+          ['applied', 'PR #12 merged', 'In Review', 'Done', [{ field: 'close', to: null }]],
+        )
+        assert.deepStrictEqual((yield* tracker.issue('MER-231')).status, { name: 'Done', category: 'done' })
+        // Done already, it is left alone.
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        assert.lengthOf(yield* cardsIn(threadId), 1)
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
+
+    it.live('move nothing where the project doesn’t move issues along with its tasks', () => {
       const tracker = linear()
       return Effect.gen(function* () {
         yield* connect('linear')
@@ -419,24 +461,52 @@ describe('changes to issues', () => {
         const changes = yield* IssueChanges
         const instance = yield* Instance
         const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
-        yield* changes.followPullRequest(task.id, 'opened', { key: 'PR #12' })
-        const [review] = yield* cardsIn(task.threadId)
-        assert.deepStrictEqual([review?.note, review?.issues[0]?.changes], ['PR #12 opened.', [{ field: 'status', to: 'In Review' }]])
-        yield* changes.apply(review?.changesId ?? '', instance.personId)
+        yield* (yield* Policies).set(projectId, { moveIssues: false, changeIssues: true }, instance.personId)
+        yield* changes.followPullRequest(task.id, 'opened', pr(12))
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        assert.lengthOf(yield* cardsIn(task.threadId), 0)
+        assert.lengthOf(yield* cardsIn(threadId), 0)
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'Todo')
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
 
-        yield* changes.followPullRequest(task.id, 'merged', { key: 'PR #12' })
-        const [done] = yield* cardsIn(threadId)
-        assert.match(done?.note ?? '', /: PR #12 merged\.$/)
-        assert.deepStrictEqual(done?.issues[0]?.changes, [{ field: 'close', to: null }])
-        yield* changes.apply(done?.changesId ?? '', instance.personId)
-        assert.deepStrictEqual((yield* tracker.issue('MER-231')).status, { name: 'Done', category: 'done' })
-        // Done already, nothing more is offered; nor where the project doesn't move issues.
-        yield* changes.followPullRequest(task.id, 'merged', { key: 'PR #12' })
-        assert.lengthOf(yield* cardsIn(threadId), 1)
-        yield* (yield* Policies).set(projectId, { moveIssues: false }, instance.personId)
-        yield* (yield* Issues).attach({ projectId, taskId: task.id, issue: 'MER-232' })
-        yield* changes.followPullRequest(task.id, 'opened', { key: 'PR #13' })
-        assert.lengthOf(yield* cardsIn(task.threadId), 1)
+    it.live('make a card with the reason where the tracker refuses, and apply it again from there', () => {
+      const tracker = linear()
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, threadId, access } = yield* project()
+        const changes = yield* IssueChanges
+        const instance = yield* Instance
+        const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        tracker.failNext('update', 'forbidden')
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        const [card] = yield* cardsIn(threadId)
+        assert.strictEqual(card?.state, 'failed')
+        assert.match(card?.issues[0]?.error ?? '', /may not change it/)
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'Todo')
+        yield* changes.apply(card?.changesId ?? '', instance.personId)
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
+
+    it.live('leave an issue done or cancelled as it is', () => {
+      const tracker = linear()
+      tracker.addIssue({ ref: 'MER-233', title: 'Shipped', status: { name: 'Done', category: 'done' } })
+      tracker.addIssue({ ref: 'MER-234', title: 'Dropped', status: { name: 'Canceled', category: 'cancelled' } })
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, threadId, access } = yield* project()
+        const changes = yield* IssueChanges
+        const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-233')
+        yield* changes.followPullRequest(task.id, 'opened', pr(12))
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        assert.lengthOf(yield* cardsIn(task.threadId), 0)
+        assert.lengthOf(yield* cardsIn(threadId), 0)
+        assert.strictEqual((yield* tracker.issue('MER-233')).status.name, 'Done')
+        const { task: dropped } = yield* led(projectId, access, 'Dropped work', 'MER-234')
+        yield* changes.followPullRequest(dropped.id, 'merged', pr(13))
+        assert.lengthOf(yield* cardsIn(threadId), 0)
+        assert.strictEqual((yield* tracker.issue('MER-234')).status.name, 'Canceled')
       }).pipe(Effect.provide(withQueries({ linear: tracker })))
     })
   })

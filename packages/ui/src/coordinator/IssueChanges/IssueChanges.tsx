@@ -23,7 +23,10 @@ import s from './IssueChanges.module.css'
  * keeps the start of what it said beneath.
  *
  * Each issue leads with its title; what changes on it sits beneath, each
- * change a quiet name and the value it takes.
+ * change a quiet name and the value it takes. A status moves from where it
+ * stood to where it goes, in the tracker's own words: In Progress → Done.
+ * Where a pull request moved it, the note is a short link to that pull
+ * request, beside the task's title.
  */
 
 /** One thing changed on an issue: its status, closing it, its priority, assignee, project or title; labels added and taken off; a comment; a link. */
@@ -42,6 +45,10 @@ export interface IssueChangesIssue {
   key: string
   href: string
   title: string
+  /** Its status before the change, in the tracker's words. */
+  from?: string | null
+  /** Its status once a close applied, in the tracker's words; Done before. */
+  became?: string | null
   changes: readonly IssueChange[]
   /** Applied, or not; unset until it was tried. */
   applied?: boolean | null
@@ -54,8 +61,10 @@ export interface IssueChangesText {
   kicker: (sources: readonly string[]) => string
   /** A change, as what it changes and what to: [Status, Done], [Labels, +perf −bug], [Close, null]. */
   parts: (change: IssueChange) => readonly [string, string | null]
-  /** A change, in a few words: Status → Done, Labels +perf −bug. */
-  change: (change: IssueChange) => string
+  /** A change, in a few words: Status → Done, Labels +perf −bug; a status or a close from where it stood, In Progress → Done. */
+  change: (change: IssueChange, from?: string | null, became?: string | null) => string
+  /** Where a closed issue goes, before its tracker says. */
+  closedTo: string
   applying: string
   /** Beside the buttons, where not all of it applied. */
   failed: string
@@ -65,6 +74,7 @@ export interface IssueChangesText {
   apply: string
   applyAgain: string
   /** Before the issues, once applied. */
+  /** Before the issues, where the change isn't a status moving from one place to another; none where it is. */
   changed: string
   commented: string
   linked: string
@@ -92,10 +102,13 @@ const partsOf = (change: IssueChange): readonly [string, string | null] =>
 export const issueChangesText: IssueChangesText = {
   kicker: (sources) => (sources.length === 0 ? 'Issue changes' : `Issue changes · ${sources.join(', ')}`),
   parts: partsOf,
-  change: (change) => {
+  change: (change, from, became) => {
+    if (from && (change.field === 'status' || change.field === 'close'))
+      return `${from} → ${change.field === 'close' ? (became ?? issueChangesText.closedTo) : (change.to ?? 'none')}`
     const [what, to] = partsOf(change)
     return to === null ? what : `${what}${change.field === 'labels' ? ' ' : ' → '}${to}`
   },
+  closedTo: 'Done',
   applying: 'Applying…',
   failed: 'Not all of it applied.',
   appliedOne: 'Applied',
@@ -113,8 +126,12 @@ export type IssueChangesProps = RootProps<
   'article',
   {
     issues: readonly IssueChangesIssue[]
-    /** Why, in a sentence, where whoever proposed it said: PR #212 opened. */
+    /** Why, in a few words, where whoever proposed it said: PR #212 opened. */
     note?: string
+    /** Where the note links to: the pull request. */
+    noteHref?: string
+    /** The title of the task whose pull request it was. */
+    task?: string
     state: IssueChangesState
     onApply?: () => void
     onDiscard?: () => void
@@ -122,7 +139,19 @@ export type IssueChangesProps = RootProps<
   }
 >
 
-export function IssueChanges({ issues, note, state, onApply, onDiscard, text, ref, className, ...rest }: IssueChangesProps) {
+export function IssueChanges({
+  issues,
+  note,
+  noteHref,
+  task,
+  state,
+  onApply,
+  onDiscard,
+  text,
+  ref,
+  className,
+  ...rest
+}: IssueChangesProps) {
   const t = { ...issueChangesText, ...text }
   /* when it folds under the button you pressed, focus goes to the line it folds to */
   const line = useRef<HTMLElement>(null)
@@ -137,6 +166,9 @@ export function IssueChanges({ issues, note, state, onApply, onDiscard, text, re
     case IssueChangesState.Applied:
     case IssueChangesState.Discarded: {
       const only = first?.changes.length === 1 && issues.length === 1 ? first.changes[0] : undefined
+      const moves = issues.every(
+        (issue) => issue.from && issue.changes.every((change) => change.field === 'status' || change.field === 'close'),
+      )
       const said =
         state === IssueChangesState.Discarded
           ? t.discarded
@@ -144,7 +176,9 @@ export function IssueChanges({ issues, note, state, onApply, onDiscard, text, re
             ? t.commented
             : only?.field === 'link'
               ? t.linked
-              : t.changed
+              : moves
+                ? null
+                : t.changed
       const comment = state === IssueChangesState.Applied && only?.field === 'comment' ? only.to : null
       return (
         <article
@@ -156,15 +190,23 @@ export function IssueChanges({ issues, note, state, onApply, onDiscard, text, re
         >
           <span className={s.lineHead}>
             {first && <BrandMark brand={first.mark} size={12} className={s.lineMark} />}
-            <span className={s.said}>{said}</span>
+            {said && <span className={s.said}>{said}</span>}
             <span className={cx(s.lineWhat, state === IssueChangesState.Discarded && s.struck)}>
               {issues.map((issue, index) => (
                 <span key={`${issue.source}:${issue.key}`} className={s.lineIssue}>
                   {index > 0 && <span className={s.sep}> · </span>}
                   <Key issue={issue} t={t} />
-                  {only?.field === 'comment' || only?.field === 'link' ? null : ` ${issue.changes.map(t.change).join(', ')}`}
+                  {only?.field === 'comment' || only?.field === 'link'
+                    ? null
+                    : ` ${issue.changes.map((change) => t.change(change, issue.from, issue.became)).join(', ')}`}
                 </span>
               ))}
+              {note && state === IssueChangesState.Applied && (
+                <span className={s.lineIssue}>
+                  <span className={s.sep}> · </span>
+                  <Why note={note} href={noteHref} t={t} />
+                </span>
+              )}
             </span>
           </span>
           {/* what it said, in its own words, a couple of lines of it */}
@@ -176,11 +218,34 @@ export function IssueChanges({ issues, note, state, onApply, onDiscard, text, re
     case IssueChangesState.Applying:
     case IssueChangesState.Failed:
       return (
-        <Card root={{ ...rest, ref, className }} issues={issues} note={note} state={state} onApply={onApply} onDiscard={onDiscard} t={t} />
+        <Card
+          root={{ ...rest, ref, className }}
+          issues={issues}
+          note={note}
+          noteHref={noteHref}
+          task={task}
+          state={state}
+          onApply={onApply}
+          onDiscard={onDiscard}
+          t={t}
+        />
       )
     default:
       return unreachable(state)
   }
+}
+
+/** Why it changed, a short link to the pull request where it has an address. */
+function Why({ note, href, t }: { note: string; href: string | undefined; t: IssueChangesText }) {
+  const safe = href === undefined ? undefined : safeHref(href)
+  return safe ? (
+    <a className={s.pr} href={safe} target="_blank" rel="noreferrer">
+      {note}
+      <VisuallyHidden> {t.newTab}</VisuallyHidden>
+    </a>
+  ) : (
+    <span>{note}</span>
+  )
 }
 
 /** An issue's key, linked to it where it has an address. */
@@ -200,6 +265,8 @@ interface CardProps {
   root: RootProps<'article', object>
   issues: readonly IssueChangesIssue[]
   note: string | undefined
+  noteHref: string | undefined
+  task: string | undefined
   state: IssueChangesState
   onApply: (() => void) | undefined
   onDiscard: (() => void) | undefined
@@ -207,7 +274,7 @@ interface CardProps {
 }
 
 /** The changes before they apply: each issue and what changes on it, and the buttons that apply them or throw them away. */
-function Card({ root, issues, note, state, onApply, onDiscard, t }: CardProps) {
+function Card({ root, issues, note, noteHref, task, state, onApply, onDiscard, t }: CardProps) {
   const { className, ...rest } = root
   const kickerId = useId()
   const applying = state === IssueChangesState.Applying
@@ -218,12 +285,18 @@ function Card({ root, issues, note, state, onApply, onDiscard, t }: CardProps) {
       <p className={s.head}>
         {issues[0] && <BrandMark brand={issues[0].mark} size={11} className={s.mark} />}
         <span id={kickerId}>{t.kicker(sources)}</span>
-        {note && <span className={s.why}>{note}</span>}
+        {(task || note) && (
+          <span className={s.why}>
+            {task && <span className={s.task}>{task}</span>}
+            {note && <Why note={note} href={noteHref} t={t} />}
+          </span>
+        )}
       </p>
       <ul className={s.issues}>
         {issues.map((issue) => {
           const comment = issue.changes.find((change) => change.field === 'comment')
           const rest = issue.changes.filter((change) => change.field !== 'comment')
+          const moved = (change: IssueChange) => Boolean(issue.from) && (change.field === 'status' || change.field === 'close')
           return (
             <li key={`${issue.source}:${issue.key}`} className={s.issue}>
               <p className={s.which}>
@@ -236,7 +309,12 @@ function Card({ root, issues, note, state, onApply, onDiscard, t }: CardProps) {
                     const [what, to] = t.parts(change)
                     return (
                       <span key={index} className={s.change}>
-                        {to === null ? (
+                        {moved(change) ? (
+                          <>
+                            <span className={s.what}>{issue.from}</span> <span className={s.arrow}>→</span>{' '}
+                            <span className={s.to}>{change.field === 'close' ? (issue.became ?? t.closedTo) : to}</span>
+                          </>
+                        ) : to === null ? (
                           <span className={s.to}>{what}</span>
                         ) : (
                           <>
