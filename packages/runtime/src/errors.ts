@@ -199,7 +199,20 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'failed', 'moved', 'never']),
+  why: Schema.Literals([
+    'behind',
+    'denied',
+    'forbidden',
+    'protected',
+    'unreachable',
+    'unanswered',
+    'refused',
+    'failed',
+    'moved',
+    'never',
+    'fork_gone',
+    'unplaced',
+  ]),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
   /** What the remote said, for one it refused: its one line. */

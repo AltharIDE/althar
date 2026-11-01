@@ -9,7 +9,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
-import type { ChangeTarget } from '@althar/domain'
+import type { ChangeTarget, ProjectId } from '@althar/domain'
 import { baseBranch, forkOf, workRemotes } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -40,7 +40,7 @@ const hasBranch = (bare: string, branch = BRANCH) => {
 }
 
 /** A fork's clone, with `origin` the fork and `upstream` the repository it came from, each a bare repository of its own. */
-const forkClone = (options: { readonly canPush?: boolean; readonly upstreamDefault?: string } = {}) => {
+const forkClone = (options: { readonly canPush?: boolean; readonly upstreamDefault?: string; readonly saysHead?: boolean } = {}) => {
   const { working, bare: fork } = hosted(FORK)
   git(working, 'remote', 'add', 'upstream', `${HOST}/${UPSTREAM.join('/')}.git`)
   git(working, 'config', 'user.name', 'Fake')
@@ -50,6 +50,7 @@ const forkClone = (options: { readonly canPush?: boolean; readonly upstreamDefau
   git(working, 'push', '-q', upstream, 'main')
   const pushedTo: Array<string> = []
   const github = makeFakeService({
+    ...(options.saysHead === undefined ? {} : { saysHead: options.saysHead }),
     pushUrl: (path) => {
       const name = path.join('/')
       pushedTo.push(name)
@@ -255,6 +256,92 @@ describe('a clone whose remotes were renamed by hand', () => {
       assert.strictEqual(github.changes[1]?.url, 'https://github.com/meridian/api/pull/2')
       assert.isNull(github.forkOf(2))
       assert.isTrue(hasBranch(upstream, github.changes[1]?.source ?? ''))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  /** The person renames them: the repository it came from is origin now, and the fork is `fork`. */
+  const rename = (working: string) => {
+    git(working, 'remote', 'rename', 'origin', 'fork')
+    git(working, 'remote', 'rename', 'upstream', 'origin')
+  }
+
+  /** The task's next commit, refused by the Push button and by publishing alike, with what each said. */
+  const refusedBoth = (projectId: string, taskId: string, here: string) =>
+    Effect.gen(function* () {
+      const changes = yield* Changes
+      git(here, 'commit', '-q', '--allow-empty', '-m', 'One more')
+      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      const pushed = yield* Effect.flip(changes.push(taskId, seen?.change?.localHead ?? ''))
+      const [run] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId}`
+      const published = yield* Effect.flip(
+        changes.publish({ projectId: projectId as ProjectId, taskId, runId: run?.id ?? '', end: 'draft' }),
+      )
+      return [pushed, published].map((refused) => ({ tag: (refused as { _tag?: string })._tag, why: (refused as { why?: string }).why }))
+    })
+
+  it.live('refuses to push a pull request whose fork is gone, rather than make its branch upstream', () => {
+    const { working, upstream, github } = forkClone()
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      github.loseFork(1)
+      const sql = yield* SqlClient.SqlClient
+      yield* until(
+        sql<{
+          head: string
+        }>`SELECT json_extract(snapshot, '$.head') AS head FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`,
+        (all) => all[0]?.head === '[]',
+      )
+
+      assert.deepStrictEqual(yield* refusedBoth(projectId, taskId, here), [
+        { tag: 'PushRefused', why: 'fork_gone' },
+        { tag: 'PushRefused', why: 'fork_gone' },
+      ])
+      assert.isFalse(hasBranch(upstream), 'no new branch upstream for the open pull request')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('refuses to push a pull request its host doesn’t place where no branch of that name is, rather than make one', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+
+      assert.deepStrictEqual(yield* refusedBoth(projectId, taskId, here), [
+        { tag: 'PushRefused', why: 'unplaced' },
+        { tag: 'PushRefused', why: 'unplaced' },
+      ])
+      assert.isFalse(hasBranch(upstream), 'no new branch upstream for the open pull request')
+      assert.notStrictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a pull request whose host doesn’t say where its branch is', () => {
+  it.live('still takes its commits on the fork, where its branch is, in a clone not renamed', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      yield* pushOneMore(projectId, taskId, here, 'One more')
+      assert.strictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
+      assert.isFalse(hasBranch(upstream))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('still takes them in a normal project, whose branch is on its own repository', () => {
+    const { working, bare } = hosted(FORK)
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    const github = makeFakeService({ saysHead: false, pushUrl: () => bare })
+    github.addRepository(FORK)
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      yield* pushOneMore(projectId, taskId, here, 'One more')
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), 'One more')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

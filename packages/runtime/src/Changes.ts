@@ -1307,7 +1307,10 @@ export class Changes extends Context.Service<
           const standing = next === undefined ? yield* openFrom(input.taskId, task.workspaceId, task.branch) : undefined
           if (standing !== undefined) {
             repository = samePath(standing.repository, repository.path) ? repository : yield* host.repository(standing.repository)
-            own = yield* branchRepositoryOf(host, repository, task.path, standing)
+            own = yield* branchRepositoryOf(input.taskId, host, repository, task.path, {
+              ...standing,
+              source: sourceOf(standing, task.branch),
+            })
           }
           const from = samePath(repository.path, own.path) ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
@@ -2003,38 +2006,48 @@ export class Changes extends Context.Service<
       /**
        * The repository a pull request's branch is on, where its commits are
        * pushed, whatever the project says of the task's next ones (ADR-085):
-       * where its host last said, else where it says now; where it doesn't
-       * say, its own repository, or for one from a fork into the repository it
-       * was forked from, the fork, as the clone's remotes say.
+       * where its host last said, else where it says now. Where it says the
+       * fork is gone, nowhere. Where it doesn't say, its own repository, or for
+       * one from a fork into the repository it was forked from, the fork, as
+       * the clone's remotes say, and only with a branch of that name there: a
+       * push for an open pull request never makes a new one, and a clone's
+       * remotes renamed since can't say where a fork's is.
        */
       const branchRepositoryOf = (
+        taskId: string,
         host: CodeHost,
         repository: Repository,
         path: string,
-        pull: { readonly number: number; readonly head?: ReadonlyArray<string> | null | undefined },
+        pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
       ) =>
         Effect.gen(function* () {
+          const remote = `${host.words.short} ${host.words.prefix}${pull.number}`
           const head =
             pull.head !== undefined
               ? pull.head
               : (yield* host.change(repository, pull.number).pipe(Effect.orElseSucceed(() => null)))?.headRepository
           if (head === null) return repository
           if (head !== undefined && head.length > 0) return samePath(head, repository.path) ? repository : yield* host.repository(head)
+          if (head !== undefined) return yield* new PushRefused({ taskId, why: 'fork_gone', remote })
           const fork = yield* namedRemotes(path).pipe(
             Effect.map(forkOf),
             Effect.orElseSucceed(() => null),
           )
           const into = fork !== null && samePath(repository.path, fork.upstream.path)
-          return into ? yield* host.repository(fork.fork.path) : repository
+          const on = into ? yield* host.repository(fork.fork.path) : repository
+          if ((yield* remoteTip(path, yield* host.pushTarget(on), pull.source)) === null)
+            return yield* new PushRefused({ taskId, why: 'unplaced', remote })
+          return on
         })
 
       /** Where a pull request's commits are pushed: the repository its branch is on. */
       const pushTargetOf = (
+        taskId: string,
         host: CodeHost,
         repository: Repository,
         path: string,
-        pull: { readonly number: number; readonly head?: ReadonlyArray<string> | null | undefined },
-      ) => Effect.flatMap(branchRepositoryOf(host, repository, path, pull), (on) => host.pushTarget(on))
+        pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
+      ) => Effect.flatMap(branchRepositoryOf(taskId, host, repository, path, pull), (on) => host.pushTarget(on))
 
       /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
       const madeFrom = (commit: string) =>
@@ -2177,7 +2190,10 @@ export class Changes extends Context.Service<
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const pushTarget = yield* pushTargetOf(host, repository, workspace.path, snapshot)
+          const pushTarget = yield* pushTargetOf(taskId, host, repository, workspace.path, {
+            ...snapshot,
+            source: sourceOf(snapshot, workspace.branch),
+          })
           return { link, snapshot, workspace, pushTarget, sent: yield* sentTo(link.projectId, snapshot.url) }
         })
 
@@ -3477,7 +3493,11 @@ export class Changes extends Context.Service<
           if (sent === null || sent === said) return said
           const workspace = yield* worktreeOf(link.taskId, read.url)
           if (workspace === undefined || !(yield* behindAny(workspace.path, [said], [sent]))) return said
-          const target = yield* pushTargetOf(host, repository, workspace.path, { number: read.number, head: read.headRepository })
+          const target = yield* pushTargetOf(link.taskId, host, repository, workspace.path, {
+            number: read.number,
+            source: onto,
+            head: read.headRepository,
+          })
           return (yield* remoteTip(workspace.path, target, onto)) === sent ? sent : said
         }).pipe(Effect.orElseSucceed(() => read.headSha))
 
@@ -5259,7 +5279,7 @@ export class Changes extends Context.Service<
           const { host, repository } = yield* current(taskId, snapshot.url)
           const onto = sourceOf(snapshot, branch)
           if (onto === repository.defaultBranch) return `${name} is from ${onto}`
-          const tip = yield* remoteTip(path, yield* pushTargetOf(host, repository, path, snapshot), onto)
+          const tip = yield* remoteTip(path, yield* pushTargetOf(taskId, host, repository, path, { ...snapshot, source: onto }), onto)
           const sent = yield* sentTo(link.projectId, snapshot.url)
           const there = tip ?? snapshot.headSha
           if (there === null || there !== sent) return `Someone else pushed to ${name}`
@@ -5311,7 +5331,14 @@ export class Changes extends Context.Service<
                 ? Effect.failCause(cause)
                 : Effect.andThen(
                     Effect.logWarning('Could not push what the lead committed: it waits for the person', cause),
-                    holdPush(link, here.head, `Althar couldn't reach ${nameOf(seen)}`),
+                    // Nowhere to push it says why; anything else, that it couldn't get there.
+                    holdPush(
+                      link,
+                      here.head,
+                      Option.getOrUndefined(Cause.findErrorOption(cause)) instanceof PushRefused
+                        ? pushFailed(cause)
+                        : `Althar couldn't reach ${nameOf(seen)}`,
+                    ),
                   ),
             ),
           )
@@ -5330,7 +5357,11 @@ export class Changes extends Context.Service<
           // As its host has it now: one merged since Althar last asked takes nothing more (ADR-034).
           if ((yield* host.change(repository, snapshot.number)).state !== 'open') return
           const onto = sourceOf(snapshot, workspace.branch)
-          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path, snapshot), onto)
+          const tip = yield* remoteTip(
+            workspace.path,
+            yield* pushTargetOf(taskId, host, repository, workspace.path, { ...snapshot, source: onto }),
+            onto,
+          )
           const ahead = yield* aheadOf(workspace.path, tip, [sent, snapshot.headSha])
           if (ahead.kind === 'ahead' && ahead.count === 0) return
           const why = yield* heldOf(taskId, link, snapshot, workspace.path, workspace.branch, ahead)
@@ -6080,10 +6111,16 @@ export class Changes extends Context.Service<
           // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
           const tip = yield* remoteTip(
             workspace.path,
-            yield* pushTargetOf(host, repository, workspace.path, {
+            yield* pushTargetOf(taskId, host, repository, workspace.path, {
               number: now.number,
+              source: now.source,
               head: now.headRepository !== undefined ? now.headRepository : snapshot.head,
-            }),
+            }).pipe(
+              Effect.catchTag(
+                'PushRefused',
+                (refused) => new ToolRefused({ message: `${words(refused, String).message} Tell the person.` }),
+              ),
+            ),
             now.source,
           )
           const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])

@@ -240,6 +240,10 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
+        if (why === 'fork_gone')
+          return `${remote}’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.`
+        if (why === 'unplaced')
+          return `The host doesn’t say where ${remote}’s branch is, and it isn’t where this task pushes, so nothing was pushed.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
         const host = text(error, 'host')

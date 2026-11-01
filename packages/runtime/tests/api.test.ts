@@ -2589,6 +2589,14 @@ describe('words', () => {
     )
     assert.strictEqual(said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })), 'web’s main moved meanwhile. Merge again.')
     assert.strictEqual(said({ _tag: 'NoChangeToOpen', why: 'something new' }), "The task's work isn't done yet.")
+    // A pull request with nowhere to push to says so, and no branch is made for it.
+    assert.deepStrictEqual(
+      (['fork_gone', 'unplaced'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'PR #1' }))),
+      [
+        'PR #1’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.',
+        'The host doesn’t say where PR #1’s branch is, and it isn’t where this task pushes, so nothing was pushed.',
+      ],
+    )
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
       (['behind', 'denied', 'moved', 'never'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
