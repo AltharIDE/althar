@@ -1,8 +1,4 @@
 /* Scrappy: layout for the prototype's parts; colours and type are the kit's tokens. */
-.cards {
-  display: grid;
-  gap: 16px;
-}
 /* A repository, set apart as a card, like the kit's CodeBlock. */
 .card {
   border-radius: 10px;
@@ -10,31 +6,8 @@
   border: 1px solid var(--line-2);
   overflow: hidden;
 }
-.head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--paper-plain);
-}
 .headIcon {
   flex: none;
-  color: var(--t-3);
-}
-.repoName {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--t-1);
-}
-.checkout {
-  margin-left: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 11.5px var(--mono);
   color: var(--t-3);
 }
 .part {
@@ -45,11 +18,116 @@
   font-size: 11.5px;
   color: var(--t-3);
 }
-.head + .part {
+[role='tabpanel'] > .part:first-child {
   border-top: 0;
 }
+.mono {
+  font: 12px var(--mono);
+  color: var(--t-1);
+}
+.dim {
+  color: var(--t-3);
+}
+.fileLabel {
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
 
-/* B: a tab each, commands and files side by side. */
+/* B: the files in a row under the commands. */
+.fileRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.fileRow .fileLabel {
+  margin-right: 4px;
+}
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 2px 0 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.addChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px dashed var(--line-2);
+  border-radius: 6px;
+  background: none;
+  font: 12px var(--font);
+  color: var(--t-3);
+  cursor: pointer;
+}
+.addChip:hover {
+  color: var(--t-1);
+  border-color: var(--t-4);
+}
+.addInput {
+  height: 26px;
+  width: 160px;
+  padding: 0 9px;
+  border: 1px solid var(--t-4);
+  border-radius: 6px;
+  background: var(--paper);
+  font: 12px var(--mono);
+  color: var(--t-1);
+  outline: none;
+}
+
+/* C: the files said in a line at the card's foot. */
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.footLine {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.footLine:hover {
+  background: var(--hover-faint);
+}
+.footInput {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  margin-left: -6px;
+  border: 1px solid var(--t-4);
+  border-radius: 4px;
+  background: var(--paper);
+  font: 12px var(--mono);
+  color: var(--t-1);
+  outline: none;
+}
+
+/* A tab for each repository. */
 .tabs {
   display: flex;
   align-items: stretch;
@@ -90,50 +168,6 @@
   font: 11.5px var(--mono);
   color: var(--t-3);
 }
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-}
-.pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.pane > :last-child {
-  flex: 1;
-}
-.pane + .pane {
-  border-left: 1px solid var(--line);
-}
-.split .part {
-  border-top: 0;
-}
-
-/* C: dark, like what a task's commands print. */
-.termCard {
-  border-radius: 10px;
-  background: var(--term);
-  overflow: hidden;
-}
-.termHead {
-  composes: head;
-  background: var(--term-raised);
-  border-bottom: 0;
-}
-.termHead .repoName {
-  color: var(--term-t1);
-}
-.termHead .headIcon,
-.termHead .checkout {
-  color: var(--term-t4);
-}
-.termPart {
-  padding: 7px 14px 6px;
-  background: var(--term-raised);
-  font-size: 11.5px;
-  color: var(--term-t3);
-}
-
 /* The strip of states under the window: the prototype's, not the app's. */
 .strip {
   display: flex;

@@ -1,7 +1,7 @@
 // Scrappy: what the page shows, in one small store the switcher and the view read.
 import { useSyncExternalStore } from 'react'
 
-export type Direction = 'A' | 'B' | 'C' | 'D'
+export type Direction = 'A' | 'B' | 'C'
 export type Which = 'althar' | 'meridian'
 /** Whether a lead has recorded the setups yet. */
 export type Moment = 'recorded' | 'none'

@@ -60,10 +60,9 @@ const go = () => {
 }
 
 const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
-  { value: 'A', name: 'Cards' },
-  { value: 'B', name: 'Tabs' },
-  { value: 'C', name: 'Terminal' },
-  { value: 'D', name: 'One script' },
+  { value: 'A', name: 'Under a line' },
+  { value: 'B', name: 'Files' },
+  { value: 'C', name: 'One line' },
 ]
 
 window.addEventListener(
@@ -78,7 +77,7 @@ window.addEventListener(
         ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
         : event.key === 'ArrowLeft'
           ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
-          : /^[1-4]$/.test(event.key)
+          : /^[1-3]$/.test(event.key)
             ? DIRECTIONS[Number(event.key) - 1]
             : undefined
     if (picked === undefined) return
@@ -122,7 +121,7 @@ function Switcher() {
         ]}
       />
       <span className={s.grow} />
-      <span>1–4 or ← → switch</span>
+      <span>1–3 or ← → switch</span>
       <LinkButton onClick={go}>Back to settings</LinkButton>
     </div>
   )
