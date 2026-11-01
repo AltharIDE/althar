@@ -22,7 +22,14 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'leadsReachWeb' | 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'changeIssues' | 'repositoryFiles'
+export type RuleSwitch =
+  | 'leadsReachWeb'
+  | 'resolveConflicts'
+  | 'pushCommits'
+  | 'postScreenshots'
+  | 'moveIssues'
+  | 'changeIssues'
+  | 'repositoryFiles'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
