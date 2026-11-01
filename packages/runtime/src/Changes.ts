@@ -1,3 +1,4 @@
+import { Errands } from './Errands'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
@@ -490,6 +491,7 @@ const snapshotOf = (
 })
 
 type Store =
+  | Errands
   | SqlClient.SqlClient
   | Instance
   | Ledger
@@ -5678,8 +5680,11 @@ export class Changes extends Context.Service<
        * fetched, fetched again where that was a while ago, without asking its
        * host; a branch with none, with its default branch here.
        */
+      const errands = yield* Errands
       const sweep = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
+        for (const project of yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`)
+          yield* errands.remind(project.id).pipe(contained('Errands.remind', () => undefined))
         const links = yield* sql<LinkRow>`
           SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
           WHERE kind = 'change' AND listening = 1 AND json_extract(snapshot, '$.state') = 'open'

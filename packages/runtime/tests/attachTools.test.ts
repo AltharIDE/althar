@@ -222,7 +222,14 @@ describe('attaching a task to a pull request, from the window', () => {
             checksAppear: Duration.zero,
           }),
         )
-        yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind: 'window' },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
         const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
         const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
         yield* client.ConnectToken({ commandId: commandId(), product: 'github', token: 't', webUrl: HOST })

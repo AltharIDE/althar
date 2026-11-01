@@ -4,6 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Clock, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Errands } from '../src/Errands'
 import { Accounts } from '../src/Accounts'
 import { Instance } from '../src/Instance'
 import { whenWords } from '../src/Limits'
@@ -150,6 +151,43 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
       assert.strictEqual(reviewed?.state, 'succeeded')
     }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
   })
+
+  it.live('keeps the paired-device sender on a tell answer carried from a durable capacity wait', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      const answered = yield* started(projectId, 'Answered', 'Do it.', [{ key: 'implement', agentId: 'claude-code' }])
+      const note = 'Keep working. [lead:wait]'
+      const waiting = yield* waitingStep(answered.taskId)
+      // As after a restart: only the durable place record carries the connection's source.
+      yield* keptAs(waiting.id, waiting.output, {
+        how: 'answered',
+        sender: { kind: 'paired_device', deviceId: 'phone-1' },
+        info: { step: 'implement', why: 'stalled', detail: null, agentId: 'claude-code', round: 0, open: 0 },
+        answer: { kind: 'tell', note: note },
+      })
+      const [row] = yield* until(
+        sql<{
+          senderKind: string
+          senderDeviceId: string
+          sessionId: string
+        }>`SELECT i.sender_kind, i.sender_device_id, d.provider_session_id AS session_id FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.thread_id = ${answered.threadId} AND i.body = ${note} AND d.state = 'delivered'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(row?.senderKind, 'paired_device')
+      assert.strictEqual(row?.senderDeviceId, 'phone-1')
+      const word = yield* (yield* Errands).turn({
+        role: 'lead',
+        projectId,
+        taskId: answered.taskId,
+        threadId: answered.threadId,
+        sessionId: row!.sessionId,
+      })
+      assert.strictEqual(word.origin, 'person')
+      assert.isTrue(word.byPerson)
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
 
   it.live("carries a lead's step on at once on the lead it was resumed on, or as answered", () =>
     Effect.gen(function* () {
