@@ -11,7 +11,7 @@ import { Context, Effect, Exit, Layer } from 'effect'
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
-export { ToolRefused } from './toolErrors'
+export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
  * Althar's tools, served to agents over MCP (docs/architecture/04): how the

@@ -20,6 +20,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream }
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { ToolServer } from '../src/ToolServer'
 import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
 import {
@@ -2805,6 +2806,59 @@ describe('thread items', () => {
 })
 
 describe('connection authority', () => {
+  for (const sender of [{ kind: 'window' }, { kind: 'paired_device', deviceId: 'phone-1' }] as const) {
+    it.live(`keeps ${sender.kind} as the source when the person tells a stuck lead what to do`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, grant, context, store } = yield* connected({ sender })
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+          const task = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: 'Tell the lead',
+            description: 'Nothing to say.',
+            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          })
+          const waiting = yield* until(client.GetThread({ threadId: task.threadId }), (thread) =>
+            thread.attention.some((a) => a.kind === 'stuck'),
+          )
+          yield* client.AnswerStuck({
+            commandId: commandId(),
+            attentionId: waiting.attention.find((a) => a.kind === 'stuck')!.id,
+            answer: { kind: 'tell', note: scenarios.slow },
+          })
+          const rows = yield* until(
+            store(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                return yield* sql<{
+                  senderKind: string
+                  senderDeviceId: string | null
+                  sessionId: string
+                  origin: string
+                }>`SELECT i.sender_kind, i.sender_device_id, d.provider_session_id AS session_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.thread_id = ${task.threadId} AND i.body = ${scenarios.slow} AND d.state = 'delivered'`
+              }),
+            ),
+            (rows) => rows.length === 1,
+          )
+          assert.strictEqual(rows[0]?.senderKind, sender.kind)
+          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.origin, 'person')
+          const turn = JSON.parse(
+            yield* Effect.provideContext(
+              callTool(
+                { role: 'lead', projectId: project.id, threadId: task.threadId, taskId: task.id, sessionId: rows[0]!.sessionId },
+                'read_turn',
+              ),
+              context,
+            ),
+          ) as { byPerson: boolean }
+          assert.isTrue(turn.byPerson)
+        }),
+      ),
+    )
+  }
+
   for (const sender of [{ kind: 'window' }, { kind: 'paired_device', deviceId: 'phone-1' }, { kind: 'socket' }] as const) {
     it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
       Effect.scoped(
@@ -2814,30 +2868,34 @@ describe('connection authority', () => {
           const project = yield* Effect.provideContext(
             Effect.gen(function* () {
               const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-              return yield* (yield* Projects).createTask({
+              const created = yield* (yield* Projects).createTask({
                 envelope: yield* Runtime.envelope('task.create', {}),
                 projectId: opened.projectId,
                 title: 'Connection authority',
               })
+              return { ...created, projectId: opened.projectId }
             }),
             context,
           )
-          const id = commandId()
-          yield* client.Send({ commandId: id, threadId: project.threadId, body: scenarios.hello, disposition: 'after_current' })
           yield* client.StartSession({ commandId: commandId(), threadId: project.threadId, agentId: 'codex' })
           yield* until(
             client.GetThread({ threadId: project.threadId }),
             (thread) =>
               thread.session !== null && !thread.session.turnRunning && thread.items.some((item) => item.kind === 'agent_message'),
           )
+          const id = commandId()
+          yield* client.Send({ commandId: id, threadId: project.threadId, body: scenarios.slow, disposition: 'after_current' })
+          yield* until(client.GetThread({ threadId: project.threadId }), (thread) => thread.session?.turnRunning === true)
           const rows = yield* store(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               return yield* sql<{
+                inputId: string
+                sessionId: string
                 senderKind: string
                 senderDeviceId: string | null
                 origin: string
-              }>`SELECT i.sender_kind, i.sender_device_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.command_id = ${id}`
+              }>`SELECT i.id AS input_id, d.provider_session_id AS session_id, i.sender_kind, i.sender_device_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.command_id = ${id}`
             }),
           )
           assert.isNotEmpty(rows)
@@ -2845,6 +2903,47 @@ describe('connection authority', () => {
             rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
           )
           assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          // The message travelled over RPC and Sessions opened this live delivery; no turn rows are seeded.
+          let acts = 0
+          const first = rows[0]!
+          const answer = yield* Effect.provideContext(
+            Effect.gen(function* () {
+              yield* (yield* ToolServer).serve('lead', [
+                {
+                  name: 'test_connection_asked',
+                  kind: 'asked-for',
+                  description: 'Test only.',
+                  input: { type: 'object' },
+                  action: () =>
+                    Effect.succeed({
+                      messageId: first.inputId,
+                      target: 'connection-test',
+                      request: {},
+                      read: Effect.succeed({ state: 'ready' as const }),
+                      act: () =>
+                        Effect.sync(() => {
+                          acts++
+                          return 'Acted on the live word.'
+                        }),
+                    }),
+                },
+              ])
+              return yield* callTool(
+                {
+                  role: 'lead',
+                  projectId: project.projectId,
+                  taskId: project.taskId,
+                  threadId: project.threadId,
+                  sessionId: first.sessionId,
+                },
+                'test_connection_asked',
+              )
+            }),
+            context,
+          )
+          if (sender.kind === 'socket') assert.match(answer, /window or a paired device/)
+          else assert.strictEqual(answer, 'Acted on the live word.')
+          assert.strictEqual(acts, sender.kind === 'socket' ? 0 : 1)
           if (sender.kind === 'socket') {
             const denied = yield* Effect.exit(
               client.SetTaskAllowEverything({ commandId: commandId(), taskId: project.taskId, allowEverything: true }),

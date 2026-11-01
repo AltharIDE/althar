@@ -12,7 +12,7 @@ import { makeKeyedLock } from './keyedLock'
 import { outward } from './outward'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
-import { ToolRefused } from './toolErrors'
+import { ActionNotPerformed, ToolRefused } from './toolErrors'
 import type { ToolAccess } from './ToolServer'
 
 /** Inputs the host recorded for the live turn, never claims from a tool's arguments. */
@@ -58,7 +58,8 @@ export interface AskedAction {
   readonly branch?: string | undefined
   readonly request: Readonly<Record<string, unknown>>
   readonly read: Effect.Effect<FreshAction, ToolRefused>
-  readonly act: (fresh: FreshAction) => Effect.Effect<AskedResult, ToolRefused>
+  /** Only ActionNotPerformed proves a refusal did not write; other errors require read-back. */
+  readonly act: (fresh: FreshAction) => Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed>
 }
 
 interface ErrandRow {
@@ -94,6 +95,10 @@ const stable = (value: unknown): string =>
       : inner,
   ) ?? 'null'
 
+const waitsLine = (waits: string): string =>
+  (JSON.parse(waits) as Array<{ kind: string; target: string }>).map((w) => `${w.kind.replaceAll('_', ' ')} ${w.target}`).join(', ') ||
+  'the next step'
+
 /** Open records are included on first start, handover and task cards, independent of any session. */
 export const errandLines = (projectId: string, taskId?: string) =>
   Effect.gen(function* () {
@@ -114,8 +119,8 @@ export const errandLines = (projectId: string, taskId?: string) =>
     ORDER BY e.created_at, e.rowid, s.position`
     return rows.map((r) =>
       taskId === undefined
-        ? `${r.state === 'paused' ? 'Paused' : 'Waiting'}: ${r.tool} ${r.target}${r.head === null ? '' : ` at ${r.head}`} — ${r.reason ?? r.waits}. Asked: ${JSON.stringify(r.words)} (errand ${r.id}).`
-        : `${r.state === 'paused' ? 'Paused' : 'Waiting'} for ${r.target}: ${r.reason ?? (JSON.parse(r.waits) as Array<{ kind: string; target: string }>).map((w) => `${w.kind} ${w.target}`).join(', ')}.`,
+        ? `${r.state === 'paused' ? 'Paused' : 'Waiting'}: ${r.tool.replaceAll('_', ' ')} ${r.target}${r.head === null ? '' : ` at ${r.head}`} — ${r.reason ?? waitsLine(r.waits)}. Asked: ${JSON.stringify(r.words)} (errand ${r.id}).`
+        : `${r.state === 'paused' ? 'Paused' : 'Waiting'} for ${r.target}: ${r.reason ?? waitsLine(r.waits)}.`,
     )
   })
 
@@ -131,6 +136,7 @@ export class Errands extends Context.Service<
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
     /** The shared news watch calls this even when a poll has no changes. No session or agent place is held. */
     remind(projectId: string): Effect.Effect<void, ToolRefused>
+    /** Every poll change touching a target refreshes this clock; wake its thread separately for a fresh/terminal read. */
     news(id: string): Effect.Effect<void, ToolRefused>
   }
 >()('@althar/runtime/Errands') {
@@ -146,8 +152,8 @@ export class Errands extends Context.Service<
           Effect.catchCause((cause) => {
             const error = Option.getOrUndefined(Cause.findErrorOption(cause))
             return Effect.fail(
-              error instanceof ToolRefused
-                ? error
+              error instanceof ToolRefused || error instanceof ActionNotPerformed
+                ? refused(error.message)
                 : error instanceof ConnectorFailed
                   ? refused(`The action’s answer is uncertain: ${error.message} It will be read back before another attempt.`)
                   : refused('Althar could not keep or read the errand. Try again, or tell the person.'),
@@ -370,10 +376,16 @@ export class Errands extends Context.Service<
               if (errand !== undefined) yield* set(errand, 'paused', fresh.reason ?? 'A new objection needs the person’s word again.')
               return yield* refused(fresh.reason ?? 'A new objection needs the person’s word again.')
             }
-            if (fresh.state === 'ended' || fresh.pushedBy === 'other' || (action.branch !== undefined && fresh.branch !== action.branch)) {
+            if (
+              fresh.state === 'ended' ||
+              fresh.pushedBy === 'other' ||
+              (action.branch !== undefined && fresh.branch !== undefined && fresh.branch !== action.branch)
+            ) {
               if (errand !== undefined) yield* set(errand, 'cancelled', fresh.reason ?? 'The target changed or someone else acted on it.')
               return yield* refused(fresh.reason ?? 'The target changed or someone else acted on it.')
             }
+            if (action.branch !== undefined && fresh.branch === undefined)
+              return yield* refused('This action binds a target branch. Its fresh read must return that branch; nothing was changed.')
             if (
               action.head !== undefined &&
               fresh.head !== action.head &&
@@ -382,7 +394,7 @@ export class Errands extends Context.Service<
               return yield* refused('The head moved. Read it again before asking for this action.')
             if (fresh.state === 'unknown' || fresh.state === 'waiting')
               return yield* refused(fresh.reason ?? 'This step still waits; nothing was changed.')
-            if (receipt !== undefined && fresh.state !== 'done' && fresh.state !== 'absent')
+            if (receipt !== undefined && receipt.state !== 'failed' && fresh.state !== 'done' && fresh.state !== 'absent')
               return yield* refused(
                 'The earlier answer was lost. Read back whether it happened or is still in flight; it will not be acted on twice.',
               )
@@ -426,8 +438,10 @@ export class Errands extends Context.Service<
                         : action
                             .act(fresh)
                             .pipe(
-                              Effect.mapError(
-                                (e) => new ConnectorFailed({ product: 'asked-for', reason: 'unreachable', message: e.message }),
+                              Effect.mapError((e) =>
+                                e instanceof ActionNotPerformed
+                                  ? e
+                                  : new ConnectorFailed({ product: 'asked-for', reason: 'unreachable', message: e.message }),
                               ),
                             ),
                     confirmed: (value) => typeof value === 'string',
@@ -567,7 +581,7 @@ export class Errands extends Context.Service<
                     continue
                   yield* say(
                     row,
-                    `Errand still waits: ${row.reason ?? steps.map((s) => `${s.target}: ${s.waits}`).join('; ')}. Asked: ${JSON.stringify(row.words)}.`,
+                    `Errand still waits: ${row.reason ?? steps.map((s) => `${s.target}: ${waitsLine(s.waits)}`).join('; ')}. Asked: ${JSON.stringify(row.words)}.`,
                   )
                   yield* change('errands', row.id, { remindedAt: at })
                 }

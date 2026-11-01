@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { MessageSender } from '@althar/contracts'
+import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Deferred, Effect, Fiber, Option } from 'effect'
+import { Cause, Deferred, Effect, Fiber, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
 
+import { ActionNotPerformed } from '../src/toolErrors'
+import { Live } from '../src/Live'
 import { postCard } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
 import { Errands, errandLines, type AskedAction, type AskedResult, type ErrandStep, type FreshAction } from '../src/Errands'
@@ -17,7 +20,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { ToolRefused, ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, callToolAtOnce, repository, runtime } from './support'
+import { callTool, callToolAtOnce, repository, runtime, task, turns, until } from './support'
 
 /** A live turn in the store, without an agent process; calls use the real HTTP MCP server. */
 const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
@@ -62,6 +65,7 @@ const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
     let fresh: FreshAction = { state: 'ready', head: 'head-a', branch: 'main' }
     let acts = 0
     let reads = 0
+    let refusal = false
     let pending = false
     let lost = false
     let reading = Effect.void
@@ -102,9 +106,13 @@ const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
                 yield* reading
                 return fresh
               }),
-              act: (): Effect.Effect<AskedResult, ToolRefused> =>
-                Effect.suspend(() => {
+              act: (): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
+                Effect.suspend((): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> => {
                   acts++
+                  if (refusal) {
+                    refusal = false
+                    return Effect.fail(new ActionNotPerformed({ message: 'Not mergeable; no write was made.' }))
+                  }
                   return lost
                     ? Effect.fail(new ToolRefused({ message: 'The answer was lost.' }))
                     : Effect.succeed(pending ? { pending: true as const, answer: 'In flight.' } : 'Did it once.')
@@ -121,6 +129,9 @@ const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
       step,
       set: (next: FreshAction) => {
         fresh = next
+      },
+      refuseOnce: () => {
+        refusal = true
       },
       pending: () => {
         pending = true
@@ -181,6 +192,7 @@ describe('the person’s word through the tool boundary', () => {
       }>`SELECT revision FROM thread_items WHERE kind = 'task' AND json_extract(content, '$.taskId') = ${s.access.taskId}`
       assert.isAbove(after?.revision ?? 0, before?.revision ?? 0)
       assert.strictEqual(yield* s.errands.keep(s.access, message, [s.step]), id)
+      assert.notInclude((yield* errandLines(s.access.projectId)).join(), '[{')
       assert.include((yield* errandLines(s.access.projectId, s.access.taskId!)).join(), 'checks head-a')
       assert.include(
         (yield* handoverRecord({
@@ -235,6 +247,7 @@ describe('the person’s word through the tool boundary', () => {
       const s = yield* setup()
       for (const fresh of [
         { state: 'objection', reason: 'Changes requested.' },
+        { state: 'ended', reason: 'Someone closed it.' },
         { state: 'ready', branch: 'release', head: 'head-a' },
         { state: 'ready', branch: 'main', head: 'head-b', pushedBy: 'other' },
       ] satisfies FreshAction[]) {
@@ -258,6 +271,37 @@ describe('the person’s word through the tool boundary', () => {
       assert.instanceOf(yield* failure(s.errands.resume(s.access, id, message)), ToolRefused)
       assert.match(yield* callTool(s.access, 'test_asked', { messageId: message }), /paused or called off/)
       assert.strictEqual(s.counts().acts, 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('a missing branch on a fresh read refuses without cancelling the bound errand', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+      s.set({ state: 'ready', head: 'head-a' })
+      const args = { errandId: id, step: s.step.key }
+      assert.match(yield* callTool(s.access, 'test_asked', args), /fresh read must return that branch/)
+      assert.strictEqual((yield* s.sql<{ state: string }>`SELECT state FROM errands WHERE id = ${id}`)[0]?.state, 'open')
+      assert.strictEqual(s.counts().acts, 0)
+      s.set({ state: 'ready', head: 'head-a', branch: 'main' })
+      assert.strictEqual(yield* callTool(s.access, 'test_asked', args), 'Did it once.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('a definite refusal keeps a failed receipt and can retry after a fresh ready read', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+      const args = { errandId: id, step: s.step.key }
+      s.refuseOnce()
+      assert.match(yield* callTool(s.access, 'test_asked', args), /Not mergeable; no write was made/)
+      assert.deepStrictEqual(
+        (yield* s.sql<{ state: string }>`SELECT state FROM mutation_receipts WHERE operation = 'test_asked'`).map((r) => r.state),
+        ['failed'],
+      )
+      assert.strictEqual((yield* s.sql<{ state: string }>`SELECT state FROM errands WHERE id = ${id}`)[0]?.state, 'open')
+      assert.strictEqual(yield* callTool(s.access, 'test_asked', args), 'Did it once.')
+      assert.deepStrictEqual(s.counts(), { acts: 2, reads: 2 })
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -394,6 +438,22 @@ describe('the person’s word through the tool boundary', () => {
     }),
   )
 
+  it.effect('news touching an errand resets its day without news', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+      yield* TestClock.adjust('23 hours')
+      yield* s.errands.news(id)
+      yield* TestClock.adjust('1 hour')
+      yield* s.errands.remind(s.access.projectId)
+      const reminders = s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
+      assert.lengthOf(yield* reminders, 0)
+      yield* TestClock.adjust('23 hours')
+      yield* s.errands.remind(s.access.projectId)
+      assert.lengthOf(yield* reminders, 1)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.effect('a quiet errand says what it waits on once a day without a live session', () =>
     Effect.gen(function* () {
       const s = yield* setup()
@@ -416,7 +476,72 @@ describe('the person’s word through the tool boundary', () => {
         content: string
       }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
       assert.lengthOf(lines, 2)
-      assert.isTrue(lines.some((line) => line.content.includes('checks')))
+      assert.isTrue(lines.some((line) => line.content.includes('checks head-a')))
+      assert.isTrue(lines.every((line) => !line.content.includes('[{')))
     }).pipe(Effect.provide(runtime())),
   )
+})
+
+describe('the word in real Sessions turns', () => {
+  for (const input of [
+    { name: 'shown internal message', sender: { kind: 'internal' }, origin: 'system', quiet: false, stall: true },
+    { name: 'quiet system notice', sender: { kind: 'internal' }, origin: 'system', quiet: true, stall: false },
+    { name: 'explicit news wake', sender: { kind: 'internal' }, origin: 'news', quiet: true, stall: false },
+  ] as const) {
+    it.live(`${input.name} preserves the stall signal without giving the person’s word`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { task: created, project } = yield* task()
+          const sessions = yield* Sessions
+          const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+          yield* until(turns(created.threadId), (rows) => rows.length > 0 && rows.every((r) => r.state === 'completed'))
+          const events = yield* (yield* Live).subscribe
+          const started = yield* Deferred.make<boolean>()
+          yield* Effect.forkScoped(
+            Stream.runForEach(events, (event) =>
+              event._tag === 'TurnStarted' && event.threadId === created.threadId
+                ? Effect.asVoid(Deferred.succeed(started, event.byPerson === true))
+                : Effect.void,
+            ),
+          )
+          const accepted = yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', {}),
+            threadId: created.threadId,
+            body: scenarios.slow,
+            sender: input.sender,
+            origin: input.origin,
+            quiet: input.quiet,
+          })
+          assert.strictEqual(yield* Deferred.await(started), input.stall)
+          const access: ToolAccess = {
+            role: 'lead',
+            projectId: project.projectId,
+            taskId: created.taskId,
+            threadId: created.threadId,
+            sessionId,
+          }
+          const word = yield* (yield* Errands).turn(access)
+          assert.strictEqual(word.origin, input.origin)
+          assert.isFalse(word.byPerson)
+          yield* (yield* ToolServer).serve('lead', [
+            {
+              name: 'test_live_asked',
+              kind: 'asked-for',
+              description: 'Test only.',
+              input: { type: 'object' },
+              action: () =>
+                Effect.succeed({
+                  messageId: accepted.inputId,
+                  target: 'real-session-test',
+                  request: {},
+                  read: Effect.die('Must refuse before reading'),
+                  act: () => Effect.die('Must not act'),
+                }),
+            },
+          ])
+          assert.match(yield* callTool(access, 'test_live_asked'), /window or a paired device/)
+        }),
+      ).pipe(Effect.provide(runtime())),
+    )
+  }
 })

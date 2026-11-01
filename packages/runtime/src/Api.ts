@@ -1132,6 +1132,7 @@ export const handlers = Api.toLayer(
                 envelope: yield* envelope('attention.answer_stuck', { attentionId, answer }, commandId),
                 attentionId,
                 answer,
+                sender,
               })
             }),
           ),

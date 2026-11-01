@@ -1496,9 +1496,10 @@ export class Sessions extends Context.Service<
             _tag: 'TurnStarted',
             threadId: thread.threadId,
             turnId,
-            // What the person wrote shows in the thread; what Althar writes for them goes quietly.
+            // Keep the stall watch's shown-message signal separate from asked-for authorization.
             byPerson: inputs.some(
-              (input) => input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device'),
+              (input) =>
+                input.shown === 1 || (input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device')),
             ),
           })
           // The app's log has each turn's start and end by its ids, never what was said (DEV-61).
