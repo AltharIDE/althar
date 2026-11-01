@@ -57,6 +57,7 @@ import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { FirstConnectionsView } from './FirstConnectionsView'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
 import { partsOf, tasksOf, trackersOf } from './front'
@@ -559,6 +560,15 @@ export function ProjectView({
                   {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                 >
                   <Thread label={text.conversation} busy={busy}>
+                    {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
+                    {coordinator.items.length === 0 && !coordinator.earlier && (
+                      <FirstConnectionsView
+                        projectId={projectId}
+                        project={model.project?.name ?? coordinator.project.name}
+                        model={connections}
+                        className={s.firstConnections}
+                      />
+                    )}
                     {coordinator.earlier && (
                       <ThreadDivider
                         icon="up"
