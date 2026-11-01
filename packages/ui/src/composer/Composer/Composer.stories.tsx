@@ -16,7 +16,7 @@ import { States, statesOn } from '../../storybook/States'
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
 
 /** The lower row as a consumer fills it: the model picker and the context meter. */
-function Picker() {
+function Picker({ left }: { left?: number }) {
   const [id, setId] = useState('claude-opus-5')
   const [effort, setEffort] = useState<string | null>(null)
   const prefs = useModelPrefs()
@@ -30,6 +30,7 @@ function Picker() {
       defaultEffort={def}
       owner="Lead"
       count={MODEL_LIST.length}
+      room={left === undefined ? undefined : () => ({ left, until: 'Mon 11:00', account: null })}
       onChange={(next) => {
         setId(next)
         setEffort(null)
@@ -72,6 +73,8 @@ const sizeOf = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(b
 
 function Example(
   props: Partial<ComposerProps> & {
+    /** The share left of the model's tightest window. */
+    left?: number
     initial?: string
     recording?: boolean
     streaming?: boolean
@@ -91,6 +94,7 @@ function Example(
   },
 ) {
   const {
+    left,
     initial = '',
     recording = false,
     streaming = false,
@@ -173,7 +177,7 @@ function Example(
           : {})}
         placeholder="Tell the lead"
         hint="/"
-        picker={<Picker />}
+        picker={<Picker left={left} />}
         meter={<ContextRing used={122} total={1000} model={model('claude-opus-5')} />}
         dictation={{
           elapsed: seconds === null ? null : clock(seconds),
@@ -317,6 +321,28 @@ export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} 
 /** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
 export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }
 /** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
+/** A model nearly out, beside its chip: one muted run, warmer as it runs down. */
+export const NearlyOut: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gap: 16, width: 520 }}>
+      <Example left={10} />
+      <Example left={3} />
+      <Example left={0} />
+    </div>
+  ),
+}
+/** The same at the narrowest feet: the note is cut, never wrapped, and send stays put. */
+export const NearlyOutNarrow: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {[300, 380, 460].map((w) => (
+        <div key={w} style={{ width: w }}>
+          <Example left={3} takesFiles />
+        </div>
+      ))}
+    </div>
+  ),
+}
 export const NarrowFoot: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 24 }}>
