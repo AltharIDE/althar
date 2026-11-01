@@ -10,7 +10,7 @@ import { PullRequestScreenshots } from '../src/PullRequestScreenshots'
 import { Queries } from '../src/Queries'
 import { addItem } from '../src/threads'
 import { Instance } from '../src/Instance'
-import { SCREENSHOTS_MARK } from '../src/screenshotsComment'
+import { NONE_NOW, SCREENSHOTS_MARK } from '../src/screenshotsComment'
 import { words } from '../src/words'
 import { HOST, hosted, until } from './support'
 
@@ -205,6 +205,23 @@ describe('a task’s screenshots on its pull request', () => {
       const kept = yield* commentSaying(github, 'A refused file')
       assert.include(kept, 'arrow keys fixed')
       assert.notInclude(kept, 'The setup, one repository')
+
+      // A round whose one picture was too large to keep replaces them all: the comment empties, rather than keep them.
+      const tooLarge = {
+        artifactId: null,
+        sha256: null,
+        mediaType: '',
+        bytes: 1,
+        width: null,
+        height: null,
+        name: 'page.png',
+        why: 'too_large',
+      }
+      yield* report(projectId, threadId, [{ caption: 'The whole page', picture: tooLarge }])
+      const emptied = yield* commentSaying(github, NONE_NOW)
+      assert.lengthOf(comments(github), 1)
+      for (const gone of ['A refused file', 'arrow keys fixed', '<details>']) assert.notInclude(emptied, gone)
+      assert.strictEqual((yield* standing(threadId))?.standing, 'posted')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

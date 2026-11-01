@@ -144,6 +144,9 @@ const pictureOf = (shot: PostedShot) => `<img src="${attribute(shot.url)}" alt="
  * The comment: the screenshots as they are now, each under its caption, and
  * the commit they are of; then what they showed before, folded away; signed.
  */
+/** What the comment says once none of the views it showed shows the change as it is now. */
+export const NONE_NOW = 'No screenshots show this change as it is now.'
+
 export const commentBody = (input: {
   readonly shown: ReadonlyArray<PostedShot>
   readonly earlier: ReadonlyArray<PostedShot>
@@ -152,6 +155,8 @@ export const commentBody = (input: {
   const of = short(input.head)
   const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** as of \`${of}\``]
   for (const shot of input.shown) parts.push(`${plain(shot.caption)}\n\n${pictureOf(shot)}`)
+  // The views it showed no longer say anything of the change: it says so, rather than keep them.
+  if (input.shown.length === 0) parts.push(NONE_NOW)
   if (input.earlier.length > 0) {
     const earlier = input.earlier.map((shot) => {
       const before = short(shot.head)
