@@ -92,9 +92,17 @@ export const ProviderRefused: Story = {
     tried: [],
     read: undefined,
     output: undefined,
+    // A review: it can't be told anything, and goes on with another agent, again, or without.
+    onTell: undefined,
     onAgain: fn(),
-    againFirst: true,
+    onReport: fn(),
     fix: { label: 'Sign in to OpenCode Go', onFix: fn() },
+    text: {
+      again: 'Review again',
+      retry: 'Review with another agent',
+      retryLabel: 'Review with',
+      abandon: 'Skip the review',
+    },
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
