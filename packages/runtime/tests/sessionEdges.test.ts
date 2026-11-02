@@ -136,6 +136,10 @@ describe('a lead handed to a fresh session', () => {
       )
       assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktrees:/)
       assert.lengthOf(yield* sessionsOn(created.threadId), 2)
+      // Its report there is the round's: the end of the turn before it, still being looked at as it starts, doesn't take the
+      // round from it (#430).
+      const reports = (yield* items(created.threadId)).filter((item) => item.kind === 'step_result')
+      assert.lengthOf(reports, 2)
     }).pipe(Effect.provide(runtime())),
   )
 })
