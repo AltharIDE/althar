@@ -82,6 +82,21 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
+  it('says which providers an account is signed in to, and the one that refused work lately, though the account is signed in', () => {
+    const providers = [
+      { id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z' },
+      { id: 'anthropic', name: 'Anthropic', refusedAt: null },
+    ]
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).toMatchObject({
+      who: 'OpenCode Go · Anthropic',
+      refused: 'OpenCode Go',
+      state: { kind: 'ready' },
+    })
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [{ ...providers[0]!, refusedAt: null }] })).not.toHaveProperty(
+      'refused',
+    )
+  })
+
   it('offers no second account for an agent whose sign-in every folder shares', async () => {
     const one: Status = {
       apiVersion: 1,

@@ -17,10 +17,21 @@ import type { AccountSignInModel } from './useAccountSignIn'
  * tool signed in.
  */
 
+const providersOf = (account: AccountStatus): Pick<AccountEntry, 'who' | 'refused'> => {
+  const providers = account.providers ?? []
+  const refused = providers.find((provider) => provider.refusedAt !== null)
+  return {
+    ...(providers.length === 0 ? {} : { who: providers.map((provider) => provider.name).join(' · ') }),
+    ...(refused === undefined ? {} : { refused: refused.name }),
+  }
+}
+
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
+  // An agent with a sign-in for each provider it reaches says which are signed in; one that refused work lately is the line's button.
+  ...providersOf(account),
   place:
     account.home === null
       ? { kind: 'usual' }

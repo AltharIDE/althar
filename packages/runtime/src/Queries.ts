@@ -265,6 +265,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   const service = field(payload, 'service')
+  const model = field(payload, 'model')
+  const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -296,6 +298,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       : {}),
     ...(limit === undefined ? {} : { limit }),
     ...(typeof service === 'string' ? { service } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof provider === 'string' ? { provider } : {}),
   }
 }
 

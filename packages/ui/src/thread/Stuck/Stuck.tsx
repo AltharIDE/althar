@@ -102,6 +102,8 @@ export interface StuckProps {
   step: string
   /** What keeps going wrong, in a sentence. */
   what: ReactNode
+  /** What the agent itself said, under it, where it said something short. */
+  said?: string
   /** What Althar tried on its own, in order. */
   tried: readonly StuckAttempt[]
   /** How many tries, where one line of `tried` stands for several (Tried again 3 times); else one for each line. */
@@ -149,6 +151,7 @@ export interface StuckProps {
 export function Stuck({
   step,
   what,
+  said,
   tried,
   tries = tried.length,
   read,
@@ -231,6 +234,7 @@ export function Stuck({
   )
   return (
     <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tries)} what={what} className={className}>
+      {said !== undefined && <p className={s.said}>{said}</p>}
       {/* when it came straight to you, as when the agent couldn't start, there is nothing it tried */}
       {tried.length > 0 && (
         <section className={s.section}>
