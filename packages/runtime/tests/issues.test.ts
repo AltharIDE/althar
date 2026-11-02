@@ -369,6 +369,13 @@ describe('an issue', () => {
       const unconnected = yield* Effect.flip(issues.read('https://meridian.atlassian.net/browse/PROJ-9'))
       assert.instanceOf(unconnected, NotConnected)
       assert.strictEqual(unconnected.product, 'jira_cloud')
+      // A Jira on a company's own domain, by its issue's path; anything else, as before.
+      const ownDomain = yield* Effect.flip(issues.read('https://jira.acme.dev/browse/PAY-12'))
+      assert.instanceOf(ownDomain, NotConnected)
+      assert.strictEqual(ownDomain.product, 'jira_cloud')
+      const elsewhere = yield* Effect.flip(issues.read('https://docs.acme.dev/guide/PAY-12'))
+      assert.instanceOf(elsewhere, NotConnected)
+      assert.strictEqual(elsewhere.product, 'linear')
       // A pull request's link, given for an issue, says what it is.
       const change = yield* Effect.flip(issues.read(`${HOST}/meridian/api/pull/12`))
       assert.instanceOf(change, NotAnIssue)
