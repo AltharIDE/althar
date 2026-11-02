@@ -94,6 +94,7 @@ import {
   type LeftRunning,
   printedMore,
   QUIET_FOR,
+  TRAILS_FOR,
   servingAt,
   type ShownLeftRunning,
   shownOf,
@@ -830,6 +831,7 @@ export class Sessions extends Context.Service<
       const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
+      const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -1018,9 +1020,12 @@ export class Sessions extends Context.Service<
        * event it streamed between turns: it speaks, or makes a call and has
        * not finished it. Nothing says when such a turn ends, so it is taken
        * as over once the agent has said nothing for a while (`stillBusy`).
+       * What it says just after its turn ended is that turn's last words,
+       * heard late (`TRAILS_FOR`): no more work, unless it begins a call.
        */
       const heardWork = (running: Running, event: SessionEvent) =>
         Effect.gen(function* () {
+          let begins = false
           switch (event._tag) {
             case 'AgentMessage':
             case 'AgentContent':
@@ -1028,7 +1033,8 @@ export class Sessions extends Context.Service<
             case 'Plan':
               break
             case 'ToolCall':
-              if (event.status === 'pending' || event.status === 'in_progress') running.callsOpen.add(event.toolCallId)
+              begins = event.status === 'pending' || event.status === 'in_progress'
+              if (begins) running.callsOpen.add(event.toolCallId)
               else running.callsOpen.delete(event.toolCallId)
               break
             case 'ToolCallUpdate':
@@ -1039,7 +1045,10 @@ export class Sessions extends Context.Service<
             default:
               return
           }
-          running.workedAt = yield* Clock.currentTimeMillis
+          const now = yield* Clock.currentTimeMillis
+          // Heard before its turn is recorded as ended, or just after, it is still the turn's.
+          if (!begins && (running.turnRunning || (running.turnEndedAt !== null && now - running.turnEndedAt < trailsFor))) return
+          running.workedAt = now
           running.wakeAt = null
         })
 

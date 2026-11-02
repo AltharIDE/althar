@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { CommandEnvelope } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
@@ -19,7 +19,8 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { DICTATED, errorClassOf, promptFor, Sessions } from '../src/Sessions'
-import { items, repository, runtime, task, turns, until } from './support'
+import { QUIET_FOR, TRAILS_FOR } from '../src/leftRunning'
+import { items, onTestClock, repository, runtime, task, turns, until } from './support'
 
 const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current', dictated = false) =>
   Effect.gen(function* () {
@@ -657,6 +658,51 @@ describe('sessions', () => {
       assert.deepStrictEqual(texts, ['Done', 'Verify finished.', 'Done', 'Verify finished.'])
     }).pipe(Effect.provide(runtime())),
   )
+
+  describe('an agent heard after its turn ends', () => {
+    const busy = (threadId: string) => Effect.flatMap(Sessions, (sessions) => sessions.busy(threadId))
+    const heard = (threadId: string, text: string) =>
+      until(threadItems(threadId), (rows) => rows.some((item) => String(item.content.text ?? '').includes(text)))
+
+    it.effect('takes its last words, heard once the turn’s stream has closed, as that turn’s: not work outside it', () =>
+      onTestClock(
+        Effect.gen(function* () {
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'codex')
+          yield* say(created.threadId, scenarios.lastWords)
+          yield* ended(created.threadId, 1)
+          // Said after the turn's end, the words are recorded between turns, apart from the turn's own.
+          yield* heard(created.threadId, 'and dusted.')
+          const texts = (yield* threadItems(created.threadId))
+            .filter((item) => item.kind === 'agent_message')
+            .map((item) => item.content.text)
+          assert.deepStrictEqual(texts, ['Done', ' and dusted.'])
+          // The clock hasn't moved on, so had they counted as work, it would still be quiet for less than QUIET_FOR.
+          assert.isFalse(yield* busy(created.threadId))
+        }).pipe(Effect.provide(runtime(':memory:', {}, { idle: { trails: Duration.minutes(1) } }))),
+      ),
+    )
+
+    it.effect('still counts it at work when it goes on by itself once its turn is over, until it has been quiet', () => {
+      const going = holds()
+      return onTestClock(
+        Effect.gen(function* () {
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'codex')
+          yield* say(created.threadId, scenarios.keepsGoing)
+          yield* ended(created.threadId, 1)
+          assert.isFalse(yield* busy(created.threadId))
+          // Past what a turn's last words take to arrive, it speaks again: the agent at work, as when Claude Code wakes.
+          yield* TestClock.adjust(TRAILS_FOR)
+          going.open(scenarios.keepsGoing)
+          yield* heard(created.threadId, 'Checking it once more.')
+          assert.isTrue(yield* busy(created.threadId))
+          yield* TestClock.adjust(QUIET_FOR)
+          assert.isFalse(yield* busy(created.threadId))
+        }).pipe(Effect.provide(runtime(':memory:', { holds: going }))),
+      )
+    })
+  })
 
   describe('what a lead leaves running', () => {
     /** What the thread's session has left running, as a client reads it. */
