@@ -56,6 +56,26 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('', 0))
   })
 
+  it('reads OpenCode 2’s JSON, a Console account as a sign-in like a key', () => {
+    const { read, status } = agents.opencode.signIn
+    assert.deepStrictEqual(status?.('node').args, ['auth', 'list', '--standalone', '--format', 'json'])
+    // Seen on 2.2.5, 2 November 2026, ids redacted.
+    const console_ = [
+      { id: 'opencode', name: 'OpenCode Console', connections: [{ type: 'credential', id: 'cred_x', label: 'Default', method: 'oauth' }] },
+    ]
+    const key = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_y', label: 'default', method: 'key' }] },
+    ]
+    assert.isTrue(read(JSON.stringify(console_, null, 2), 0))
+    assert.isTrue(read(JSON.stringify(key, null, 2) + '\n', 0))
+    assert.isTrue(read(JSON.stringify([...key, ...console_]), 0))
+    // None is "can't tell": the free models run signed out.
+    assert.isUndefined(read('[]', 0))
+    assert.isUndefined(read(JSON.stringify([{ id: 'opencode', connections: [] }]), 0))
+    // The table 2.x prints without --format json carries no count.
+    assert.isUndefined(read('OpenCode Go       default                     stored\n', 0))
+  })
+
   it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
     Effect.runPromise(
       Effect.gen(function* () {
