@@ -157,6 +157,8 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
+    /** Run when `status` read nothing (an older version that rejects its flags); read the same way. */
+    readonly statusFallback?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -1043,9 +1045,29 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     options: { mode: 'mode', model: 'model', effort: 'effort', ownEffort: 'default' },
     signIn: {
-      status: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
+      status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
+      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead.
+      statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
+        const first = output.indexOf('[')
+        const last = output.lastIndexOf(']')
+        if (first >= 0 && last > first) {
+          try {
+            const parsed: unknown = JSON.parse(output.slice(first, last + 1))
+            if (Array.isArray(parsed))
+              return parsed.some(
+                (one) =>
+                  Array.isArray((one as { connections?: unknown } | null)?.connections) &&
+                  (one as { connections: unknown[] }).connections.length > 0,
+              )
+                ? true
+                : undefined
+          } catch {
+            // Not the JSON: 1.x's count line, below.
+          }
+        }
         const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
         return count !== undefined && Number(count) > 0 ? true : undefined
       },
