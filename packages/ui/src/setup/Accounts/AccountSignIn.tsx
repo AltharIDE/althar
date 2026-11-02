@@ -34,8 +34,8 @@ export type AccountSignInStep =
   | { kind: 'choose' }
   /** The agent's sign-in is open in the browser, waiting on `host`. `link`: to open it elsewhere. `paste`: it takes a code the page shows when the browser can't reach back. */
   | { kind: 'browser'; host: string; link?: string; paste?: boolean; pasteError?: ReactNode }
-  /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in. */
-  | { kind: 'terminal'; line: string; opened: boolean; notYet?: boolean }
+  /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in; `unclear`: the agent answered something Althar couldn't read; `checking`: reading again. */
+  | { kind: 'terminal'; line: string; opened: boolean; notYet?: boolean; unclear?: boolean; checking?: boolean }
   /** A one-time code to type on `page`. `lasts`: how long it still works, as the person reads it. */
   | { kind: 'code'; code: string; page: string; lasts: string; opened?: boolean }
   /** A key to paste. */
@@ -95,6 +95,8 @@ export interface AccountSignInText {
   inTerminal: string
   runIt: string
   notYet: string
+  unclear: string
+  checkingAgain: string
   terminalAgain: string
   checkAgain: string
   finishTerminal: string
@@ -147,6 +149,8 @@ export const accountSignInText: AccountSignInText = {
   inTerminal: 'Finish signing in from the terminal',
   runIt: 'Run this in a terminal to sign in',
   notYet: 'Not signed in yet.',
+  unclear: 'Couldn’t tell if it signed in.',
+  checkingAgain: 'Checking…',
   terminalAgain: 'Open the terminal again',
   checkAgain: 'Check again',
   finishTerminal: 'Then come back here.',
@@ -393,7 +397,7 @@ function Under({
         <div className={s.under}>
           {step.opened ? (
             <p className={s.hint}>
-              {step.notYet && <span className={s.notYet}>{t.notYet} </span>}
+              {step.notYet && <span className={s.notYet}>{step.unclear ? t.unclear : t.notYet} </span>}
               {t.finishTerminal}
             </p>
           ) : (
@@ -403,7 +407,11 @@ function Under({
             </div>
           )}
           <div className={s.row}>
-            {onCheck && <LinkButton onClick={onCheck}>{t.checkAgain}</LinkButton>}
+            {onCheck && (
+              <LinkButton onClick={onCheck} disabled={step.checking}>
+                {step.checking ? t.checkingAgain : t.checkAgain}
+              </LinkButton>
+            )}
             {step.opened && onOpen && <LinkButton onClick={onOpen}>{t.terminalAgain}</LinkButton>}
             {another}
           </div>

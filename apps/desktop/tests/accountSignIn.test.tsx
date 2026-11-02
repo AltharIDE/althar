@@ -259,6 +259,23 @@ describe('signing in in Terminal', () => {
     expect(result.current.signingIn?.step).toBe(step)
   })
 
+  it('says it couldn’t tell where the agent answered something unreadable, and shows it is checking again', async () => {
+    const { client } = fakeClient()
+    const start = startOf(codexWith([], usualCodex), 1)
+    let done = () => {}
+    const recheck = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { result, rerender } = signInOf(client, { ...start, recheck })
+    act(() => result.current.add('codex'))
+    act(() => result.current.way(SignInWay.Terminal))
+    await waitFor(() => expect(result.current.signingIn?.step).toEqual({ kind: 'terminal', line: 'codex login', opened: true }))
+    act(() => result.current.check())
+    expect(result.current.signingIn?.step).toMatchObject({ kind: 'terminal', checking: true })
+    const made = { ...usual('acc_added', 'unknown'), name: 'Account 2', home: '/Users/me/accounts/acc_added' }
+    rerender({ start: { ...start, recheck, status: codexWith([], usualCodex, made), checkedAt: 2 } })
+    await act(async () => done())
+    expect(result.current.signingIn?.step).toMatchObject({ notYet: true, unclear: true, checking: false })
+  })
+
   it('drops what Terminal says, opened or not, once the sign-in was left', async () => {
     const answers: Array<{ resolve: (value: { line: string; opened: boolean }) => void; reject: (failure: unknown) => void }> = []
     const { client } = fakeClient({

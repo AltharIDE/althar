@@ -72,8 +72,8 @@ export const GEMINI_PRO = model('gemini-3-pro')
 export const QWEN = model('qwen3-coder')
 
 export const RUNTIMES: readonly RuntimeInfo[] = [
-  { id: 'claude-code', name: 'Claude Code', how: 'signed in', brand: Brand.ClaudeCode },
-  { id: 'codex', name: 'Codex', how: 'signed in', brand: Brand.Codex },
+  { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode },
+  { id: 'codex', name: 'Codex', brand: Brand.Codex },
   { id: 'gemini-cli', name: 'Gemini CLI', how: 'API key', brand: Brand.GeminiCli },
   { id: 'ollama', name: 'Ollama', how: 'this Mac', brand: Brand.Ollama },
   { id: 'openrouter', name: 'OpenRouter', how: 'API key', brand: Brand.OpenRouter },

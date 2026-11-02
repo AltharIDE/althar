@@ -97,6 +97,50 @@ const stateOf = (taskId: string) =>
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
 
 describe('merging a task here', () => {
+  /** A fork's clone as the person keeps one: its default branch follows `upstream`, and pushing there is turned off. */
+  const forkWithPushingOff = () => {
+    const root = repository()
+    git(root, 'remote', 'add', 'origin', 'git@github.com:alice/api.git')
+    git(root, 'remote', 'add', 'upstream', 'git@github.com:acme/api.git')
+    git(root, 'remote', 'set-url', '--push', 'upstream', 'DISABLED')
+    git(root, 'config', 'branch.main.remote', 'upstream')
+    git(root, 'config', 'branch.main.merge', 'refs/heads/main')
+    const fork = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+    git(fork, 'init', '-q', '--bare', '-b', 'main')
+    git(root, 'remote', 'set-url', '--push', 'origin', fork)
+    return { root, fork }
+  }
+
+  it.live('pushes a fork’s branch to the fork, though its default branch follows upstream', () => {
+    const { root, fork } = forkWithPushingOff()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+      const head = commit(worktree, 'retry.ts', 'retry\n')
+      const seen = yield* Effect.map((yield* Queries).thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+      assert.strictEqual(seen?.name, 'origin')
+      assert.deepStrictEqual(yield* (yield* Changes).pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]), [
+        { branch, remote: 'origin' },
+      ])
+      assert.strictEqual(git(fork, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'))
+    }).pipe(Effect.provide(withQueries()))
+  })
+
+  it.live('says a push address that isn’t a repository, where the person chose to push upstream', () => {
+    const { root } = forkWithPushingOff()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const head = commit(worktree, 'retry.ts', 'retry\n')
+      yield* (yield* SqlClient.SqlClient)`UPDATE repository_bindings SET change_target = 'upstream_branch'`
+      const refused = yield* Effect.flip((yield* Changes).pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      assert.deepInclude(refused, { _tag: 'PushRefused', why: 'no_push_address', said: 'DISABLED' })
+      assert.include(words(refused, String).message, 'DISABLED')
+      assert.notInclude(words(refused, String).message, 'and the repository exists')
+    }).pipe(Effect.provide(withQueries()))
+  })
+
   it.live('fast-forwards the default branch where it is checked out and clean, and settles the task', () =>
     Effect.gen(function* () {
       const root = repository()

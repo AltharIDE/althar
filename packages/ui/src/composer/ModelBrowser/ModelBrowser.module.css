@@ -139,11 +139,20 @@
   overflow-y: auto;
   padding: 4px 8px 8px;
   container-type: inline-size;
+  /* the name takes what the rest leaves; a column that has nothing to show is left out, gap and all */
+  --agent-col: 92px;
+  --effort-col: 104px;
+}
+.results[data-room] {
+  --room-col: 56px;
+}
+.results[data-context] {
+  --ctx-col: 48px;
 }
 .cols,
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr) 56px 104px 62px;
+  grid-template-columns: minmax(0, 1fr) var(--agent-col,) var(--room-col,) var(--ctx-col,) var(--effort-col,) 62px;
   align-items: center;
   gap: 10px;
 }
@@ -189,13 +198,6 @@
 .use > :first-child {
   min-width: 0;
 }
-.inUse {
-  flex: none;
-  white-space: nowrap;
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--t-3);
-}
 .via {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -203,7 +205,21 @@
   color: var(--t-2);
 }
 .via span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
   color: var(--t-3);
+}
+.name {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+.room {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .ctx,
 .none {
@@ -271,6 +287,15 @@
   justify-content: flex-end;
   gap: 2px;
 }
+/* the model in use is the row that stays tinted */
+.current,
+.current:hover,
+.current:focus-within {
+  background: var(--pressed-paper);
+}
+.current .use {
+  font-weight: 600;
+}
 /* a model switched off: there, quieter, not to be chosen */
 .off .use {
   cursor: default;
@@ -281,7 +306,7 @@
 
 /* Narrow, the table gives way before anything overlaps: the rail slims and then
    goes, the context window goes and the agent keeps only its name, then the
-   agent goes, and last the default effort. */
+   agent and the usage go, and last the default effort. */
 @container (max-width: 640px) {
   .rail {
     width: 150px;
@@ -291,13 +316,11 @@
   .rail {
     display: none;
   }
-}
-@container (max-width: 520px) {
   .cols,
   .row {
-    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 104px 62px;
+    --ctx-col: initial;
   }
-  .cols > :nth-child(3),
+  .colContext,
   .ctx,
   .via span {
     display: none;
@@ -306,20 +329,23 @@
 @container (max-width: 440px) {
   .cols,
   .row {
-    grid-template-columns: minmax(0, 1fr) 104px 62px;
+    --agent-col: initial;
+    --room-col: initial;
   }
-  .cols > :nth-child(2),
-  .via {
+  .colAgent,
+  .colRoom,
+  .via,
+  .room {
     display: none;
   }
 }
 @container (max-width: 270px) {
   .cols,
   .row {
-    grid-template-columns: minmax(0, 1fr) 62px;
+    --effort-col: initial;
   }
-  .cols > :nth-child(4),
-  .row > :nth-child(4) {
+  .cols > :nth-last-child(2),
+  .row > :nth-last-child(2) {
     display: none;
   }
 }

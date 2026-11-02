@@ -87,7 +87,10 @@ Processes still running when looked at (10%) and `gh` killed at its deadline
 
 Some tests fail on a real ordering problem, in the code or in the test: the
 13 ordering flakes, and `home.test.ts`, where the runtime's reminder and the
-person's queued words reached the fake agent as one prompt (fixed in #407).
+person's queued words reached the fake agent as one prompt (fixed in #407),
+and `sessionEdges`, where a lead's next turn began while Althar still read git
+for the end of the one before, and both settled the same round of work (fixed
+for #430).
 A new test runs once on its pull request, so a race that shows one run in ten
 lands.
 
@@ -305,7 +308,6 @@ fixed where it is.
 
 A running list: each goes when it is fixed, and a new one is added as it is found.
 
-- **#430, `sessionEdges` › "in a task of several repositories, says it carries on in the same worktrees".** It flaked once in the queue: the person's first follow-up was never delivered. It passes 20 runs on a Mac. Its report didn't say which wait timed out; since #433 a wait's report keeps a long prompt's state, so the next one will.
 - **A lead's permission asked while a round's review runs shows on the reviewer's card in the graph, and on none once the round ends** (`callsOf` in `graph.ts`). Found with #445; where it belongs is a product call.
 - **Coverage only after merge.** The merge queue doesn't run the coverage gates, or build the Linux packages, so a pull request can pass the queue and still turn main red on either; ADR-074 takes that on, and a release still waits for both. Running coverage in the queue for changes to the gated packages would close it.
 - **Phase 4's rest** (Where it stands, above): git, processes and ports as services with fakes, and the 45 tests on short real-time timer options.

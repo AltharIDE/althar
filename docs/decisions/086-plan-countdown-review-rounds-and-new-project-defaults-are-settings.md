@@ -1,4 +1,4 @@
-# ADR-084: The plan countdown, review rounds and new-project defaults are settings
+# ADR-086: The plan countdown, review rounds and new-project defaults are settings
 
 - **Status:** Accepted
 - **Date:** 2026-10-31

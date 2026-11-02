@@ -44,6 +44,9 @@ const WAITS = new Set(['until', 'waitFor'])
 const FINDS = /^find(All)?By[A-Z]/
 const DOM_WAITS = new Set(['waitFor', 'waitForElementToBeRemoved'])
 
+/** Whether an argument is words: a string, or a template of one. */
+const named = (node: Any) => (node.type === 'Literal' && typeof node.value === 'string') || node.type === 'TemplateLiteral'
+
 /** Where in the file a time of its own is set, as `file:line what`. */
 const limitsIn = (file: string) => {
   const source = readFileSync(join(root, file), 'utf8')
@@ -65,8 +68,9 @@ const limitsIn = (file: string) => {
       }
       if (callee.type === 'Identifier' && HOOKS.has(callee.name as string) && args[1] !== undefined)
         at(one, `a hook's time of its own: ${text(args[1])}`)
-      if (callee.type === 'Identifier' && WAITS.has(callee.name as string) && args.length > 2)
-        at(one, `a wait's time of its own: ${text(args[2]!)}`)
+      // A wait's third argument names what it waits for; anything else there, or more, is a time.
+      if (callee.type === 'Identifier' && WAITS.has(callee.name as string) && args.length > 2 && !(named(args[2]!) && args.length === 3))
+        at(one, `a wait's time of its own: ${text(args.at(-1)!)}`)
       const method =
         callee.type === 'MemberExpression' ? (callee.property as Any).name : callee.type === 'Identifier' ? callee.name : undefined
       if (typeof method === 'string' && FINDS.test(method) && args[2] !== undefined && /\btimeout\b/.test(text(args[2])))
