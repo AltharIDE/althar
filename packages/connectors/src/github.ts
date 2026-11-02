@@ -27,7 +27,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { branchPath, cantChange, lacking, leftAsItIs, noPictures, stillOpen, unchangeable } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, mergedForGood, noPictures, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -685,6 +685,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       threads: true,
       reviews: true,
       pictures: uploads !== null,
+      reopen: true,
+      rerun: true,
       links: false,
       starts: false,
       changes: ISSUE_CHANGES,
@@ -820,6 +822,14 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
         if (now.state !== 'open') return changeOf(now)
         return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'closed' }))
+      }),
+    reopenChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state === 'open') return changeOf(now)
+        if (changeOf(now).state === 'merged')
+          return yield* mergedForGood(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'open' }))
       }),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
