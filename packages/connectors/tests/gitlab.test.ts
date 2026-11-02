@@ -1214,3 +1214,24 @@ describe('GitLab’s pictures', () => {
     }),
   )
 })
+
+describe('GitLab opening a closed merge request again, and running a pipeline’s jobs', () => {
+  it.effect('opens a closed one, leaves an open one as it is, and says a merged one can’t be', () =>
+    Effect.gen(function* () {
+      assert.isTrue(gitlab([]).host.capabilities.reopen)
+      assert.isTrue(gitlab([]).host.capabilities.rerun)
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'closed' }) }],
+        ['PUT', `${PROJECT}/merge_requests/12`, { json: request({ state: 'opened' }) }],
+      ])
+      assert.strictEqual((yield* host.reopenChange(repository, change)).state, 'open')
+      assert.deepStrictEqual(sent.find((one) => one.method === 'PUT')?.body, { state_event: 'reopen' })
+      const open = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request() }]])
+      assert.strictEqual((yield* open.host.reopenChange(repository, change)).state, 'open')
+      assert.isFalse(open.sent.some((one) => one.method === 'PUT'))
+      const merged = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'merged' }) }]])
+      assert.deepInclude(yield* Effect.flip(merged.host.reopenChange(repository, change)), { reason: 'rejected' })
+      assert.isFalse(merged.sent.some((one) => one.method === 'PUT'))
+    }),
+  )
+})
