@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Cause, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Ids, newId } from '@althar/domain'
@@ -166,6 +166,21 @@ const crashed = (file: string) => {
   db.exec('UPDATE runtime_instances SET ended_at = NULL WHERE rowid = (SELECT max(rowid) FROM runtime_instances)')
   db.close()
 }
+
+/**
+ * A launch on the store at `file` that does `effect`, then ends as the app's
+ * runtime does (runtime.ts): quitting interrupts it; a failure it can't carry
+ * on past closes its scope on that failure before the app exits.
+ */
+const launch = <A, E, R>(file: string, effect: Effect.Effect<A, E, R>, ends: 'quit' | 'failed') =>
+  Effect.gen(function* () {
+    const exit = yield* effect.pipe(
+      Effect.andThen(ends === 'quit' ? Effect.interrupt : Effect.die(new Error('Something the runtime couldn’t carry on past'))),
+      Effect.provide(runtime(file)),
+      Effect.exit,
+    )
+    assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) === (ends === 'quit'))
+  })
 
 /** A day passes while Althar is closed: every time the store at `file` keeps is a day earlier. */
 const aDayLater = (file: string) => {
@@ -441,7 +456,11 @@ describe('A step a restart stopped', () => {
       const file = store()
       const task = yield* working(file)
       // Quit and opened again at once, twice: each launch carries it on.
-      yield* until(sessionsOf(task.threadId), (rows) => rows.length === 2).pipe(Effect.provide(runtime(file)))
+      yield* launch(
+        file,
+        until(sessionsOf(task.threadId), (rows) => rows.length === 2),
+        'quit',
+      )
       yield* Effect.gen(function* () {
         yield* until(sessionsOf(task.threadId), (rows) => rows.length === 3)
         const [attempt] = yield* until(implement, (rows) => rows[0]?.state === 'running')
@@ -486,6 +505,30 @@ describe('A step a restart stopped', () => {
       yield* Effect.gen(function* () {
         assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'open', why: 'restarted' }])
         assert.strictEqual((yield* implement)[0]?.state, 'waiting_attention')
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('needs the person where Althar fails on it twice in a row, its scope closing on the failure each time', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      // Quit, it carries on; then fails, carries on again, and fails again soon after.
+      yield* launch(
+        file,
+        until(sessionsOf(task.threadId), (rows) => rows.length === 2),
+        'failed',
+      )
+      yield* launch(
+        file,
+        until(sessionsOf(task.threadId), (rows) => rows.length === 3),
+        'failed',
+      )
+      yield* Effect.gen(function* () {
+        const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'restarted' })
+        assert.strictEqual((yield* implement)[0]?.state, 'waiting_attention')
+        assert.strictEqual((yield* sessionsOf(task.threadId)).length, 3)
       }).pipe(Effect.provide(runtime(file)))
     }),
   )
