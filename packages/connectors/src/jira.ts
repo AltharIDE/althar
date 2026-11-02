@@ -196,6 +196,8 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   const cloud = product === 'jira_cloud'
   const site = cloud ? siteOf(options.webUrl) : options.webUrl.replace(/\/+$/, '')
   const api = options.apiUrl.replace(/\/+$/, '')
+  // Where its API is: the site, or, for a site on its own domain, its atlassian.net address, which its gateway id is asked of.
+  const apiSite = cloud ? siteOf(api) : site
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
 
   /*
@@ -210,7 +212,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
    */
   let root = api
   const gateway = Effect.map(
-    http.json(Schema.Struct({ cloudId: Schema.String }), 'GET', `${site}/_edge/tenant_info`),
+    http.json(Schema.Struct({ cloudId: Schema.String }), 'GET', `${apiSite}/_edge/tenant_info`),
     ({ cloudId }) => `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3`,
   )
   const keep = (other: string) =>
@@ -533,7 +535,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   }
 }
 
-/** Jira Cloud, at a site's address (`https://meridian.atlassian.net`). */
+/** Jira Cloud, at a site's address (`https://meridian.atlassian.net`, or its own domain, with its API at the atlassian.net one). */
 export const makeJiraCloud = (options: AdapterOptions): Tracker => makeJira('jira_cloud', options)
 
 /** Jira Data Center, at an instance's address. */
@@ -559,6 +561,7 @@ export const accessJira: Access = (input) =>
     const cloud = /\/rest\/api\/3\/?$/.test(input.apiUrl)
     const site = cloud ? siteOf(input.webUrl) : input.webUrl.replace(/\/+$/, '')
     const api = input.apiUrl.replace(/\/+$/, '')
+    const apiSite = cloud ? siteOf(api) : site
     const ask = (url: string) => probe(input, url)
 
     const atSite = yield* ask(`${api}/myself`)
@@ -567,7 +570,7 @@ export const accessJira: Access = (input) =>
     // A token with scopes works only through the gateway, which the site's id names.
     const gateway = (): Effect.Effect<{ readonly root: string; readonly me: Answer }> =>
       Effect.gen(function* () {
-        const tenant = yield* ask(`${site}/_edge/tenant_info`)
+        const tenant = yield* ask(`${apiSite}/_edge/tenant_info`)
         const cloudId = answered(tenant) ? readAs(Schema.Struct({ cloudId: Schema.String }), tenant)?.cloudId : undefined
         if (cloudId === undefined) return { root: api, me: atSite }
         const root = `https://api.atlassian.com/ex/jira/${encodeURIComponent(cloudId)}/rest/api/3`

@@ -341,6 +341,21 @@ describe('Jira Cloud', () => {
     }),
   )
 
+  it.effect('on its own domain, calls its API and the gateway at its atlassian.net address, and links issues on its own', () =>
+    Effect.gen(function* () {
+      const own = 'https://hibernate.example.org'
+      const { fetch, sent } = stubFetch([
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 401, text: '' }],
+        ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+        ['GET', `${GATEWAY}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      const credential = Effect.succeed<Credential>({ kind: 'basic', user: 'you@meridian.dev', token: 'ATATT3x' })
+      const tracker = makeJiraCloud({ fetch, apiUrl: CLOUD, webUrl: `${own}/browse/HHH-1`, credential })
+      assert.strictEqual((yield* tracker.issue('HHH-20844')).url, `${own}/browse/HHH-20844`)
+      assert.isTrue(sent.every((request) => !request.url.startsWith(own)))
+    }),
+  )
+
   it.effect('reads an issue with little filled in, and an app as a bot', () =>
     Effect.gen(function* () {
       const { tracker } = cloud([

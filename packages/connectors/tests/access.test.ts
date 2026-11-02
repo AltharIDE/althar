@@ -1084,6 +1084,24 @@ describe('checking a Jira connection', () => {
     }),
   )
 
+  it.effect('on its own domain, asks its atlassian.net address, and names the site as the person knows it', () =>
+    Effect.gen(function* () {
+      const gateway = 'https://api.atlassian.com/ex/jira/c-1/rest/api/3'
+      const { fetch, sent } = stubFetch([
+        ['GET', `${CLOUD}/myself`, { status: 401, text: '' }],
+        ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: 'c-1' } }],
+        ['GET', `${gateway}/myself`, { json: ada }],
+        ['GET', `${gateway}/${PERMISSIONS}`, permitted(true, true, true)],
+        ['GET', `${gateway}/project/search?maxResults=1`, { json: { total: 3 } }],
+      ])
+      const credential: Credential = { kind: 'basic', user: 'ada@northwind.dev', token: 'ATATT-secret' }
+      const report = yield* accessJira(inputOf(fetch, { apiUrl: CLOUD, webUrl: 'https://tickets.northwind.dev', credential }))
+      assert.deepStrictEqual(report.lines[0], line('site', 'ok', { fact: 'tickets.northwind.dev' }))
+      assert.deepStrictEqual(states(report), ['site ok', 'account ok', 'read ok', 'comment ok', 'move ok'])
+      assert.isTrue(sent.every((request) => !request.url.includes('tickets.northwind.dev')))
+    }),
+  )
+
   it.effect('stops where the site doesn’t answer, or can’t say who signs in', () =>
     Effect.gen(function* () {
       const away = yield* accessJira(inputOf(offline, { apiUrl: CLOUD, webUrl: SITE }))

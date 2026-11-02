@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 
 import { authorizationOf } from '../src/credential'
 import { HOSTED } from '../src/links'
+import { stubFetch } from './stub'
 import { addressOf, available, hostedOf, products } from '../src/products'
 
 describe('the products', () => {
@@ -37,6 +38,30 @@ describe('the products', () => {
     assert.strictEqual(products.linear.apiFor('https://linear.app'), 'https://api.linear.app')
     assert.strictEqual(products.trello.apiFor('https://trello.com'), 'https://api.trello.com/1')
   })
+
+  it.effect('ask a Jira Cloud site on its own domain where its API is, and no other product', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        [
+          'GET',
+          'https://tickets.meridian.dev/rest/api/2/serverInfo',
+          {
+            json: { baseUrl: 'https://meridian.atlassian.net', version: '1001.0.0', versionNumbers: [1001, 0, 0], deploymentType: 'Cloud' },
+          },
+        ],
+      ])
+      const apiAt = products.jira_cloud.apiAt
+      assert.isDefined(apiAt)
+      if (apiAt === undefined) return
+      assert.strictEqual(yield* apiAt(fetch, 'https://tickets.meridian.dev/browse/PAY-1'), 'https://meridian.atlassian.net/rest/api/3')
+      assert.deepStrictEqual(
+        Object.values(products)
+          .filter((info) => info.apiAt !== undefined)
+          .map((info) => info.product),
+        ['jira_cloud'],
+      )
+    }),
+  )
 
   it('keep a connection’s address as typed, trimmed, or a Jira Cloud site by its origin', () => {
     assert.strictEqual(addressOf(products.github, 'https://git.meridian.dev/'), 'https://git.meridian.dev')
