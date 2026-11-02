@@ -1,0 +1,144 @@
+import type { Brand } from '../../foundations/brands/brands'
+import { BrandMark } from '../../foundations/Marks/Marks'
+import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
+import s from './Usage.module.css'
+
+/*
+ * What a task, or the coordinator's day, used of each account its agents ran
+ * on (ADR-084): a line each, its figure at the end, the models and their
+ * tokens under it. On a plan, the figure is the share of its week; paid per
+ * use, the dollars. There is no total: a share of a week and dollars don't
+ * add up.
+ */
+
+/** One account's line. */
+export interface UsageLine {
+  readonly id: string
+  /** The account as the person knows it: Claude Code Max. */
+  readonly name: string
+  readonly mark?: Brand
+  /** On a plan, the points of its week it took; null where none was read. Absent where it is paid per use. */
+  readonly took?: number | null
+  /** Paid per use, the dollars spent; null where neither the agent nor a price said. */
+  readonly spent?: number | null
+  /** The models that ran on it, by name. */
+  readonly models: ReadonlyArray<string>
+  readonly tokens: number
+}
+
+export interface UsageText {
+  /** The card's name. */
+  title: string
+  /** On a plan: the share of its week. */
+  ofWeek: (points: number) => string
+  /** Paid per use: the dollars. */
+  dollars: (amount: number) => string
+  /** Where nothing was read to say it. */
+  unknown: string
+  /** Under the name: the models, and their tokens. */
+  what: (models: ReadonlyArray<string>, tokens: number) => string
+}
+
+const tokensWord = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(Math.round(n))
+
+const shareWord = (points: number) => (points >= 1 ? `${Math.round(points)}%` : points >= 0.1 ? `${points.toFixed(1)}%` : '< 0.1%')
+
+export const usageText: UsageText = {
+  title: 'Usage',
+  ofWeek: (points) => `${shareWord(points)} of week`,
+  dollars: (amount) => (amount > 0 && amount < 0.01 ? '< $0.01' : `$${amount.toFixed(2)}`),
+  unknown: '—',
+  what: (models, tokens) => [...models, `${tokensWord(tokens)} tokens`].join(' · '),
+}
+
+/** A line's figure, said whole: 8% of week, or $21.59. */
+const figureOf = (line: UsageLine, t: UsageText) =>
+  line.took !== undefined
+    ? line.took === null
+      ? t.unknown
+      : t.ofWeek(line.took)
+    : line.spent === undefined || line.spent === null
+      ? t.unknown
+      : t.dollars(line.spent)
+
+/** The figure alone, for a glance: 8%, or $21.59. */
+const glanceOf = (line: UsageLine, t: UsageText) =>
+  line.took !== undefined
+    ? line.took === null
+      ? t.unknown
+      : shareWord(line.took)
+    : line.spent === undefined || line.spent === null
+      ? t.unknown
+      : t.dollars(line.spent)
+
+export interface UsageLinesProps {
+  lines: ReadonlyArray<UsageLine>
+  /** Whose usage, above the lines: This task so far, Today. */
+  heading?: string
+  text?: Partial<UsageText>
+}
+
+/** A line for each account: its mark and name, the models and tokens under them, its figure centred at the end. */
+export function UsageLines({ lines, heading, text }: UsageLinesProps) {
+  const t = { ...usageText, ...text }
+  return (
+    <div className={s.usage}>
+      {heading !== undefined && <span className={s.heading}>{heading}</span>}
+      <ul className={s.lines}>
+        {lines.map((line) => (
+          <li key={line.id}>
+            <span className={s.name}>
+              {line.mark !== undefined && <BrandMark brand={line.mark} size={13} />}
+              <span>{line.name}</span>
+            </span>
+            <span className={s.what} data-marked={line.mark !== undefined || undefined}>
+              {t.what(line.models, line.tokens)}
+            </span>
+            <b className={s.figure}>{figureOf(line, t)}</b>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+export interface UsageCardProps {
+  lines: ReadonlyArray<UsageLine>
+  /** Whether it is open: the person's choice, kept by whoever holds it. */
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  text?: Partial<UsageText>
+}
+
+/**
+ * Usage, as a card in Outputs: one row with each account's figure by its
+ * mark, opening to the lines, as the pull request's checks do. Whether it is
+ * open is the person's, kept for every task alike.
+ */
+export function UsageCard({ lines, open, onOpenChange, text }: UsageCardProps) {
+  const t = { ...usageText, ...text }
+  return (
+    <Disclosure className={s.card} open={open} onOpenChange={onOpenChange}>
+      <DisclosureTrigger>
+        <button type="button" className={s.toggle}>
+          <span className={s.title}>{t.title}</span>
+          <span className={s.glance} aria-hidden={open || undefined}>
+            {lines.map((line) => (
+              <span key={line.id}>
+                {line.mark !== undefined && <BrandMark brand={line.mark} size={12} />}
+                {glanceOf(line, t)}
+              </span>
+            ))}
+          </span>
+          <Caret />
+        </button>
+      </DisclosureTrigger>
+      <Fold bleed={false}>
+        <div className={s.body}>
+          <UsageLines lines={lines} text={text} />
+        </div>
+      </Fold>
+    </Disclosure>
+  )
+}
