@@ -35,6 +35,11 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
+.tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .effort {
   color: var(--t-3);
 }

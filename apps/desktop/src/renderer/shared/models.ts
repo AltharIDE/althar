@@ -96,8 +96,6 @@ const isNative = (agentId: string, words: string) => AGENT_MAKERS[agentId] !== u
 
 export const text = {
   agentDefault: agentDefaultName,
-  /** A name two models share, told apart by the provider or the agent that offers each. */
-  via: (model: string, by: string) => `${model} · ${by}`,
   /** Effort levels the agents write as one word. */
   efforts: { xhigh: 'Extra high' } as Readonly<Record<string, string>>,
   how: { signed_in: 'signed in', unknown: device.this, signed_out: 'signed out' } satisfies Record<AgentStatus['signIn'], string>,
@@ -113,6 +111,21 @@ export interface Catalog {
   readonly defaults: ReadonlyMap<string, string>
 }
 
+/** A provider as OpenCode writes it (opencode-go) in people's words (OpenCode Go), the agent's own name where it starts it. */
+const providerWords = (provider: string, agentName: string): string => {
+  const words = provider.split(/[-_\s]+/).filter((word) => word !== '')
+  const joined = words.join('').toLowerCase()
+  const own = agentName.replace(/\s+/g, '').toLowerCase()
+  if (joined.startsWith(own)) {
+    let used = 0
+    let at = 0
+    while (at < own.length && used < words.length) at += words[used++]!.length
+    return [agentName, ...words.slice(used).map(capital)].join(' ')
+  }
+  return words.map(capital).join(' ')
+}
+const capital = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
+
 /** A model's name in a list of every agent's models (see `@althar/contracts`'s models). */
 export const nameOf = namedAmongAgents
 
@@ -126,10 +139,10 @@ export const viaOf = (agentName: string, account?: string | null): string =>
 /**
  * The agents' models as one list, for the agents a picker offers;
  * `withBlocked` keeps the ones switched off, for where they are switched on
- * again. `apart` is for a picker, where the way to a model is chosen: a model
- * reached through an agent that isn't its maker's says which way
- * (Claude Haiku 5.5 · OpenCode Go), and so does a name two agents share.
- * Where a model is only named, the hover says the way.
+ * again. `apart` is for a picker, where the way to a model is chosen: a name
+ * two entries share (the same model on OpenCode Go and OpenCode Zen) gets a
+ * `route`, in people's words, for the list and the hover; the chip keeps the
+ * plain name. Where a model is only named, the hover says the way.
  */
 export const catalogOf = (
   known: ReadonlyArray<AgentModels>,
@@ -175,18 +188,21 @@ export const catalogOf = (
         ...(model.description === null ? {} : { note: model.description }),
       }
       // The way it goes: the agent, or its provider where that names the agent (OpenCode Go).
-      const route = provider !== undefined && provider.toLowerCase().includes(agent.name.toLowerCase()) ? provider : agent.name
-      return { info, by: provider ?? agent.name, route, native: isNative(agent.id, `${model.id} ${model.name}`) }
+      const named = provider === undefined ? undefined : providerWords(provider, agent.name)
+      const route =
+        named !== undefined && provider !== undefined && provider.toLowerCase().includes(agent.name.toLowerCase()) ? named : agent.name
+      return { info, by: named ?? agent.name, route, native: isNative(agent.id, `${model.id} ${model.name}`) }
     })
   })
-  const shown = (entry: (typeof entries)[number]) => (entry.native ? entry.info.name : text.via(entry.info.name, entry.route))
-  // Two that would still read the same say whose each is: its provider's, or its agent's.
-  const clash = (name: string) => entries.filter((entry) => shown(entry) === name).length > 1
+  // A name is plain; where two entries share it, each says where it runs: its route, or else its provider or agent.
+  const same = (name: string) => entries.filter((entry) => entry.info.name === name).length > 1
+  const routeClash = (entry: (typeof entries)[number]) =>
+    entries.filter((other) => other.info.name === entry.info.name && other.route === entry.route).length > 1
   return {
     models: entries.map((entry) => {
-      if (!apart) return entry.info
-      const told = clash(shown(entry)) ? text.via(entry.info.name, entry.by) : shown(entry)
-      return told === entry.info.name ? entry.info : { ...entry.info, name: told, short: told }
+      if (!apart || !same(entry.info.name)) return entry.info
+      const route = routeClash(entry) ? entry.by : entry.route
+      return { ...entry.info, route, via: viaOf(route) }
     }),
     runtimes: agents.map((agent) => {
       const brand = AGENT_BRANDS[agent.id]

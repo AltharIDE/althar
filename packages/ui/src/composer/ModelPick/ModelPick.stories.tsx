@@ -5,6 +5,8 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { effortFor, MODEL_LIST, model, OPUS, RUNTIMES, useModelPrefs } from '../../fixtures/models'
 import { States, statesParameters } from '../../storybook/States'
 import { ModelBrowser } from '../ModelBrowser/ModelBrowser'
+import { Brand } from '../../foundations/brands/brands'
+import type { ModelInfo } from '../../primitives/Model/Model'
 import { ModelPick } from './ModelPick'
 
 /** A consumer's wiring: your pins and defaults, the effort this conversation moved to, and the browser. */
@@ -193,4 +195,83 @@ export const AllStates: Story = {
     ),
   ],
   render: (args) => <States cells={['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <ModelPick {...args} /> }))} />,
+}
+
+const flash = (id: string, route: string, via: string): ModelInfo => ({
+  id,
+  name: 'DeepSeek V4.1 Flash',
+  short: 'DeepSeek V4.1 Flash',
+  mark: Brand.DeepSeek,
+  runtime: 'opencode',
+  efforts: ['Default', 'Low', 'High'],
+  route,
+  via,
+})
+const GO = flash('opencode:opencode-go/deepseek-v4.1-flash', 'OpenCode Go', 'via OpenCode Go')
+const ZEN = flash('opencode:opencode-zen/deepseek-v4.1-flash', 'OpenCode Zen', 'via OpenCode Zen')
+
+/**
+ * One OpenCode model on two providers, a Claude model and a Codex model. The
+ * chip keeps the plain name and leaves out an effort called "Default"; the
+ * provider is said in the list and on hover, only for the model offered twice.
+ */
+export const OnTwoProviders: Story = {
+  args: {
+    model: GO,
+    pinned: [GO, ZEN, OPUS, model('gpt-5.2-codex')],
+    effort: 'Default',
+    defaultOpen: true,
+    variant: 'field',
+    placement: 'below',
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ paddingTop: 0, minHeight: 360 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: /DeepSeek V4.1 Flash/ })).not.toHaveTextContent(/opencode|Default/i)
+    await expect(await within(document.body).findByText('OpenCode Zen')).toBeInTheDocument()
+  },
+}
+
+/** The same chip as a Claude model and as a Codex model, each with its own effort. */
+export const PlainChips: Story = {
+  render: () => (
+    <div style={{ display: 'flex', gap: 12 }}>
+      <ModelPick
+        model={GO}
+        pinned={[GO]}
+        effort="Default"
+        defaultEffort="Default"
+        owner="Review"
+        variant="field"
+        onChange={fn()}
+        onEffort={fn()}
+      />
+      <ModelPick
+        model={OPUS}
+        pinned={[OPUS]}
+        effort="High"
+        defaultEffort="High"
+        owner="Review"
+        variant="field"
+        onChange={fn()}
+        onEffort={fn()}
+      />
+      <ModelPick
+        model={model('gpt-5.2-codex')}
+        pinned={[]}
+        effort="Medium"
+        defaultEffort="Medium"
+        owner="Review"
+        variant="field"
+        onChange={fn()}
+        onEffort={fn()}
+      />
+    </div>
+  ),
 }

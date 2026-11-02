@@ -94,27 +94,25 @@ describe('the models every agent offers', () => {
     }
     const both = catalogOf([...models, offered], [...signedIn, opencode])
     const named = (id: string) => both.models.find((info) => info.id === id)
-    // In a picker, a model its maker's agent runs is named alone; through another agent, it says which way it goes.
-    expect([named('claude-code:opus')?.name, named('opencode:anthropic/opus')?.short]).toEqual(['Claude Opus', 'Opus · OpenCode'])
-    expect(named('opencode:qwen/qwen3-coder')).toMatchObject({
-      name: 'Qwen3 Coder · OpenCode',
-      short: 'Qwen3 Coder · OpenCode',
-      mark: Brand.Alibaba,
-    })
-    // A provider that names the agent is the way; two that would still read the same say their providers.
+    // A name is as people know it, whichever agent runs the model.
+    expect([named('claude-code:opus')?.name, named('opencode:anthropic/opus')?.short]).toEqual(['Claude Opus', 'Opus'])
+    expect(named('opencode:qwen/qwen3-coder')).toMatchObject({ name: 'Qwen3 Coder', short: 'Qwen3 Coder', mark: Brand.Alibaba })
+    expect(named('opencode:qwen/qwen3-coder')?.route).toBeUndefined()
     expect(named('opencode:local')?.mark).toBeUndefined()
-    expect([named('opencode:opencode/big-pickle')?.name, named('opencode:other/big-pickle')?.name]).toEqual([
-      'Big Pickle · OpenCode Zen',
-      'Big Pickle · OpenCode',
+    // Two entries with one name say where each runs, in words: the provider that names the agent, or else the provider.
+    expect([named('opencode:opencode/big-pickle'), named('opencode:other/big-pickle')]).toEqual([
+      expect.objectContaining({ name: 'Big Pickle', route: 'OpenCode Zen', via: 'via OpenCode Zen' }),
+      expect.objectContaining({ name: 'Big Pickle', route: 'OpenCode', via: 'via OpenCode' }),
     ])
-    expect([named('opencode:acme/kimi-k3')?.name, named('opencode:zeta/kimi-k3')?.name]).toEqual(['Kimi K3 · Acme', 'Kimi K3 · Zeta'])
+    expect([named('opencode:acme/kimi-k3')?.route, named('opencode:zeta/kimi-k3')?.route]).toEqual(['Acme', 'Zeta'])
     // Where a model is only named, not chosen, it is named alone; the hover says the way.
     const alone = catalogOf([...models, offered], [...signedIn, opencode], { apart: false })
     expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')).toMatchObject({ name: 'Big Pickle', via: 'via OpenCode' })
-    expect([named('opencode:openai/gpt-6-sol'), named('opencode:gemini-3-pro')?.name, named('opencode:v2')?.name]).toEqual([
-      expect.objectContaining({ name: 'GPT-6 Sol · OpenCode', mark: Brand.OpenAI }),
-      'Gemini 3 Pro · OpenCode',
-      '2 · OpenCode',
+    expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')?.route).toBeUndefined()
+    expect([named('opencode:openai/gpt-6-sol')?.name, named('opencode:gemini-3-pro')?.name, named('opencode:v2')?.name]).toEqual([
+      'GPT-6 Sol',
+      'Gemini 3 Pro',
+      '2',
     ])
     expect(alone.models.find((info) => info.id === 'opencode:openai/gpt-6-sol')?.name).toBe('GPT-6 Sol')
     // Each model has effort levels of its own, and some none; levels an agent runs together are written apart.
