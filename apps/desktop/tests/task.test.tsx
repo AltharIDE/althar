@@ -2443,9 +2443,13 @@ describe('a task', () => {
     expect(await screen.findByText("Codex couldn't start. It isn’t signed in.")).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Review with another agent' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: /Claude Code/ }))
+    // Suggested: a model of another agent than the one that couldn't start.
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
     await waitFor(() =>
-      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'retry', agentId: 'claude-code' } }),
+      expect(client.answerStuck).toHaveBeenCalledWith({
+        attentionId: 'st1',
+        answer: expect.objectContaining({ kind: 'retry', agentId: 'claude-code' }),
+      }),
     )
 
     // Out of review rounds: accepted as it is.
@@ -2615,10 +2619,10 @@ describe('a task', () => {
     withServices(<Task />, client)
     await screen.findByText(/^Codex is out of usage\.$/)
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
-    // Handing it on is offered only to the agents that aren't out.
+    // Handing it on is offered to every model but the one that is out, and can be left again.
     await userEvent.click(screen.getByRole('button', { name: 'Hand to another agent' }))
-    expect(screen.queryByRole('menuitem', { name: /Codex/ })).toBeNull()
-    await userEvent.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Hand over' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await userEvent.click(screen.getByRole('button', { name: 'Try Codex again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st9', answer: { kind: 'retry', agentId: 'codex' } }),
