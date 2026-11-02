@@ -162,6 +162,17 @@ test('walks a first run from the tour to the project, which asks for its code ho
     await expect(page.getByRole('list', { name: 'Code hosts' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0)
     await shoot(electronApp, page, '4-code')
+    // A host's walk in, in the welcome's card, from the same left edge as the way back to the hosts.
+    await page
+      .getByRole('list', { name: 'Code hosts' })
+      .getByRole('listitem')
+      .filter({ hasText: 'GitHub' })
+      .getByRole('button', { name: /^Connect/ })
+      .click()
+    await expect(page.getByRole('heading', { name: 'Connect GitHub' })).toBeVisible()
+    await shoot(electronApp, page, '4-code-github')
+    await page.getByRole('button', { name: 'Back to code hosts' }).click()
+    await expect(page.getByRole('list', { name: 'Code hosts' })).toBeVisible()
     await page.getByRole('button', { name: 'Not now' }).click()
     await expect(page.getByRole('list', { name: 'Trackers' })).toBeVisible()
     await shoot(electronApp, page, '5-issues')
@@ -174,6 +185,41 @@ test('walks a first run from the tour to the project, which asks for its code ho
     await still(page)
     await card.screenshot({ path: `${SHOTS}/6-project-card.png`, scale: 'css' })
     await page.screenshot({ path: `${SHOTS}/6-project.png`, scale: 'css' })
+
+    // The card's walk in, in place of its rows: GitHub's ways in, a token's step, a company's own server, and back to its
+    // rows. Each state shot at the window's smallest size and a large one, light and dark.
+    const shootTheCard = async (name: string) => {
+      for (const [size, width, height] of SIZES) {
+        await sizeWindow(electronApp, page, width, height)
+        for (const theme of ['light', 'dark'] as const) {
+          await page.evaluate((one) => {
+            document.documentElement.dataset.theme = one
+          }, theme)
+          await still(page)
+          await card.screenshot({ path: `${SHOTS}/7-card-${name}-${size}-${theme}.png`, scale: 'css' })
+        }
+      }
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'light'
+      })
+    }
+    const back = card.getByRole('button', { name: 'Back', exact: true })
+    await shootTheCard('rows')
+    await card.getByRole('button', { name: 'Connect' }).first().click()
+    await page.getByRole('menuitem', { name: 'GitHub' }).click()
+    await expect(card.getByRole('heading', { name: 'Connect GitHub' })).toBeVisible()
+    await shootTheCard('github')
+    await card.getByRole('button', { name: /^Make a token/ }).click()
+    await expect(card.getByRole('heading', { name: 'Connect GitHub' })).toHaveCount(0)
+    await shootTheCard('token')
+    await back.click()
+    await card.getByRole('button', { name: 'On a company’s own server' }).click()
+    await expect(card.getByRole('heading', { name: 'Connect GitHub' })).toHaveCount(0)
+    await shootTheCard('server')
+    await back.click()
+    await expect(card.getByRole('heading', { name: 'Connect GitHub' })).toBeVisible()
+    await back.click()
+    await expect(card.getByRole('button', { name: 'Connect' }).first()).toBeVisible()
   } finally {
     await electronApp.close()
   }

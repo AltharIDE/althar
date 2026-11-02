@@ -641,10 +641,12 @@ export interface ConnectFlowProps {
   model: ConnectModel
   /** Narrow, as beside a project's work: the code smaller. */
   compact?: boolean
+  /** Centred, as a sign-in on its own; or from the left edge of the card or page it is set in. */
+  align?: 'centre' | 'start'
 }
 
 /** The walk in to a service, as a sign-in card. */
-export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
+export function ConnectFlow({ model, compact = false, align = 'centre' }: ConnectFlowProps) {
   const service = serviceName(model.service)
   const brand = serviceBrand(model.service)
   const places = model.guide?.places ?? []
@@ -652,7 +654,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
 
   if (model.reading)
     return (
-      <ConnectCard brand={brand} title={model.again === null ? text.connect(service) : text.again(service)}>
+      <ConnectCard brand={brand} title={model.again === null ? text.connect(service) : text.again(service)} align={align}>
         <output className={s.reading} aria-label={text.reading}>
           <Skeleton shape="sheet" height={54} />
           <Skeleton shape="sheet" height={54} />
@@ -662,7 +664,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
 
   if (model.way === null || model.step === null) {
     return (
-      <ConnectCard brand={brand} title={text.connect(service)} line={forLine(model.service, places)} foot={text.kept}>
+      <ConnectCard brand={brand} title={text.connect(service)} line={forLine(model.service, places)} foot={text.kept} align={align}>
         <ConnectWays label={text.ways(service)} ways={model.ways.map((way) => wayOption(way, model))} onChoose={model.choose} />
         {model.serverWay !== null && (
           <ConnectActions align="start">
@@ -682,6 +684,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
   return (
     <ConnectCard
       brand={brand}
+      align={align}
       title={stepTitle(model, step, way)}
       pager={{ steps: way.steps.length, at: model.at }}
       done={done}
