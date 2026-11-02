@@ -34,8 +34,34 @@ const request = (step: StuckStep): AttentionRequest => ({
   stuck: step,
 })
 
-const show = (step: StuckStep, onReport?: (step: string) => void) => {
-  const { client } = fakeClient()
+/** The agents list the one model an OpenCode provider refused, or, with `fixtureModels`, those of the fixtures. */
+const show = (step: StuckStep, onReport?: (step: string) => void, onSignIn?: (agentId: string) => void, fixtureModels = false) => {
+  const { client } = fakeClient(
+    fixtureModels
+      ? {}
+      : {
+          getModels: vi.fn(async () => [
+            {
+              agentId: 'codex',
+              models: [
+                {
+                  id: 'opencode-go/deepseek-v4.1-flash',
+                  name: 'OpenCode Go/DeepSeek V4.1 Flash',
+                  description: null,
+                  efforts: [],
+                  effort: null,
+                },
+              ],
+              model: null,
+              effort: null,
+              defaults: [],
+              blocked: [],
+              probing: false,
+              images: null,
+            },
+          ]),
+        },
+  )
   const onAnswer = vi.fn()
   withServices(
     <StuckCall
@@ -45,6 +71,7 @@ const show = (step: StuckStep, onReport?: (step: string) => void) => {
       agentName={(id) => (id === 'codex' ? 'Codex' : '')}
       onAnswer={onAnswer}
       {...(onReport === undefined ? {} : { onReport })}
+      {...(onSignIn === undefined ? {} : { onSignIn })}
     />,
     client,
   )
@@ -71,6 +98,38 @@ describe('why a review needed the person', () => {
   it('counts the findings still open after the last review round, and says none where none are', () => {
     expect(stuckWords.what(stuck({ why: 'round_limit', open: 0 }), 'Codex')).toBe('Reviewed three times.')
     expect(stuckWords.what(stuck({ why: 'round_limit', open: 3 }), 'Codex')).toBe('Reviewed three times. 3 findings open.')
+  })
+})
+
+describe('a sign-in a provider within the agent refused', () => {
+  const refused = stuck({
+    step: 'review',
+    why: 'signed_out',
+    detail: 'Authentication required: provider authentication required',
+    model: 'opencode-go/deepseek-v4.1-flash',
+    provider: 'opencode-go',
+  })
+
+  it('names the provider and the model, with the agent’s own words under it, and signs in to that provider', async () => {
+    const onSignIn = vi.fn()
+    show(refused, undefined, onSignIn)
+    expect(await screen.findByText('OpenCode Go refused the sign-in for DeepSeek V4.1 Flash.')).toBeTruthy()
+    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    expect(screen.queryByText(/is signed out/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in to OpenCode Go' }))
+    expect(onSignIn).toHaveBeenCalledWith('codex')
+  })
+
+  it('names the provider by its id where its agent doesn’t list the model', async () => {
+    show({ ...refused, model: 'opencode-go/glm-9', provider: 'opencode-go' }, undefined, vi.fn())
+    expect(await screen.findByRole('button', { name: 'Sign in to opencode-go' })).toBeTruthy()
+  })
+
+  it('says the agent is signed out where no provider is named, still with its words under it', async () => {
+    show({ ...refused, model: undefined, provider: undefined }, undefined, vi.fn())
+    expect(await screen.findByText('Codex is signed out.')).toBeTruthy()
+    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 })
 
@@ -152,7 +211,12 @@ describe('handing a step on to a model', () => {
   }
 
   it('offers every model but the one whose failure it was, and hands the step to the one picked, another of the same agent’s too', async () => {
-    const onAnswer = show(stuck({ step: 'review', why: 'signed_out', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    const onAnswer = show(
+      stuck({ step: 'review', why: 'signed_out', agentId: 'codex', model: 'gpt-5.2-codex' }),
+      undefined,
+      undefined,
+      true,
+    )
     await opened()
     // Suggested: another maker's model, not the one that ran out.
     await userEvent.click(await screen.findByRole('button', { name: /^Review: / }))
@@ -167,7 +231,7 @@ describe('handing a step on to a model', () => {
   })
 
   it('leaves out no model where the step stalled, and suggests another maker’s', async () => {
-    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'codex', model: 'gpt-5.2-codex' }), undefined, undefined, true)
     await opened()
     await userEvent.click(await screen.findByRole('button', { name: /^Review: Claude/ }))
     expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
@@ -177,7 +241,12 @@ describe('handing a step on to a model', () => {
   })
 
   it('hands the step on at the effort picked', async () => {
-    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'claude-code', model: 'opus', effort: 'high' }))
+    const onAnswer = show(
+      stuck({ step: 'review', why: 'stalled', agentId: 'claude-code', model: 'opus', effort: 'high' }),
+      undefined,
+      undefined,
+      true,
+    )
     await opened()
     await userEvent.click(await screen.findByRole('button', { name: /^Review: Codex|^Review: gpt-5/ }))
     await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))

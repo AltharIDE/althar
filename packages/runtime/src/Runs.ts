@@ -372,8 +372,7 @@ export interface StuckInfo {
   readonly why: StuckWhy
   readonly detail: string | null
   readonly agentId: string | null
-  /** The model and effort the step last ran on, where it had a session: put there as the call is raised. */
-  readonly model?: string
+  /** How hard the step last thought, where it had a session: put there as the call is raised. */
   readonly effort?: string
   readonly round: number
   readonly open: number
@@ -383,6 +382,9 @@ export interface StuckInfo {
   readonly limit?: LimitCall
   /** For a service that kept failing: its name, where the registry names one (`Anthropic`); else the call says the agent's. */
   readonly service?: string
+  /** The model the step last ran on, where it had a session (the one that failed, so handing on can leave it out), and for a sign-in refused, the provider within the agent whose sign-in it was (`opencode-go`). */
+  readonly model?: string
+  readonly provider?: string
 }
 
 /**
@@ -1593,8 +1595,21 @@ export class Runs extends Context.Service<
           // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
           // Signed out, or refused, it won't go on however it's reminded.
-          if (event.errorClass === 'auth_required')
-            return yield* stuck(on.run, { id: on.attemptId }, info('signed_out', event.failure ?? null))
+          if (event.errorClass === 'auth_required') {
+            // On an agent that reaches several providers, it is one provider's sign-in that was refused: the turn's model says which.
+            const [signedOutTurn] = yield* sql<{ model: string | null }>`SELECT model FROM turn_deliveries WHERE id = ${event.turnId}`
+            const model = signedOutTurn?.model ?? null
+            const providers = agentsHere.list.find((entry) => entry.definition.id === agent?.agentId)?.definition.signIn.providers
+            const provider = model === null ? undefined : providers?.of(model)
+            return yield* stuck(
+              on.run,
+              { id: on.attemptId },
+              {
+                ...info('signed_out', event.failure ?? null),
+                ...(model === null || provider === undefined ? {} : { model, provider }),
+              },
+            )
+          }
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
           // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
           const continued = output.continued ?? 0

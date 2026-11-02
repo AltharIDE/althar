@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
+import { openCodeProviders } from './usageSources'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -167,6 +168,15 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /**
+     * For an agent that reaches several providers, each with a sign-in of its
+     * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
+     * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
+     */
+    readonly providers?: {
+      readonly read: (output: string) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+      readonly of: (model: string) => string | undefined
+    }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
     /**
@@ -1073,6 +1083,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
+      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work.
+      providers: { read: openCodeProviders, of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined) },
       login: 'opencode auth login',
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),

@@ -190,7 +190,13 @@ export const catalogOf = (
     }),
     runtimes: agents.map((agent) => {
       const brand = AGENT_BRANDS[agent.id]
-      return { id: agent.id, name: agent.name, how: text.how[agent.signIn], ...(brand ? { brand } : {}) }
+      // Signed in is the normal state, so only the others are said.
+      return {
+        id: agent.id,
+        name: agent.name,
+        ...(agent.signIn === 'signed_in' ? {} : { how: text.how[agent.signIn] }),
+        ...(brand ? { brand } : {}),
+      }
     }),
     agents: byId,
     defaults: new Map(
