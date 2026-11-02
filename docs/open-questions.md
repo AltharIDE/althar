@@ -664,27 +664,14 @@ never under running work.
   none) and then the form with what was chosen. Dropping folders on the window
   does the same. This departs from the two entrances in architecture doc 01;
   if it holds, the doc should change.
-- [ ] **The welcome.** Shown once after install (kit `onboarding/Welcome`,
-  prototype `#start`). The opening draws the mark; then a drafting table with
-  five plots, and a camera that travels to each. At each plot the real
-  components are sketched in pencil from their own layout, uncovered, and set
-  working: a task visits the project and leaves a note, a lead takes a task, a
-  call arrives on the board and a pointer answers it, the last checks pass and
-  the change is accepted, an agent finishes signing in. It ends on the whole
-  table, built. Settled: the opening starts close on the mark as it is drawn
-  and pulls back hard before the name and line come into focus, and the line
-  is "Agents come and go. Your project stays." The opening is drawn on the
-  table itself, so Begin moves the camera off it to the side, across the same
-  paper, straight to the first plot, rather than changing screens; the whole
-  table is only shown at the end. From plot to plot the camera glides
-  straight and low, tipped toward where it is going, and the pencil route is
-  drawn beside it as it goes; the camera does not follow the route's bends
-  (chosen over a zoom out and in, a dolly and a whip pan). Open:
-  the point (kit story Onboarding/Opening has the versions side by side), a
-  plain dot set at the end, a plain circle drawn first and filled, or none;
-  can it be replayed from the Help menu; does a major update get a plot of its
-  own; is there sound, as Arc has; and should a scene replay when you come
-  back to it with Back (today it holds its end).
+- [x] **The welcome.** Settled in [ADR-083](decisions/083-a-welcome-on-first-launch.md):
+  the first screen is one card of steps, a tour of four scenes of the real
+  components first (once on a computer, and skippable), then the agents, the
+  first project, its code host and a tracker; a new project's empty
+  conversation asks for the code host and tracker not connected. The
+  drafting table's camera and opening went; its scenes stayed. Still open:
+  replaying the tour from the Help menu, and whether a major update gets a
+  page of its own.
 - [ ] **Explaining "lead" before anyone has met one.** The new-project form now
   says "The agent in charge decides", with the note that each task has one
   agent in charge of it, its lead. ProjectRules uses the same title. Does

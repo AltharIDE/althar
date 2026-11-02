@@ -4,7 +4,7 @@ import { TestClock } from 'effect/testing'
 
 import type { Fetch } from '../src/http'
 import type { Service } from '../src/model'
-import { identify } from '../src/servers'
+import { identify, jiraCloudSiteOf } from '../src/servers'
 import { type Answer as Canned, stubFetch } from './stub'
 
 /** A page, as a server that isn't the one asked for answers. */
@@ -147,6 +147,50 @@ describe('identifying a company’s own server', () => {
       assert.strictEqual((yield* identify(fetch, 'jira', 'refused.northwind.dev')).reason, 'other')
       assert.strictEqual((yield* identify(fetch, 'jira', 'json.northwind.dev')).reason, 'other')
       assert.strictEqual((yield* identify(fetch, 'jira', 'empty.northwind.dev')).reason, 'other')
+    }),
+  )
+
+  it.effect('finds a Jira Cloud site’s API at its atlassian.net address, where it lives on its own domain', () =>
+    Effect.gen(function* () {
+      const { fetch, sent } = stubFetch([
+        [
+          'GET',
+          'https://tickets.northwind.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'https://northwind.atlassian.net/' }) },
+        ],
+        // A server that names somewhere not Atlassian's, or Atlassian's without HTTPS or with a password: its own address stands.
+        [
+          'GET',
+          'https://jira.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'https://elsewhere.test' }) },
+        ],
+        [
+          'GET',
+          'https://plain.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'http://halyard.atlassian.net' }) },
+        ],
+        [
+          'GET',
+          'https://secret.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ deploymentType: 'Cloud', baseUrl: 'https://someone:secret@halyard.atlassian.net' }) },
+        ],
+        [
+          'GET',
+          'https://lookalike.halyard.dev/rest/api/2/serverInfo',
+          { json: jira({ baseUrl: 'https://halyard.atlassian.net.evil.test' }) },
+        ],
+        ['GET', 'https://quiet.halyard.dev/rest/api/2/serverInfo', page],
+      ])
+      assert.strictEqual(yield* jiraCloudSiteOf(fetch, 'https://tickets.northwind.dev'), 'https://northwind.atlassian.net')
+      // Asked without signing in.
+      assert.isUndefined(sent[0]?.headers.authorization)
+      for (const site of ['jira', 'plain', 'secret', 'lookalike', 'quiet'].map((name) => `https://${name}.halyard.dev`))
+        assert.strictEqual(yield* jiraCloudSiteOf(fetch, site), site)
+      assert.strictEqual(yield* jiraCloudSiteOf(offline, 'https://away.halyard.dev'), 'https://away.halyard.dev')
+      // An atlassian.net site is its own, without asking.
+      const before = sent.length
+      assert.strictEqual(yield* jiraCloudSiteOf(fetch, 'https://northwind.atlassian.net'), 'https://northwind.atlassian.net')
+      assert.lengthOf(sent, before)
     }),
   )
 

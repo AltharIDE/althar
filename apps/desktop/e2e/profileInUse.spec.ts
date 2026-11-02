@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
-import { launch, mainWindow } from './support'
+import { launch, mainWindow, pastTheTour } from './support'
 
 /*
  * A profile another runtime has open (DEV-115): the CLI, or another Althar.
@@ -40,6 +40,7 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
 
   // A profile made by an earlier run, then held as the CLI holds it: exclusive, from its first statement until it closes.
   const before = await launch(home)
+  await pastTheTour(before.page)
   await expect(before.page.getByText('Claude Code').first()).toBeVisible()
   await before.electronApp.close()
   const earlier = runtimeLines(home)
@@ -76,6 +77,7 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
     other.close()
     held = false
     await page.getByRole('button', { name: 'Try again' }).click()
+    await pastTheTour(page)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
   } finally {
     if (held) other.close()
@@ -87,6 +89,7 @@ test('a second launch on the same profile brings the first forward and ends, whi
   const home = mkdtempSync(join(tmpdir(), 'althar-twice-'))
   const { electronApp, page } = await launch(home)
   try {
+    await pastTheTour(page)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
     await electronApp.evaluate(({ BrowserWindow }) => {
       for (const window of BrowserWindow.getAllWindows()) window.hide()
@@ -117,7 +120,9 @@ test('a second launch on the same profile brings the first forward and ends, whi
     const otherHome = mkdtempSync(join(tmpdir(), 'althar-beside-'))
     const beside = await launch(otherHome)
     try {
+      await pastTheTour(beside.page)
       await expect(beside.page.getByText('Claude Code').first()).toBeVisible()
+      await pastTheTour(page)
       await expect(page.getByText('Claude Code').first()).toBeVisible()
       expect(await mainWindow(beside.electronApp)).not.toBe(page)
     } finally {

@@ -144,7 +144,7 @@ const gitGate = (words: string) =>
   )
 
 /** The runtime with a fake GitHub, asked for news often. */
-const withGitHub = (github: FakeService) => withQueries({ connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })
+const withGitHub = (github: FakeService) => withQueries({ connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })
 
 /** Connects GitHub with a pasted token, as the person would. */
 const connectGitHub = Effect.gen(function* () {

@@ -287,7 +287,7 @@ request that names the issue links it.
   the commit the last pass read. Folded at the description's end, what
   changed after review, with the commits that made it, and what the lead
   kept, with why. Never how many findings there were.
-- **After the first push, a lead's commits go up as its turn ends** (ADR-083),
+- **After the first push, a lead's commits go up as its turn ends** (ADR-072),
   where the project's rules say so (`pushCommits`, "Push the lead's commits
   automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
@@ -983,9 +983,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-083](../decisions/083-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-084](../decisions/084-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-084](../decisions/084-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-085](../decisions/085-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

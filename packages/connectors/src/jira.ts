@@ -125,6 +125,13 @@ const personOf = (user: User): Person =>
     ? { id: user.accountId, login: user.displayName ?? user.accountId, name: user.displayName ?? null, bot: user.accountType === 'app' }
     : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null, bot: false }
 
+/** An address without its trailing slashes, in one pass: a pattern for them is slow on a long run of slashes not at the end. */
+export const withoutTrailingSlashes = (address: string): string => {
+  let end = address.length
+  while (end > 0 && address[end - 1] === '/') end -= 1
+  return address.slice(0, end)
+}
+
 /**
  * A Jira Cloud site's address: its origin alone. A site has no path of its
  * own, so a board's address pasted for it (`/jira/software/projects/PAY/
@@ -134,7 +141,7 @@ export const siteOf = (webUrl: string): string => {
   try {
     return new URL(webUrl).origin
   } catch {
-    return webUrl.replace(/\/+$/, '')
+    return withoutTrailingSlashes(webUrl)
   }
 }
 
@@ -194,8 +201,10 @@ const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
 const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   const cloud = product === 'jira_cloud'
-  const site = cloud ? siteOf(options.webUrl) : options.webUrl.replace(/\/+$/, '')
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const site = cloud ? siteOf(options.webUrl) : withoutTrailingSlashes(options.webUrl)
+  const api = withoutTrailingSlashes(options.apiUrl)
+  // Where its API is: the site, or, for a site on its own domain, its atlassian.net address, which its gateway id is asked of.
+  const apiSite = cloud ? siteOf(api) : site
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
 
   /*
@@ -210,7 +219,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
    */
   let root = api
   const gateway = Effect.map(
-    http.json(Schema.Struct({ cloudId: Schema.String }), 'GET', `${site}/_edge/tenant_info`),
+    http.json(Schema.Struct({ cloudId: Schema.String }), 'GET', `${apiSite}/_edge/tenant_info`),
     ({ cloudId }) => `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3`,
   )
   const keep = (other: string) =>
@@ -533,7 +542,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   }
 }
 
-/** Jira Cloud, at a site's address (`https://meridian.atlassian.net`). */
+/** Jira Cloud, at a site's address (`https://meridian.atlassian.net`, or its own domain, with its API at the atlassian.net one). */
 export const makeJiraCloud = (options: AdapterOptions): Tracker => makeJira('jira_cloud', options)
 
 /** Jira Data Center, at an instance's address. */
@@ -557,8 +566,9 @@ const Email = Schema.Struct({ emailAddress: Schema.optional(Schema.NullOr(Schema
 export const accessJira: Access = (input) =>
   Effect.gen(function* () {
     const cloud = /\/rest\/api\/3\/?$/.test(input.apiUrl)
-    const site = cloud ? siteOf(input.webUrl) : input.webUrl.replace(/\/+$/, '')
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const site = cloud ? siteOf(input.webUrl) : withoutTrailingSlashes(input.webUrl)
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const apiSite = cloud ? siteOf(api) : site
     const ask = (url: string) => probe(input, url)
 
     const atSite = yield* ask(`${api}/myself`)
@@ -567,7 +577,7 @@ export const accessJira: Access = (input) =>
     // A token with scopes works only through the gateway, which the site's id names.
     const gateway = (): Effect.Effect<{ readonly root: string; readonly me: Answer }> =>
       Effect.gen(function* () {
-        const tenant = yield* ask(`${site}/_edge/tenant_info`)
+        const tenant = yield* ask(`${apiSite}/_edge/tenant_info`)
         const cloudId = answered(tenant) ? readAs(Schema.Struct({ cloudId: Schema.String }), tenant)?.cloudId : undefined
         if (cloudId === undefined) return { root: api, me: atSite }
         const root = `https://api.atlassian.com/ex/jira/${encodeURIComponent(cloudId)}/rest/api/3`

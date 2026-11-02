@@ -1,4 +1,13 @@
-import { ConnectorFailed, type Issue, linksIn, parseLink, type Product, type Started, type StatusCategory } from '@althar/connectors'
+import {
+  ConnectorFailed,
+  type Issue,
+  linksIn,
+  looksLikeJira,
+  parseLink,
+  type Product,
+  type Started,
+  type StatusCategory,
+} from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
@@ -176,8 +185,13 @@ export class Issues extends Context.Service<
           const wanted = text.trim()
           if (/^https?:\/\//.test(wanted)) {
             const found = yield* connections.resolve(wanted)
-            // A link to a tracker not connected names it where its address can (a Jira Cloud site's does).
-            if (found === null) return yield* new NotConnected({ product: parseLink(wanted)?.product ?? 'linear', what: wanted })
+            // A link to a tracker not connected names it where its address can (a Jira Cloud site's does), or its path
+            // (a Jira on a company's own domain, `/browse/PAY-12`).
+            if (found === null)
+              return yield* new NotConnected({
+                product: parseLink(wanted)?.product ?? (looksLikeJira(wanted) ? 'jira_cloud' : 'linear'),
+                what: wanted,
+              })
             // A pull request's link, given for an issue, says so in its host's words.
             if (found.ref.kind !== 'issue') return yield* new NotAnIssue({ link: wanted, what: found.host?.words.noun ?? 'pull request' })
             if (found.tracker === undefined) return yield* new NotConnected({ product: found.ref.product, what: wanted })

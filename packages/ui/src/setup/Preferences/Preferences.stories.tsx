@@ -27,6 +27,7 @@ import {
   SettingList,
   SettingRow,
   SettingSwitch,
+  SkillsLine,
   UsageData,
 } from './Preferences'
 
@@ -53,6 +54,7 @@ const onPlay = fn()
 const onPlace = fn()
 const onUsage = fn()
 const onCrashes = fn()
+const onSkills = fn()
 
 /* Stand-ins for what the app puts in the screen: the home layer's Island and EdgeSheet can't be drawn from here. */
 const island = (
@@ -181,6 +183,21 @@ function Crashes({ line = false }: { line?: boolean }) {
   )
 }
 
+function SkillsSettingLine() {
+  const [on, setOn] = useState(false)
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <SkillsLine
+        on={on}
+        onChange={(next) => {
+          setOn(next)
+          onSkills(next)
+        }}
+      />
+    </div>
+  )
+}
+
 function Places() {
   const [place, setPlace] = useState<'island' | 'menu'>('island')
   return (
@@ -261,6 +278,19 @@ export const CrashReportsSwitch: Story = {
     await expect(onCrashes).toHaveBeenCalledWith(false)
     await expect(crashes).not.toBeChecked()
     await expect(within(canvasElement).getByRole('switch', { name: 'Usage data' })).toBeChecked()
+  },
+}
+
+/** Agent skills, off until turned on, with Settings named as where to choose them one by one. */
+export const SkillsLineAsked: Story = {
+  render: () => <SkillsSettingLine />,
+  play: async ({ canvasElement }) => {
+    const skills = within(canvasElement).getByRole('switch', { name: 'Agent skills' })
+    await expect(skills).not.toBeChecked()
+    await expect(skills).toHaveAccessibleDescription(/in Settings, under Skills/)
+    await userEvent.click(skills)
+    await expect(skills).toBeChecked()
+    await expect(onSkills).toHaveBeenCalledWith(true)
   },
 }
 

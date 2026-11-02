@@ -108,11 +108,13 @@ export interface StationProps {
   built: boolean
   /** Arrive built, with no sketch: stills and reduced motion. */
   instant: boolean
+  /** Without the drafting table's plot and its numeral round it: a scene alone, framed by what holds it. */
+  bare?: boolean
   /** The scene: its components, its notes and its pointer, all in station pixels. */
   children: ReactNode
 }
 
-export function Station({ n, label, x, y, shown, built, instant, children }: StationProps) {
+export function Station({ n, label, x, y, shown, built, instant, bare = false, children }: StationProps) {
   const content = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const unscale = useCallback(() => {
@@ -128,11 +130,15 @@ export function Station({ n, label, x, y, shown, built, instant, children }: Sta
         className={cx(s.station, shown && s.shown, built && s.built, instant && s.instant)}
         style={{ left: x, top: y, ...cssVars({ '--n': n }) }}
       >
-        <span className={s.plot} aria-hidden="true" />
-        <span className={s.tag} aria-hidden="true">
-          <span className={s.numeral}>{String(n).padStart(2, '0')}</span>
-          <span className={s.label}>{label}</span>
-        </span>
+        {!bare && (
+          <>
+            <span className={s.plot} aria-hidden="true" />
+            <span className={s.tag} aria-hidden="true">
+              <span className={s.numeral}>{String(n).padStart(2, '0')}</span>
+              <span className={s.label}>{label}</span>
+            </span>
+          </>
+        )}
         <div ref={content} className={s.content} inert aria-hidden="true">
           {children}
         </div>

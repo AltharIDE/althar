@@ -9,6 +9,7 @@ import { useServices } from '../../data/services'
 import { kitInk } from '../../shared/inks'
 import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
+import { useWelcoming } from '../start/welcome'
 import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
 import { useWarmHome, useWarmTabs } from './warm'
@@ -39,7 +40,7 @@ export interface TabsModel {
   readonly current: string | null
   /** What waits on the person across every project. */
   readonly yours: number
-  /** There is no project at all yet, as read: the first screen has the whole window. */
+  /** There is no project at all yet, as read, or the welcome is still on show: the first screen has the whole window. */
   readonly none: boolean
   /** Althar's settings: whether they have a tab, and whether it has the window. */
   readonly settings: { readonly open: boolean; readonly current: boolean }
@@ -138,6 +139,7 @@ export const useTabs = (): TabsModel => {
   // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
   const preview = useWarmTabs(open, places)
   // And the home's, once there are projects: going back to it never waits either.
+  const welcoming = useWelcoming()
   const previewHome = useWarmHome(projects !== null && projects.length > 0)
   // The project being made, at the end; once made, its own tab has its id, and stands in its place.
   const making: ProjectTab | null =
@@ -172,7 +174,8 @@ export const useTabs = (): TabsModel => {
     others: (projects ?? []).filter((project) => !open.includes(project.id)).map(tabOf),
     current: onNew ? (draft?.id ?? null) : current,
     yours: (projects ?? []).reduce((sum, project) => sum + yoursIn(project), 0),
-    none: projects !== null && projects.length === 0,
+    // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs.
+    none: (projects !== null && projects.length === 0) || welcoming,
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
       if (id !== null && id === making?.id) return void navigate({ to: '/new' })
