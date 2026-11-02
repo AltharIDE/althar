@@ -135,6 +135,34 @@ const answerAt = (fetch: Fetch, service: Service, base: string): Effect.Effect<{
     }
   })
 
+/**
+ * Where a Jira Cloud site answers its API: on its own domain
+ * (`jira.northwind.dev`), Atlassian serves the site's pages but not its REST
+ * API, which stays at the site's atlassian.net address. Its server info says
+ * that address, which is kept only where it is an Atlassian site over HTTPS,
+ * the only host its Atlassian token goes to. Anywhere else, or when it doesn't
+ * say, the site itself.
+ */
+export const jiraCloudSiteOf = (fetch: Fetch, site: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    if (atlassianSite(site) !== null) return site
+    const answer = yield* ask(fetch, `${site}/rest/api/2/serverInfo`)
+    const info = answer?.status === 200 ? fits(JiraInfo, answer.json) : undefined
+    return (info === undefined ? null : atlassianSite(info.baseUrl)) ?? site
+  })
+
+/** An Atlassian Cloud site's origin, `https://northwind.atlassian.net`; null for any other address. */
+const atlassianSite = (address: string): string | null => {
+  try {
+    const url = new URL(address)
+    return url.protocol === 'https:' && url.username === '' && url.password === '' && url.hostname.toLowerCase().endsWith('.atlassian.net')
+      ? url.origin
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** Which of a service's products answers at an address, asked without signing in. */
 export const identify = (fetch: Fetch, service: Service, typed: string): Effect.Effect<Identified> =>
   Effect.gen(function* () {

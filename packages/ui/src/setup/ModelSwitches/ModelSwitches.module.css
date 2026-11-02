@@ -21,9 +21,12 @@
 .find {
   width: 100%;
 }
+/* The list scrolls under the field: its ends fade, so a row is never cut flat and the edge says there is more. */
 .list {
   max-height: 340px;
+  padding-block: 10px;
   overflow-y: auto;
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 10px), transparent);
 }
 .quiet {
   margin: 0;

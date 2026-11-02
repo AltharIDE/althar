@@ -1,48 +1,54 @@
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
-import type { AgentStatus } from '@althar/contracts'
+import type { AgentStatus, ProjectSummary } from '@althar/contracts'
 import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, SkillsLine } from '@althar/ui'
-import { Start } from '@althar/ui/screens'
+import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
-import { AgentAccounts } from '../accounts/AgentAccounts'
-import { useSkills } from '../settings/useSkills'
+import { AgentSignIn } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
+import { ConnectionsView } from '../connections/ConnectionsView'
+import { useConnections } from '../connections/useConnections'
+import { hostsCode, serviceOf } from '../connections/ways'
+import { useSkills } from '../settings/useSkills'
 import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
+import { markToured, toured, useWelcoming, welcome } from './welcome'
 
 /*
- * Where the window starts. With no project yet, the kit's Start screen: the
- * agents answering round the mark, and the repositories found where people
- * keep code, ticked into the first project (useFirstProject), and at the
- * sheet's foot agent skills, whether the leads are given Althar's, and
- * crash reports (DEV-66), each asked once as a quiet line with its switch,
- * which Settings keeps too. Once there are projects, the home,
- * where a new project starts in a tab of its own.
+ * Where the window starts. On a first run, the kit's Welcome: a short tour
+ * of what Althar does, then the agents on this computer, each with the one
+ * thing it needs; the first project, of the repositories found where people
+ * keep code (useFirstProject); where its code is, for pull requests, and a
+ * tracker, for issues (ConnectionsView, one kind a step); and on the agents'
+ * step, agent skills and crash reports, each asked once as a quiet line with
+ * its switch, which Settings keeps too. The project is made on its step, and
+ * the welcome stays on show (welcome.ts) until its last step opens it. Once
+ * there are projects, the home, where a new project starts in a tab of its own.
  */
 
 export const text = {
   removeAnyway: 'Remove anyway',
   /** Asks every agent again, after one couldn't be checked. */
   checkAgain: 'Check again',
-  /** The kit's first screen, in this computer's words, with the keys this system has. */
-  first: () => {
-    return {
-      looking: `Looking around ${device.this}…`,
-      agentsLabel: `Agents on ${device.this}`,
-      noneHere: `None on ${device.this} yet`,
-      away: `Not on ${device.this}`,
-      awayLabel: `Agents not on ${device.this}`,
-      add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') },
-      createKbd: modKey(keys.return),
-    }
-  },
+  /** An agent signed in, on its row in the welcome. */
+  signedIn: 'Signed in',
+  /** The welcome, in this computer's words, with the keys this system has. */
+  first: () => ({
+    welcome: {
+      agents: { ...welcomeText.agents, list: `Agents on ${device.this}`, noneHere: `None on ${device.this} yet` },
+      project: { ...welcomeText.project, makeKbd: modKey(keys.return) },
+    },
+    away: { title: `Not on ${device.this}`, label: `Agents not on ${device.this}` },
+    repositories: { add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') } },
+    runtimes: { missing: `Not installed on ${device.this}` },
+  }),
 }
 
 /** An agent's sign-in, as a row of the kit's list of agents, with what goes under it: its accounts. */
@@ -94,15 +100,30 @@ export const openGuide = (model: StartModel, agentId: string) => {
   if (guide != null) window.open(guide, '_blank')
 }
 
-/** The agents on this computer, each with its accounts to add, sign in, rename, order and remove. */
+/**
+ * The agents, each as a row of the kit's list, with its own sign-in under it while one is under way. A row signed in says
+ * so, before its version: someone new needn't know what a version number means to see it is ready.
+ */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
-  model.status?.agents.map((agent) =>
-    runtimeEntry(
-      agent,
-      agent.installed ? <AgentAccounts agent={agent} start={model} signIn={signIn} /> : undefined,
-      model.installFailed[agent.id],
-    ),
-  ) ?? []
+  model.status?.agents.map((agent) => {
+    const entry = runtimeEntry(agent, agent.installed ? signingInOf(agent, signIn) : undefined, model.installFailed[agent.id])
+    return entry.state === RuntimeState.Ready && entry.account === undefined ? { ...entry, account: text.signedIn } : entry
+  }) ?? []
+
+/** An agent's sign-in under way, in its row: one of its accounts signing in again is named, as in Settings. */
+const signingInOf = (agent: AgentStatus, signIn: AccountSignInModel) => {
+  const flow = signIn.signingIn
+  if (flow?.agentId !== agent.id) return undefined
+  const again = flow.again == null ? undefined : agent.accounts.find((account) => account.id === flow.again)
+  return <AgentSignIn agent={agent} signIn={signIn} position={1} {...(again === undefined ? {} : { account: { name: again.name } })} />
+}
+
+/** Signs an agent in by its first account, or a new one where it has none. */
+const signInTo = (model: StartModel, signIn: AccountSignInModel, agentId: string) => {
+  const account = model.status?.agents.find((agent) => agent.id === agentId)?.accounts[0]
+  if (account === undefined) signIn.add(agentId)
+  else signIn.again(agentId, account.id)
+}
 
 /** Why one agent couldn't be checked, with a way to check every agent again. */
 export function AgentProblem({ why, model }: { why: string; model: StartModel }) {
@@ -148,8 +169,10 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong.
-  const first = (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
+  const welcoming = useWelcoming()
+  // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
+  // welcome while it is on show, over the project made on its way.
+  const first = welcoming || (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
 
   if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 
@@ -162,7 +185,7 @@ export function StartView({
 const theirs = (target: EventTarget | null) =>
   target instanceof Element && target.closest('form, [role="dialog"], [data-radix-popper-content-wrapper]') !== null
 
-/** The first screen: the agents answering, the repositories found, and the first project made of those ticked. */
+/** The first screen: the welcome, its tour, then the agents, the first project of the repositories ticked, its code host and a tracker. */
 function First({
   model,
   accounts,
@@ -173,14 +196,38 @@ function First({
   onProject: (projectId: string) => void
 }) {
   const project = useFirstProject()
-  const make = () =>
-    void project.make().then((made) => {
-      if (made !== null) onProject(made.id)
-    })
-
-  // ⌘N adds a folder, ⌘↵ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
-  // what is open over the screen, are theirs.
+  const connections = useConnections()
+  // Whether the tour was seen is read as the welcome opens: once over, it stays on the track, and Back goes to it. Opened
+  // with no projects read, because the runtime didn't answer, it isn't a first run: it starts on the agents, where that
+  // is said, with no tour.
+  const [seen] = useState(() => toured() || model.projects === null)
+  const [step, setStep] = useState<WelcomeStep>(seen ? 'agents' : 'ask')
+  const [made, setMade] = useState<ProjectSummary | null>(null)
+  const firstRun = model.projects !== null && model.projects.length === 0
+  // A first run's welcome stays on show until its last step opens the project made on its way.
   useEffect(() => {
+    if (firstRun) welcome.begin()
+  }, [firstRun])
+  // Left with its project made, by Open or by going elsewhere, it is over.
+  useEffect(() => {
+    if (made === null) return
+    return () => welcome.end()
+  }, [made])
+
+  const make = () =>
+    void project.make().then((one) => {
+      if (one !== null) setMade(one)
+    })
+  const open = () => {
+    if (made === null) return
+    welcome.end()
+    onProject(made.id)
+  }
+
+  // ⌘N adds a folder, ⌘↵ makes the project, on its step, as the screen says; Ctrl off a Mac. Keys typed into an account's
+  // form, or into what is open over the screen, are theirs.
+  useEffect(() => {
+    if (step !== 'project' || made !== null) return
     const onKey = (event: KeyboardEvent) => {
       if (!primaryDown(event) || event.shiftKey || event.altKey || event.defaultPrevented || theirs(event.target)) return
       if (event.key.toLowerCase() === 'n') {
@@ -196,22 +243,37 @@ function First({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const skills = useSkills()
-  const error = project.error ?? model.error ?? skills.error
   const { preferences, set } = usePreferences()
   const { host } = useServices()
-  // The skills that can be given: one Althar can't read is left as it is, on or off.
+  const skills = useSkills()
+  // Skills with problems cannot be switched in Settings, so leave them out of the all-on calculation too.
   const sound = skills.rows?.filter((skill) => skill.problem === undefined) ?? []
+  const list = connections.list
+  const hostConnected =
+    list?.connections.some((connection) => {
+      const service = serviceOf(list.products, connection.product)
+      return service !== undefined && hostsCode(service)
+    }) ?? false
+  const trackersOffered = list === null || list.products.some((product) => !hostsCode(product.service))
+  const words = text.first()
   return (
     <div className={`${s.window} ${s.bare}`}>
       <BareBar className={s.over} />
-      <Start
+      <Welcome
+        step={step}
+        onStepChange={setStep}
+        toured={seen}
+        onToured={markToured}
         // Still asking until the runtime answers, or says it can't.
         runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}
+        runtimesText={words.runtimes}
+        awayText={words.away}
+        onSignIn={(id) => signInTo(model, accounts, id)}
+        onCheck={() => void model.recheck()}
         onInstall={(id) => void model.install(id)}
         onHelp={(id) => openGuide(model, id)}
         repositories={project.candidates}
-        {...(project.lookedIn === null || project.lookedIn.length === 0 ? {} : { lookedIn: project.lookedIn.join(', ') })}
+        repositoryText={words.repositories}
         picked={project.picked}
         onPick={project.toggle}
         onAdd={() => void project.add()}
@@ -220,13 +282,21 @@ function First({
         onNameChange={project.rename}
         onCreate={make}
         creating={project.making}
-        {...(error === null ? {} : { error })}
-        text={text.first()}
-        runtimesText={{ missing: `Not installed on ${device.this}` }}
+        made={made !== null}
+        {...(project.error !== null
+          ? { error: { step: 'project' as const, said: project.error } }
+          : model.error !== null
+            ? { error: { step: 'agents' as const, said: model.error } }
+            : skills.error !== null
+              ? { error: { step: 'agents' as const, said: skills.error } }
+              : {})}
+        hosts={<ConnectionsView model={connections} only="hosts" />}
+        hostConnected={hostConnected}
+        // Issues are a step only where a tracker can be connected; until the list is read, as though one can.
+        {...(trackersOffered ? { trackers: <ConnectionsView model={connections} only="trackers" /> } : {})}
+        onOpen={open}
         foot={
           <>
-            {/* Only where Althar has skills to give, once the store is read: off until turned on, as each one is. */}
-            {/* On only when every one is, so with some on it turns the rest on, as Settings' Turn all on does. */}
             {skills.enabled && sound.length > 0 && <SkillsLine on={sound.every((skill) => skill.on)} onChange={skills.toggleAll} />}
             <CrashReportsLine
               on={preferences.crashReports}
@@ -235,6 +305,7 @@ function First({
             />
           </>
         }
+        text={words.welcome}
       />
       {model.unremoved !== null && <StartError model={model} />}
     </div>

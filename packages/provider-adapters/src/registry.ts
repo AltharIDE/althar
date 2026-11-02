@@ -1180,7 +1180,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
-      inheritEnv: ['COPILOT_HOME'],
+      // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
+      inheritEnv: ['COPILOT_HOME', 'GH_HOST'],
     }),
     modes: {
       ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',

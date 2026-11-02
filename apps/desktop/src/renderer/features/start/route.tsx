@@ -9,6 +9,7 @@ import { useAccountSignIn } from '../accounts/useAccountSignIn'
 import { useShown } from '../tabs/kept'
 import { StartView } from './StartView'
 import { useStart } from './useStart'
+import { useWelcoming } from './welcome'
 
 /**
  * The home on show: its screen is the window's own, kept while the person is
@@ -19,7 +20,7 @@ function ShownHome() {
   return null
 }
 
-/** The first screen, before there is any project, or while the runtime doesn't answer. */
+/** The first screen, before there is any project, or while the runtime doesn't answer: the welcome. */
 function First() {
   const navigate = useNavigate()
   const start = useStart()
@@ -37,7 +38,9 @@ function First() {
 function Start() {
   const { client } = useServices()
   const projects = useQuery(reads(client).projects()).data?.projects
-  return projects !== undefined && projects.length > 0 ? <ShownHome /> : <First />
+  // The welcome stays on show over the project made on its way, until its last step opens it.
+  const welcoming = useWelcoming()
+  return projects !== undefined && projects.length > 0 && !welcoming ? <ShownHome /> : <First />
 }
 
 /** Where the window starts: the first screen with no project yet, the home once there are. */

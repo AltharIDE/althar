@@ -28,7 +28,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { cantChange, lacking, leftAsItIs, noReviews, stillOpen, unchangeable } from './model'
+import { cantChange, lacking, leftAsItIs, mergedForGood, noReviews, stillOpen, unchangeable } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -571,6 +571,8 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       threads: true,
       reviews: false,
       pictures: true,
+      reopen: true,
+      rerun: true,
       links: false,
       starts: false,
       changes: ISSUE_CHANGES,
@@ -686,6 +688,15 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         if (now.state !== 'opened') return changeOf(now)
         return changeOf(
           yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'close' })),
+        )
+      }),
+    reopenChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state === 'opened') return changeOf(now)
+        if (now.state === 'merged') return yield* mergedForGood(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        return changeOf(
+          yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'reopen' })),
         )
       }),
     deleteBranch: (repository, change) =>

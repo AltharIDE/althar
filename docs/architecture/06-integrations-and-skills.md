@@ -987,9 +987,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-083](../decisions/083-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-084](../decisions/084-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-084](../decisions/084-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-085](../decisions/085-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

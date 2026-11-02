@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, say } from './support'
+import { launch, openMadeProject, say, toFirstProject } from './support'
 
 /*
  * The effort the coordinator picks for a step, in a real window with the
@@ -24,11 +24,13 @@ test('shows on the plan the effort the coordinator picked for its lead, which th
   const { electronApp, page } = await launch(home)
   try {
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
+    await toFirstProject(page)
     await page
       .getByRole('list', { name: 'Repositories for the project' })
       .getByRole('checkbox', { name: /meridian/ })
       .click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await say(page, 'Rework how the cache expires. [coordinator:plan-effort] [coordinator:plan-no-review] [lead:finish]')
 

@@ -18,6 +18,7 @@ import { type StartModel, useStart } from '../src/renderer/features/start/useSta
 import { shortFolder } from '../src/renderer/shared/folders'
 import { agents, changed, fakeClient, fakeHost, installedSkill, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
+import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
   return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} />
@@ -480,6 +481,58 @@ describe('the start', () => {
     expect(watching).toHaveLength(1)
   })
 
+  it('keeps the welcome on show over the project made on its way, with its code hosts, then its trackers, until its last step opens it', async () => {
+    const onProject = vi.fn()
+    let projects: ReadonlyArray<ProjectSummary> = []
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects })),
+      readFolder: vi.fn(async () => ({
+        kind: 'repository' as const,
+        name: 'meridian',
+        repositories: [{ path: '/Users/me/Projects/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+        project: null,
+      })),
+      openProject: vi.fn(async () => {
+        projects = [project]
+        return project
+      }),
+    })
+    seenTheTour()
+    withServices(<Start onProject={onProject} />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Make the project/ }))
+    // The projects are read again with it in them, and the welcome stays: where its code is, then a tracker.
+    const hosts = await screen.findByRole('list', { name: 'Code hosts' })
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
+    expect(within(hosts).getByText('GitHub')).toBeTruthy()
+    expect(within(hosts).getByText(/meridian’s code is here/)).toBeTruthy()
+    expect(within(hosts).queryByText('Linear')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Projects' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    const trackers = await screen.findByRole('list', { name: 'Trackers' })
+    expect(within(trackers).getByText('Linear')).toBeTruthy()
+    expect(within(trackers).queryByText('GitHub')).toBeNull()
+    // Its walk in opens in place of the list, with the way back to it.
+    await userEvent.click(within(trackers).getByRole('button', { name: 'Connect' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Back to trackers' }))
+    expect(await screen.findByRole('list', { name: 'Trackers' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open meridian' }))
+    expect(onProject).toHaveBeenCalledWith('p1')
+    // Over, the window shows the home it now has.
+    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+  })
+
+  it('signs an agent in from its row, in its own walk under it', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    seenTheTour()
+    withServices(<Start onProject={vi.fn()} />, client, fakeHost())
+    // OpenCode is signed out, and signs in only in Terminal: its account, named, signs in again.
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_opencode'))
+    expect(await screen.findByRole('group', { name: 'Signing main in' })).toBeTruthy()
+  })
+
   it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
     let installing = false
     let finish: () => void = () => {}
@@ -500,6 +553,7 @@ describe('the start', () => {
         throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
       }),
     })
+    seenTheTour()
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
     // Under those on this Mac, a tile of its own: its size on its button, and no long note.
     const away = await screen.findByRole('list', { name: 'Agents not on this Mac' })
@@ -531,9 +585,10 @@ describe('the start', () => {
     }))
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
     const host = fakeHost({ findRepositories })
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
+    await toTheProject()
     const found = await screen.findByRole('list', { name: 'Repositories for the project' })
-    expect(screen.getByText('in ~/Projects, ~/code')).toBeTruthy()
     expect(
       within(found)
         .getByRole('checkbox', { name: /meridian/ })
@@ -553,6 +608,10 @@ describe('the start', () => {
     await userEvent.clear(name)
     await userEvent.type(name, 'Halyard')
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    // Made, the welcome goes on to its code host and a tracker; its last step opens it.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    expect(onProject).not.toHaveBeenCalled()
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(host.grantFound).toHaveBeenCalledWith('r2')
     expect(host.grantFound).toHaveBeenCalledWith('r1')
@@ -565,9 +624,10 @@ describe('the start', () => {
     })
   })
 
-  it('asks about crash reports once, as one quiet line with its switch at the first screen’s foot, on until turned off', async () => {
+  it('asks about crash reports once, as one quiet line with its switch at the foot of the welcome’s agents, on until turned off', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
     const host = fakeHost()
+    seenTheTour()
     const view = withServices(<Start onProject={vi.fn()} />, client, host)
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
@@ -582,6 +642,7 @@ describe('the start', () => {
     view.unmount()
 
     // DO_NOT_TRACK keeps it off, and the line says so.
+    seenTheTour()
     withServices(
       <Start onProject={vi.fn()} />,
       fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) }).client,
@@ -603,6 +664,7 @@ describe('the start', () => {
       listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
       listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: off })),
     })
+    seenTheTour()
     const view = withServices(<Start onProject={vi.fn()} />, client, fakeHost())
     const skills = await screen.findByRole('switch', { name: 'Agent skills' })
     expect(skills.getAttribute('aria-checked')).toBe('false')
@@ -666,7 +728,9 @@ describe('the start', () => {
     )
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
     const host = fakeHost()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
+    await toTheProject()
     await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
     const list = screen.getByRole('list', { name: 'Repositories for the project' })
     expect(within(list).getByRole('checkbox', { name: /api/ }).getAttribute('aria-checked')).toBe('true')
@@ -688,6 +752,7 @@ describe('the start', () => {
     await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
     await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(client.openProject).toHaveBeenCalledWith('grant_dropped', { name: 'docs' })
   })
@@ -712,8 +777,10 @@ describe('the start', () => {
         repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
       })),
     })
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByRole('heading', { name: 'Where should they work?' })
+    await toTheProject()
+    await screen.findByRole('heading', { name: 'Your first project' })
 
     // Typed into an account's form, such as its key, ⌘⏎ and ⌘N are the form's.
     const form = document.createElement('form')
@@ -722,7 +789,7 @@ describe('the start', () => {
     ;(await screen.findByRole('list', { name: 'Repositories for the project' })).append(form)
     fireEvent.keyDown(key, { key: 'Enter', metaKey: true })
     fireEvent.keyDown(key, { key: 'n', metaKey: true })
-    expect(screen.queryByText('Tick a repository for the project first.')).toBeNull()
+    expect(screen.queryByText('Tick a repository, or add a folder.')).toBeNull()
     expect(host.pickFolder).not.toHaveBeenCalled()
     form.remove()
 
@@ -732,6 +799,10 @@ describe('the start', () => {
     await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
     act(() => made(project))
+    // On past it, ⌘⏎ makes nothing more.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(opened).toHaveBeenCalledTimes(1)
   })
@@ -748,32 +819,13 @@ describe('the start', () => {
         repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
       })),
     })
+    seenTheTour()
     withServices(<Start onProject={vi.fn()} />, client, host)
+    await toTheProject()
     await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
     expect(await screen.findByText('meridian isn’t a git repository any more.')).toBeTruthy()
     expect(client.openProject).not.toHaveBeenCalled()
-  })
-
-  it('keeps focus in the project as its repositories are left out, then on the last one’s tick', async () => {
-    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
-    const host = fakeHost({
-      findRepositories: vi.fn(async () => ({
-        lookedIn: ['~/Projects'],
-        repositories: [
-          { id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 },
-          { id: 'r2', name: 'halyard', where: '~/Projects/halyard', branch: 'main', worked: 0 },
-        ],
-      })),
-    })
-    withServices(<Start onProject={vi.fn()} />, client, host)
-    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /halyard/ }))
-    await userEvent.click(screen.getByRole('button', { name: 'Leave meridian out' }))
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Leave halyard out' })))
-    await userEvent.keyboard('{Enter}')
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: /halyard/ })))
-    expect(screen.getByRole('checkbox', { name: /halyard/ }).getAttribute('aria-checked')).toBe('false')
   })
 
   it('says what went wrong making the first project, and when nothing was found or the runtime can’t answer', async () => {
@@ -796,10 +848,12 @@ describe('the start', () => {
       grantDropped: vi.fn(async () => null),
     })
     const onProject = vi.fn()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByRole('heading', { name: 'Where should they work?' })
+    await toTheProject()
+    await screen.findByRole('heading', { name: 'Your first project' })
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
-    expect(await screen.findByText('Tick a repository for the project first.')).toBeTruthy()
+    expect(await screen.findByText('Tick a repository, or add a folder.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
     expect(await screen.findByText('There’s no git repository in empty.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
@@ -815,16 +869,22 @@ describe('the start', () => {
     expect(onProject).not.toHaveBeenCalled()
   })
 
-  it('offers no repositories when none were found or the look failed, and says when the runtime cannot answer', async () => {
+  it('says at once, with no tour, when the runtime cannot answer, and offers no repositories when none were found or the look failed', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
       status: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
     })
     const host = fakeHost({ pickFolder: vi.fn(async () => null), findRepositories: vi.fn(async () => Promise.reject(new Error('EACCES'))) })
+    // The tour not seen: with no projects read, this may be someone's install of long ago, so it isn't greeted as new.
     withServices(<Start onProject={vi.fn()} />, client, host)
-    await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
-    expect(await screen.findByRole('heading', { name: 'Where is your code?' })).toBeTruthy()
-    expect(screen.getByText('None found in the usual places.')).toBeTruthy()
+    // Said on the agents' step, where no agent could be asked; the project can still be made.
+    expect((await screen.findByRole('alert')).textContent).toBe("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
+    expect(screen.getByText('None on this Mac yet')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
+    expect(await screen.findByText('None found in the usual places.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
     expect(client.readFolder).not.toHaveBeenCalled()
   })
