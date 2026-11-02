@@ -105,13 +105,17 @@ export const openGuide = (model: StartModel, agentId: string) => {
  */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
   model.status?.agents.map((agent) => {
-    const entry = runtimeEntry(
-      agent,
-      agent.installed && signIn.signingIn?.agentId === agent.id ? <AgentSignIn agent={agent} signIn={signIn} position={1} /> : undefined,
-      model.installFailed[agent.id],
-    )
+    const entry = runtimeEntry(agent, agent.installed ? signingInOf(agent, signIn) : undefined, model.installFailed[agent.id])
     return entry.state === RuntimeState.Ready && entry.account === undefined ? { ...entry, account: text.signedIn } : entry
   }) ?? []
+
+/** An agent's sign-in under way, in its row: one of its accounts signing in again is named, as in Settings. */
+const signingInOf = (agent: AgentStatus, signIn: AccountSignInModel) => {
+  const flow = signIn.signingIn
+  if (flow?.agentId !== agent.id) return undefined
+  const again = flow.again == null ? undefined : agent.accounts.find((account) => account.id === flow.again)
+  return <AgentSignIn agent={agent} signIn={signIn} position={1} {...(again === undefined ? {} : { account: { name: again.name } })} />
+}
 
 /** Signs an agent in by its first account, or a new one where it has none. */
 const signInTo = (model: StartModel, signIn: AccountSignInModel, agentId: string) => {
@@ -192,8 +196,10 @@ function First({
 }) {
   const project = useFirstProject()
   const connections = useConnections()
-  // Whether the tour was seen is read as the welcome opens: once over, it stays on the track, and Back goes to it.
-  const [seen] = useState(toured)
+  // Whether the tour was seen is read as the welcome opens: once over, it stays on the track, and Back goes to it. Opened
+  // with no projects read, because the runtime didn't answer, it isn't a first run: it starts on the agents, where that
+  // is said, with no tour.
+  const [seen] = useState(() => toured() || model.projects === null)
   const [step, setStep] = useState<WelcomeStep>(seen ? 'agents' : 'ask')
   const [made, setMade] = useState<ProjectSummary | null>(null)
   const firstRun = model.projects !== null && model.projects.length === 0

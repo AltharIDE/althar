@@ -527,9 +527,10 @@ describe('the start', () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
     seenTheTour()
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
-    // OpenCode is signed out, and signs in only in Terminal.
+    // OpenCode is signed out, and signs in only in Terminal: its account, named, signs in again.
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_opencode'))
+    expect(await screen.findByRole('group', { name: 'Signing main in' })).toBeTruthy()
   })
 
   it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
@@ -809,16 +810,19 @@ describe('the start', () => {
     expect(onProject).not.toHaveBeenCalled()
   })
 
-  it('offers no repositories when none were found or the look failed, and says when the runtime cannot answer', async () => {
+  it('says at once, with no tour, when the runtime cannot answer, and offers no repositories when none were found or the look failed', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
       status: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
     })
     const host = fakeHost({ pickFolder: vi.fn(async () => null), findRepositories: vi.fn(async () => Promise.reject(new Error('EACCES'))) })
-    seenTheTour()
+    // The tour not seen: with no projects read, this may be someone's install of long ago, so it isn't greeted as new.
     withServices(<Start onProject={vi.fn()} />, client, host)
     // Said on the agents' step, where no agent could be asked; the project can still be made.
     expect((await screen.findByRole('alert')).textContent).toBe("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
     expect(screen.getByText('None on this Mac yet')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
     expect(await screen.findByText('None found in the usual places.')).toBeTruthy()

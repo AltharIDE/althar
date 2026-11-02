@@ -49,7 +49,9 @@ test('walks a first run from the tour to the project, which asks for its code ho
   // Every service Althar connects, as a person's own install offers them.
   let { electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTORS: 'demo' })
   try {
-    // The tour: four pages, each a scene of the real components, walked with Next.
+    // The tour: four pages, each a scene of the real components, walked with Next. With reduced motion each arrives as it
+    // ends, as the kit's scenes do, so each is shot played out.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     const pages = [
       ['ask', 'Tell the coordinator what you want'],
       ['build', 'Agents from different makers'],
@@ -58,12 +60,12 @@ test('walks a first run from the tour to the project, which asks for its code ho
     ] as const
     for (const [name, title] of pages) {
       await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
-      // The scene plays out before it is shot.
-      await page.waitForTimeout(name === 'decide' ? 13_000 : 10_000)
       await shoot(page, `1-tour-${name}`)
       if (name === 'review') await shootDark(page, '1-tour-review-dark')
       await page.getByRole('button', { name: name === 'review' ? 'Set up Althar' : 'Next' }).click()
     }
+
+    await page.emulateMedia({ reducedMotion: null })
 
     // The agents on this computer, and those Althar can fetch; one ready is enough.
     await expect(page.getByRole('heading', { name: 'Your agents', level: 1 })).toBeVisible()
