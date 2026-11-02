@@ -54,12 +54,13 @@ const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${w
  * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`
  * rebuilt the `workspace` table without `project_id`, which 1.x still updates
  * when it opens a repository, so it stops on every start there (anomalyco/opencode#42170).
- * GitHub's latest release is still 1.x, so a bare `opencode upgrade` doesn't
- * help: the way out names version 2. Seen 2 November 2026, 1.18.31 against 2.2.5.
+ * Neither `opencode upgrade` nor 1.x's installer moves to 2 (the installer refuses
+ * a 2.x version): OpenCode 2 has an installer of its own, which its docs give for
+ * each platform. Seen 2 November 2026, 1.18.31 against 2.2.5.
  */
 const olderOpenCode = /no such column: project_id/
 const olderOpenCodeWords =
-  'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Update OpenCode to version 2 (in a terminal: opencode upgrade 2.2.5), then try again.'
+  'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.'
 
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'

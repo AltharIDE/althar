@@ -2575,7 +2575,7 @@ describe('words', () => {
           stderr: '\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nno such column: project_id\n',
         }),
       ),
-      'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Update OpenCode to version 2 (in a terminal: opencode upgrade 2.2.5), then try again.',
+      'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.',
     )
     const failed = (failure: AgentRequestFailed['failure'], resetsAt?: string) =>
       agentSaid(
