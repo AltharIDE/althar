@@ -268,6 +268,39 @@ export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | nul
 export const defaultPins = (catalog: Catalog): ReadonlyArray<string> =>
   catalog.runtimes.map((runtime) => infoOf(catalog, { agentId: runtime.id, model: null }).id)
 
+/** The models of a catalog but one, by key: the one that failed a step isn't offered it again. */
+export const withoutModel = (catalog: Catalog, key: string | null): Catalog =>
+  key === null ? catalog : { ...catalog, models: catalog.models.filter((info) => info.id !== key) }
+
+/**
+ * Who a stuck step is suggested to be handed to: the first of the models
+ * pinned, then every other, that another maker made than the one that
+ * failed, and that isn't the agent that couldn't start. Failing that, the
+ * first not of that agent; failing that, the first. It keeps the step's
+ * effort where the model offers it, else starts at the model's default. None
+ * where the catalog has no model left.
+ */
+export const suggestHandOn = (
+  catalog: Catalog,
+  pins: ReadonlyArray<string>,
+  step: {
+    readonly failed: ModelInfo | null
+    readonly avoidAgent: string | null
+    readonly agentId: string | null
+    readonly effort: string | null
+  },
+): Choice | null => {
+  const pinned = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
+  const candidates = [...pinned, ...catalog.models.filter((info) => !pinned.includes(info))]
+  const away = (info: ModelInfo) => info.runtime === step.avoidAgent
+  const another = (info: ModelInfo) => step.failed?.mark !== undefined && info.mark !== undefined && info.mark !== step.failed.mark
+  const picked = candidates.find((info) => !away(info) && another(info)) ?? candidates.find((info) => !away(info)) ?? candidates[0]
+  if (picked === undefined) return null
+  const { agentId, model } = choiceOf(picked.id)
+  const kept = agentId === step.agentId && offersEffort(catalog, picked.id, step.effort) ? step.effort : null
+  return { agentId, model, effort: kept ?? catalog.defaults.get(picked.id) ?? null }
+}
+
 /** The person's pins, by key; null until they pin one. */
 export interface ModelPrefs {
   readonly pins: ReadonlyArray<string> | null

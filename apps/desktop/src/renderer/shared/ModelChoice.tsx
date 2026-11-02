@@ -18,6 +18,7 @@ import {
   offersEffort,
   togglePin,
   useModelPrefs,
+  withoutModel,
 } from './models'
 
 /*
@@ -45,6 +46,8 @@ export interface ModelChoiceProps {
   onChange: (choice: Choice) => void
   /** Take the pick off what it was for, like a step's review. */
   onRemove?: () => void
+  /** A model it doesn't offer, by key: for a step handed on, the one that failed it. */
+  without?: string | null
   /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
   projectId?: string
   /** A conversation under way, which another agent's model hands over. */
@@ -54,7 +57,19 @@ export interface ModelChoiceProps {
   text?: Partial<ModelPickText>
 }
 
-export function ModelChoice({ owner, agents, value, onChange, onRemove, projectId, handover, variant, placement, text }: ModelChoiceProps) {
+export function ModelChoice({
+  owner,
+  agents,
+  value,
+  onChange,
+  onRemove,
+  without = null,
+  projectId,
+  handover,
+  variant,
+  placement,
+  text,
+}: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
@@ -63,9 +78,9 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [asking, setAsking] = useState<ModelInfo | null>(null)
-  const catalog = useMemo(() => catalogOf(known ?? [], agents), [known, agents])
+  const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
   // The browser shows the ones switched off too, to switch them on again.
-  const every = useMemo(() => catalogOf(known ?? [], agents, { withBlocked: true }), [known, agents])
+  const every = useMemo(() => withoutModel(catalogOf(known ?? [], agents, { withBlocked: true }), without), [known, agents, without])
   const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
   const current = infoOf(catalog, value)
   const pins = prefs.pins ?? defaultPins(catalog)

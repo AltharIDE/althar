@@ -69,3 +69,9 @@
 .report {
   margin-left: auto;
 }
+
+/* beside the model picker, once handing on was chosen */
+.handLabel {
+  font-size: 12.5px;
+  color: var(--t-2);
+}

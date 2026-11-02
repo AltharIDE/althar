@@ -1,9 +1,12 @@
 import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts'
 import { Stuck, type StuckAttempt } from '@althar/ui'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { StuckAnswer } from '../../data/client'
-import { useModelNames } from '../../shared/modelNames'
+import { useModels } from '../../data/models'
+import { canPick } from '../../shared/agents'
+import { ModelChoice } from '../../shared/ModelChoice'
+import { type Choice, catalogOf, defaultPins, infoOf, suggestHandOn, useModelPrefs, withoutModel } from '../../shared/models'
 import { clock } from '../../shared/time'
 import { LimitCall, limitText } from './LimitCall'
 
@@ -12,8 +15,10 @@ import { LimitCall, limitText } from './LimitCall'
  * what went wrong, what Althar tried, and the ways on. Every one can be
  * tried again on the agent it was on, in the session it was in: first,
  * where the connection or the session failed rather than the work (ADR-060).
- * The lead's steps can also be told what to do, handed to another agent, or
- * abandoned; a review can be run again on another agent, or gone on without.
+ * The lead's steps can also be told what to do, handed to another model, or
+ * abandoned; a review can be run again on another model, or gone on without.
+ * Any model of any agent could take a step over, in the picker the plan and
+ * the composer use: only the one whose failure it was is left out.
  */
 
 export const text = {
@@ -86,6 +91,7 @@ export const text = {
     tryingAgain: 'Reviewing again',
     retry: 'Review with another agent',
     retryLabel: 'Review with',
+    retryGo: 'Review',
     retried: (agent: string) => `Reviewing with ${agent}`,
     skip: 'Skip the review',
     skipped: 'Skipped the review',
@@ -122,6 +128,63 @@ export function StuckCall({ onAnswer, ...props }: StuckCallProps) {
   return <StuckCard key={round} {...props} onAnswer={send} />
 }
 
+/** Failures that are one model's or its provider's: its agent's other models could go on. */
+const ofTheModel: ReadonlyArray<StuckStep['why']> = ['signed_out', 'usage_limit', 'transient']
+
+/**
+ * Handing a step on to a model: the picker's, with every model of every
+ * agent that can be picked. The one that failed is left out where the
+ * failure was its own or its provider's (signed out, out of usage, its
+ * service failing); where the agent couldn't start, its models stay, but
+ * it isn't suggested. The suggestion is another maker's model, from those
+ * pinned first, on the step's effort where it offers it.
+ */
+const useHandOn = (
+  attentionId: string,
+  stuck: StuckStep,
+  agents: ReadonlyArray<AgentStatus>,
+  onAnswer: (attentionId: string, answer: StuckAnswer) => void,
+) => {
+  const known = useModels()
+  const prefs = useModelPrefs()
+  const [picked, setPicked] = useState<Choice | null>(null)
+  const pickable = useMemo(() => agents.filter(canPick), [agents])
+  const catalog = useMemo(() => catalogOf(known ?? [], pickable), [known, pickable])
+  const failed = stuck.agentId === null ? null : infoOf(catalog, { agentId: stuck.agentId, model: stuck.model ?? null })
+  const without = failed !== null && ofTheModel.includes(stuck.why) ? failed.id : null
+  if (stuck.step === 'publish') return undefined
+  const left = withoutModel(catalog, without)
+  const suggested = suggestHandOn(left, prefs.pins ?? defaultPins(left), {
+    failed,
+    avoidAgent: stuck.why === 'failed_to_start' ? stuck.agentId : null,
+    agentId: stuck.agentId,
+    effort: stuck.effort ?? null,
+  })
+  const choice = picked ?? suggested
+  if (choice === null) return undefined
+  return {
+    model: infoOf(left, choice),
+    picker: (
+      <ModelChoice
+        owner={stuck.step === 'review' ? text.step.review : 'Lead'}
+        agents={pickable}
+        value={choice}
+        onChange={setPicked}
+        without={without}
+        variant="field"
+        placement="below"
+      />
+    ),
+    onHandOn: () =>
+      onAnswer(attentionId, {
+        kind: 'retry',
+        agentId: choice.agentId,
+        ...(choice.model === null ? {} : { model: choice.model }),
+        ...(choice.effort === null ? {} : { effort: choice.effort }),
+      }),
+  }
+}
+
 function StuckCard({
   request,
   stuck,
@@ -132,8 +195,8 @@ function StuckCard({
   onSignIn,
   onConnect,
 }: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
-  const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
+  const handOn = useHandOn(request.id, stuck, agents, onAnswer)
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
   if (stuck.why === 'usage_limit' && stuck.limit !== undefined)
     return (
@@ -154,8 +217,6 @@ function StuckCard({
         ? [{ id: 'waited', what: text.waited.what, result: text.waited.result }]
         : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
   const review = stuck.step === 'review'
-  // Handed on, a step goes to another agent: trying again is the agent it had.
-  const others = agents.filter((candidate) => stuck.agentId === null || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
   // Signed out, its lead can't be told anything until it is signed in again.
@@ -185,14 +246,13 @@ function StuckCard({
       what={text.what(stuck, agent)}
       tried={tried}
       {...(stuck.why === 'transient' ? { tries: text.waited.tries } : {})}
-      agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
+      {...(handOn === undefined ? {} : { handOn })}
       {...(review || out || signedOut ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
       {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
       againFirst={againFirst}
       {...(stuck.why === 'signed_out' && stuck.agentId !== null && onSignIn !== undefined
         ? { fix: { label: text.fix.signIn, onFix: () => onSignIn(stuck.agentId ?? '') } }
         : {})}
-      onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
       {...(onReport === undefined ? {} : { onReport: () => onReport(text.step[stuck.step]) })}
       {...(out
@@ -206,6 +266,7 @@ function StuckCard({
                   tryingAgain: text.review.tryingAgain,
                   retry: text.review.retry,
                   retryLabel: text.review.retryLabel,
+                  retryGo: text.review.retryGo,
                   retried: text.review.retried,
                   abandon: lastRound ? text.review.accept : text.review.skip,
                   abandoned: lastRound ? text.review.accepted : text.review.skipped,

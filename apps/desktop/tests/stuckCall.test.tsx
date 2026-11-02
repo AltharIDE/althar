@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -143,5 +143,46 @@ describe('trying a step again', () => {
     const onAnswer = show(stuck({ step: 'review', why: 'stalled' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Review again' }))
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
+  })
+})
+
+describe('handing a step on to a model', () => {
+  const opened = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Review with another agent' }))
+  }
+
+  it('offers every model but the one whose failure it was, and hands the step to the one picked, another of the same agent’s too', async () => {
+    const onAnswer = show(stuck({ step: 'review', why: 'signed_out', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    await opened()
+    // Suggested: another maker's model, not the one that ran out.
+    await userEvent.click(await screen.findByRole('button', { name: /^Review: / }))
+    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    const all = within(await screen.findByRole('dialog'))
+    expect(all.queryByRole('button', { name: 'Use gpt-5.2-codex' })).toBeNull()
+    await userEvent.click(all.getByRole('button', { name: 'Use gpt-5.2' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex', model: 'gpt-5.2' })
+    expect(await screen.findByText('Reviewing with gpt-5.2')).toBeTruthy()
+  })
+
+  it('leaves out no model where the step stalled, and suggests another maker’s', async () => {
+    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    await opened()
+    await userEvent.click(await screen.findByRole('button', { name: /^Review: Claude/ }))
+    expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default' })
+  })
+
+  it('hands the step on at the effort picked', async () => {
+    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'claude-code', model: 'opus', effort: 'high' }))
+    await opened()
+    await userEvent.click(await screen.findByRole('button', { name: /^Review: Codex|^Review: gpt-5/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'extra-high' })
   })
 })

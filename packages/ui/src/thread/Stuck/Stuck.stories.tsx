@@ -1,15 +1,84 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { ModelBrowser } from '../../composer/ModelBrowser/ModelBrowser'
+import { ModelPick } from '../../composer/ModelPick/ModelPick'
+import { effortFor, MODEL_LIST, model, RUNTIMES, useModelPrefs } from '../../fixtures/models'
 import { STUCK } from '../../fixtures/stuck'
 import { States, statesOn } from '../../storybook/States'
 import { ThreadFrame } from '../../storybook/ThreadFrame'
-import { Stuck } from './Stuck'
+import { Stuck, type StuckProps } from './Stuck'
+
+/** What the consumer is told when the step is handed on. */
+const handedOn = fn()
+
+/**
+ * The consumer's wiring: the model picker with its pins and every model one
+ * step away, starting on a suggestion; the card keeps only what to do with
+ * the pick. The model that failed isn't offered.
+ */
+function HandingOn({ open = false, ...props }: StuckProps & { open?: boolean }) {
+  const [id, setId] = useState('gpt-5.2-codex')
+  const [effort, setEffort] = useState<string | null>(null)
+  const [browsing, setBrowsing] = useState(false)
+  const prefs = useModelPrefs()
+  const offered = MODEL_LIST.filter((each) => each.id !== 'claude-opus-5')
+  const current = model(id)
+  const change = (next: string) => {
+    setId(next)
+    setEffort(null)
+  }
+  return (
+    <>
+      <Stuck
+        {...props}
+        handOn={{
+          model: current,
+          onHandOn: () => handedOn(current, effort),
+          picker: (
+            <ModelPick
+              model={current}
+              pinned={prefs.pinned.filter((each) => each.id !== 'claude-opus-5')}
+              effort={effort ?? prefs.defaultEffort(current)}
+              defaultEffort={effortFor(current)}
+              owner="Review"
+              variant="field"
+              placement="below"
+              defaultOpen={open}
+              count={offered.length}
+              onChange={change}
+              onEffort={setEffort}
+              onBrowse={() => setBrowsing(true)}
+            />
+          ),
+        }}
+      />
+      {browsing && (
+        <ModelBrowser
+          models={offered}
+          runtimes={RUNTIMES}
+          value={id}
+          pins={prefs.pins}
+          defaultEffort={prefs.defaultEffort}
+          onTogglePin={prefs.togglePin}
+          onSetDefaultEffort={prefs.setDefaultEffort}
+          onClose={() => setBrowsing(false)}
+          onPick={(next) => {
+            setBrowsing(false)
+            change(next)
+          }}
+        />
+      )}
+    </>
+  )
+}
 
 const meta = {
   title: 'Thread/Stuck',
   component: Stuck,
-  args: { ...STUCK, onTell: fn(), onRetry: fn(), onAbandon: fn(), onUndo: fn() },
+  args: { ...STUCK, onTell: fn(), onAbandon: fn(), onUndo: fn() },
+  render: (args) => <HandingOn {...args} />,
   decorators: [(Story, { parameters }) => (parameters.pseudo ? Story() : <ThreadFrame>{Story()}</ThreadFrame>)],
 } satisfies Meta<typeof Stuck>
 export default meta
@@ -18,7 +87,7 @@ type Story = StoryObj<typeof meta>
 /** What it tried, why it thinks it keeps failing, and the output; then what you can do. */
 export const Default: Story = {}
 /** Nothing else to hand the step to: only telling the lead, or abandoning. */
-export const NoOtherAgent: Story = { args: { agents: [] } }
+export const NoOtherAgent: Story = { render: (args) => <Stuck {...args} /> }
 /** Without the lead's read or the output: what it tried is always there. */
 export const Bare: Story = { args: { read: undefined, output: undefined } }
 /** It came straight to you, as when the agent couldn't start: nothing was tried, so the step alone heads it. */
@@ -105,13 +174,40 @@ export const TellingTheLead: Story = {
   },
 }
 
+/**
+ * Handing the step to a model: the picker opens on a suggestion, its pins
+ * first and every model one step away, the one that failed left out.
+ */
 export const HandingToAnother: Story = {
-  play: async ({ args, canvasElement }) => {
+  play: async ({ canvasElement }) => {
+    handedOn.mockClear()
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
-    await userEvent.click(await within(document.body).findByRole('menuitem', { name: /Gemini 3 Pro/ }))
-    await expect(args.onRetry).toHaveBeenCalledWith(STUCK.agents[0]!.model)
-    await expect(document.activeElement).toHaveTextContent('Handed to')
+    await userEvent.click(c.getByRole('button', { name: /Review: Codex/ }))
+    const page = within(document.body)
+    await userEvent.click(await page.findByRole('radio', { name: /Sonnet 5/ }))
+    await userEvent.click(c.getByRole('button', { name: 'Hand over' }))
+    await expect(handedOn).toHaveBeenCalledWith(model('claude-sonnet-5'), null)
+    await expect(document.activeElement).toHaveTextContent('Handed to Sonnet 5')
+  },
+}
+
+/** Handing on, its picker open: the models you pinned, then all of them; the model that failed isn't there. */
+export const ModelMenuOpen: Story = {
+  render: (args) => <HandingOn {...args} open />,
+  decorators: [
+    (Story) => (
+      <div style={{ paddingBottom: 260 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
+    const page = within(document.body)
+    await expect(page.queryByRole('radio', { name: /Opus 5/ })).toBeNull()
+    await expect(await page.findByRole('button', { name: /All models/ })).toBeInTheDocument()
   },
 }
 
@@ -128,14 +224,13 @@ export const Abandoning: Story = {
 
 /** A step Althar does itself, such as opening the pull request: tried again as it was, or gone on without. */
 export const OneAltharDoes: Story = {
+  render: (args) => <Stuck {...args} />,
   args: {
     step: 'Pull request',
     tried: [],
     read: undefined,
     output: undefined,
-    agents: [],
     onTell: undefined,
-    onRetry: undefined,
     onAgain: fn(),
     what: 'Althar couldn’t push the branch: the host said the token can’t write to meridian/api.',
     text: { abandon: 'Go on without it' },
@@ -190,8 +285,8 @@ export const AllStates: Story = {
     <States
       size="thread"
       cells={[
-        { state: 'waiting on you', node: <Stuck {...args} /> },
-        { state: 'no other agent', node: <Stuck {...args} agents={[]} /> },
+        { state: 'waiting on you', node: <HandingOn {...args} /> },
+        { state: 'no other agent', node: <Stuck {...args} /> },
         { state: 'bare', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'nothing tried', node: <Stuck {...args} tried={[]} read={undefined} output={undefined} /> },
         { state: 'with report this', node: <Stuck {...args} read={undefined} output={undefined} onReport={() => {}} /> },
