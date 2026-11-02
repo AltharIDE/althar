@@ -86,16 +86,18 @@
   - **It never asks the person a question,** as a reviewer doesn't; a
     permission the lead's mode would put to the person is shown in the lead's
     thread under the helper's name, and the helper waits for it.
-  - **The lead picks its model,** from `list_models`, which leads get too,
-    within the project's usage rules; without one, the lead's own
-    ([The model](#the-model)).
+  - **The lead picks its model and effort,** from `list_models`, which leads
+    get too, within the project's usage rules; without one, the lead's own,
+    at its effort. A helper whose agent fails is tried again as a step is
+    (ADR-060); if it keeps failing, the lead hears at once, with the models
+    it may use now, and can start it on another ([The model](#the-model)).
   - **Its result reaches the lead as a new turn,** the way news does: its
     last message, kept first, then queued on the lead's thread after the turn
     under way, several together in one turn, starting a lead that stopped,
     and never the person's word ([The result](#the-result-as-a-new-turn)). A
     lead waiting on its helpers holds no place and isn't stuck; it can't
     finish its step while one is at work.
-  - **Helpers take places among the agents at work: at most three of a
+  - **Helpers take places among the agents at work: at most four of a
     task's at once, ten at work or waiting, fifty in its life,** one level
     deep, an hour each at most ([Places and limits](#places-and-limits)).
   - **The thread shows each helper where the lead started it,** opening in
@@ -200,7 +202,7 @@
   - ACP gives agents turns of their own (v2's prompt that answers at once),
     or standardizes steering, or the agents' MCP clients carry tasks that
     wake the model: Althar's own turn may then be one way among others.
-  - Leads hit the limits (three, ten, fifty, an hour) often, or never start
+  - Leads hit the limits (four, ten, fifty, an hour) often, or never start
     helpers, or start them for what their own subagents would do cheaper.
   - Writing helpers' commits conflict more often than they are taken.
   - The person asks to talk to a helper, or to start one themselves.
@@ -294,8 +296,8 @@ deep.
 |---|---|
 | `brief` | What to do, whole: the helper reads nothing of the lead's conversation |
 | `name` | What it is, in a few words, shown in the thread: "Find flaky tests" |
-| `model` | Optional: a model as `list_models` writes it. Without one, the lead's own |
-| `effort` | Optional: one of the efforts `list_models` gives for it |
+| `model` | Optional: a model as `list_models` writes it, of any agent. Without one, the lead's own |
+| `effort` | Optional: one of the efforts `list_models` gives for it. Without one, the lead's own where the model has it, else the model's default |
 | `writes` | Optional, false by default: keep what it changes, as a commit for the lead to bring in |
 
 It answers at once, before the helper has a place or has started, in words
@@ -307,8 +309,9 @@ Claude Code's tool results say the same, because models did both):
 > will find: carry on with work it doesn't touch, or end your turn.
 
 It refuses, saying why: where the model isn't one the lead may use now;
-where the task has ten helpers at work or waiting, or has had fifty; after
-three in a row failed to start; in a review of someone else's pull request;
+where the task has ten helpers at work or waiting, or has had fifty; on an
+agent whose last three helpers of the task failed to start, until the person
+next writes (another agent's model still starts); in a review of someone else's pull request;
 and in a helper's own session, which doesn't have it.
 
 **`stop_helper`** stops one of the lead's helpers by its name or id. Nothing
@@ -399,7 +402,24 @@ threads bring work back the same way, on purpose.
   (`accounts.only`), steering clear of an account nearly out as a new step
   does (`NEARLY_OUT`); an automation's task, only what a plan pays for
   (`PlanOnly`). A model the lead may not use is refused, naming those it may.
-- **Without a model, the lead's own,** on the same account and effort.
+- **Without a model, the lead's own,** on the same account and effort. The
+  lead can name another model and effort for each helper: "Haiku on medium"
+  for a search, the strongest on high for a hard question. Claude Code's
+  `Agent` call takes `model` and `effort` the same way.
+- **A failing agent is tried again, then the lead chooses.** A helper whose
+  agent's service fails, or that can't start, is tried again after a growing
+  pause, as a step is (ADR-060): 15 seconds, a minute, four minutes; offline,
+  it waits for the connection. A fourth failure in a row ends it, and its
+  result comes to the lead at once, as a new turn, saying what failed and
+  naming the models it may use now:
+
+  > Helper "Find flaky tests" (OpenCode, GLM-5) didn't start: OpenCode's
+  > service kept failing ("Cannot connect to API"). You may use: Claude Haiku
+  > 4.5, Claude Sonnet 5.5, GPT-5.6 Luna, …
+
+  The lead starts it again on one of those, with the same brief, as it
+  judges. Althar never switches agent by itself: another agent's model is
+  another price and another plan's usage, and the lead chose this one.
 - **The lead's brief says how to choose,** as the coordinator's does: a
   quicker, cheaper model for searching and reading, a different maker's for a
   second opinion, the strongest for hard reasoning, a plan over a key.
@@ -475,15 +495,17 @@ sequenceDiagram
   (`keyOf`). It waits as its task's work under way does, behind what the
   person did, and its task's lead goes before it. A helper waiting for a
   place says so on its row, never in Up next: its task is already under way.
-- **At most three of a task's helpers at work at once,** so one lead can't
+- **At most four of a task's helpers at work at once,** so one lead can't
   fill the machine; more wait their turn in the order started. Codex's v2
-  allows three children too. **At most ten at work or waiting,** after which
+  allows three children. **At most ten at work or waiting,** after which
   `start_helper` refuses, naming them: people report 24 run for 3 asked
   (claude-code #82565), and 46 Opus subagents from one workflow (#66023).
   **At most fifty in a task's life,** against a result that starts the lead,
   which starts another helper, which ends at once (Nimbalyst's backstop);
-  and after three in a row fail to start, `start_helper` refuses until the
-  person next writes in the thread, as Orca stops a dispatch after three.
+  and after three helpers in a row on one agent fail to start, retries
+  included, `start_helper` refuses that agent until the person next writes in
+  the thread, as Orca stops a dispatch after three; the lead can still start
+  one on another agent.
 - **One level.** A helper has no `start_helper`. Its agent's own subagents
   work inside it, as the agent has them.
 - **An hour at most,** counted while it is at work, after which it is stopped
@@ -495,8 +517,10 @@ sequenceDiagram
   result says why. A helper never makes its step need the person.
 - **A usage limit** moves it to its agent's next account where the project
   rotates accounts; otherwise it ends, and its result says until when, with
-  what it had. It never moves to another agent by itself: the lead chose the
-  model, and can start another.
+  what it had and the models the lead may use now. It never moves to another
+  agent by itself: the lead chose the model, and can start another.
+- **A failing service** is tried again, then ends, as
+  [The model](#the-model) says.
 - **A restart** starts a helper that was at work again once, in its copy,
   told that a restart stopped it; stopped again within five minutes, it ends,
   and the lead hears.
@@ -597,8 +621,8 @@ with another package's folder.
 | ---: | --- | --- | :---: | --- |
 | 1 | A lead waiting on its own work isn't stuck | The step's watch (`Runs.ts:1478-1626`) counts a helper at work, and once task 7 lands its agent's own subagent, as another turn to come: no reminder, never stuck. `finish_step` refuses while a helper is at work, naming each. The handover brief (`handover.ts`) lists the helpers at work. Shared with DEV-176, whose waits it takes next. Tests: a turn that ends with a helper at work is neither reminded nor stuck, and one that ends without is, as now | S | – |
 | 2 | Leads get list_models | The coordinator's `list_models` served to leads too, the same list; the lead's brief says how to pick a helper's model, as the coordinator's says for a step's. Tests: a model the person switched off isn't listed to a lead | S | – |
-| 3 | Helper sessions in copies of their own | A `helper` role beside `task`, `coordinator` and `reviewer`, for the context, the tools and the rules; a thread for each helper on its task. Its copy: the round's snapshot (`reviewCopy.ts`, made general) under `<project>/.helpers/<task>/<n>/`. Its mode and rules the lead's, with its copy as its folder; Claude Code's sandbox held to the copy (`sessionMeta`, `holds`), Codex's `workspace-write` there; Althar's push guard refusing every push; its tools (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`, `screenshot`, `install_dependencies` in its copy); no questions; its asks under its name. Places keyed by helper (`Busy.ts`), three of a task's at once, ten at work or waiting, fifty in its life, a stop after three that fail to start, the lead first. The hour, stalls (`Stalls.ts`), usage limits and restarts as [above](#places-and-limits); stopped with its task (`LeftBehind.settled`, ADR-068) and gone with its folder (ADR-056). A clause in the agents' contract suite: a helper can't write its lead's folder, on every agent (ADR-082) | L | 1 |
-| 4 | Leads start helpers and hear their results as turns | `start_helper` and `stop_helper` ([The tools](#the-tools)): the answer, the refusals, the model's way as a step's (plan, `accounts.only`, `PlanOnly`, nearly out), the lead's own without one. The result kept on the helper's thread and as a file under `.althar/` in the lead's folder, then queued as quiet news after the turn under way, batched, delivered once, starting a lead that stopped (`startLast`); the person's Stop as a line in the lead's next turn. The helper's brief, and the lead's lines on when to start one. Tests, DEV-181's done-when: a Claude Code lead with a Codex helper and a Codex lead with a Claude Code helper, each only reading, the person talking to the lead meanwhile and the result coming as a new turn, on the agents' fakes in CI and once on real accounts before the release | L | 2, 3 |
+| 3 | Helper sessions in copies of their own | A `helper` role beside `task`, `coordinator` and `reviewer`, for the context, the tools and the rules; a thread for each helper on its task. Its copy: the round's snapshot (`reviewCopy.ts`, made general) under `<project>/.helpers/<task>/<n>/`. Its mode and rules the lead's, with its copy as its folder; Claude Code's sandbox held to the copy (`sessionMeta`, `holds`), Codex's `workspace-write` there; Althar's push guard refusing every push; its tools (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`, `screenshot`, `install_dependencies` in its copy); no questions; its asks under its name. Places keyed by helper (`Busy.ts`), four of a task's at once, ten at work or waiting, fifty in its life, an agent refused after three of its helpers fail to start, the lead first. The hour, stalls (`Stalls.ts`), usage limits, a failing service tried again as a step is (ADR-060, `Failures.backoff`) and restarts as [above](#places-and-limits); stopped with its task (`LeftBehind.settled`, ADR-068) and gone with its folder (ADR-056). A clause in the agents' contract suite: a helper can't write its lead's folder, on every agent (ADR-082) | L | 1 |
+| 4 | Leads start helpers and hear their results as turns | `start_helper` and `stop_helper` ([The tools](#the-tools)): the answer, the refusals, the model's way as a step's (plan, `accounts.only`, `PlanOnly`, nearly out), the lead's own model and effort without one; a helper that failed for good reported at once with the models the lead may use now. The result kept on the helper's thread and as a file under `.althar/` in the lead's folder, then queued as quiet news after the turn under way, batched, delivered once, starting a lead that stopped (`startLast`); the person's Stop as a line in the lead's next turn. The helper's brief, and the lead's lines on when to start one. Tests, DEV-181's done-when: a Claude Code lead with a Codex helper and a Codex lead with a Claude Code helper, each only reading, the person talking to the lead meanwhile and the result coming as a new turn; an OpenCode helper whose service fails, tried again, then reported, and the lead starting it on Haiku at medium effort, on the agents' fakes in CI and once on real accounts before the release | L | 2, 3 |
 | 5 | Helpers in the thread, with Stop | The row where the lead started it (the kit's `SubAgents`, grown: the model's mark and name, how long, the brief, opening in place to the helper's work), helpers in the Running list with Stop (ADR-022), the result's "From …" block (as `Relayed`), asks under the helper's name, the Graph face's lanes (ADR-054), the task's usage by model. Stories with plays for each state; an end-to-end spec: start a helper, see it, stop it | M | 4 |
 | 6 | Helpers that write: a commit for the lead to take | `writes`: the helper's changes committed on its snapshot, kept on `refs/althar/helpers/<task>/<n>`, never pushed, named in the result with how to bring them in; gone when its task settles. Tests: the lead takes it with `git cherry-pick --no-commit`; one that conflicts with the lead's work since is left for the lead to settle | M | 4 |
 | 7 | Claude Code's own subagents stop holding its turn | Althar declares ACP's `subagents` client capability and AIR's `backgroundSubagents` (`provider-adapters/src/AgentConnection.ts:722`), so claude-agent-acp ends a lead's turn at its answer and reports its subagents as child sessions, and codex-acp its own; `subagent_update` taken off the stream before the SDK, as `background.ts` takes async tasks. Their state counts the lead as at work (`stillBusy`) and, with task 1, not stuck; their calls nest under the call that started them (the kit's `SubAgents`); the turn Claude Code starts with their results is recorded as now (ADR-022). The lead's brief says when its own subagents serve and when `start_helper` does. Tests on recorded adapter output: a turn that starts a background subagent ends at its answer, and the follow-up is recorded | M | 1 |
@@ -632,21 +656,24 @@ In order:
 - **MCP's tasks, ACP's v2 and steering,** which this doesn't need; see
   Revisit when.
 
+## Settled with the person
+
+On 2026-11-02 the person settled what the research left open:
+
+1. **What a helper may do:** read and run what its lead may, in its copy,
+   taking what works well elsewhere, as Claude Code's background agents do:
+   the call answers at once, the result comes as a later turn and names a
+   file with the whole of it, and the helper works in a copy of its own.
+2. **A helper's asks:** shown under its name in the lead's thread.
+3. **The limits:** four of a task's helpers at once, ten at work or waiting,
+   fifty in a task's life, an hour each.
+4. **A lead the person stopped:** started again by a helper's result.
+5. **The model:** the lead's own model and effort by default; the lead can
+   name another model, of any agent, and its effort. A failing agent is tried
+   again by Althar; if it keeps failing, the lead hears and picks another
+   ("Haiku on medium").
+
 ## Open for the person
 
-Each has a proposal above; these are the calls the research didn't settle.
-
-1. **What a helper may do by default:** read and run what its lead may, in
-   its copy (proposed), or only read, on the reviewer's strict list, which
-   can't run the project's tests.
-2. **A helper's asks:** shown under its name in the lead's thread
-   (proposed), or never put to the person, refused and said in its result.
-3. **The limits:** three of a task's helpers at once, ten at work or
-   waiting, fifty in a task's life, an hour each.
-4. **A lead the person stopped:** started again by a helper's result
-   (proposed, as #505 does for reviews), or the result waits for the person
-   to start it.
-5. **Without a model named:** the lead's own (proposed), or a quicker,
-   cheaper one Althar picks.
-6. **Claude Code's own subagents:** stop holding the lead's turn, by
+1. **Claude Code's own subagents:** stop holding the lead's turn, by
    declaring the capabilities (proposed), or leave them as they are.
