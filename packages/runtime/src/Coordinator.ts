@@ -1107,8 +1107,8 @@ export class Coordinator extends Context.Service<
             disposition: now === true ? 'interrupt_and_continue' : 'after_current',
             quiet: true,
           })
-          // Queued for a lead that isn't running, it waits until one starts: the coordinator says so to the person.
-          return Option.isSome(lead)
+          const started = Option.isNone(lead) && (yield* sessions.startLast(task.threadId))
+          return Option.isSome(lead) || started
             ? `Passed on to ${task.slug}'s lead.`
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
@@ -1757,7 +1757,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'message_lead',
-          "Passes a message to a task's lead: after its current turn, or at once with now.",
+          "Passes a message to a task's lead, starting it if it stopped: after its current turn, or at once with now. It waits for an agent place and available usage.",
           {
             type: 'object',
             properties: { task: { type: 'string' }, message: { type: 'string' }, now: { type: 'boolean' } },
