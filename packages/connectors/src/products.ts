@@ -1,13 +1,17 @@
+import { Effect } from 'effect'
+
 import type { Access } from './access'
 import { accessBitbucketCloud, makeBitbucketCloud } from './bitbucketCloud'
 import { accessBitbucketDataCenter, makeBitbucketDataCenter } from './bitbucketDataCenter'
 import type { AdapterOptions, Credential } from './credential'
+import type { Fetch } from './http'
 import { accessGitHub, classicTokenPage, makeGitHub } from './github'
 import { accessGitLab, makeGitLab } from './gitlab'
 import { accessJira, makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 import { accessLinear, makeLinear } from './linear'
 import type { KnownHosts } from './links'
 import type { CodeHost, Product, Service, Tracker } from './model'
+import { jiraCloudSiteOf } from './servers'
 import { accessTrello, makeTrello } from './trello'
 
 /*
@@ -38,6 +42,12 @@ export interface ProductInfo {
   readonly workspaces?: boolean
   /** An instance's API root, from its address. */
   readonly apiFor: (webUrl: string) => string
+  /**
+   * An instance's API root where its address alone can't say, asked of it as
+   * a connection is made: a Jira Cloud site on its own domain answers its API
+   * at its atlassian.net address. Asked without signing in.
+   */
+  readonly apiAt?: (fetch: Fetch, webUrl: string) => Effect.Effect<string>
   /** The address a connection keeps, from what the person typed, where the product says more than trimming it. */
   readonly address?: (typed: string) => string
   /**
@@ -260,6 +270,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     hosted: null,
     selfHosted: false,
     apiFor: (webUrl) => `${siteOf(webUrl)}/rest/api/3`,
+    apiAt: (fetch, webUrl) => Effect.map(jiraCloudSiteOf(fetch, siteOf(webUrl)), (site) => `${site}/rest/api/3`),
     // A site is its origin, whatever page of it was pasted.
     address: siteOf,
     browser: null,

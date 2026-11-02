@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 
-import { HOSTED, linksIn, newPullRequestLink, parseLink, parseRemote } from '../src/links'
+import { HOSTED, linksIn, looksLikeJira, newPullRequestLink, parseLink, parseRemote } from '../src/links'
 
 describe('a git remote', () => {
   it.each([
@@ -91,6 +91,20 @@ describe('a pasted link', () => {
       ref: 'OPS-4',
     })
     expect(parseLink('https://meridian.atlassian.net/wiki/spaces/X')).toBeNull()
+  })
+
+  it('shaped like a Jira issue’s on a host not known, only to name the tracker: it is read as no issue', () => {
+    expect(looksLikeJira('https://jira.acme.com/browse/PAY-12')).toBe(true)
+    expect(looksLikeJira('https://acme.example/jira/browse/ops_2-4?focusedCommentId=1')).toBe(true)
+    expect(parseLink('https://jira.acme.com/browse/PAY-12')).toBeNull()
+    for (const link of [
+      'https://jira.acme.com/browse/',
+      'https://jira.acme.com/browse/PAY',
+      'https://jira.acme.com/issues/PAY-12',
+      'ftp://jira.acme.com/browse/PAY-12',
+      'not a link',
+    ])
+      expect(looksLikeJira(link)).toBe(false)
   })
 
   it('to Trello and Bitbucket', () => {
