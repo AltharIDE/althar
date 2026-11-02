@@ -34,8 +34,9 @@ export const runningOf = (
   }))
 
 /** A run's card as the thread keeps it: where, the command, where it answers, for how long, and how it ended. */
-export const runCardOf = (run: RunContent, now: string): Pick<RunCardProps, 'where' | 'command' | 'url' | 'since' | 'ended'> => ({
+export const runCardOf = (run: RunContent, now: string): Pick<RunCardProps, 'where' | 'name' | 'command' | 'url' | 'since' | 'ended'> => ({
   where: run.where,
+  ...(run.name == null ? {} : { name: run.name }),
   command: run.command,
   ...(run.url === null ? {} : { url: addressOf(run.url) }),
   since: run.ended === null ? running(run.startedAt, now) : ago(run.ended.at, new Date(now)),

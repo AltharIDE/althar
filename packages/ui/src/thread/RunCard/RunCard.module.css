@@ -32,8 +32,29 @@
   font: 600 13.5px var(--mono);
   color: var(--t-1);
 }
-.ended .command {
+.ended .command,
+.ended .name {
   color: var(--t-2);
+}
+.name {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+/* the command under its name: quiet, to a line, the whole on hover */
+.sub {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11.5px var(--mono);
+  color: var(--t-3);
 }
 .foot {
   display: flex;
@@ -41,6 +62,7 @@
   gap: 10px;
   min-height: 40px;
   padding: 0 16px 6px;
+  white-space: nowrap;
   font-size: 12.5px;
 }
 .open {
@@ -55,15 +77,19 @@
 .status {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: 8px;
-  min-width: 0;
   color: var(--t-2);
 }
 .bad {
   color: var(--danger);
 }
 .last {
-  min-width: 0;
+  display: block;
+  margin: 8px 16px 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--tile);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

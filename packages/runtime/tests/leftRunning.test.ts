@@ -4,6 +4,7 @@ import { Duration, Effect } from 'effect'
 import {
   addressOf,
   commandOfCall,
+  endingLine,
   exitCodeIn,
   type InHand,
   type LeftRunning,
@@ -151,5 +152,23 @@ describe('whether an agent that ended its turn is still at work', () => {
     assert.isFalse(stillBusy(slow, 311_000, quiet, wake))
     // Once it has spoken, the quiet applies.
     assert.isFalse(stillBusy({ ...slow, wakeAt: null }, 200_000, quiet, wake))
+  })
+})
+
+describe('the line that says why a run ended', () => {
+  const vite = 'dist/assets/shared-BHOM6s1t.js   4,889.30 kB │ gzip: 1,220.43 kB │ map: 20,000 kB'
+  it('lets an error line win over the noise printed after it', () => {
+    assert.strictEqual(endingLine(`Error: Port 5173 is already in use\n${vite}\n`, 1), 'Error: Port 5173 is already in use')
+    assert.strictEqual(endingLine('\u001b[31mError: boom\u001b[39m\nshutting down\n', 1), 'Error: boom')
+  })
+  it('says nothing where nothing explains it, never a build report', () => {
+    assert.strictEqual(endingLine(`building…\n${vite}\n`, 1), null)
+    assert.strictEqual(endingLine('', 1), null)
+    assert.strictEqual(endingLine('Found 0 errors.\n', 1), null)
+  })
+  it('falls back to the last stderr line for a failure, and the last line for one that went well', () => {
+    assert.strictEqual(endingLine(`${vite}\n`, 1, 'warning: x\nelectron exited\n'), 'electron exited')
+    assert.strictEqual(endingLine(`compiling\n✓ built in 2.41s\n${vite}\n`, 0), '✓ built in 2.41s')
+    assert.strictEqual(endingLine('compiling\n', null), null)
   })
 })

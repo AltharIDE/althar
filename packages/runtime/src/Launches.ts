@@ -14,7 +14,7 @@ import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
-import { printedMore, servingAt, uncoloured } from './leftRunning'
+import { endingLine, printedMore, servingAt, uncoloured } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
@@ -104,6 +104,8 @@ interface Launch {
   card: string | null
   /** The end of what it printed, both streams. */
   printed: string
+  /** The end of what it printed on stderr alone. */
+  stderr: () => string
   url: string | null
   ended: { readonly at: string; readonly code: number | null } | null
   /** It was stopped, not ended by itself. */
@@ -404,6 +406,7 @@ export class Launches extends Context.Service<
         branch: launch.branch,
         ref: launch.ref,
         runnableId: launch.runnableId,
+        name: launch.name,
         where: launch.where,
         command: launch.command,
         url: launch.url,
@@ -414,7 +417,7 @@ export class Launches extends Context.Service<
             : {
                 ...launch.ended,
                 stopped: launch.stopped,
-                last: launch.stopped ? null : uncoloured(launch.printed).trimEnd().split('\n').at(-1)?.trim() || null,
+                last: launch.stopped ? null : endingLine(launch.printed, launch.ended.code, launch.stderr()),
               },
       })
       /** Keeps a run's card in step with it. */
@@ -677,6 +680,7 @@ export class Launches extends Context.Service<
               pid: owned.pid,
               card: null,
               printed: '',
+              stderr: owned.stderrTail,
               url: null,
               ended: null,
               stopped: false,
