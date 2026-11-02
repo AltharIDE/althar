@@ -65,7 +65,9 @@
   }
 }
 
-/* reporting it is no answer to the step: quiet, at the far end of the answers */
+/* reporting it is no answer to the step: quiet, at the far end of the answers, on one line */
 .report {
+  flex-shrink: 0;
   margin-left: auto;
+  white-space: nowrap;
 }

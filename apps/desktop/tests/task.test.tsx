@@ -2516,7 +2516,7 @@ describe('a task', () => {
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex closed before finishing the step.',
-      'Paused after Althar restarted twice.',
+      'Althar stopped unexpectedly twice while this step ran.',
       "Codex couldn't start.",
       'Reviewed three times. 1 finding open.',
       'Codex is out of usage.',
@@ -2526,7 +2526,7 @@ describe('a task', () => {
       stuckWords.what({ step: 'review', why, detail: null, agentId: null, round: 0, open: 0 }, 'Codex')
     expect([inReview('session_ended'), inReview('restarted'), inReview('refused')]).toEqual([
       'Codex closed before finishing the step.',
-      'Paused after Althar restarted twice.',
+      'Althar stopped unexpectedly twice while this step ran.',
       'Codex refused to go on.',
     ])
     const back = '2026-09-29T14:00:00.000Z'
@@ -2552,7 +2552,7 @@ describe('a task', () => {
     ])
   })
 
-  it('shows what Althar tried for a lead that went quiet, and starts it again', async () => {
+  it('shows what Althar tried for a lead that went quiet, and has it told what to do rather than started again as it was', async () => {
     const quiet = {
       id: 'st7',
       kind: 'stuck' as const,
@@ -2575,14 +2575,20 @@ describe('a task', () => {
     await screen.findByText('Codex has gone quiet.')
     expect(screen.getByText('Told it to carry on')).toBeTruthy()
     expect(screen.getByText('Started Codex again from the start')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Tell the lead' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
+    // Althar started it again already: telling it what to do starts it with that.
+    expect(screen.queryByRole('button', { name: 'Start Codex again' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Tell the lead' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'What should it do instead?' }), 'Run the tests on their own.')
+    await userEvent.click(screen.getByRole('button', { name: 'Send to the lead' }))
     await waitFor(() =>
-      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st7', answer: { kind: 'retry', agentId: 'codex' } }),
+      expect(client.answerStuck).toHaveBeenCalledWith({
+        attentionId: 'st7',
+        answer: { kind: 'tell', note: 'Run the tests on their own.' },
+      }),
     )
   })
 
-  it('starts a step restarts kept stopping again, on its agent, as the person says', async () => {
+  it('starts a step Althar crashed on again, on its agent, as the person says, with no lead to tell', async () => {
     const restarted = {
       id: 'st8',
       kind: 'stuck' as const,
@@ -2594,7 +2600,8 @@ describe('a task', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [restarted] })) })
     withServices(<Task />, client)
-    await screen.findByText(/Paused after Althar restarted twice/)
+    await screen.findByText('Althar stopped unexpectedly twice while this step ran.')
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st8', answer: { kind: 'retry', agentId: 'codex' } }),

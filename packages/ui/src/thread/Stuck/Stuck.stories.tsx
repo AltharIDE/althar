@@ -43,8 +43,9 @@ export const ServiceKeptFailing: Story = {
     tries: 3,
     read: undefined,
     output: undefined,
+    onTell: undefined,
     onAgain: fn(),
-    againFirst: true,
+    primary: 'again',
   },
   play: async ({ canvasElement }) => {
     const [first] = within(canvasElement).getAllByRole('button')
@@ -62,11 +63,13 @@ export const ServiceKeptFailing: Story = {
 export const SignedOut: Story = {
   args: {
     step: 'Implement',
-    what: 'Claude Code is signed out. Sign in again, then try again, or hand the step to another agent.',
+    what: 'Claude Code is signed out.',
     tried: [],
     read: undefined,
     output: undefined,
+    onTell: undefined,
     onAgain: fn(),
+    primary: 'again',
     fix: { label: 'Sign in again', onFix: fn() },
   },
   play: async ({ args, canvasElement }) => {
@@ -161,7 +164,8 @@ export const OutOfUsage: Story = {
     output: undefined,
     onTell: undefined,
     onAgain: fn(),
-    what: 'Codex reached its usage limit.',
+    primary: 'retry',
+    what: 'Codex is out of usage.',
     text: { again: 'Try Codex again' },
   },
   play: async ({ args, canvasElement }) => {
@@ -182,6 +186,171 @@ export const Reporting: Story = {
     // It answers nothing: the step still waits.
     await expect(c.getByRole('button', { name: 'Tell the lead' })).toBeInTheDocument()
   },
+}
+
+/*
+ * Each reason a step stops, as the app asks about it: only the ways on that
+ * fit what went wrong, the way to take first. The lead is told what to do
+ * only where its own work went wrong; where Althar, the service or the
+ * session failed, the step starts again on its agent.
+ */
+
+/** A card as the app shows one: nothing of the lead's read or the output, Report this at its end. */
+const asked = { tried: [], read: undefined, output: undefined, onTell: undefined, onAgain: undefined, onReport: fn() }
+
+/** The card offers these buttons, in this order, the first the way to take. */
+const offers =
+  (...names: string[]) =>
+  async ({ canvasElement }: { canvasElement: HTMLElement }) =>
+    expect(
+      within(canvasElement)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([...names, 'Report this'])
+
+/** Althar crashed on the step twice in a row: nothing to tell the lead, which was cut off, so its agent starts again, first. */
+export const Restarted: Story = {
+  args: {
+    ...asked,
+    step: 'Implement',
+    what: 'Althar stopped unexpectedly twice while this step ran.',
+    onAgain: fn(),
+    primary: 'again',
+    text: { again: 'Start Claude Code again', tryingAgain: 'Starting Claude Code again' },
+  },
+  play: offers('Start Claude Code again', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** Its agent's session closed under it: started again, first. */
+export const SessionEnded: Story = {
+  args: { ...Restarted.args, what: 'Claude Code closed before finishing the step.' },
+  play: offers('Start Claude Code again', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** Its agent couldn't start: tried again, first, or handed on. */
+export const FailedToStart: Story = {
+  args: { ...asked, step: 'Implement', what: "Codex couldn't start. It exited with code 1.", onAgain: fn(), primary: 'again' },
+  play: offers('Try again', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** It stopped without reporting, after a reminder: the lead is told what to do, first; reminding it again would do the same. */
+export const NoReport: Story = {
+  args: {
+    ...asked,
+    step: 'Implement',
+    what: 'Codex stopped without saying whether the step is done.',
+    tried: [{ id: 'reminded', what: 'Reminded it to report', result: 'it stopped again' }],
+    onTell: fn(),
+  },
+  play: offers('Tell the lead', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** Gone quiet after Althar told it to carry on and started it again: told what to do, first. */
+export const Stalled: Story = {
+  args: {
+    ...NoReport.args,
+    what: 'Codex has gone quiet.',
+    tried: [
+      { id: 'carried_on', what: 'Told it to carry on', result: 'it stopped again' },
+      { id: 'restarted', what: 'Started Codex again from the start', result: 'it stopped again' },
+    ],
+  },
+  play: offers('Tell the lead', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** The same result again and again, after Althar told it to try another way: told what to do, first. */
+export const Looping: Story = {
+  args: {
+    ...NoReport.args,
+    what: 'Codex keeps getting the same result.',
+    tried: [{ id: 'redirected', what: 'Told it to try another way', result: 'it did the same again' }],
+  },
+  play: offers('Tell the lead', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** It refused to go on: told what to do, first, or handed on. */
+export const Refused: Story = {
+  args: { ...NoReport.args, what: 'Codex refused to go on.', tried: [] },
+  play: offers('Tell the lead', 'Hand to another agent', 'Abandon this step'),
+}
+
+/** Long at it: let carry on, first, or told what to do instead, handed on, or stopped. */
+export const OverBudget: Story = {
+  args: {
+    ...asked,
+    step: 'Implement',
+    what: 'Codex has worked on this step for 3 hours.',
+    onTell: fn(),
+    onAgain: fn(),
+    primary: 'again',
+    text: { again: 'Let Codex carry on', tryingAgain: 'Codex carries on' },
+  },
+  play: offers('Let Codex carry on', 'Tell the lead', 'Hand to another agent', 'Abandon this step'),
+}
+
+const reviewText = {
+  again: 'Review again',
+  tryingAgain: 'Reviewing again',
+  retry: 'Review with another agent',
+  retryLabel: 'Review with',
+  abandon: 'Skip the review',
+  abandoned: 'Skipped the review',
+}
+
+/** A reviewer that went quiet: another reviewer, first; a review is never told what to do. */
+export const ReviewStalled: Story = {
+  args: { ...asked, step: 'Review', what: 'Codex has gone quiet.', onAgain: fn(), primary: 'retry', text: reviewText },
+  play: offers('Review with another agent', 'Review again', 'Skip the review'),
+}
+
+/** Out of rounds, with changes no review has seen: reviewed again, first, or accepted as it is. */
+export const RoundLimit: Story = {
+  args: {
+    ...ReviewStalled.args,
+    what: 'Reviewed three times. 2 findings open.',
+    primary: 'again',
+    text: { ...reviewText, abandon: 'Accept it as it is', abandoned: 'Accepted as it is' },
+  },
+  play: offers('Review again', 'Review with another agent', 'Accept it as it is'),
+}
+
+/** The pull request, where Althar isn't connected to the host: connected first, then tried again. */
+export const NotConnected: Story = {
+  args: {
+    ...OneAltharDoes.args,
+    ...asked,
+    agents: [],
+    onAgain: fn(),
+    what: "Althar isn't connected to this repository's host.",
+    fix: { label: 'Connect', onFix: fn() },
+  },
+  play: offers('Connect', 'Try again', 'Go on without it'),
+}
+
+/** Every reason side by side, as the app asks about each. */
+export const EveryReason: Story = {
+  render: (args) => (
+    <States
+      size="thread"
+      cells={[
+        { state: 'restarted', node: <Stuck {...args} {...Restarted.args} /> },
+        { state: 'session ended', node: <Stuck {...args} {...SessionEnded.args} /> },
+        { state: 'failed to start', node: <Stuck {...args} {...FailedToStart.args} /> },
+        { state: 'service kept failing', node: <Stuck {...args} {...ServiceKeptFailing.args} onReport={fn()} /> },
+        { state: 'signed out', node: <Stuck {...args} {...SignedOut.args} onReport={fn()} /> },
+        { state: 'out of usage', node: <Stuck {...args} {...OutOfUsage.args} onReport={fn()} /> },
+        { state: 'no report', node: <Stuck {...args} {...NoReport.args} /> },
+        { state: 'stalled', node: <Stuck {...args} {...Stalled.args} /> },
+        { state: 'looping', node: <Stuck {...args} {...Looping.args} /> },
+        { state: 'refused', node: <Stuck {...args} {...Refused.args} /> },
+        { state: 'over budget', node: <Stuck {...args} {...OverBudget.args} /> },
+        { state: 'review stalled', node: <Stuck {...args} {...ReviewStalled.args} /> },
+        { state: 'round limit', node: <Stuck {...args} {...RoundLimit.args} /> },
+        { state: 'pull request, not connected', node: <Stuck {...args} {...NotConnected.args} /> },
+        { state: 'pull request', node: <Stuck {...args} {...OneAltharDoes.args} onReport={fn()} /> },
+      ]}
+    />
+  ),
 }
 
 export const AllStates: Story = {
