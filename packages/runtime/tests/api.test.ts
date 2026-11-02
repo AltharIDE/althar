@@ -2566,6 +2566,17 @@ describe('words', () => {
       'The agent stopped: out of memory.',
     )
     assert.strictEqual(agentSaid(new AgentExited({ code: 1, signal: null, stderr: '' })), 'The agent stopped.')
+    // OpenCode 1.x on a data folder OpenCode 2 has moved on, as 1.18.31 said it: what's wrong and the way out, never the bare SQLite error.
+    assert.strictEqual(
+      agentSaid(
+        new AgentExited({
+          code: 1,
+          signal: null,
+          stderr: '\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nno such column: project_id\n',
+        }),
+      ),
+      'OpenCode’s own database was moved on by OpenCode 2, which Althar doesn’t run yet, and this OpenCode is 1.x, which can’t open it. Add another OpenCode account in Settings: it starts with a database of its own.',
+    )
     const failed = (failure: AgentRequestFailed['failure'], resetsAt?: string) =>
       agentSaid(
         new AgentRequestFailed({

@@ -39,6 +39,32 @@ describe('ModelBrowser', () => {
     expect(onPick).toHaveBeenCalledWith('claude-haiku-4-5')
   })
 
+  it('lists the usable models first, pinned first within each group, and the switched-off ones last', () => {
+    const { rows, dialog, search, onPick } = open({ pins: ['gpt-5.2-codex', 'gemini-3-pro'], blocked: ['gpt-5.2-codex', 'kimi-k2'] })
+    expect(rows().map((r) => r.dataset.id)).toEqual([
+      'gemini-3-pro',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-haiku-4-5',
+      'gpt-5.2',
+      'gpt-5-mini',
+      'gemini-3-flash',
+      'qwen3-coder',
+      'devstral-small',
+      'deepseek-v3.2',
+      'glm-4.6',
+      'grok-4',
+      'llama-4-maverick',
+      UNKNOWN_MODEL.id,
+      'gpt-5.2-codex',
+      'kimi-k2',
+    ])
+    /* the first usable model leads, so Enter from the search still picks it */
+    fireEvent.keyDown(dialog, { key: 'Enter' })
+    expect(search).toHaveFocus()
+    expect(onPick).toHaveBeenCalledWith('gemini-3-pro')
+  })
+
   it('filters by pins and by runtime', () => {
     const { rows, dialog } = open()
     fireEvent.click(within(dialog).getByRole('radio', { name: /^Pinned/ }))

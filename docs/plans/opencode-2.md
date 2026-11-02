@@ -48,6 +48,32 @@ make the adapter version-aware in the stages below, lift the gate once the
 switch-off is shown to hold on 2.x, and switch the default only once a
 signed-in contract run passes there.
 
+## Tried again on 2 November 2026
+
+Main's #519 moved Althar's download to 2.x, because 1.x can't open a data
+folder 2.x has migrated. So the two reasons for the gate were run on 2.2.5,
+over ACP with Althar's own config and a fake model, in throwaway homes, with
+1.19.5 beside it [V]:
+
+| | 1.19.5 | 2.2.5 |
+|---|---|---|
+| A rejected command | turn carries on, the model hears of it | turn ends `cancelled`, the model doesn't |
+| The person's MCP server, nothing switched off | started, its tool offered | started, its tools listed |
+| Althar's switch-off, `{name: {enabled: false}}` in `OPENCODE_CONFIG_CONTENT` | not started | **started, its tools listed** |
+| 2.x's own form, `mcp.servers.<name>.disabled` there | not run | **started, its tools listed** |
+| `disabled: true` in the person's own file | not run | not started |
+
+So neither reason has gone and the gate stays: the download stays on 1.x, and
+the way out of a migrated folder is another account, a home of its own. The
+fix isn't only the new form in `ownTools.ts`, as it says below: the config in
+the environment doesn't switch off a server a file names, in either form.
+
+Not settled: whether the model can call such a server on 2.2.5. Its tools
+aren't offered directly; they'd come through `execute`, whose `search` found
+nothing for this server, even with nothing switched off. That may be how the
+fake server was written, so the server is known to start and be asked for its
+tools, not to be out of reach. Also since 15 October, 2.x has GitHub Releases.
+
 ## What OpenCode 2 is
 
 - **Release status.** The binaries are published on npm as `@opencode/cli`,
@@ -304,8 +330,8 @@ rejection, and the question asked in words.
   Flatpak smoke script itself.
 - `opencode upgrade --major` itself. It replaces the binary in place, and
   was not run anywhere near the person's install.
-- Whether 2.x honours the MCP switch-off over ACP. `mcp list` showed no
-  servers in any case, so it doesn't answer this.
+- Whether 2.x honours the MCP switch-off over ACP was open here; see "Tried
+  again on 2 November 2026".
 - 2.x's self-update default, and whether file-based agents and skills in an
   `OPENCODE_CONFIG_DIR` are discovered (`debug agents` listed only built-in
   agents either way).

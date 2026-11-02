@@ -64,6 +64,7 @@ const github = (bytes: Buffer, { digest = `sha256:${sha(bytes)}` as string | nul
         { tag_name: 'v1.20.0-beta.1', prerelease: true, assets: [elsewhere] },
         { tag_name: 'v1.20.0', draft: true, assets: [elsewhere] },
         release,
+        { tag_name: 'process-daemon-v0.4.0', assets: [elsewhere] },
         { tag_name: 'v1.0.0', assets: [elsewhere] },
       ])
     return new Response(new Uint8Array(bytes))
@@ -79,7 +80,7 @@ const using = (options: Partial<InstallsOptions>) => {
 
 describe('downloading an agent', () => {
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
-  it.skipIf(windows)('keeps its latest release, checked, and runs it where the person has none', async () => {
+  it.skipIf(windows)('keeps its newest 2.x release, checked, and runs it where the person has none', async () => {
     const { fetch, asked } = github(archive())
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))

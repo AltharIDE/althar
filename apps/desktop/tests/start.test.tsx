@@ -137,10 +137,10 @@ describe('accounts in settings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
-    // Back from Terminal, and still it can't tell: not signed in yet.
+    // Back from Terminal, and still it can't tell: it says so, rather than taking it as signed in.
     codex.next(usual('acc_usual', 'signed_in'), { ...usual('acc_added', 'unknown'), name: 'Account 2' })
     act(() => void window.dispatchEvent(new Event('focus')))
-    expect(await within(accounts).findByText(/Not signed in yet\./)).toBeTruthy()
+    expect(await within(accounts).findByText(/Couldn’t tell if it signed in\./)).toBeTruthy()
   })
 
   it('keeps an account the person named, even when the screen closes before Althar has read the agents again', async () => {
