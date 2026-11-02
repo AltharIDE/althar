@@ -49,8 +49,8 @@ export function AskCard({ icon, kicker, kickerId, who, what, quiet = false, chil
 }
 
 /** The row of answers at the foot of an ask. */
-export function AskFoot({ children }: { children: ReactNode }) {
-  return <div className={s.foot}>{children}</div>
+export function AskFoot({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx(s.foot, className)}>{children}</div>
 }
 
 export type AskAnsweredProps = RootProps<

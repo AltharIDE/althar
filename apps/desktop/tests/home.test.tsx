@@ -341,7 +341,7 @@ describe('the home', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [publish] })) })
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
-    expect(within(needs).getByText('Paused after Althar restarted twice.')).toBeTruthy()
+    expect(within(needs).getByText('Althar stopped unexpectedly twice while this step ran.')).toBeTruthy()
   })
 
   it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {
