@@ -143,10 +143,10 @@ describe('the pull request Althar couldn’t open', () => {
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'althar' })
   })
 
-  it('says why it paused after restarts, goes on without it, and reports it as the pull request step', async () => {
+  it('says Althar crashed on it, goes on without it, and reports it as the pull request step', async () => {
     const onReport = vi.fn()
     const onAnswer = show(stuck({ step: 'publish', why: 'restarted', agentId: null }), onReport)
-    expect(await screen.findByText('Paused after Althar restarted twice.')).toBeTruthy()
+    expect(await screen.findByText('Althar stopped unexpectedly twice while this step ran.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Report this' }))
     expect(onReport).toHaveBeenCalledWith('Pull request')
     await userEvent.click(screen.getByRole('button', { name: 'Go on without it' }))
@@ -161,29 +161,111 @@ describe('the pull request Althar couldn’t open', () => {
   })
 })
 
+/** The card's buttons, in order, the first the way to take. */
+const buttonsOf = async (step: StuckStep) => {
+  show(step, () => {})
+  const names = (await screen.findAllByRole('button')).map((button) => button.textContent)
+  document.body.innerHTML = ''
+  return names
+}
+
+describe('the ways on each card offers', () => {
+  const report = 'Report this'
+
+  it('offers a lead’s step only what fits what went wrong, the way to take first', async () => {
+    const tell = ['Tell the lead', 'Continue with another model', 'Abandon this step', report]
+    const offered: Record<string, ReadonlyArray<string | null>> = {}
+    for (const why of [
+      'no_report',
+      'session_ended',
+      'transient',
+      'failed_to_start',
+      'restarted',
+      'stalled',
+      'looping',
+      'over_budget',
+      'refused',
+    ] as const)
+      offered[why] = await buttonsOf(stuck({ why }))
+    expect(offered).toEqual({
+      // The lead's own work went wrong: told what to do instead.
+      no_report: tell,
+      stalled: tell,
+      looping: tell,
+      refused: tell,
+      over_budget: ['Let Codex carry on', 'Tell the lead', 'Continue with another model', 'Abandon this step', report],
+      // Althar, the service or the session failed, not the work: nothing to tell the lead, so its agent starts again.
+      session_ended: ['Start Codex again', 'Continue with another model', 'Abandon this step', report],
+      restarted: ['Start Codex again', 'Continue with another model', 'Abandon this step', report],
+      transient: ['Try again', 'Continue with another model', 'Abandon this step', report],
+      failed_to_start: ['Try again', 'Continue with another model', 'Abandon this step', report],
+    })
+  })
+
+  it('says a step Althar crashed on in plain words, and starts its agent again on the agent it was on', async () => {
+    const onAnswer = show(stuck({ why: 'restarted' }))
+    expect(await screen.findByText('Althar stopped unexpectedly twice while this step ran.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
+  })
+
+  it('never tells a review what to do: another reviewer for its own trouble, the same again where it was cut off', async () => {
+    expect(await buttonsOf(stuck({ step: 'review', why: 'stalled' }))).toEqual([
+      'Review with another model',
+      'Review again',
+      'Skip the review',
+      report,
+    ])
+    expect(await buttonsOf(stuck({ step: 'review', why: 'restarted' }))).toEqual([
+      'Review again',
+      'Review with another model',
+      'Skip the review',
+      report,
+    ])
+    expect(await buttonsOf(stuck({ step: 'review', why: 'round_limit', agentId: 'codex', open: 2 }))).toEqual([
+      'Review again',
+      'Review with another model',
+      'Accept it as it is',
+      report,
+    ])
+  })
+
+  it('offers an agent out of usage, with no one named to take over, to another first, never to be told', async () => {
+    expect(await buttonsOf(stuck({ why: 'usage_limit' }))).toEqual([
+      'Continue with another model',
+      'Try Codex again',
+      'Abandon this step',
+      report,
+    ])
+  })
+
+  it('offers a signed-out agent its sign-in first, then trying again, never telling it', async () => {
+    const onSignIn = vi.fn()
+    const { client } = fakeClient()
+    const step = stuck({ why: 'signed_out' })
+    withServices(
+      <StuckCall request={request(step)} stuck={step} agents={agents} agentName={() => 'Codex'} onAnswer={vi.fn()} onSignIn={onSignIn} />,
+      client,
+    )
+    expect((await screen.findAllByRole('button')).map((button) => button.textContent)).toEqual([
+      'Sign in again',
+      'Try again',
+      'Continue with another model',
+      'Abandon this step',
+    ])
+  })
+
+  it('offers the pull request only trying again or going on without it', async () => {
+    expect(await buttonsOf(stuck({ step: 'publish', why: 'failed_to_start', agentId: null }))).toEqual([
+      'Try again',
+      'Go on without it',
+      report,
+    ])
+  })
+})
+
 describe('trying a step again', () => {
-  it('offers it on every card, on the agent the step was on', async () => {
-    for (const why of ['no_report', 'session_ended', 'failed_to_start', 'looping', 'refused', 'transient'] as const) {
-      const onAnswer = show(stuck({ why }))
-      await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
-      expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
-      document.body.innerHTML = ''
-    }
-  })
-
-  it('puts it first where the connection or the session failed, rather than the work', async () => {
-    for (const [why, first] of [
-      ['transient', 'Try again'],
-      ['session_ended', 'Try again'],
-      ['no_report', 'Tell the lead'],
-    ] as const) {
-      show(stuck({ why }))
-      const buttons = await screen.findAllByRole('button')
-      expect(buttons[0]).toHaveProperty('textContent', first)
-      document.body.innerHTML = ''
-    }
-  })
-
   it('says whose service kept failing, and what it said', () => {
     expect(stuckWords.what(stuck({ why: 'transient', service: 'Anthropic', detail: 'API Error: 529 Overloaded' }), 'Claude Code')).toBe(
       "Anthropic's service kept failing.",

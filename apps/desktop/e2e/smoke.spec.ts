@@ -18,7 +18,7 @@ test('starts on the first screen and makes a project of a repository', async () 
   const home = mkdtempSync(join(tmpdir(), 'althar e2e '))
   const { electronApp, page } = await launch(home)
   try {
-    await expect(page.getByRole('heading', { name: 'Tell the coordinator what you want', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Work happens in projects', level: 1 })).toBeVisible()
     await openFirstProject(electronApp, page, repository(home))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   } finally {

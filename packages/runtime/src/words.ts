@@ -71,6 +71,12 @@ const olderOpenCode = /no such column: project_id/
 const olderOpenCodeWords =
   'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.'
 
+/** An agent that no longer has the session Althar sent to, as its process died: what it said ("Resource not found") stays its detail. */
+export const lostWords = (agent: string) => `${agent} had lost this conversation.`
+
+/** The same, where Althar started the agent afresh on the thread for it. */
+export const startedAfreshWords = (agent: string) => `${agent} had lost this conversation. Started it afresh.`
+
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
@@ -105,6 +111,8 @@ export const agentSaid = (error: unknown): string | undefined => {
         }
         case 'context_full':
           return "The agent's context is full."
+        case 'session_lost':
+          return lostWords('The agent')
         default:
           return sentence(text(error, 'message'))
       }
