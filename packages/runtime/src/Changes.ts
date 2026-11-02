@@ -86,6 +86,7 @@ import {
   namedRemotes,
   onHead,
   pushTo,
+  branchRemoteIn,
   remoteOf,
   askedRemoteTip,
   remoteTip,
@@ -2729,8 +2730,14 @@ export class Changes extends Context.Service<
       const askRemotes = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const repositories = yield* sql<{ base: string; root: string; worktree: string; branch: string }>`
-            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch
+          const repositories = yield* sql<{
+            base: string
+            root: string
+            worktree: string
+            branch: string
+            changeTarget: ChangeTarget | null
+          }>`
+            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, b.change_target
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2741,7 +2748,7 @@ export class Changes extends Context.Service<
             (repository) =>
               Effect.gen(function* () {
                 const { root, branch } = repository
-                const remote = yield* remoteOf(root, repository.base)
+                const remote = yield* branchRemoteIn(root, repository.base, repository.changeTarget)
                 const [head = null] = yield* commitsOf(repository.worktree, ['HEAD'])
                 if (remote === null || head === null) return false
                 const url = (yield* namedRemotes(root)).find((one) => one.name === remote)?.url
@@ -2791,9 +2798,10 @@ export class Changes extends Context.Service<
             branch: string
             baseCommit: string | null
             remotes: string
+            changeTarget: ChangeTarget | null
           }>`
             SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit,
-              b.remote_fingerprints AS remotes
+              b.remote_fingerprints AS remotes, b.change_target
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2805,7 +2813,7 @@ export class Changes extends Context.Service<
             const head = heads.find((seen) => seen.repository === repository.slug)?.head
             if (head === undefined) continue
             if (!/^[0-9a-f]{7,64}$/.test(head)) return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
-            const remote = yield* remoteOf(repository.root, repository.base)
+            const remote = yield* branchRemoteIn(repository.root, repository.base, repository.changeTarget)
             if (remote === null) continue
             // Credited as every push is (credit.ts): what the remote has already stays as it is.
             const [there = null] = yield* commitsOf(repository.root, [`refs/remotes/${remote}/${repository.branch}`])

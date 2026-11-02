@@ -212,6 +212,7 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
     'never',
     'fork_gone',
     'unplaced',
+    'no_push_address',
   ]),
   /** The branch it follows: origin/main. */
   remote: Schema.String,

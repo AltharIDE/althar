@@ -32,6 +32,15 @@ const text = (error: unknown, key: string): string => {
 }
 
 /** The last line of an agent's error output, which usually says why. */
+/** What git said without the advice it ends a remote it couldn't read with, whose last line says nothing alone. */
+const saidByGit = (stderr: string): string =>
+  lastLine(
+    stderr.replace(
+      /(fatal: )?Could not read from remote repository\.\s*(Please make sure you have the correct access rights\s*and the repository exists\.\s*)?/i,
+      '',
+    ),
+  )
+
 const lastLine = (output: string): string =>
   output
     .split('\n')
@@ -215,7 +224,7 @@ export const words = (
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
         const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
-        const said = lastLine(text(error, 'stderr'))
+        const said = saidByGit(text(error, 'stderr'))
         if (said !== '') return sentence(`${command} didn't work: ${said}`)
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
@@ -244,6 +253,8 @@ export const words = (
           return `${remote}’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.`
         if (why === 'unplaced')
           return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
+        if (why === 'no_push_address')
+          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
         const host = text(error, 'host')

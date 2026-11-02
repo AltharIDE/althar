@@ -44,6 +44,12 @@
   - **The default branch stays out of reach, whatever the target** (ADR-016,
     ADR-071): publishing refuses a task branch named as the default branch of
     the repository it would push to, and never forces.
+  - A task's branch pushed with the person's own git goes to the same place as
+    one Althar publishes: the fork, or upstream where chosen, whichever remote
+    the default branch follows. A fork's default branch usually follows
+    upstream, so going by that alone would send the branch there. A push address
+    that isn't a repository, as `git remote set-url --push upstream DISABLED`
+    leaves, is named in the refusal; Althar never changes it.
 - **Alternatives considered:**
   - **Rewriting the remotes when the person accepts:** the clone is theirs, and
     their own git, scripts and other tools read those names. It also couldn't
