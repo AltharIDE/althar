@@ -143,11 +143,8 @@
   --agent-col: 92px;
   --effort-col: 104px;
 }
-.results[data-note] {
-  --agent-col: 150px;
-}
 .results[data-room] {
-  --room-col: 72px;
+  --room-col: 56px;
 }
 .results[data-context] {
   --ctx-col: 48px;
@@ -208,7 +205,16 @@
   color: var(--t-2);
 }
 .via span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
   color: var(--t-3);
+}
+.name {
+  display: block;
+  min-width: 0;
+  height: 100%;
 }
 .room {
   overflow: hidden;

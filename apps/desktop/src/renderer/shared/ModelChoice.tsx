@@ -140,7 +140,7 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
           onTogglePin={(key) => togglePin(key, pins)}
           onSetDefaultEffort={makeDefault}
           text={{
-            columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' },
+            columns: { model: 'Model', runtime: 'Agent', room: 'Usage', context: 'Context', effort: 'Default effort' },
             // The pin's shortcut as this system writes it.
             keys: { ...modelBrowserText.keys, pin: modKey('P') },
           }}

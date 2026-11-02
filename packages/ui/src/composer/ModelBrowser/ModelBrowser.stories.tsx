@@ -314,7 +314,7 @@ export const OpenCodeSignedOut: Story = {
   render: () => <OpenCodeList signedOut room />,
   play: async () => {
     const body = within(document.body)
-    await expect(body.getAllByText('· signed out').length).toBeGreaterThan(0)
+    await expect(body.getAllByText('signed out').length).toBeGreaterThan(0)
     await expect(body.getByText('Usage')).toBeInTheDocument()
     await expect(body.getByText('18%')).toBeInTheDocument()
   },
@@ -326,6 +326,7 @@ export const OpenCodeLongest: Story = {
   play: async () => {
     const body = within(document.body)
     await userEvent.type(body.getByRole('searchbox'), 'zen')
-    await expect(body.getByRole('button', { name: 'Use Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen' })).toBeInTheDocument()
+    const name = body.getByRole('button', { name: 'Use Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen' })
+    for (const n of name.querySelectorAll('span')) await expect(n.scrollWidth).toBeLessThanOrEqual(n.clientWidth)
   },
 }

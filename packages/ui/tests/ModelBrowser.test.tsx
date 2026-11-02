@@ -135,6 +135,13 @@ describe('ModelBrowser', () => {
       expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude Opus 5')
     })
 
+    it('says a cut name in full on a switched-off row too', async () => {
+      cutShort()
+      const { dialog } = open({ blocked: ['claude-haiku-4-5'] })
+      fireEvent.pointerMove(within(dialog).getByRole('button', { name: 'Use Claude Haiku 4.5' }).parentElement as HTMLElement)
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('Claude Haiku 4.5')
+    })
+
     it('says nothing more where the name is whole', () => {
       const { dialog } = open()
       fireEvent.focus(within(dialog).getByRole('button', { name: 'Use Claude Haiku 4.5' }))
@@ -154,7 +161,7 @@ describe('ModelBrowser', () => {
       const { dialog } = open({ runtimes, room })
       expect(within(dialog).getByText('Usage')).toBeInTheDocument()
       expect(within(dialog).getByText('19%')).toBeInTheDocument()
-      expect(within(dialog).getAllByText('· signed out').length).toBeGreaterThan(0)
+      expect(within(dialog).getAllByText('signed out').length).toBeGreaterThan(0)
     })
 
     it('leaves out the context column where no model shown has a window', () => {
