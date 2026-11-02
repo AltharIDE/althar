@@ -18,6 +18,7 @@ import {
   Download,
   Edit,
   EditPencil,
+  Expand,
   Folder,
   GitBranch,
   GitMerge,
@@ -140,6 +141,8 @@ export const ICONS = {
   down: ArrowDown,
   lock: Lock,
   compress: Compress,
+  /** Opens something bigger, as a diagram over the window. */
+  expand: Expand,
   up: ArrowUp,
   /** When something happens on a schedule. */
   clock: Clock,

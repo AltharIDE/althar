@@ -46,6 +46,8 @@
   --room: 140px;
   width: min(calc(var(--w, 1280) * 1px), calc(100vw - 80px), calc((100vh - var(--room)) * var(--w, 16) / var(--h, 9)));
   aspect-ratio: var(--w, 16) / var(--h, 9);
+  /* what a view draws in place of a picture (a diagram) can fill the frame */
+  position: relative;
   overflow: hidden;
   border-radius: 10px;
   background: var(--term);

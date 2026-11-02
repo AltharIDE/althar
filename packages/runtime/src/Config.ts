@@ -183,6 +183,8 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+  /** How long after its turn ends what an agent says is still that turn's, not work outside it: a second. */
+  readonly trails?: Duration.Duration
   /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
   readonly blank?: Duration.Duration
 }

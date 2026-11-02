@@ -154,6 +154,26 @@ export const parseLink = (link: string, hosts: KnownHosts = HOSTED): LinkRef | n
   }
 }
 
+/**
+ * Whether a link on a host Althar doesn't know is shaped like a Jira issue's,
+ * `/browse/PAY-12`, as a Jira on a company's own domain writes it. It says
+ * only which tracker to name for a link no connection reads; it reads no
+ * issue from it.
+ */
+export const looksLikeJira = (link: string): boolean => {
+  let url: URL
+  try {
+    url = new URL(link)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
+  const segments = url.pathname.split('/').filter((segment) => segment !== '')
+  const browse = segments.indexOf('browse')
+  const key = browse === -1 ? undefined : segments[browse + 1]
+  return key !== undefined && /^[A-Z][A-Z0-9_]*-\d+$/i.test(key)
+}
+
 /** Every http(s) link in a piece of text, in order, once each, without trailing punctuation. */
 export const linksIn = (text: string): ReadonlyArray<string> => [
   ...new Set([...text.matchAll(/https?:\/\/[^\s<>()"'`]+/g)].map((match) => match[0].replace(/[.,;:!?)\]]+$/, ''))),

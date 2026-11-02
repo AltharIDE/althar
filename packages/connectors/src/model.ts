@@ -289,6 +289,17 @@ export interface HostCapabilities {
    * not on Enterprise Server, which takes no such upload.
    */
   readonly pictures: boolean
+  /**
+   * A closed change can be opened again. Not on Bitbucket Cloud, where a
+   * declined pull request is final: `reopenChange` is refused there.
+   */
+  readonly reopen: boolean
+  /**
+   * A failed check can be run again from here: Actions' jobs, GitLab's jobs,
+   * Bitbucket Cloud's pipeline whole. Not on Bitbucket Data Center, whose
+   * builds are another service's: `rerun` is refused there, with whose.
+   */
+  readonly rerun: boolean
 }
 
 /** A picture to upload: its bytes, its file's name, and its type, `image/png` and the like. */
@@ -368,6 +379,14 @@ export interface CodeHost {
    * change still open; a branch already gone is nothing to do.
    */
   deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
+  /**
+   * Opens a closed change again, because the person said to or it can be
+   * taken back in a step: read back as the host has it after; one open
+   * already is left as it is, and a merged one can't be opened (refused).
+   * Where the host has `capabilities.reopen`; refused elsewhere, as
+   * `rejected`, in the host's words.
+   */
+  reopenChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /**
    * The end of a check's log, or with `whole` all of it. Null for a check the
@@ -393,6 +412,8 @@ export interface CodeHost {
   /**
    * Runs a check again, as for one that may have failed by chance: true where
    * the host began it again, false where it can't run that check again.
+   * Refused, as `rejected`, where the host has no `capabilities.rerun`, with
+   * whose builds they are.
    */
   rerun(repository: Repository, check: Check): Effect.Effect<boolean, ConnectorFailed>
   /** Comments and reviews since a cursor (from the start without one). */
@@ -436,6 +457,30 @@ export interface CodeHost {
 /** A host's refusal of a picture, where it has no `capabilities.pictures`. */
 export const noPictures = (product: Product): ConnectorFailed =>
   new ConnectorFailed({ product, reason: 'rejected', message: 'This host takes no pictures in its conversations' })
+
+/** A host's refusal to open a declined change again, where it has no `capabilities.reopen`: said in its words for a change. */
+export const noReopen = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} was declined, and Bitbucket can’t open a declined ${words.noun} again. Make a new one from its branch.`,
+  })
+
+/** A change that can't be opened again because it was merged. */
+export const mergedForGood = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is merged, so it can’t be opened again.`,
+  })
+
+/** A host's refusal to run a check again, where it has no `capabilities.rerun`: whose build it is, and where to run it. */
+export const notOurBuild = (product: Product, check: { readonly name: string; readonly url: string | null }): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${check.name} is built by another service (Jenkins, Bamboo or the like), not by Bitbucket Data Center, so only it can run it again.${check.url === null ? '' : ` Its page: ${check.url}`}`,
+  })
 
 /** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
 export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
