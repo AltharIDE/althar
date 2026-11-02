@@ -172,3 +172,17 @@ describe('the line that says why a run ended', () => {
     assert.strictEqual(endingLine('compiling\n', null), null)
   })
 })
+
+describe('the ending line, edges', () => {
+  it('does not let an earlier warning beat the last line of a run that exited 0', () => {
+    assert.strictEqual(endingLine('warning: cannot find cache\nfailed to fetch, retried\n✓ ready in 1.2s\n', 0), '✓ ready in 1.2s')
+  })
+  it('keeps a long line to 200 characters, ending in an ellipsis', () => {
+    const line = endingLine(`Error: ${'x'.repeat(500)}\n`, 1)
+    assert.strictEqual(line?.length, 200)
+    assert.ok(line?.endsWith('…'))
+  })
+  it('reads a line with non-ASCII text whole', () => {
+    assert.strictEqual(endingLine('Fehler: Datei nicht gefunden – 日本語 ✗ failed\n', 1), 'Fehler: Datei nicht gefunden – 日本語 ✗ failed')
+  })
+})

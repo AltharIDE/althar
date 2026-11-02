@@ -406,7 +406,7 @@ export class Launches extends Context.Service<
         branch: launch.branch,
         ref: launch.ref,
         runnableId: launch.runnableId,
-        name: launch.name,
+        name: launch.name ?? shortCommand(launch.command),
         where: launch.where,
         command: launch.command,
         url: launch.url,

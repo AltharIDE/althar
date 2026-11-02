@@ -161,9 +161,12 @@ export const endingLine = (printed: string, code: number | null, stderr = ''): s
       .map((line) => line.trim())
       .filter((line) => line !== '' && !NOISE.test(line))
       .slice(-LINES_READ)
+  // One that ended well has no error to find: a warning earlier must not sit beside a calm "exited 0".
   const found =
-    linesOf(`${printed}\n${stderr}`).findLast((line) => ERRORISH.test(line) && !WELL.test(line)) ??
-    (code === 0 ? linesOf(printed).at(-1) : code === null ? undefined : linesOf(stderr).at(-1))
+    code === 0
+      ? linesOf(printed).at(-1)
+      : (linesOf(`${printed}\n${stderr}`).findLast((line) => ERRORISH.test(line) && !WELL.test(line)) ??
+        (code === null ? undefined : linesOf(stderr).at(-1)))
   if (found === undefined) return null
   return found.length > LINE_MAX ? `${found.slice(0, LINE_MAX - 1)}…` : found
 }
