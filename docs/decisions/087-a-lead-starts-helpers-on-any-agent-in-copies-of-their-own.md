@@ -184,7 +184,7 @@
     install's time where nothing can be cloned.
   - **Asks can reach the person from work they didn't start,** under the
     helper's name, in the mode they chose.
-  - **Three helpers and a lead are four places** on a machine whose count may
+  - **Four helpers and a lead are five places** on a machine whose count may
     be four (ADR-032): a task can take the machine while the person's other
     work waits behind it, though never what the person does.
   - **Usage grows.** Helpers are more sessions on the person's plans, and
@@ -310,9 +310,10 @@ Claude Code's tool results say the same, because models did both):
 
 It refuses, saying why: where the model isn't one the lead may use now;
 where the task has ten helpers at work or waiting, or has had fifty; on an
-agent whose last three helpers of the task failed to start, until the person
-next writes (another agent's model still starts); in a review of someone else's pull request;
-and in a helper's own session, which doesn't have it.
+agent whose last three helpers of the task ended without starting, until the
+person next writes (another agent's model still starts); in a review of
+someone else's pull request; and in a helper's own session, which doesn't
+have it.
 
 **`stop_helper`** stops one of the lead's helpers by its name or id. Nothing
 of it comes back: the lead knows why it stopped it.
@@ -502,10 +503,12 @@ sequenceDiagram
   (claude-code #82565), and 46 Opus subagents from one workflow (#66023).
   **At most fifty in a task's life,** against a result that starts the lead,
   which starts another helper, which ends at once (Nimbalyst's backstop);
-  and after three helpers in a row on one agent fail to start, retries
-  included, `start_helper` refuses that agent until the person next writes in
-  the thread, as Orca stops a dispatch after three; the lead can still start
-  one on another agent.
+  and after three helpers in a row on one agent end without starting,
+  `start_helper` refuses that agent until the person next writes in the
+  thread, as Orca stops a dispatch after three; the lead can still start one
+  on another agent. A helper counts once toward the three when its retries
+  run out, however many tries it took; a try that a retry recovers doesn't
+  count.
 - **One level.** A helper has no `start_helper`. Its agent's own subagents
   work inside it, as the agent has them.
 - **An hour at most,** counted while it is at work, after which it is stopped
@@ -621,7 +624,7 @@ with another package's folder.
 | ---: | --- | --- | :---: | --- |
 | 1 | A lead waiting on its own work isn't stuck | The step's watch (`Runs.ts:1478-1626`) counts a helper at work, and once task 7 lands its agent's own subagent, as another turn to come: no reminder, never stuck. `finish_step` refuses while a helper is at work, naming each. The handover brief (`handover.ts`) lists the helpers at work. Shared with DEV-176, whose waits it takes next. Tests: a turn that ends with a helper at work is neither reminded nor stuck, and one that ends without is, as now | S | – |
 | 2 | Leads get list_models | The coordinator's `list_models` served to leads too, the same list; the lead's brief says how to pick a helper's model, as the coordinator's says for a step's. Tests: a model the person switched off isn't listed to a lead | S | – |
-| 3 | Helper sessions in copies of their own | A `helper` role beside `task`, `coordinator` and `reviewer`, for the context, the tools and the rules; a thread for each helper on its task. Its copy: the round's snapshot (`reviewCopy.ts`, made general) under `<project>/.helpers/<task>/<n>/`. Its mode and rules the lead's, with its copy as its folder; Claude Code's sandbox held to the copy (`sessionMeta`, `holds`), Codex's `workspace-write` there; Althar's push guard refusing every push; its tools (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`, `screenshot`, `install_dependencies` in its copy); no questions; its asks under its name. Places keyed by helper (`Busy.ts`), four of a task's at once, ten at work or waiting, fifty in its life, an agent refused after three of its helpers fail to start, the lead first. The hour, stalls (`Stalls.ts`), usage limits, a failing service tried again as a step is (ADR-060, `Failures.backoff`) and restarts as [above](#places-and-limits); stopped with its task (`LeftBehind.settled`, ADR-068) and gone with its folder (ADR-056). A clause in the agents' contract suite: a helper can't write its lead's folder, on every agent (ADR-082) | L | 1 |
+| 3 | Helper sessions in copies of their own | A `helper` role beside `task`, `coordinator` and `reviewer`, for the context, the tools and the rules; a thread for each helper on its task. Its copy: the round's snapshot (`reviewCopy.ts`, made general) under `<project>/.helpers/<task>/<n>/`. Its mode and rules the lead's, with its copy as its folder; Claude Code's sandbox held to the copy (`sessionMeta`, `holds`), Codex's `workspace-write` there; Althar's push guard refusing every push; its tools (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`, `screenshot`, `install_dependencies` in its copy); no questions; its asks under its name. Places keyed by helper (`Busy.ts`), four of a task's at once, ten at work or waiting, fifty in its life, an agent refused after three of its helpers fail to start, the lead first. The hour, stalls (`Stalls.ts`), usage limits, a failing service tried again on the step's schedule (ADR-060: `Connectivity.ts`'s pauses of 15 s, 1 min and 4 min, not `Failures.backoff`'s defaults), then ended, and restarts as [above](#places-and-limits); stopped with its task (`LeftBehind.settled`, ADR-068) and gone with its folder (ADR-056). A clause in the agents' contract suite: a helper can't write its lead's folder, on every agent (ADR-082) | L | 1 |
 | 4 | Leads start helpers and hear their results as turns | `start_helper` and `stop_helper` ([The tools](#the-tools)): the answer, the refusals, the model's way as a step's (plan, `accounts.only`, `PlanOnly`, nearly out), the lead's own model and effort without one; a helper that failed for good reported at once with the models the lead may use now. The result kept on the helper's thread and as a file under `.althar/` in the lead's folder, then queued as quiet news after the turn under way, batched, delivered once, starting a lead that stopped (`startLast`); the person's Stop as a line in the lead's next turn. The helper's brief, and the lead's lines on when to start one. Tests, DEV-181's done-when: a Claude Code lead with a Codex helper and a Codex lead with a Claude Code helper, each only reading, the person talking to the lead meanwhile and the result coming as a new turn; an OpenCode helper whose service fails, tried again, then reported, and the lead starting it on Haiku at medium effort, on the agents' fakes in CI and once on real accounts before the release | L | 2, 3 |
 | 5 | Helpers in the thread, with Stop | The row where the lead started it (the kit's `SubAgents`, grown: the model's mark and name, how long, the brief, opening in place to the helper's work), helpers in the Running list with Stop (ADR-022), the result's "From …" block (as `Relayed`), asks under the helper's name, the Graph face's lanes (ADR-054), the task's usage by model. Stories with plays for each state; an end-to-end spec: start a helper, see it, stop it | M | 4 |
 | 6 | Helpers that write: a commit for the lead to take | `writes`: the helper's changes committed on its snapshot, kept on `refs/althar/helpers/<task>/<n>`, never pushed, named in the result with how to bring them in; gone when its task settles. Tests: the lead takes it with `git cherry-pick --no-commit`; one that conflicts with the lead's work since is left for the lead to settle | M | 4 |
