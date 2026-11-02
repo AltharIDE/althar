@@ -3330,7 +3330,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
-          if (thread === undefined || thread.state !== 'open') return
+          if (thread === undefined || !['open', 'done'].includes(thread.state)) return
           const running = Option.isSome(yield* sessions.running(thread.id))
           if (!running && !wake) return
           yield* sessions.send({
@@ -3543,6 +3543,9 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
+          // Only new words from the person or members, or a queue return, wake a stopped lead.
+          // Approvals, bots, outsiders and state/check updates alone leave a merged task asleep.
+          let addressed = false
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
             if (voice === 'althar' || !(yield* heard(link, 'review', `review:${review.id}`, { author: review.author.login }))) continue
@@ -3556,7 +3559,10 @@ export class Changes extends Context.Service<
               url: review.url,
               outsider: voice === 'outsider',
             })
-            if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') forLead.push(reviewForLead(review, name))
+            if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') {
+              addressed = true
+              forLead.push(reviewForLead(review, name))
+            }
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
@@ -3573,7 +3579,10 @@ export class Changes extends Context.Service<
               url: comment.url,
               outsider: voice === 'outsider',
             })
-            if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
+            if (voice === 'person' || voice === 'member') {
+              addressed = true
+              forLead.push(commentForLead(comment, name))
+            }
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
           // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
@@ -3596,6 +3605,8 @@ export class Changes extends Context.Service<
           if (leftQueue) {
             happened = true
             yield* sayOn(link, leftQueueNote(name, now.leftQueue))
+            addressed = true
+            forLead.push(leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
             happened = true
@@ -3619,7 +3630,11 @@ export class Changes extends Context.Service<
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
-          yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
+          yield* tellLead(
+            link,
+            theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
+            addressed || (after.state === 'open' && alone && !theRounds),
+          )
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
               Effect.catchCause((cause) =>

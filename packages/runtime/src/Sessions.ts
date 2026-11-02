@@ -1795,6 +1795,26 @@ export class Sessions extends Context.Service<
                 Effect.catchCause((cause) => Effect.logWarning('Could not deliver a turn', cause)),
               )
             if (yield* compactsNext(thread.threadId)) return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
+            // News can start a stopped session outside a workflow step. Keep its input queued until
+            // this account has usage again, before asking Busy for a place. The thread marker also
+            // lets Busy restore this wait after a restart.
+            const out = yield* run(limits.outAccount(running.account.id))
+            if (Option.isSome(out)) {
+              yield* run(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  const changed = yield* sql<{
+                    id: string
+                  }>`UPDATE threads SET waits_for_place = ${yield* timestamp} WHERE id = ${thread.threadId} AND waits_for_place IS NULL RETURNING id`
+                  if (changed.length > 0) yield* touchTask(thread.taskId)
+                }),
+              )
+              yield* Effect.sleep(
+                Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
+              )
+              if (!running.stopping) yield* Queue.offer(running.wake, undefined)
+              return
+            }
             yield* gate(
               {
                 taskId: thread.taskId,
