@@ -17,21 +17,18 @@ import type { AccountSignInModel } from './useAccountSignIn'
  * tool signed in.
  */
 
-const providersOf = (account: AccountStatus): Pick<AccountEntry, 'who' | 'refused'> => {
-  const providers = account.providers ?? []
-  const refused = providers.find((provider) => provider.refusedAt !== null)
-  return {
-    ...(providers.length === 0 ? {} : { who: providers.map((provider) => provider.name).join(' · ') }),
-    ...(refused === undefined ? {} : { refused: refused.name }),
-  }
+/** The provider within the agent that refused work lately, if any: the line says it and nothing else about the providers. */
+const refusedOf = (account: AccountStatus): Pick<AccountEntry, 'refused'> => {
+  const refused = account.providers?.find((provider) => provider.refusedAt !== null)
+  return refused === undefined ? {} : { refused: refused.name }
 }
 
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
-  // An agent with a sign-in for each provider it reaches says which are signed in; one that refused work lately is the line's button.
-  ...providersOf(account),
+  // A provider within the agent that refused work lately is the line's button; signed in, the line says nothing more.
+  ...refusedOf(account),
   place:
     account.home === null
       ? { kind: 'usual' }

@@ -42,8 +42,8 @@ export const EveryState: Story = {
 }
 
 /**
- * An agent that reaches several providers, each with a sign-in of its own: the account is signed in, and says by which
- * providers. One that refused work lately is the line's button, since signing in to it is what puts it right.
+ * An agent that reaches several providers, each with a sign-in of its own: the account is signed in, and one provider that
+ * refused work lately is the line's only word, as the button that signs it in.
  */
 export const AProviderRefused: Story = {
   args: {
@@ -54,14 +54,12 @@ export const AProviderRefused: Story = {
         name: 'Personal',
         place: { kind: 'usual' },
         state: { kind: 'ready', paid: 'key' },
-        who: 'OpenCode Go · Anthropic · OpenCode Console',
         refused: 'OpenCode Go',
       },
     ],
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('OpenCode Go · Anthropic · OpenCode Console')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'OpenCode Go: sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith('acc_usual')
   },
