@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 
 import { deviceWords } from '@althar/ui/device'
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, still } from './support'
+import { launch, openFirstProject, pastTheTour, still } from './support'
 
 /*
  * Every agent Althar runs, as the window shows them all: Claude Code and
@@ -24,7 +24,8 @@ test('shows every agent: those on this computer first, the rest to download or i
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_EVERY_AGENT: '1' })
   try {
-    // The first screen: the two on this computer in rows, the other eight in tiles, those Althar can fetch first.
+    // The first screen, past the tour: the two on this computer in rows, the other eight in tiles, those Althar can fetch first.
+    await pastTheTour(page)
     const rows = page.getByRole('list', { name: `Agents on ${here}` })
     await expect(rows.getByRole('listitem').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
     const away = page.getByRole('list', { name: `Agents not on ${here}` })

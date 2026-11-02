@@ -9,10 +9,13 @@
 }
 .row {
   display: flex;
-  align-items: center;
+  flex: none; /* a row grows with its name, never shrinks into the next in a list that scrolls */
+  align-items: flex-start;
   gap: 10px;
   min-height: 30px;
-  padding: 0 10px;
+  padding: 6px 10px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
   border-radius: 7px;
   font-size: 13px;
   color: var(--t-1);
@@ -52,6 +55,7 @@
   display: grid;
   place-items: center;
   flex: none;
+  margin-top: 2px; /* centred on the first line of a name that wraps */
   width: 14px;
   height: 14px;
   border-radius: 4px;

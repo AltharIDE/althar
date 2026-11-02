@@ -3,41 +3,40 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { device } from '../../foundations/device'
 import { Board, BoardColumn, BoardList } from '../../board/Board/Board'
 import { CallCard } from '../../board/CallCard/CallCard'
+import { PullChip } from '../../board/BoardCard/Chips'
 import { NextRow } from '../../board/NextRow/NextRow'
 import { WorkCard } from '../../board/WorkCard/WorkCard'
 import { TitleBar } from '../../chrome/TitleBar/TitleBar'
 import { WorkStatus } from '../../chrome/WorkStatus/WorkStatus'
 import { TaskCard } from '../../coordinator/TaskCard/TaskCard'
 import { CallPeek } from '../../dock/CallPeek/CallPeek'
-import { ListPeek } from '../../dock/ListPeek/ListPeek'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
-import { BoardLane, ChangeState, CheckState, RuntimeState, TaskStatus } from '../../foundations/vocabulary'
-import { ChangeSet } from '../../outputs/ChangeSet/ChangeSet'
+import { BoardLane, FindingState, RuntimeState, StepState, TaskStatus, ToolState, Verdict } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import { Button } from '../../primitives/Button/Button'
 import { Panel } from '../../primitives/Panel/Panel'
+import { ReviewSealGlyph } from '../../setup/ReviewSeal/ReviewSeal'
 import { Runtimes, type RuntimeEntry } from '../../setup/Runtimes/Runtimes'
-import { SourceMap } from '../../setup/SourceMap/SourceMap'
+import { Review, type ReviewFinding } from '../../thread/Review/Review'
 import { You } from '../../thread/You/You'
 import {
   AGENTS,
   CALL,
+  FINDINGS,
+  FIX,
   DOING,
   GEMINI,
   GPT,
-  LEARNED,
   NEXT_UP,
-  NOTES,
   OPUS,
-  PRS,
-  ROLES,
+  REVIEWING,
   RUNNING_421,
+  SEAL,
+  SEALED,
+  SET_ASIDE,
   SONNET,
-  SOURCES,
   STEPS,
   TASK,
-  checks,
 } from './demo'
 import { Note, find, rectIn, useScene } from './Station'
 
@@ -101,78 +100,6 @@ function useGlide(root: RefObject<HTMLElement | null>, instant: boolean) {
  * its styles), so its plot on the table and the camera's framing are the size
  * of the finished scene.
  */
-
-/* ---- 01 · a project --------------------------------------------------------- */
-
-export function ProjectScene({ live, instant }: SceneProps) {
-  const [task, setTask] = useState<'off' | 'on' | 'done' | 'gone'>('off')
-  const [at, setAt] = useState(0)
-  const [learned, setLearned] = useState(false)
-  const [notes, setNotes] = useState(0)
-  const root = useRef<HTMLDivElement>(null)
-  useGlide(root, instant)
-  const pointer = useScene(
-    live,
-    instant,
-    async (stage) => {
-      await stage.wait(1500)
-      setNotes(1)
-      await stage.wait(700)
-      setTask('on')
-      await stage.wait(700)
-      setNotes(2)
-      for (const i of [1, 2, 3]) {
-        await stage.wait(1100)
-        setAt(i)
-      }
-      await stage.wait(500)
-      setLearned(true)
-      await stage.wait(500)
-      setNotes(3)
-      await stage.wait(900)
-      setTask('done')
-    },
-    () => {
-      setTask('done')
-      setAt(3)
-      setLearned(true)
-      setNotes(3)
-    },
-  )
-  return (
-    <div ref={root} className={s.project}>
-      <Panel kicker="Project" title="Meridian" className={s.projectPanel}>
-        <div className={s.block}>
-          <span className={s.eyebrow}>Repositories</span>
-          <SourceMap sources={SOURCES} roles={ROLES} onRoleChange={noop} onOriginChange={noop} onFindingChange={noop} onRemove={noop} />
-        </div>
-        <div className={s.block}>
-          <ListPeek sections={[{ label: 'Notes', entries: learned ? [LEARNED, ...NOTES] : NOTES }]} />
-        </div>
-      </Panel>
-      <div className={s.visitor}>
-        {task !== 'off' && task !== 'gone' && (
-          <div data-glide="418" className={s.enterRight}>
-            <WorkCard
-              {...TASK}
-              status={task === 'done' ? TaskStatus.Done : TaskStatus.Running}
-              steps={STEPS}
-              at={at}
-              elapsed="12m"
-              lead={OPUS}
-              onStep={[GPT, GEMINI]}
-              note={task === 'done' ? 'Merged · left a note for the project' : DOING[at]}
-            />
-          </div>
-        )}
-      </div>
-      {notes > 0 && <Note target="meridian-api" side="left" reach={44} shift={-12} label="The code it may change" />}
-      {notes > 1 && <Note target="Repair token refresh" side="bottom" reach={44} shift={-40} label="A task comes, works, and goes" />}
-      {notes > 2 && <Note target={LEARNED.title} side="left" from="far" reach={44} shift={12} label="What it learned stays" />}
-      {pointer}
-    </div>
-  )
-}
 
 /* ---- 02 · a task and its lead ------------------------------------------------- */
 
@@ -376,59 +303,61 @@ export function CallsScene({ live, instant }: SceneProps) {
   )
 }
 
-/* ---- 04 · the change comes back ------------------------------------------------ */
+/* ---- 04 · reviewed before you see it ------------------------------------------ */
 
-export function ChangeScene({ live, instant }: SceneProps) {
-  const [stage, setStage] = useState(0)
-  const [merged, setMerged] = useState(false)
+/* The review as the lead settles it: one finding fixed in the second round, one set aside with its reason. */
+const settled = (finding: ReviewFinding): ReviewFinding =>
+  finding.id === FIX ? { ...finding, state: FindingState.Fixed, round: 2 } : { ...finding, state: FindingState.Aside, reason: SET_ASIDE }
+
+export function ReviewScene({ live, instant }: SceneProps) {
+  const [read, setRead] = useState(false)
+  const [findings, setFindings] = useState(FINDINGS)
+  const [sealed, setSealed] = useState(false)
   const [notes, setNotes] = useState(0)
   const pointer = useScene(
     live,
     instant,
-    async (st) => {
-      await st.wait(1600)
+    async (stage) => {
+      await stage.wait(1500)
+      setRead(true)
+      await stage.wait(700)
       setNotes(1)
-      await st.wait(900)
-      setStage(1)
-      await st.wait(1200)
-      setStage(2)
+      await stage.wait(1300)
+      setFindings((now) => now.map((f) => (f.id === FIX ? settled(f) : f)))
+      await stage.wait(900)
+      setFindings((now) => now.map(settled))
       setNotes(2)
-      await st.wait(1000)
-      await st.point('Accept and merge both')
-      await st.wait(500)
-      await st.press()
-      st.rest()
-      await st.wait(500)
+      await stage.wait(1300)
+      setSealed(true)
+      await stage.wait(600)
       setNotes(3)
     },
     () => {
-      setStage(2)
-      setMerged(true)
+      setRead(true)
+      setFindings(FINDINGS.map(settled))
+      setSealed(true)
       setNotes(3)
     },
   )
-  const ready = stage > 1
   return (
-    <div className={s.change}>
-      <ChangeSet
-        host={GITHUB}
-        state={merged ? ChangeState.Merged : ready ? ChangeState.Ready : ChangeState.Draft}
-        {...(merged ? { note: 'Accepted by you · merged in order' } : {})}
-        prs={PRS}
-        checks={checks(stage).filter((check) => check.id !== 'review')}
-        review={{ state: CheckState.Passed, by: [GPT, GEMINI] }}
-        actions={
-          ready &&
-          !merged && (
-            <Button variant="signal" onClick={() => setMerged(true)}>
-              Accept and merge both
-            </Button>
-          )
-        }
+    <div className={s.review}>
+      <Review
+        n={2}
+        of={4}
+        reviewers={[read ? { model: GPT } : { model: GPT, state: ToolState.Running, meta: REVIEWING }]}
+        state={read ? StepState.Done : StepState.Running}
+        findings={findings}
+        {...(read ? { verdict: Verdict.Changes, took: '3m 10s' } : {})}
+        open={read}
       />
-      {notes > 0 && <Note target="api #1191" side="left" from="far" reach={44} label="Its own branch; your folders untouched" />}
-      {notes > 1 && <Note target='[aria-label^="Its checks"]' side="right" from="far" reach={44} label="Every check, run for you" />}
-      {notes > 2 && merged && <Note target="Accepted by you" side="top" from="far" reach={48} shift={120} label="Merging stays yours" />}
+      <div className={s.sealed} data-shown={sealed || undefined} aria-hidden={!sealed || undefined}>
+        <PullChip host={GITHUB} repo="meridian/api" number={1191} />
+        <span className={s.sealedWords}>{SEALED}</span>
+        <ReviewSealGlyph facts={SEAL} size={52} />
+      </div>
+      {notes > 0 && <Note target="GPT-5.2" side="left" from="far" reach={44} label="Another maker reads the change" />}
+      {notes > 1 && <Note target={SET_ASIDE.slice(0, 24)} side="right" from="far" reach={44} label="The lead fixes it, or says why not" />}
+      {notes > 2 && <Note target={SEALED} side="bottom" from="far" reach={36} label="The pull request carries the review" />}
       {pointer}
     </div>
   )
@@ -525,4 +454,5 @@ function Wires({ rootRef, from, to }: { rootRef: RefObject<HTMLDivElement | null
   )
 }
 
-export const SCENES: ((p: SceneProps) => ReactNode)[] = [ProjectScene, TaskScene, CallsScene, ChangeScene, AgentsScene]
+/** The tour, in its order: asking, the agents, the calls, the review. */
+export const SCENES: ((p: SceneProps) => ReactNode)[] = [TaskScene, AgentsScene, CallsScene, ReviewScene]

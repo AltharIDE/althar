@@ -1,13 +1,13 @@
 import { act, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ProjectScene } from '../src/screens/Welcome/scenes'
+import { CallsScene } from '../src/screens/Welcome/scenes'
 import { Station } from '../src/screens/Welcome/Station'
 
 /*
  * A welcome scene's parts that change place glide there, from where they
- * were. Here the task card sits lower each time it is measured, as it would
- * when what is above it grows.
+ * were. Here the board's cards sit lower each time they are measured, as
+ * they would when what is above them grows.
  */
 
 afterEach(() => {
@@ -30,11 +30,11 @@ describe('a welcome scene', () => {
     /* laid out at the size it is drawn: the camera does not scale the scene here */
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 120 })
     render(
-      <Station n={1} label="Project" x={0} y={0} shown built={false} instant={false}>
-        <ProjectScene live instant={false} />
+      <Station n={1} label="Decide" x={0} y={0} shown built={false} instant={false} bare>
+        <CallsScene live instant={false} />
       </Station>,
     )
-    for (let i = 0; i < 80; i++)
+    for (let i = 0; i < 300; i++)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(50)
       })
