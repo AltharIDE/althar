@@ -143,6 +143,9 @@
   --agent-col: 92px;
   --effort-col: 104px;
 }
+.results[data-note] {
+  --agent-col: 150px;
+}
 .results[data-room] {
   --room-col: 72px;
 }
@@ -307,8 +310,9 @@
   .rail {
     display: none;
   }
-  .results {
-    --ctx-col: ;
+  .cols,
+  .row {
+    --ctx-col: initial;
   }
   .colContext,
   .ctx,
@@ -317,9 +321,10 @@
   }
 }
 @container (max-width: 440px) {
-  .results {
-    --agent-col: ;
-    --room-col: ;
+  .cols,
+  .row {
+    --agent-col: initial;
+    --room-col: initial;
   }
   .colAgent,
   .colRoom,
@@ -329,8 +334,9 @@
   }
 }
 @container (max-width: 270px) {
-  .results {
-    --effort-col: ;
+  .cols,
+  .row {
+    --effort-col: initial;
   }
   .cols > :nth-last-child(2),
   .row > :nth-last-child(2) {

@@ -197,6 +197,7 @@ export function ModelBrowser({
   const readings = useMemo(() => new Map(rows.map((m) => [m.id, room?.(m) ?? null])), [rows, room])
   const hasRoom = rows.some((m) => readings.get(m.id) != null)
   const hasContext = rows.some((m) => m.context !== undefined)
+  const hasNote = rows.some((m) => runtimes.find((r) => r.id === m.runtime)?.how)
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     /* a select in a row handles its own arrows, and they bubble here through its portal */
@@ -315,7 +316,12 @@ export function ModelBrowser({
               )}
             </div>
 
-            <div className={s.results} data-room={hasRoom || undefined} data-context={hasContext || undefined}>
+            <div
+              className={s.results}
+              data-room={hasRoom || undefined}
+              data-context={hasContext || undefined}
+              data-note={hasNote || undefined}
+            >
               <div className={s.cols} aria-hidden="true">
                 <span>{t.columns.model}</span>
                 <span className={s.colAgent}>{t.columns.runtime}</span>

@@ -319,3 +319,13 @@ export const OpenCodeSignedOut: Story = {
     await expect(body.getByText('18%')).toBeInTheDocument()
   },
 }
+
+/** The longest names in OpenCode's list, told apart by their provider, in full at the browser's normal width. */
+export const OpenCodeLongest: Story = {
+  render: () => <OpenCodeList />,
+  play: async () => {
+    const body = within(document.body)
+    await userEvent.type(body.getByRole('searchbox'), 'zen')
+    await expect(body.getByRole('button', { name: 'Use Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen' })).toBeInTheDocument()
+  },
+}
