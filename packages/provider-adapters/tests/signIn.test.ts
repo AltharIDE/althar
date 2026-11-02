@@ -200,6 +200,29 @@ describe('an agent’s homes', () => {
 })
 
 describe('signInStatus', () => {
+  it.live('falls back to the plain command where OpenCode 1.x rejects the JSON flags', () =>
+    Effect.gen(function* () {
+      // 1.x exits 1 on --standalone / --format json; its plain `auth list` prints a count.
+      const script =
+        "if (process.argv.includes('json')) { console.error('Unknown argument: standalone'); process.exit(1) } console.log('2 credentials')"
+      const spec = (...extra: string[]) => ({ command: 'bun', args: ['-e', script, ...extra] })
+      const old: AgentDefinition = {
+        ...agents.opencode,
+        signIn: {
+          ...agents.opencode.signIn,
+          status: () => spec('json'),
+          statusFallback: () => spec(),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(old)).status, 'signed_in')
+      // With no fallback the rejected flags would read as "can't tell".
+      const { statusFallback: _dropped, ...withoutFallback } = old.signIn
+      const bare: AgentDefinition = { ...old, signIn: withoutFallback }
+      assert.strictEqual((yield* signInCheck(bare)).status, 'unknown')
+      assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
+    }),
+  )
+
   it.live('runs the status command and reads it', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Logged in using ChatGPT')")), 'signed_in')
