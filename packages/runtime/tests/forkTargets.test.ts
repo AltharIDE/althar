@@ -1,3 +1,4 @@
+import { renameSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,7 +47,7 @@ const forkClone = (
     readonly upstreamDefault?: string
     readonly saysHead?: boolean
     /** What the host says the pull request's head is, where not the commit its branch on the fork is at. */
-    readonly headOf?: () => string
+    readonly headOf?: () => string | undefined
   } = {},
 ) => {
   const { working, bare: fork } = hosted(FORK)
@@ -353,6 +354,47 @@ describe('a clone whose remotes were renamed by hand', () => {
         { tag: 'PushRefused', why: 'unplaced' },
       ])
       assert.strictEqual(git(fork, 'rev-parse', BRANCH), head)
+      assert.strictEqual(git(upstream, 'rev-parse', BRANCH), head)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('takes no saved head for the pull request’s, where the host can’t be read', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      const saved = git(fork, 'rev-parse', BRANCH)
+      // Upstream's branch of that name stands where the pull request last was; the fork's has moved on since.
+      git(fork, 'push', '-q', upstream, `${saved}:refs/heads/${BRANCH}`)
+      const tree = git(fork, 'rev-parse', `${saved}^{tree}`)
+      const moved = git(fork, '-c', 'user.name=Them', '-c', 'user.email=them@althar.test', 'commit-tree', tree, '-p', saved, '-m', 'Theirs')
+      git(fork, 'update-ref', `refs/heads/${BRANCH}`, moved)
+      git(here, 'commit', '-q', '--allow-empty', '-m', 'One more')
+
+      github.failNext('change', 'unreachable')
+      yield* Effect.exit((yield* Changes).push(taskId, git(here, 'rev-parse', 'HEAD')))
+      assert.strictEqual(git(upstream, 'rev-parse', BRANCH), saved, 'upstream’s branch of that name stays as it was')
+      assert.strictEqual(git(fork, 'rev-parse', BRANCH), moved)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('refuses a pull request whose other repository can’t be read, where only one that can stands at its head', () => {
+    let head: string | undefined
+    const { working, fork, upstream, github } = forkClone({ saysHead: false, headOf: () => head })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      head = git(fork, 'rev-parse', BRANCH)
+      git(fork, 'push', '-q', upstream, `${head}:refs/heads/${BRANCH}`)
+      // The fork answers nothing for now: its branch may be there all the same.
+      renameSync(fork, `${fork}.away`)
+
+      assert.deepStrictEqual(yield* refusedBoth(projectId, taskId, here), [
+        { tag: 'PushRefused', why: 'unplaced' },
+        { tag: 'PushRefused', why: 'unplaced' },
+      ])
       assert.strictEqual(git(upstream, 'rev-parse', BRANCH), head)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

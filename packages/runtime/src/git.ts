@@ -266,9 +266,12 @@ const signedIn = (target: { readonly header: string | null }): Record<string, st
 
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  askedRemoteTip(cwd, target, branch).pipe(Effect.orElseSucceed(() => null))
+
+/** As remoteTip, but a remote that doesn't answer fails, rather than looking as if it hasn't the branch. */
+export const askedRemoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
   run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
     Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
-    Effect.orElseSucceed(() => null),
   )
 
 /**
