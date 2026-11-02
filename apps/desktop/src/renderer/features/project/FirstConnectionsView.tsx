@@ -107,12 +107,12 @@ export function FirstConnectionsView({ projectId, project, model, className }: F
   )
 }
 
-/** A service's walk in, in the card: the one Settings shows, with the way back to the card's rows. */
+/** A service's walk in, in the card: the one Settings shows, from the card's left edge, with the way back to the card's rows on it too. */
 function Walk({ service, onClose }: { service: Service; onClose: () => void }) {
   const flow = useConnect({ service, again: null, onClose })
   return (
-    <div className={s.side}>
-      <ConnectFlow model={flow} compact />
+    <div className={s.inCard}>
+      <ConnectFlow model={flow} compact align="start" />
       <LinkButton onClick={() => void (flow.back() || onClose())}>{text.back}</LinkButton>
     </div>
   )

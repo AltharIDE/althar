@@ -2,12 +2,14 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { Brand } from '../src/foundations/brands/brands'
 import { RuntimeState } from '../src/foundations/vocabulary'
 import type { RuntimeEntry } from '../src/setup/Runtimes/Runtimes'
 import { Welcome, type WelcomeProps, type WelcomeStep } from '../src/screens/Welcome/Welcome'
 
-const READY: RuntimeEntry = { id: 'claude-code', name: 'Claude Code', state: RuntimeState.Ready, version: '2.4.1' }
-const SIGNED_OUT: RuntimeEntry = { id: 'codex', name: 'Codex', state: RuntimeState.SignedOut }
+const READY: RuntimeEntry = { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode, state: RuntimeState.Ready, version: '2.4.1' }
+const SIGNED_OUT: RuntimeEntry = { id: 'codex', name: 'Codex', brand: Brand.Codex, state: RuntimeState.SignedOut }
+const AWAY: RuntimeEntry = { id: 'kimi', name: 'Kimi Code', state: RuntimeState.Missing }
 const FOUND = [
   { id: 'meridian', name: 'meridian', where: '~/Projects/meridian' },
   { id: 'halyard', name: 'halyard', where: '~/Projects/halyard' },
@@ -15,7 +17,7 @@ const FOUND = [
 
 /* As the app keeps it: the step, what is ticked and its name, and the project once made. */
 function FirstRun({ start, ...props }: Partial<WelcomeProps> & { start?: WelcomeStep }) {
-  const [step, setStep] = useState<WelcomeStep>(start ?? (props.toured === true ? 'agents' : 'ask'))
+  const [step, setStep] = useState<WelcomeStep>(start ?? (props.toured === true ? 'agents' : 'projects'))
   const [picked, setPicked] = useState<readonly string[]>(props.picked ?? [])
   const [made, setMade] = useState(props.made ?? false)
   return (
@@ -55,22 +57,20 @@ describe('the welcome’s tour', () => {
   it('walks its pages with Next and the arrows, then goes on to the agents and says the tour is over', () => {
     const onToured = vi.fn()
     render(<FirstRun onToured={onToured} />)
-    expect(screen.getByText('Welcome to Althar')).toBeInTheDocument()
-    expect(heading('Tell the coordinator what you want')).toBeInTheDocument()
+    expect(heading('Work happens in projects')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Next' })).toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(heading('Agents from different makers')).toBeInTheDocument()
-    expect(screen.queryByText('Welcome to Althar')).toBeNull()
+    expect(heading('Meet the coordinator')).toBeInTheDocument()
     fireEvent.keyDown(screen.getByRole('button', { name: 'Next' }), { key: 'ArrowRight' })
-    expect(heading('Only the calls come to you')).toBeInTheDocument()
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Next' }), { key: 'ArrowLeft' })
     expect(heading('Agents from different makers')).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Next' }), { key: 'ArrowLeft' })
+    expect(heading('Meet the coordinator')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    expect(heading('Tell the coordinator what you want')).toBeInTheDocument()
+    expect(heading('Work happens in projects')).toBeInTheDocument()
     // Before the first page and after the last, the arrows go nowhere; with a key held, they are someone else's.
     fireEvent.keyDown(screen.getByRole('button', { name: 'Next' }), { key: 'ArrowLeft' })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Next' }), { key: 'ArrowRight', metaKey: true })
-    expect(heading('Tell the coordinator what you want')).toBeInTheDocument()
+    expect(heading('Work happens in projects')).toBeInTheDocument()
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     expect(heading('Reviewed before you see it')).toBeInTheDocument()
     expect(onToured).not.toHaveBeenCalled()
@@ -82,9 +82,25 @@ describe('the welcome’s tour', () => {
     expect(heading('Your agents')).toBeInTheDocument()
   })
 
+  it('names every agent Althar runs on the makers’ page, by its mark or, without one, by its name', () => {
+    render(<FirstRun start="makers" runtimes={[READY, SIGNED_OUT, AWAY]} />)
+    const makers = screen.getByRole('list', { name: 'The agents Althar runs' })
+    expect(
+      within(makers)
+        .getAllByRole('img')
+        .map((mark) => mark.getAttribute('aria-label')),
+    ).toEqual(['Claude Code', 'Codex', 'Kimi Code'])
+    expect(within(makers).getByText('Kimi Code')).toBeInTheDocument()
+  })
+
+  it('holds the makers’ line while the agents are still asked', () => {
+    render(<FirstRun start="makers" runtimes={null} />)
+    expect(within(screen.getByRole('list', { name: 'The agents Althar runs' })).queryAllByRole('listitem')).toHaveLength(0)
+  })
+
   it('leaves the tour from any page with Skip', () => {
     const onToured = vi.fn()
-    render(<FirstRun onToured={onToured} start="build" />)
+    render(<FirstRun onToured={onToured} start="makers" />)
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     expect(heading('Your agents')).toBeInTheDocument()
     expect(onToured).toHaveBeenCalledTimes(1)
@@ -92,10 +108,10 @@ describe('the welcome’s tour', () => {
   })
 
   it('leaves the tour out once it has been seen, from the track too', () => {
-    render(<FirstRun toured start="ask" />)
+    render(<FirstRun toured start="projects" />)
     expect(heading('Your agents')).toBeInTheDocument()
     const track = screen.getByRole('list', { name: 'Steps' })
-    expect(within(track).queryByText('Ask')).toBeNull()
+    expect(within(track).queryByText('Projects')).toBeNull()
     expect(within(track).getByText('Agents')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
   })
@@ -110,7 +126,7 @@ describe('the welcome’s tour', () => {
     const field = document.createElement('input')
     screen.getByRole('button', { name: 'Next' }).closest('section')?.append(field)
     fireEvent.keyDown(field, { key: 'ArrowRight' })
-    expect(heading('Tell the coordinator what you want')).toBeInTheDocument()
+    expect(heading('Work happens in projects')).toBeInTheDocument()
   })
 })
 
@@ -123,6 +139,20 @@ describe('the welcome’s agents', () => {
     render(<FirstRun toured runtimes={[SIGNED_OUT]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
     expect(heading('Your first project')).toBeInTheDocument()
+  })
+
+  it('heads the agents on this computer, and says where they would be when there are none', () => {
+    render(<FirstRun toured runtimes={[AWAY]} />)
+    expect(screen.queryByRole('list', { name: /Agents on/ })).toBeNull()
+    expect(screen.getByText(/None yet/)).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: /Agents not on/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue without one' })).toHaveFocus()
+  })
+
+  it('says none were found, not to download one, where none is offered either', () => {
+    render(<FirstRun toured runtimes={[]} />)
+    expect(screen.getByText('None found.')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: /Agents not on/ })).toBeNull()
   })
 
   it('shows where the agents will be while they are asked', () => {
@@ -144,8 +174,10 @@ describe('the welcome’s project', () => {
   it('says what is missing when nothing is ticked, and makes the project of what is', () => {
     const onCreate = vi.fn()
     render(<FirstRun toured start="project" onCreate={onCreate} />)
+    // The step is about finding one: its field takes the focus as it arrives.
+    expect(screen.getByRole('searchbox')).toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: /Make the project/ }))
-    expect(screen.getByRole('alert')).toHaveTextContent('Tick a repository, or add a folder.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Tick a repository, or choose a folder.')
     expect(onCreate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox', { name: /halyard/ }))
     expect(screen.queryByRole('alert')).toBeNull()
@@ -246,7 +278,8 @@ describe('a scene in the welcome', () => {
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { get: () => 330, configurable: true })
     render(<FirstRun still={false} start="review" />)
     const stage = document.querySelector<HTMLElement>('[data-stop]')?.parentElement
-    expect(stage?.style.transform).toMatch(/scale\(0\.5\d+\)/)
+    // As large as the frame's height lets it be, with room round it: (330 − 24) / 400.
+    expect(stage?.style.transform).toBe('translate(-50%, -50%) scale(0.765)')
     act(() => seen.forEach((f) => f()))
     act(() => {
       vi.advanceTimersByTime(12_000)

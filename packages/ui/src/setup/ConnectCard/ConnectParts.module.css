@@ -81,6 +81,15 @@
   color: var(--t-3);
 }
 
+/* In a card set from the left edge of what holds it (ConnectCard's `align="start"`), its words and presses start there too. */
+[data-align='start'] .text {
+  text-align: left;
+}
+[data-align='start'] .actions,
+[data-align='start'] .code {
+  justify-content: flex-start;
+}
+
 /* ---- a code to type ---- */
 .code {
   display: flex;
