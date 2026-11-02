@@ -14,10 +14,6 @@
   color: var(--t-1);
   font-weight: 600;
 }
-.none {
-  color: var(--t-4);
-}
-
 /* one run, the chip's size and baseline; cut with an ellipsis, so the chip and the actions keep their room */
 .said {
   flex: 0 1000 auto;

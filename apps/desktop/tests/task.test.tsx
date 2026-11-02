@@ -2140,7 +2140,7 @@ describe('a task', () => {
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Claude Opus, via Claude Codenot pinned', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
+    ).toEqual(['Claude Opus, via Claude Code', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))

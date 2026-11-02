@@ -18,7 +18,6 @@ export interface ModelPickText {
   /** The button's name: whose pick it is, then what it shows. */
   current: (owner: string, model: string, effort: string | null) => string
   pinned: string
-  notPinned: string
   effort: string
   /** The effort in use is the model's default. */
   isDefault: (model: string) => string
@@ -37,7 +36,6 @@ export const modelPickText: ModelPickText = {
   label: (owner) => `${owner} model and effort`,
   current: (owner, model, effort) => `${owner}: ${model}${effort ? ` ${effort}` : ''}`,
   pinned: 'Pinned models',
-  notPinned: 'not pinned',
   effort: 'Effort',
   isDefault: (model) => `${model} default`,
   otherDefault: (level) => `default ${level}`,
@@ -181,7 +179,6 @@ export function ModelPick({
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
                 {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>

@@ -148,7 +148,7 @@ export const Room: Story = {
     const page = within(document.body)
     await expect(page.getByText('Side · 62%')).toBeInTheDocument()
     await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
-    await expect(page.getByText('no reading')).toBeInTheDocument()
+    await expect(page.queryByText('no reading')).toBeNull()
     await expect(within(canvasElement).getByText('3% left · until 14:00')).toBeInTheDocument()
   },
 }
