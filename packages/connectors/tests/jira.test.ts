@@ -352,7 +352,7 @@ describe('Jira Cloud', () => {
       const credential = Effect.succeed<Credential>({ kind: 'basic', user: 'you@meridian.dev', token: 'ATATT3x' })
       const tracker = makeJiraCloud({ fetch, apiUrl: CLOUD, webUrl: `${own}/browse/HHH-1`, credential })
       assert.strictEqual((yield* tracker.issue('HHH-20844')).url, `${own}/browse/HHH-20844`)
-      assert.isTrue(sent.every((request) => !request.url.startsWith(own)))
+      assert.isTrue(sent.every((request) => new URL(request.url).origin !== own))
     }),
   )
 

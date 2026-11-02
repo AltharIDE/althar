@@ -1098,7 +1098,7 @@ describe('checking a Jira connection', () => {
       const report = yield* accessJira(inputOf(fetch, { apiUrl: CLOUD, webUrl: 'https://tickets.northwind.dev', credential }))
       assert.deepStrictEqual(report.lines[0], line('site', 'ok', { fact: 'tickets.northwind.dev' }))
       assert.deepStrictEqual(states(report), ['site ok', 'account ok', 'read ok', 'comment ok', 'move ok'])
-      assert.isTrue(sent.every((request) => !request.url.includes('tickets.northwind.dev')))
+      assert.isTrue(sent.every((request) => new URL(request.url).host !== 'tickets.northwind.dev'))
     }),
   )
 
