@@ -31,6 +31,14 @@ import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
+import {
+  closePullRequest,
+  markReady,
+  readDefaultBranchChecks,
+  replyOnPullRequest,
+  reopenPullRequest,
+  rerunChecks,
+} from './coordinatorPullRequests'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
@@ -1107,8 +1115,8 @@ export class Coordinator extends Context.Service<
             disposition: now === true ? 'interrupt_and_continue' : 'after_current',
             quiet: true,
           })
-          // Queued for a lead that isn't running, it waits until one starts: the coordinator says so to the person.
-          return Option.isSome(lead)
+          const started = Option.isNone(lead) && (yield* sessions.startLast(task.threadId))
+          return Option.isSome(lead) || started
             ? `Passed on to ${task.slug}'s lead.`
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
@@ -1576,6 +1584,60 @@ export class Coordinator extends Context.Service<
           },
           findPulls,
         ),
+        tool(
+          'rerun_check',
+          "Runs a failed check once more, as for one that may have failed by chance (a flaky test, a runner that went away): on a pull request of the project's by its link or number (pull_request), or on the default branch's latest commit with repository (or without, in a project of one). With check, the one by that name; without, each that failed. GitHub runs an Actions job again, GitLab a pipeline's job, Bitbucket Cloud the pipeline, whole, on the same commit; Bitbucket Data Center's builds are another service's, so it says whose and links the build. A check its host can't run again is said so, with its page. You may do this unasked when a failure looks like chance; fix one that is the change's instead.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string', description: 'Its link, or its number: #123. Leave it out for the default branch.' },
+              repository: {
+                type: 'string',
+                description: 'For the default branch: the repository, by name. Needed only in a project of several.',
+              },
+              check: { type: 'string', description: 'A check by its name, as read_pull_request gives it.' },
+            },
+          },
+          (access, input) => rerunChecks(access.projectId, input),
+        ),
+        tool(
+          'read_default_branch_checks',
+          "The checks on the latest commit of a repository's default branch (main, often), with the end of the first failed ones' logs: to tell whether a check failing on a pull request fails there too, broken already rather than by the change. repository names it, in a project of several. It only reads.",
+          { type: 'object', properties: { repository: { type: 'string' } } },
+          (access, input) => readDefaultBranchChecks(access.projectId, input),
+        ),
+        tool(
+          'mark_ready',
+          'Marks a draft pull request that Althar opened ready for review, by its link or number. It can go back to a draft on the host, so you may do it unasked when its task is done. Not for one a person opened.',
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => markReady(access.projectId, input),
+        ),
+        tool(
+          'close_pull_request',
+          "Closes, without merging, a pull request that Althar opened, by its link or number. reopen_pull_request undoes it, so you may close one that is plainly dead (superseded, abandoned) unasked and say so. On Bitbucket Cloud declining is final: there it waits for the person's word and is refused here. Not for one a person opened.",
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => closePullRequest(access.projectId, input),
+        ),
+        tool(
+          'reopen_pull_request',
+          "Opens a closed pull request that Althar opened again, by its link or number: on GitHub, GitLab and Bitbucket Data Center. Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => reopenPullRequest(access.projectId, input),
+        ),
+        tool(
+          'reply_on_pull_request',
+          "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. For a pull request Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it waits for the person's word and is refused here. A change to the code is a task, not a reply.",
+          {
+            type: 'object',
+            properties: { pull_request: { type: 'string' }, body: { type: 'string' }, thread_id: { type: 'string' } },
+            required: ['pull_request', 'body'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const running = yield* sessions.running(access.threadId)
+              return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
+            }),
+        ),
         draftIssueTool,
         tool(
           'list_models',
@@ -1757,7 +1819,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'message_lead',
-          "Passes a message to a task's lead: after its current turn, or at once with now.",
+          "Passes a message to a task's lead, starting it if it stopped: after its current turn, or at once with now. It waits for an agent place and available usage.",
           {
             type: 'object',
             properties: { task: { type: 'string' }, message: { type: 'string' }, now: { type: 'boolean' } },

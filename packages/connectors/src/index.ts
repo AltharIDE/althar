@@ -8,7 +8,17 @@ export { makeGitLab } from './gitlab'
 export { type Fetch, makeHttp } from './http'
 export { makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 export { makeLinear } from './linear'
-export { HOSTED, type KnownHosts, type LinkRef, linksIn, newPullRequestLink, parseLink, parseRemote, type RemoteRef } from './links'
+export {
+  HOSTED,
+  type KnownHosts,
+  type LinkRef,
+  linksIn,
+  looksLikeJira,
+  newPullRequestLink,
+  parseLink,
+  parseRemote,
+  type RemoteRef,
+} from './links'
 export * from './model'
 export { addressOf, available, classicTokenPage, hostedOf, type ProductInfo, products, type TokenMade } from './products'
 export { identify, type Identified } from './servers'
