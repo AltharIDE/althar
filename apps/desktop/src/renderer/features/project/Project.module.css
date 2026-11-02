@@ -99,9 +99,3 @@
   color: var(--danger);
   font-size: 13px;
 }
-
-.quiet {
-  margin: 0;
-  color: var(--t-3);
-  font-size: 13px;
-}

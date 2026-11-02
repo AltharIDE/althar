@@ -38,8 +38,8 @@ export class PlanOnly extends Schema.TaggedError<PlanOnly>()('PlanOnly', { messa
 /** Why an automation's run can't run on these accounts, as its history and its task's thread say it. */
 export const planOnlyWords = (paidBy: ReadonlyArray<'plan' | 'key' | 'unknown'>) =>
   paidBy.includes('unknown') || paidBy.length === 0
-    ? 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
-    : 'Its agent pays per use, and automations run on a plan only for now.'
+    ? 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
+    : 'Automations run only on a plan for now, and its agent pays per use.'
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
@@ -86,11 +86,11 @@ export const lowWords = (input: {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const work = step?.work ?? 'the step'
   if (input.to !== undefined)
-    return `${input.from} has ${roomWords(input.room, input.now)}, so ${input.to.agent} takes ${work} instead${
+    return `${input.from} has ${roomWords(input.room, input.now)}. ${input.to.agent} takes ${work} instead${
       input.to.model === null ? '' : `, on ${input.to.model}`
     }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
   const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
-  return `${input.from} has ${roomWords(input.room, input.now, false)}, so ${work} ${step?.waits ?? 'waits'} ${back}. To carry on now, pick another model on the task.`
+  return `${input.from} has ${roomWords(input.room, input.now, false)}. ${capitalized(work)} ${step?.waits ?? 'waits'} ${back}.`
 }
 
 /** An account that is out: until its reset, if it said, and when it is tried again either way. */
@@ -146,12 +146,10 @@ export const outWords = (input: {
       input.to.model === null ? '' : `, on ${input.to.model}`
     }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
-  const until = back === null ? `until ${input.from} is back` : `until ${back}, when ${input.from} is back`
+  const until = back === null ? `until ${input.from} is back` : `until ${back}`
   if (input.waits === 'message') return `${out}. Your message waits ${until}.`
   const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
-  return input.nothingFree === true
-    ? `${out}. No other model was free, so ${waits} ${until}. Pick one on the task to carry on now.`
-    : `${out}. ${capitalized(waits)} ${until}. To carry on now, pick another model on the task.`
+  return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
 
 /** Words that open a sentence. */
@@ -233,6 +231,12 @@ export class Limits extends Context.Service<
       readonly rather?: ReadonlyArray<string>
       readonly planned?: { readonly agentId: string; readonly model: string | null }
     }): Effect.Effect<ReadonlyArray<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }>, Failure>
+    /**
+     * Whether any of these, as `choices` lists them, could take the work over
+     * now: signed in and not out of usage. Paid per use counts: the person may
+     * choose to spend their money, so that is a call of theirs.
+     */
+    canTakeOver(choices: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>): Effect.Effect<boolean, Failure>
     /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
@@ -478,6 +482,15 @@ export class Limits extends Context.Service<
                 if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
             }
             return found
+          }),
+        canTakeOver: (choices) =>
+          Effect.gen(function* () {
+            for (const choice of choices) {
+              const account = (yield* accounts.of(choice.agentId)).find((each) => each.id === choice.accountId)
+              if (account === undefined || (yield* signIns.account(account)).status === 'signed_out') continue
+              if (Option.isNone(yield* outOf(account))) return true
+            }
+            return false
           }),
         modelFor,
         named: (agentId, model, accountId = null) =>

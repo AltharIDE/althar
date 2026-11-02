@@ -93,7 +93,8 @@ export const text = {
     closed: 'Closed',
     ready: 'Ready for review:',
   },
-  failing: (names: ReadonlyArray<string>) => `Failed: ${names.join(', ')}`,
+  /** The checks that failed: by name while there are two at most, else how many. */
+  failing: (names: ReadonlyArray<string>) => (names.length > 2 ? `${names.length} failed` : `Failed: ${names.join(', ')}`),
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
   /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
@@ -101,9 +102,11 @@ export const text = {
     running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
     done: (setup: SetupContent) => (setup.kept ? `Set up ${setup.repository}` : `Installed dependencies in ${setup.repository}`),
     failed: (setup: SetupContent) =>
-      `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}. The lead is told.`,
-    stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped as Althar quit. It runs again before the lead starts.`,
-    timedOut: 'It took too long, and was stopped.',
+      `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}.`,
+    stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped when Althar quit.`,
+    /** A recorded setup that ran, but couldn't copy files it names from the person's checkout. */
+    missing: (setup: SetupContent, files: ReadonlyArray<string>) => `Couldn’t copy ${files.join(', ')} into ${setup.repository}’s folder.`,
+    timedOut: 'Timed out.',
   },
   /** What passing it on says to the lead, in the person's name. */
   passed: (said: string, text: string) =>
@@ -121,15 +124,18 @@ export const text = {
  */
 function SetupView({ setup }: { setup: SetupContent }) {
   const { ended } = setup
-  const failed = ended !== null && !ended.stopped && ended.code !== 0
+  const missing = ended?.missing ?? []
+  const failed = ended !== null && !ended.stopped && (ended.code !== 0 || missing.length > 0)
   const line =
     ended === null
       ? text.setup.running(setup)
       : ended.stopped
         ? text.setup.stopped(setup)
-        : failed
-          ? text.setup.failed(setup)
-          : text.setup.done(setup)
+        : ended.code === 0 && missing.length > 0
+          ? text.setup.missing(setup, missing)
+          : failed
+            ? text.setup.failed(setup)
+            : text.setup.done(setup)
   return (
     <>
       <ThreadDivider icon="terminal">{line}</ThreadDivider>

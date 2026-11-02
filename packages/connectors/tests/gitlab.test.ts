@@ -1157,3 +1157,81 @@ describe('GitLab listing merge requests', () => {
     )
   })
 })
+
+describe('GitLab’s pictures', () => {
+  const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'say "cheese".png', mediaType: 'image/png' }
+
+  it.effect('uploads one to the project, as a form, served from the project’s own page', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        [
+          'POST',
+          `${PROJECT}/uploads`,
+          {
+            status: 201,
+            json: {
+              alt: 'say -cheese-',
+              url: '/uploads/66dbcd21ec5d24ed6ea225176098d52b/say_-cheese-.png',
+              full_path: '/-/project/34675721/uploads/66dbcd21ec5d24ed6ea225176098d52b/say_-cheese-.png',
+              markdown: '![say -cheese-](/uploads/66dbcd21ec5d24ed6ea225176098d52b/say_-cheese-.png)',
+            },
+          },
+        ],
+      ])
+      assert.isTrue(host.capabilities.pictures)
+      const url = yield* host.uploadPicture?.(repository, picture) ?? Effect.die('none')
+      assert.strictEqual(url, 'https://gitlab.com/meridian/payments/api/uploads/66dbcd21ec5d24ed6ea225176098d52b/say_-cheese-.png')
+      const [asked] = sent
+      const boundary = /boundary=(.+)$/.exec(asked?.headers['content-type'] ?? '')?.[1] ?? ''
+      assert.match(asked?.headers['content-type'] ?? '', /^multipart\/form-data; boundary=althar-[0-9a-f]{24}$/)
+      const form = new TextDecoder().decode(asked?.bytes)
+      assert.include(
+        form,
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="say -cheese-.png"\r\nContent-Type: image/png\r\n\r\n`,
+      )
+      assert.isTrue(form.endsWith(`\r\n--${boundary}--\r\n`))
+    }),
+  )
+
+  it.effect('never takes an address elsewhere for one', () =>
+    Effect.gen(function* () {
+      const { host } = gitlab([['POST', `${PROJECT}/uploads`, { status: 201, json: { url: 'https://example.com/a.png' } }]])
+      const failed = yield* Effect.flip(host.uploadPicture?.(repository, picture) ?? Effect.die('none'))
+      assert.strictEqual(failed.reason, 'invalid_response')
+    }),
+  )
+
+  it.effect('writes a note in the conversation anew', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['PUT', `${PROJECT}/merge_requests/12/notes/301`, { json: note(301, user(5, 'you'), 'Again', '2026-10-31T12:00:00Z') }],
+      ])
+      const edited = yield* host.editComment?.(repository, 12, '301', 'Again') ?? Effect.die('none')
+      assert.deepStrictEqual(sent[0]?.body, { body: 'Again' })
+      assert.strictEqual(edited.id, '301')
+      assert.strictEqual(edited.body, 'Again')
+      assert.isNull(edited.threadId)
+    }),
+  )
+})
+
+describe('GitLab opening a closed merge request again, and running a pipeline’s jobs', () => {
+  it.effect('opens a closed one, leaves an open one as it is, and says a merged one can’t be', () =>
+    Effect.gen(function* () {
+      assert.isTrue(gitlab([]).host.capabilities.reopen)
+      assert.isTrue(gitlab([]).host.capabilities.rerun)
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'closed' }) }],
+        ['PUT', `${PROJECT}/merge_requests/12`, { json: request({ state: 'opened' }) }],
+      ])
+      assert.strictEqual((yield* host.reopenChange(repository, change)).state, 'open')
+      assert.deepStrictEqual(sent.find((one) => one.method === 'PUT')?.body, { state_event: 'reopen' })
+      const open = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request() }]])
+      assert.strictEqual((yield* open.host.reopenChange(repository, change)).state, 'open')
+      assert.isFalse(open.sent.some((one) => one.method === 'PUT'))
+      const merged = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'merged' }) }]])
+      assert.deepInclude(yield* Effect.flip(merged.host.reopenChange(repository, change)), { reason: 'rejected' })
+      assert.isFalse(merged.sent.some((one) => one.method === 'PUT'))
+    }),
+  )
+})

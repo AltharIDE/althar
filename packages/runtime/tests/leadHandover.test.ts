@@ -111,7 +111,7 @@ const finished = (threadId: string) => answered(threadId, 1)
 /** The quiet lines in the thread. */
 const titles = (threadId: string) => Effect.map(notices(threadId), (said) => said.map((notice) => notice.title))
 
-const AFRESH = 'Started Fake codex afresh, briefed from the task, to keep its context small.'
+const AFRESH = 'Started Fake codex afresh.'
 
 describe('when to hand a lead over', () => {
   it('past its mark at any turn, or 80% of a smaller window; past a lower one at a break', () => {

@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
+import { ClientAuthority, Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
 import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -48,7 +48,12 @@ const connected = async () => {
       scope,
     ),
   )
-  await serving(connection(emitterPort(channel.port1 as never, (data) => data)).pipe(Layer.provide(Layer.succeedContext(context))))
+  await serving(
+    connection(
+      emitterPort(channel.port1 as never, (data) => data),
+      { kind: 'window' },
+    ).pipe(Layer.provide(Layer.succeedContext(context))),
+  )
   const client = await connect(channel.port2 as unknown as DomMessagePort)
   /** A folder the person chose, as the main process allows it. */
   const grant = (path: string) => Effect.runPromise(Context.get(context, Folders).allow(path))
@@ -211,6 +216,8 @@ describe('the client', () => {
           SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
+          PlaceRepository: () => Effect.die('unused'),
+          MakeRepository: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
           ReplacePullRequest: () => Effect.die('unused'),
           MergeNote: () => Effect.die('unused'),
@@ -250,6 +257,8 @@ describe('the client', () => {
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
           SetPostTeamReviews: () => Effect.die('unused'),
+          SetReviewSeal: () => Effect.die('unused'),
+          SetReviewSealStyle: () => Effect.die('unused'),
           GetAutomations: () => Effect.die('unused'),
           GetAutomation: () => Effect.die('unused'),
           MakeAutomation: () => Effect.die('unused'),
@@ -290,6 +299,7 @@ describe('the client', () => {
           AbandonTask: () => Effect.die('unused'),
           MarkTaskDone: () => Effect.die('unused'),
           KeepTaskForLater: () => Effect.die('unused'),
+          SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
@@ -323,6 +333,7 @@ describe('the client', () => {
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
+          PostScreenshots: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
           GetProjectNotes: () => Effect.die('unused'),
@@ -379,6 +390,7 @@ describe('the client', () => {
     )
     await serving(
       RpcServer.layer(Api).pipe(
+        Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
         Layer.provide(handlers),
         Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
       ),
@@ -460,6 +472,7 @@ describe('automations', () => {
     )
     // Handlers made on the fly need nothing, as their type can't say.
     const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
+      Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
       Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
       Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
     ) as Layer.Layer<never>

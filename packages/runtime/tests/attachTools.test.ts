@@ -80,7 +80,7 @@ const forked = (state?: 'open' | 'closed') => {
 
 const withQueries = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
   )
 
 /** GitHub connected, the fork opened as a project whose pull requests open upstream, a task in it, and the coordinator's tools. */
@@ -222,7 +222,14 @@ describe('attaching a task to a pull request, from the window', () => {
             checksAppear: Duration.zero,
           }),
         )
-        yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind: 'window' },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
         const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
         const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
         yield* client.ConnectToken({ commandId: commandId(), product: 'github', token: 't', webUrl: HOST })

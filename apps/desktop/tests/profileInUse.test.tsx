@@ -64,11 +64,11 @@ describe('main, hearing it', () => {
 describe('the window, on a profile that is open elsewhere', () => {
   const failure: StoreFailure = { stopped: 'held', backup: null, reason: IN_USE }
 
-  it('says so, says Althar can open again once that closes, and tries again on the person’s word', async () => {
+  it('says so, says to close the other, and tries again on the person’s word', async () => {
     const host = fakeHost()
     render(<ProfileInUseView failure={failure} host={host} />)
     expect(screen.getByRole('alert').textContent).toContain(IN_USE)
-    expect(screen.getByRole('alert').textContent).toContain('Once it closes, Althar can open again.')
+    expect(screen.getByRole('alert').textContent).toContain('Close it, then try again.')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(host.tryAgain).toHaveBeenCalledOnce()
   })

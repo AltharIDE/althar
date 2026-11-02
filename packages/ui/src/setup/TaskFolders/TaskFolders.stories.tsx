@@ -83,7 +83,7 @@ export const Smart: Story = {
     await expect(c.getByRole('button', { name: /Can go now 9\.5 GB.*Held back 7\.0 GB/ })).toBeVisible()
     await userEvent.click(c.getByRole('combobox', { name: 'Remove finished tasks’ folders' }))
     await userEvent.click(within(document.body).getByRole('option', { name: 'After a week' }))
-    await expect(c.getByText('A week after a task settles. Their branches stay.')).toBeVisible()
+    await expect(c.getByText('Their branches stay.')).toBeVisible()
   },
 }
 
@@ -183,7 +183,7 @@ export const FreedLittle: Story = {
 export const OnlyWhenICleanUp: Story = {
   render: () => <Row wait="never" />,
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Nothing goes by itself.')).toBeVisible()
+    await expect(within(canvasElement).getByText('Their branches stay.')).toBeVisible()
   },
 }
 

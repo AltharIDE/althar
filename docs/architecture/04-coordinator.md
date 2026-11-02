@@ -128,6 +128,10 @@ provisional.
 | `read_change` | A task's diff and checks | Read |
 | `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)) | Read |
 | `read_check_log` | A check's whole log on one of the project's pull requests, a page at a time ([ADR-041](../decisions/041-what-failed-said-in-full.md)) | Read |
+| `rerun_check` | Runs a failed check on a pull request of the project's, or on the default branch's latest commit, once more: the one named, or each that failed. GitHub's Actions job, GitLab's pipeline job, Bitbucket Cloud's pipeline whole on the same commit; Bitbucket Data Center's builds are another service's, so it says whose and links the build ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)) | Command, undone in a step |
+| `read_default_branch_checks` | The checks on a repository's default branch's latest commit, with the end of the first failed ones' logs | Read |
+| `mark_ready`, `close_pull_request`, `reopen_pull_request` | Marks ready, closes unmerged, or opens again a pull request Althar opened, by its number or link. Each can be taken back in a step. Bitbucket Cloud can't reopen a declined one, so closing there waits for the person's word, and is refused until that is built; a pull request a person opened is theirs | Command, undone in a step |
+| `reply_on_pull_request` | Replies, signed as from Althar, in a thread or a pull request's conversation: on one Althar opened, or whose author is the connected account or one of the repository's own people. An outside author's waits for the person's word, since the notification can't be taken back | Command, undone in a step |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
 | `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
@@ -155,7 +159,8 @@ A lead's own tools, beside `finish_step` and its pull request's, do what its
 sandbox would refuse, outside it (ADR-057): `install_dependencies` runs its
 worktree's setup again; `run_project` and `stop_project` run the project in
 its worktree, as the run the person sees; `screenshot`, as above; and
-`rerun_check` runs checks on its pull request again. For checks that fail,
+`rerun_check` runs checks on its pull request again (the coordinator's
+runs them on any of the project's, and on the default branch). For checks that fail,
 `read_default_branch_checks` reads those on its default branch's latest
 commit, and `hand_checks_to_person` brings a failure that isn't the change's
 to the person, with a line on why (ADR-070). `show_pictures` shows
@@ -291,3 +296,66 @@ in the tools assumes one coordinator: every command carries its actor.
   and running tasks as they were.
 - Switching the coordinator's agent keeps the thread.
 - A coordinator out of usage pauses no task.
+
+## The person's word and errands
+
+The host records each message's sender on the connection: `window`,
+`paired_device` (with its device id), `socket`, or `internal`. A client never
+supplies its own authority in a message payload. Free text supplied with an
+`AnswerStuck` tell keeps that connection’s sender,
+including while waiting for capacity. Generated quiet notices from Changes,
+Reviews and IssueChanges, and structured question-answer summaries, remain
+system input: they report a decision rather than authorizing another action.
+New RPC calls are refused to a socket until the contract marks them
+`SocketAllowed` (ADR-048).
+Permission answers and widening rules remain the person's calls.
+
+Each delivered turn records `person`, `news`, or `system` as its origin.
+`Sessions.send` accepts an explicit `origin: 'news'` for a quiet wake.
+`ToolAccess` exposes `byPerson`, `origin`, `turnId` and the person's message
+ids, resolved from the live delivery on every call. The `TurnStarted.byPerson`
+signal also retains shown messages for the stall watch; it is not tool
+authorization. A session's old messages, a socket's visible message, and a
+caller-supplied `byPerson` cannot authorize
+a new action. `read_turn` gives the agent the same facts.
+
+`Errands` owns durable ordered steps. `keep_errand` requires a person's
+message in the live turn and keeps its exact words and id, each tool and its
+semantic arguments, target, head, target branch, task and waits. Kept, paused,
+resumed and completed errands leave lines in the thread. Task cards show the
+open wait, and fresh coordinator and lead briefs include the open records.
+`read_errands` reads the complete steps. Resuming records the fresh message
+separately, preserving the original request. An objection uses `pause_errand`;
+only fresh word can resume or cancel. The shared change sweep reports a day
+without news, or a `required-check-missing` wait whose `since` marks an hour
+after the other checks finished, at most once a day. The news watch can read
+`errand_steps.waits` and must call `Errands.news(id)` on every poll change
+touching an errand’s targets. This refreshes the no-news clock only; it does
+not inspect targets or end errands. The news task must also wake the owning
+thread for a fresh read when another writer pushes or a target closes, merges
+or leaves its queue. Until that watch is connected, those changes are detected
+only by the next attempted step, and the no-news clock runs from keep/resume.
+
+An acting tool declares `kind: 'asked-for'` and supplies an `AskedAction`
+instead of an ordinary call. The shared tool server owns its authorization,
+fresh read and mutation receipt. It accepts a person's message id from this
+turn or an exact open errand step in this thread. Steps run in order. A read
+reporting an objection pauses the errand; another writer, a changed target
+branch or someone else settling the target ends it. A head that moved is
+refused, except an errand's head moved by the task's lead or Althar, which the
+action receives from that fresh read. A tool binding a branch must return
+that branch in its read: omitting it refuses this attempt and leaves the
+errand open.
+
+The same tool, target, head, branch and semantic request share a serialized
+receipt across messages, errands and sessions. Include an observed task
+revision or operation generation in the request where the same operation may
+legitimately recur. An action may fail with `ActionNotPerformed` only with
+positive proof it neither happened nor remains in flight (such as a host’s definite refusal).
+That receipt is failed and permits retry after another fresh read. Every other
+`ToolRefused` from the action is conservatively treated as a lost answer.
+A lost answer or `{ pending: true, answer }` stays uncertain. Only a read proving it done confirms it; only `absent`, positive
+proof it neither happened nor remains in flight, permits another attempt.
+A confirmed receipt repairs an interrupted completion and its chat line
+without acting again. Host-specific reads and acting tools are later parts
+of ADR-081; this foundation is shared by every host and agent.

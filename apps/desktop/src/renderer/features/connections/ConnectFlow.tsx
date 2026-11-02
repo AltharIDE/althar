@@ -42,13 +42,40 @@ const and = (items: ReadonlyArray<string>): string =>
   items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.slice(-1).join('')}`
 
 /** The repositories of some places by their paths; on GitHub, whose token is made for one owner, by name where they share it. */
-const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): string => {
+const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): ReadonlyArray<string> => {
   const paths = [...new Set(places.flatMap((place) => place.repositories))]
   const github = places.every((place) => place.product === 'github')
-  return and(!github || ownerOf(places) === undefined ? paths : paths.map((path) => path.split('/').slice(1).join('/')))
+  return !github || ownerOf(places) === undefined ? paths : paths.map((path) => path.split('/').slice(1).join('/'))
 }
 
+/** Repositories by name, two at most; more, as a count. */
+const named = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `${paths.length} repositories`)
+
+/** Repositories to pick on the service's page, past two: one to a line. */
+const Names = ({ paths }: { paths: ReadonlyArray<string> }) =>
+  paths.length <= 2 ? null : (
+    <ul className={s.names}>
+      {paths.map((path) => (
+        <li key={path}>{path}</li>
+      ))}
+    </ul>
+  )
+
+/** Repositories in a step's words: two at most by name; more, counted. */
+const these = (paths: ReadonlyArray<string>) => (paths.length <= 2 ? and(paths) : `these ${paths.length}`)
+
+/** A step that picks repositories: its words, and past two, the list under them. */
+const toPick = (paths: ReadonlyArray<string>, words: (names: string) => string): ReactNode => (
+  <>
+    {words(these(paths))}
+    <Names paths={paths} />
+  </>
+)
+
 const projectsIn = (places: ReadonlyArray<ConnectPlace>) => [...new Set(places.map((place) => place.project))]
+
+/** Projects by name, two at most; more, as a count. */
+const projectsWords = (projects: ReadonlyArray<string>) => (projects.length <= 2 ? and(projects) : `${projects.length} projects`)
 
 /** A product's name for what it opens: pull requests, or GitLab's merge requests. */
 const changes = (product: Product) => (product === 'gitlab' ? 'merge requests' : 'pull requests')
@@ -64,15 +91,14 @@ export const text = {
   connect: (service: string) => `Connect ${service}`,
   again: (service: string) => `Sign in to ${service} again`,
   ways: (service: string) => `Ways to connect ${service}`,
-  for: (projects: ReadonlyArray<string>) => `For ${and(projects)}`,
+  for: (projects: ReadonlyArray<string>) => `For ${projectsWords(projects)}`,
   forRepositories: (projects: ReadonlyArray<string>, repositories: string, host: string | null) =>
-    `For ${and(projects)}: ${repositories}${host === null ? '' : ` on ${host}`}`,
-  forMany: (projects: ReadonlyArray<string>, count: number) => `For ${and(projects)}: ${count} repositories`,
+    `For ${projectsWords(projects)}: ${repositories}${host === null ? '' : ` on ${host}`}`,
+  forMany: (projects: ReadonlyArray<string>, count: number) => `For ${projectsWords(projects)}: ${count} repositories`,
   hostsFor: 'Pull requests, their checks and review comments',
   trackersFor: 'Issues become tasks, and tasks move their issues',
-  kept: (service: string, host: boolean) =>
-    `Kept encrypted on ${device.this}. Agents never get it; they ${host ? `reach ${service}` : 'read issues'} through Althar.`,
-  stopped: 'Its token stopped working. Tasks can’t reach it until it’s back.',
+  kept: `Kept encrypted on ${device.this}`,
+  stopped: 'Its token stopped working.',
   anotherWay: 'Another way',
   ownServer: 'On a company’s own server',
   reading: 'Finding the ways in',
@@ -101,7 +127,7 @@ export const text = {
 
   /* the browser */
   typeCode: (service: string) => `Type this code on ${service}`,
-  codeOpen: (page: string) => `${page} is open in your browser. Type the code there, then Authorize Althar.`,
+  codeOpen: (page: string) => `Type it on ${page}, then Authorize Althar.`,
   waitingApprove: (minutes: number | null) =>
     minutes === null ? 'Waiting for you to approve' : `Waiting for you to approve · the code lasts ${minutes} min`,
   openAgain: 'Open the page again',
@@ -109,15 +135,19 @@ export const text = {
   letIn: (owner: string) => `Let Althar into ${owner}`,
   notInstalled: (login: string, projects: ReadonlyArray<string>, owner: string) => (
     <>
-      Signed in as <b>{login}</b>. {and(projects)}’s repositories belong to <b>{owner}</b>, where Althar isn’t installed yet.
+      Signed in as <b>{login}</b>. {projectsWords(projects)}’s repositories belong to <b>{owner}</b>, where Althar isn’t installed yet.
     </>
   ),
   install: (owner: string) => `Install Althar on ${owner}`,
-  installSteps: (repositories: string) => ['Choose Only select repositories.', `Pick ${repositories}.`, 'Install.'],
+  installSteps: (repositories: ReadonlyArray<string>) => [
+    'Choose Only select repositories.',
+    toPick(repositories, (names) => `Pick ${names}.`),
+    'Install.',
+  ],
   waitingFor: (who: string) => `Waiting for ${who}`,
-  ownersApprove: (owner: string) => `If you don’t own ${owner}, GitHub asks its owners, and Althar carries on once they approve.`,
+  ownersApprove: (owner: string) => `If you don’t own ${owner}, its owners approve it first.`,
   approveOn: (service: string) => `Approve Althar on ${service}`,
-  approveOpen: (host: string) => `${host} is open in your browser. Pick your workspace, then Approve.`,
+  approveOpen: (host: string) => `Pick your workspace on ${host}, then Approve.`,
   copyLink: 'Copy the link for another browser',
 
   /* gh's or glab's sign-in */
@@ -127,7 +157,6 @@ export const text = {
   accountOn: (account: string, host: string) => `${account} on ${host}`,
   reachesAll: (account: string, owner: string | undefined, host: boolean) =>
     `Every ${host ? 'repository' : 'project'} ${account} can${owner === undefined ? '' : `, ${owner}’s included`}`,
-  copied: (tool: string) => `Althar keeps its own copy of the token, encrypted. ${tool} keeps working as it does.`,
   useIt: 'Use this sign-in',
 
   /* a server */
@@ -145,7 +174,6 @@ export const text = {
   nothingAt: (host: string) => `Nothing answers at ${host}`,
   notService: (host: string, service: string) => `${host} isn’t a ${service} server`,
   notSite: (host: string) => `${host} isn’t a Jira site`,
-  tokenThere: 'On this server Althar connects with a token you make there.',
   instead: (host: string) => `${host} instead`,
   continue: 'Continue',
 
@@ -158,14 +186,13 @@ export const text = {
   openAtlassian: 'Open Atlassian’s API tokens',
   openLinear: 'Open Linear’s settings',
   openAccessTokens: (host: string) => `Open ${host}’s access tokens`,
-  githubFilled: (owner: string | undefined) =>
-    `It opens with the name, ${owner === undefined ? '' : `${owner} as the owner, `}90 days and the permissions set.`,
-  classicFilled: 'It opens with the note Althar and the repo and workflow scopes ticked.',
-  gitlabFilled: 'It opens with the name Althar and the api scope ticked.',
-  githubSteps: (repositories: string | null) => [
+  githubFilled: (owner: string | undefined) => (owner === undefined ? 'Opens filled in.' : `Opens filled in, for ${owner}.`),
+  classicFilled: 'Opens with the repo and workflow scopes ticked.',
+  gitlabFilled: 'Opens with the api scope ticked.',
+  githubSteps: (repositories: ReadonlyArray<string> | null) => [
     repositories === null
       ? 'Under Repository access, choose the repositories Althar works in.'
-      : `Under Repository access, choose Only select repositories: ${repositories}.`,
+      : toPick(repositories, (names) => `Under Repository access, choose Only select repositories: ${names}.`),
     'Generate token, then copy it.',
   ],
   classicSteps: ['Set when it runs out.', 'Generate token, then copy it.'],
@@ -209,7 +236,7 @@ export const text = {
   emailFrom: (project: string | null) => (project === null ? 'From your git config' : `From ${project}’s git config`),
   orPaste: 'Or paste it',
   check: 'Check',
-  keptToken: `Kept encrypted on ${device.this}, for Althar alone. It isn’t shown again.`,
+  keptToken: `Kept encrypted on ${device.this}.`,
   looksLike: (service: string, product: Product) =>
     product === 'bitbucket_cloud' || product === 'jira_cloud'
       ? 'An Atlassian token'
@@ -279,25 +306,24 @@ export const text = {
   why: {
     refused: (service: string) => `${service} didn’t take this token: it may be mistyped, revoked or run out.`,
     scope: (scope: string) => `The token wasn’t given the ${scope} scope.`,
-    permission: (permission: string, product: Product, need: AccessLine['need']) =>
-      `${permission} isn’t allowed on this token${need === 'changes' ? `, so a task would end on its branch` : ''}.`,
+    permission: (permission: string) => `${permission} isn’t allowed on this token.`,
     role: (role: string | null) => (role === null ? 'Your account can’t do this there.' : `As ${role}, your account can’t do this there.`),
-    unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${and(names)}.`,
+    unseen: (names: ReadonlyArray<string>) => `It doesn’t see ${named(names)}.`,
     notInstalled: (owner: string) => `Althar isn’t installed on ${owner} yet.`,
     restricted: (owner: string) => `${owner} keeps out apps that sign in with OAuth, gh among them, until its owners approve one.`,
     sso: (owner: string) => `${owner} signs in with SAML: the token needs authorizing for it.`,
-    noCheckRuns: 'GitHub gives fine-grained tokens no check runs, so a task sees commit statuses only.',
+    noCheckRuns: 'Fine-grained tokens can’t read check runs.',
     unreadable: (service: string) => `${service} doesn’t say what this token may change.`,
   },
   fix: {
-    githubSet: (what: string) => `Set ${what}, then Update. It stays the same token, so there’s nothing to paste again.`,
-    githubAdd: (names: string) => `Add ${names} under Repository access, then Update.`,
-    githubScope: (scope: string) => `Tick ${scope}, then Update token. It stays the same token, so there’s nothing to paste again.`,
+    githubSet: (what: string) => `Set ${what}, then Update.`,
+    githubAdd: (names: ReadonlyArray<string>) => `Add ${these(names)} under Repository access, then Update.`,
+    githubScope: (scope: string) => `Tick ${scope}, then Update token.`,
     remake: (service: string, scope: string) => `A ${service} token keeps the scopes it was made with: make one with ${scope}.`,
     restricted: (owner: string) => `Its owners can approve GitHub CLI for ${owner}, or you can make a token instead.`,
     sso: (owner: string) => `Authorize the token for ${owner} on GitHub, then check again.`,
-    classic: 'A classic token reads them: its page opens with the repo and workflow scopes ticked.',
-    role: 'That is your account’s role there, not the token’s: its owners can change it.',
+    classic: 'A classic token reads them.',
+    role: 'Your account’s role there: its owners can change it.',
     changeOn: (service: string) => `Change it on ${service}`,
     checkAgain: 'Check again',
     asItIs: 'Connect as it is',
@@ -308,10 +334,10 @@ export const text = {
     classicToken: 'Make a classic token',
   },
   expires: {
-    renews: (service: string) => `Through Althar’s ${service} app, which renews its own sign-in.`,
+    renews: (service: string) => `Through Althar’s ${service} app; renews itself.`,
     cli: (tool: string) => `${tool}’s token; it runs out when ${tool}’s does.`,
     on: (date: string) => `The token runs out on ${date}.`,
-    never: 'The token doesn’t run out; revoke it on Trello to stop it.',
+    never: 'The token doesn’t run out.',
   },
   done: 'Done',
 }
@@ -492,7 +518,7 @@ const whyOf = (reason: AccessReason, line: AccessLine, product: Product, service
     case 'scope':
       return text.why.scope(reason.scope)
     case 'permission':
-      return text.why.permission(reason.permission, product, line.need)
+      return text.why.permission(reason.permission)
     case 'role':
       return text.why.role(reason.role)
     case 'unseen':
@@ -536,7 +562,7 @@ const checkLines = (model: ConnectModel, product: Product): ReadonlyArray<Connec
   const service = serviceName(model.service)
   const webUrl = model.instance?.webUrl ?? ''
   const places = placesAt(model.guide?.places ?? [], product, webUrl)
-  const repositories = repositoriesIn(places)
+  const repositories = named(repositoriesIn(places))
   const said = (need: AccessLine['need']) => lineText(need, product, model, repositories)
   if (model.check !== null)
     return model.check.lines.map((line) => {
@@ -636,12 +662,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
 
   if (model.way === null || model.step === null) {
     return (
-      <ConnectCard
-        brand={brand}
-        title={text.connect(service)}
-        line={forLine(model.service, places)}
-        foot={text.kept(service, hostsCode(model.service))}
-      >
+      <ConnectCard brand={brand} title={text.connect(service)} line={forLine(model.service, places)} foot={text.kept}>
         <ConnectWays label={text.ways(service)} ways={model.ways.map((way) => wayOption(way, model))} onChoose={model.choose} />
         {model.serverWay !== null && (
           <ConnectActions align="start">
@@ -794,7 +815,6 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
     case 'cli': {
       if (way.kind !== 'cli') return null
       const cli = way.cli
-      const tool = cli.tool
       return (
         <>
           <ConnectFacts
@@ -804,7 +824,6 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
               { label: text.reaches, value: text.reachesAll(cli.account, owner, product === 'github') },
             ]}
           />
-          <ConnectText tone="note">{text.copied(tool)}</ConnectText>
           {model.cli.error !== null && <ConnectFound tone="no">{model.cli.error}</ConnectFound>}
           <ConnectActions primary>
             <Button busy={model.cli.busy} onClick={model.takeCli}>
@@ -859,7 +878,6 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
           ) : (
             said
           )}
-          {!site && <ConnectText tone="note">{text.tokenThere}</ConnectText>}
           <ConnectActions primary>
             <Button onClick={model.confirmAddress}>{site ? text.continue : text.makeToken}</Button>
             {!site && hosted !== undefined && hosted.webUrl !== null && (
@@ -1196,12 +1214,15 @@ function Fix({
         {text.fix.makeNew}
       </Button>
     )
-  const row = (note: string | null, ...presses: ReadonlyArray<ReactNode>) => (
+  /** The fix's words, past two repositories the list of them, and its presses. */
+  const listed = (note: string | null, paths: ReadonlyArray<string>, ...presses: ReadonlyArray<ReactNode>) => (
     <>
       {note !== null && <ConnectText tone="note">{note}</ConnectText>}
+      <Names paths={paths} />
       <ConnectActions>{presses}</ConnectActions>
     </>
   )
+  const row = (note: string | null, ...presses: ReadonlyArray<ReactNode>) => listed(note, [], ...presses)
   if (reason === null) return row(null, checkAgain, asItIs)
   switch (reason.kind) {
     case 'refused':
@@ -1225,7 +1246,7 @@ function Fix({
       )
     case 'unseen':
       return product === 'github' && reason.url !== null
-        ? row(text.fix.githubAdd(and(reason.names)), change(reason.url), checkAgain, asItIs)
+        ? listed(text.fix.githubAdd(reason.names), reason.names, change(reason.url), checkAgain, asItIs)
         : row(null, checkAgain, asItIs)
     case 'not_installed':
       return row(null, checkAgain, asItIs)

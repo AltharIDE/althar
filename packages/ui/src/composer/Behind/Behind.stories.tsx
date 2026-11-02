@@ -80,8 +80,7 @@ export const Waiting: Story = {
     await expect(chip).not.toHaveTextContent('finished')
     await userEvent.click(chip)
     const page = within(document.body)
-    await expect(await page.findByText('6 tasks are running; 1 of them only for a server it left running.')).toBeVisible()
-    await expect(page.getByText('Only its Dark mode preview keeps the place')).toBeVisible()
+    await expect(await page.findByText('Dark mode preview left running')).toBeVisible()
     await userEvent.click(
       page.getByRole('button', { name: 'Stop what Dark mode: a warm dark theme and Light/Dark/Match the Mac left running' }),
     )

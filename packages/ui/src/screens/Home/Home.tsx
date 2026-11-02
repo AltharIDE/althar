@@ -65,8 +65,6 @@ export interface HomeText {
     quiet: string
     /** Under it, while work is moving: how much, and where. */
     moving: (tasks: number, projects: number) => string
-    tellOne: string
-    tellMany: string
     talk: (project: string) => string
     /** More projects with no task yet than it offers ways to. */
     more: (n: number) => string
@@ -88,8 +86,6 @@ export const homeText: HomeText = {
     quiet: 'Nothing needs you',
     moving: (tasks, projects) =>
       `${tasks === 1 ? '1 task' : `${tasks} tasks`} moving in ${projects === 1 ? '1 project' : `${projects} projects`}.`,
-    tellOne: 'Tell its coordinator what you want done. It plans the tasks and hands them to your agents.',
-    tellMany: 'Tell a project’s coordinator what you want done. It plans the tasks and hands them to your agents.',
     talk: (project) => `Talk to ${project}’s coordinator`,
     more: (n) => (n === 1 ? '1 more under Projects' : `${n} more under Projects`),
   },
@@ -355,13 +351,7 @@ function Rest({
   // Where work is moving, its projects' marks stand up in place of Althar's.
   const moving = running.filter(movingOf)
   const where = projects.filter((p) => moving.some((run) => run.project.seed === p.project.seed))
-  const note = everyFresh
-    ? projects.length === 1
-      ? t.tellOne
-      : t.tellMany
-    : moving.length > 0
-      ? t.moving(moving.length, where.length)
-      : undefined
+  const note = !everyFresh && moving.length > 0 ? t.moving(moving.length, where.length) : undefined
   const ways = !hasSince && onTalk ? fresh.slice(0, REST_WAYS) : []
   const figure =
     where.length > 0 ? (

@@ -51,7 +51,7 @@ test('allows everything on a task or a project, clearing what waits, and says so
     await say(page, 'run each make deploy; npm run deploy; ./deploy.sh')
     await expect(page.getByRole('button', { name: 'Allow all 3' })).toBeVisible()
     await expect(page.getByRole('radio', { name: /Yes, and always allow/ })).toHaveCount(0)
-    await expect(page.getByText(/meridian always asks you about this, so there’s no “always allow”/)).toBeVisible()
+    await expect(page.getByText('meridian always asks about this.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Change it in Rules' })).toBeVisible()
     await shoot(page, 'app-burst-waiting.png')
 

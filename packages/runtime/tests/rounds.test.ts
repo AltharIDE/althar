@@ -24,6 +24,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { withoutReview } from './changesSupport'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, until } from './support'
 
 /*
@@ -36,9 +37,7 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, run
  */
 
 const runtimeWith = (github: FakeService, file = ':memory:', agents: FakeAgentOptions = {}) =>
-  Queries.layer.pipe(
-    Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
-  )
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })))
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
@@ -148,10 +147,15 @@ describe('a task that goes back to work', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running' && all[0].followUp === true)
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+      // The host can't be reached as the round ends, so the next pull request it opens by itself can't open (ADR-034).
+      pushes.to = join(bare, 'nowhere')
       slow.open('[lead:slowly]')
 
       // The lead finishes the round with its summary, the review the plan has looks at what is new, and the task is ready, with
-      // a commit that is in no pull request yet.
+      // a commit that is in no pull request yet, and says so.
+      yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      )
       const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
       assert.deepStrictEqual([ready?.change?.number, ready?.change?.state], [1, 'merged'])
@@ -172,14 +176,8 @@ describe('a task that goes back to work', () => {
         SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review%'`
       assert.include(told?.body, `git diff ${mergedHead.slice(0, 12)}`)
-      assert.isTrue(
-        (yield* notices(task.threadId)).some(
-          (notice) => notice.title === "PR #1 is merged, so what the follow-up committed isn't in a pull request yet.",
-        ),
-      )
 
       // Where main can't be fetched, nothing moves: as this Mac last saw it, main hasn't what merged.
-      pushes.to = join(bare, 'nowhere')
       yield* Effect.flip(runs.publish(task.taskId))
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
       pushes.to = bare
@@ -198,9 +196,10 @@ describe('a task that goes back to work', () => {
       assert.deepStrictEqual([second?.source, second?.target, second?.draft], ['althar/add-a-retry-2', 'main', true])
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry-2^'), git(bare, 'rev-parse', 'main'))
       assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry-2'), '1')
-      // Described as the lead wrote it for the round's work, with nothing of its review; and the merged branch is as it was merged.
-      assert.isTrue(second?.body.startsWith(`${DESCRIBED}\n\n`))
-      assert.notMatch(second?.body ?? '', /review/i)
+      // Described as the lead wrote it for the round's work, with nothing of its review but what Althar adds of it; and the merged
+      // branch is as it was merged.
+      assert.isTrue(withoutReview(second?.body ?? '').startsWith(`${DESCRIBED}\n\n`))
+      assert.notMatch(withoutReview(second?.body ?? ''), /review/i)
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), mergedHead)
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
       const [workspace] = yield* sql<{
@@ -387,10 +386,10 @@ describe('a task that goes back to work', () => {
       assert.isFalse((yield* queries.thread(task.threadId)).task.skipReview)
       slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
-      // No review of the round: the plan's, then the round's own report.
+      // No review of the round: the plan's, then the round's own report, and its next pull request, which it opened by itself.
       assert.deepStrictEqual(
         (yield* results(task.threadId)).map((result) => result.step),
-        ['implement', 'review', 'publish', 'implement'],
+        ['implement', 'review', 'publish', 'implement', 'publish'],
       )
       const [plan, round] = yield* runsOf(task.taskId)
       const reviewOf = (parameters: string | undefined) =>
@@ -476,11 +475,7 @@ describe('a task that goes back to work', () => {
       const [after] = yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null)
       assert.deepStrictEqual([after?.phase, after?.unshipped], ['ready', { commits: 1, add: 1, del: 0 }])
       assert.strictEqual((yield* taskRow(taskId))?.state, 'open')
-      assert.isTrue(
-        (yield* notices(ready?.threadId ?? '')).some(
-          (notice) => notice.title === "Not done yet: 1 commit after PR #1 isn't in a pull request.",
-        ),
-      )
+      assert.isTrue((yield* notices(ready?.threadId ?? '')).some((notice) => notice.title === 'Not done yet: 1 commit in no pull request.'))
       yield* runs.publish(taskId)
       assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%s', 'althar/add-a-retry-2'), 'Later')
@@ -522,7 +517,11 @@ describe('a task that goes back to work', () => {
       git(clone, 'push', '-q', 'origin', 'main')
       yield* say(task.threadId, 'Once more. [lead:finish]')
       yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'succeeded')
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+      // Althar tries to open it by itself as the round ends (ADR-034), and can't: then the person's try is refused the same way.
+      yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      )
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       const refused = (yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen
       assert.deepStrictEqual([refused.why, refused.detail], ['conflicts', 'change.txt'])
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
@@ -744,7 +743,6 @@ describe('a task’s first pull request in a repository, and a reported round wi
         git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
       }
       return Effect.gen(function* () {
-        const runs = yield* Runs
         const sql = yield* SqlClient.SqlClient
         const instance = yield* Instance
         yield* connect()
@@ -800,19 +798,16 @@ describe('a task’s first pull request in a repository, and a reported round wi
           descriptions: [{ repository: 'web', text: 'Web gave up on the first failed call too. It now retries once, as api does.' }],
         })
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
-        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
-        assert.isTrue(
-          (yield* notices(task.threadId)).some(
-            (notice) => notice.title === "web has no pull request, so what the follow-up committed isn't in a pull request yet.",
-          ),
+        // Web's first opens by itself as the round ends (ADR-034), from the task's branch, as a first one does; api's merged one
+        // stays as it is.
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length === 2,
         )
-        // Web's first opens, from the task's branch, as a first one does; api's merged one stays as it is.
-        yield* runs.publish(task.taskId)
-        assert.lengthOf(github.changes, 2)
+        yield* until(cards(project.projectId), (all) => all[0]?.change?.number === 2)
         assert.include(github.changes[1]?.url, '/meridian/web/')
         assert.strictEqual(github.changes[1]?.source, task.branch)
-        assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
+        assert.isTrue(withoutReview(github.changes[1]?.body ?? '').startsWith('Web gave up on the first failed call too.'))
         assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
         assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
 
@@ -839,8 +834,10 @@ describe('a task’s first pull request in a repository, and a reported round wi
           }),
           'Althar has your summary. The task is ready for the person.',
         )
-        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped?.commits === 2)
-        yield* runs.publish(task.taskId)
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length === 4,
+        )
         assert.deepStrictEqual(
           github.changes.slice(2).map((change) => change.body.split('\n\n')[0]),
           ['Api retries twice now.', 'Web retries twice now.'],
@@ -951,8 +948,18 @@ describe('a task’s first pull request in a repository, and a reported round wi
         yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
         const [workspace] = yield* sql<{ id: string; path: string }>`SELECT id, path FROM workspaces WHERE task_id = ${created.taskId}`
         const path = workspace?.path ?? ''
-        // Where its run left it is kept: its head as the run ended.
-        assert.strictEqual(git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`), git(path, 'rev-parse', 'HEAD'))
+        // Where its run left it is kept: its head as the run ended, a moment after its state says so.
+        const head = git(path, 'rev-parse', 'HEAD')
+        yield* until(
+          Effect.sync(() => {
+            try {
+              return git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`)
+            } catch {
+              return ''
+            }
+          }),
+          (rested) => rested === head,
+        )
         const [lead] = yield* sql<{
           id: string
         }>`SELECT id FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC LIMIT 1`
@@ -1025,9 +1032,7 @@ describe('a round of work and a restart', () => {
 
       yield* Effect.gen(function* () {
         // It carries on by itself, says so, and its lead finishes it, with a new commit.
-        yield* until(notices(started.threadId), (all) =>
-          all.some((notice) => notice.title === 'Althar restarted; the step carried on from here.'),
-        )
+        yield* until(notices(started.threadId), (all) => all.some((notice) => notice.title === 'Carried on after Althar restarted.'))
         const [, round] = yield* until(runsOf(started.taskId), (rows) => rows[1]?.state === 'succeeded')
         assert.deepStrictEqual([round?.planId, round?.endReason], [null, null])
         const [card] = yield* until(cards(started.projectId), (all) => all[0]?.phase === 'ready')
@@ -1079,12 +1084,7 @@ describe('a merged task with commits after its pull request', () => {
         assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), slider)
         assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
         assert.isTrue(
-          (yield* notices(task.threadId)).some(
-            (notice) =>
-              notice.title === 'Abandoned 1 commit after PR #1.' &&
-              notice.description ===
-                "The task stays merged. The commit stays on althar/add-a-retry, in the task's worktree; what's committed after counts again.",
-          ),
+          (yield* notices(task.threadId)).some((notice) => notice.title === 'Abandoned 1 commit.' && notice.description === undefined),
         )
         // Pressed again, there is nothing to leave out.
         yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })

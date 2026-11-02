@@ -43,15 +43,13 @@ export const StartFromHead: Story = {
   args: { defaultValue: '#185', start: { name: 'PR #185', source: 'ninemate:permission-card-enter', own: 2 } },
   play: async ({ args }) => {
     const page = within(document.body)
-    await expect(await page.findByRole('dialog', { name: 'Start from PR #185’s head?' })).toHaveTextContent(
-      'Its 2 own commits go on top, one by one.',
-    )
+    await expect(await page.findByRole('dialog', { name: 'Start from PR #185’s head?' })).toHaveTextContent('Its 2 own commits go on top.')
     await userEvent.click(page.getByRole('button', { name: 'Start from its head' }))
     await expect(args.onAttach).toHaveBeenCalledWith('#185', true)
   },
 }
 
-/** A task with nothing of its own: none is lost. */
+/** A task with no commits of its own: nothing is said of them. */
 export const NothingOwn: Story = {
   args: { defaultValue: '#185', start: { name: 'PR #185', source: 'permission-card-enter', own: 0 } },
 }

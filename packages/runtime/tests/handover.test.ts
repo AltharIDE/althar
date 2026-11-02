@@ -384,7 +384,7 @@ describe('handing the coordinator to a fresh session', () => {
         assert.deepInclude(yield* notices(threadId), {
           source: 'runtime',
           severity: 'info',
-          title: 'Started a fresh session; picked up 5 open tasks.',
+          title: 'Started a fresh session.',
         })
 
         // Nothing in flight moved: the draft, the held plan, the countdown, the running lead and its question.

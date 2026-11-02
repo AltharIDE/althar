@@ -102,7 +102,7 @@ describe('the Automations tab', () => {
     expect(client.setAutomationsPaused).toHaveBeenCalledWith(true)
     const band = await screen.findByRole('status', { name: 'Every automation is paused' })
     expect(within(band).getByText('Every automation is paused')).toBeTruthy()
-    expect(within(band).getByText('None starts until you resume them. Runs under way finish.')).toBeTruthy()
+    expect(within(band).getByText('Runs under way finish.')).toBeTruthy()
     // Every one of them stands paused, at once.
     expect(screen.getByText('Paused')).toBeTruthy()
     await userEvent.click(within(band).getByRole('button', { name: 'Resume all' }))
@@ -130,10 +130,10 @@ describe('the Automations tab', () => {
     const host = fakeHost()
     const { client } = fakeClient({ getAutomations: vi.fn(async () => automationsSnapshot()) })
     withServices(<Room />, client, host)
-    expect(await screen.findByText(/They run on this Mac while Althar is open\./)).toBeTruthy()
+    expect(await screen.findByText(/Only while Althar is open\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open Althar at login' }))
     expect(host.setPreference).toHaveBeenCalledWith('openAtLogin', true)
-    await waitFor(() => expect(screen.queryByText(/They run on this Mac/)).toBeNull())
+    await waitFor(() => expect(screen.queryByText(/Only while Althar is open/)).toBeNull())
   })
 
   it('says nothing of it once Althar opens at login', async () => {
@@ -142,7 +142,7 @@ describe('the Automations tab', () => {
     withServices(<Room />, client, host)
     await screen.findByRole('button', { name: 'Morning review' })
     await waitFor(() => expect(host.preferences).toHaveBeenCalled())
-    expect(screen.queryByText(/They run on this Mac/)).toBeNull()
+    expect(screen.queryByText(/Only while Althar is open/)).toBeNull()
   })
 
   it('has none yet: what they are for, a few to start from, and New automation, which opens a blank page', async () => {
@@ -267,8 +267,8 @@ describe('an automation’s page', () => {
     expect(client.changeAutomation).toHaveBeenLastCalledWith('auto1', expect.objectContaining({ allowEverything: false }))
     await userEvent.click(screen.getByRole('switch', { name: 'Post its reviews without asking' }))
     expect(client.setAutomationPostsReviews).toHaveBeenCalledWith('auto1', true)
-    expect(screen.getByText(/One at most, after your own work/)).toBeTruthy()
-    expect(screen.getByText(/After three failures in a row/)).toBeTruthy()
+    expect(screen.getByText(/One, after your own work/)).toBeTruthy()
+    expect(screen.getByText(/Pauses after three in a row/)).toBeTruthy()
     // A review ends in no pull request of its own: no limit on them.
     expect(screen.queryByText('Open pull requests')).toBeNull()
   })
@@ -459,7 +459,7 @@ describe('a new automation', () => {
     withServices(<Room opening="new" />, client)
     const prompt = await screen.findByRole('textbox', { name: 'What each run is asked' })
     await waitFor(() => expect(document.activeElement).toBe(prompt))
-    expect(screen.getByText('Say it as you would to the coordinator.')).toBeTruthy()
+    expect(screen.queryByText('Holds from its next run.')).toBeNull()
     expect(screen.getByRole('button', { name: /Every weekday at 9:00/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Nothing leaves this Mac/ })).toBeTruthy()
     expect(screen.getByText('None')).toBeTruthy()

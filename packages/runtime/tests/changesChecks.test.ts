@@ -62,6 +62,106 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('keeps a stopped task’s pull request, whose checks passed, ready to merge: and not one whose checks failed', () => {
+    const { working, bare } = hosted()
+    let checks: 'passed' | 'failed' = 'passed'
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: checks }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      assert.isUndefined(ready?.mergeable)
+      // Its run ended some way other than succeeded, as when Althar stopped it after its pull request opened.
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${ready?.taskId ?? ''}`
+      // Its draft pull request isn't merged as it is: until it is marked ready, by hand here.
+      const [draft] = yield* until(cards(projectId), (all) => all[0]?.phase === 'stopped')
+      assert.isUndefined(draft?.mergeable)
+      github.readyByHand(1)
+      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'stopped' && all[0].mergeable === true)
+      const { task } = yield* (yield* Queries).thread(stopped?.threadId ?? '', { limit: 0 })
+      assert.deepStrictEqual([task.phase, task.mergeable], ['stopped', true])
+      // Its checks fail: stopped, and no longer to be merged as it is.
+      checks = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.failed === 1 && all[0].mergeable === undefined)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('hears another success at the same head after checks fail', () => {
+    const { working, bare } = hosted()
+    let state: 'passed' | 'failed' = 'passed'
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const [before] = yield* (yield* Changes).ofTask(taskId)
+      const head = before?.headSha
+      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      const [failedSnapshot] = yield* sql<{ id: string; snapshot: string }>`
+        SELECT id, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
+      assert.isDefined(failedSnapshot)
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      const results = yield* sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      assert.strictEqual(results[0]?.outcome, 'passed')
+      assert.include(
+        results.map((one) => one.outcome),
+        'failed',
+      )
+      assert.strictEqual(results.at(-1)?.outcome, 'passed')
+      assert.lengthOf(
+        results.filter((one) => one.outcome === 'passed'),
+        2,
+      )
+      const [after] = yield* (yield* Changes).ofTask(taskId)
+      assert.strictEqual(after?.headSha, head)
+      const changes = yield* Changes
+      const readResults = sql<{ outcome: string }>`
+        SELECT json_extract(o.payload, '$.outcome') AS outcome FROM observations o
+        JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks' ORDER BY o.rowid`
+      // Several unchanged polls must not deliver another finished result.
+      yield* changes.refresh(taskId)
+      yield* Effect.sleep(Duration.millis(400))
+      assert.deepStrictEqual(yield* readResults, results)
+      // Model an observation committed before its snapshot write failed. The retry must repair the revision too.
+      if (failedSnapshot === undefined) throw new Error('Missing failed snapshot')
+      yield* sql`UPDATE external_links SET snapshot = ${failedSnapshot.snapshot} WHERE id = ${failedSnapshot.id}`
+      yield* changes.refresh(taskId)
+      const repaired = yield* until(
+        sql<{ snapshot: string }>`SELECT snapshot FROM external_links WHERE id = ${failedSnapshot.id}`,
+        (rows) => JSON.parse(rows[0]?.snapshot ?? '{}').checks?.outcome === 'passed',
+      )
+      assert.strictEqual(JSON.parse(repaired[0]?.snapshot ?? '{}').checksRevision, JSON.parse(failedSnapshot.snapshot).checksRevision + 1)
+      assert.deepStrictEqual(yield* readResults, results)
+      state = 'failed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'failed')
+      state = 'passed'
+      yield* until(cards(projectId), (all) => all[0]?.change?.checks?.outcome === 'passed')
+      assert.lengthOf(
+        (yield* readResults).filter((one) => one.outcome === 'passed'),
+        3,
+      )
+      // Every new finished result is also durable coordinator news, with no duplicate after snapshot recovery.
+      const delivered = yield* sql<{ outcome: string }>`
+        SELECT json_extract(e.payload, '$.outcome') AS outcome FROM record_events e
+        JOIN external_links l ON l.id = e.aggregate_id
+        WHERE l.task_id = ${taskId} AND e.type = 'external_link.news'
+          AND json_extract(e.payload, '$.kind') = 'checks' ORDER BY e.sequence`
+      assert.deepStrictEqual(delivered, yield* readResults)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('brings a change in a repository that has never had checks to the person at once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
@@ -149,8 +249,8 @@ describe('a change whose checks Althar sees through', () => {
         const [given] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && fixesOn(bare).length === FIX_ROUNDS)
         const threadId = given?.threadId ?? ''
         assert.include(
-          yield* until(notices(threadId), (said) => said.some((title) => title.includes('so the change is yours now'))),
-          `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes by its lead, so the change is yours now.`,
+          yield* until(notices(threadId), (said) => said.some((title) => title.includes('still fail after'))),
+          `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes.`,
         )
         // Its lead says what it tried, and tries no more: the card says why, and nothing is asked of the person to push.
         const [why] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
@@ -184,10 +284,13 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running')
       const threadId = running?.threadId ?? ''
-      // Opened by the person, it is theirs while its checks run; its lead's session ends.
+      // Opened by the person, it is still under way while its checks run, nothing theirs to do yet (DEV-173); its lead's session ends.
       yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       yield* (yield* Sessions).stop(threadId)
+      yield* Effect.sleep('300 millis')
+      const [seen] = yield* cards(projectId)
+      assert.strictEqual(seen?.phase, 'running')
+      assert.strictEqual(seen?.step, 'checks_running')
       first = 'failed'
       // The failure goes to its lead all the same, started again; its fix goes up, and the card is under way while its checks run.
       const [fixing] = yield* until(
@@ -215,9 +318,20 @@ describe('a change whose checks Althar sees through', () => {
         yield* connect('github', HOST)
         // A lead that answers the failure, and its ask after, without a fix, a rerun or a line for the person.
         const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
+        // Every card read on the way: while its lead has the failure, between its turns too, it is never the person's (DEV-173).
+        const seen: Array<{ readonly phase: string; readonly failed: number; readonly why: boolean }> = []
+        const read = cards(projectId).pipe(
+          Effect.tap((all) =>
+            Effect.sync(() =>
+              seen.push({ phase: all[0]?.phase ?? '', failed: all[0]?.change?.checks?.failed ?? 0, why: all[0]?.checksBack != null }),
+            ),
+          ),
+        )
+        const [ready] = yield* until(read, (all) => all[0]?.checksBack != null)
+        assert.isTrue(seen.some((one) => one.failed > 0 && !one.why))
+        assert.isFalse(seen.some((one) => one.failed > 0 && !one.why && one.phase === 'ready'))
         assert.strictEqual(ready?.phase, 'ready')
-        assert.strictEqual(ready?.checksBack, 'test still fails, and the lead stopped without a fix or a reason. Tell it what to do.')
+        assert.strictEqual(ready?.checksBack, 'test still fails, and the lead stopped. Tell it what to do.')
         const threadId = ready?.threadId ?? ''
         assert.include(yield* notices(threadId), ready?.checksBack ?? '')
         // Asked once to finish, between.
@@ -242,10 +356,7 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
       assert.strictEqual(ready?.phase, 'ready')
-      assert.strictEqual(
-        ready?.checksBack,
-        "test still fails, and the lead's agent stopped on its own without a fix or a reason. Tell it what to do.",
-      )
+      assert.strictEqual(ready?.checksBack, "test still fails, and the lead's agent stopped. Tell it what to do.")
       const threadId = ready?.threadId ?? ''
       // Started again once, between, to be asked to see them through.
       const sql = yield* SqlClient.SqlClient
@@ -438,16 +549,19 @@ describe('a change whose checks Althar sees through', () => {
       const changes = yield* Changes
       yield* (yield* Sessions).stop(threadId)
       yield* changes.leadStopped({ threadId })
-      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      assert.isNull(stopped?.checksBack ?? null)
       const sessionsOf = sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`
       const before = (yield* sessionsOf).length
-      // The same failure, failing again, doesn't start it again: the person has it.
+      // Its checks still run, nothing the person's to do yet (DEV-173); the same failure, failing again, doesn't start its lead
+      // again: the person has it.
       hold = false
       yield* until(
-        sql<{ id: string }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.id') LIKE '%:failed:again'`,
+        sql<{
+          id: string
+        }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' AND json_extract(payload, '$.id') LIKE '%:again'`,
         (heard) => heard.length > 0,
       )
+      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      assert.isNull(stopped?.checksBack ?? null)
       yield* Effect.sleep('500 millis')
       assert.lengthOf(yield* sessionsOf, before)
       assert.strictEqual((yield* cards(projectId))[0]?.phase, 'ready')
@@ -475,7 +589,7 @@ describe('what failed, in full', () => {
     git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry')
       .split('\n')
       .filter((name) => name.startsWith('fixed-'))
-  const AGAIN = 'Running test on PR #1 again, once, in case it failed by chance.'
+  const AGAIN = 'Running a failed check on PR #1 again.'
 
   it.live('runs a failed check again once, and tells its lead only if it fails again, not while the old failure still shows', () => {
     const { working, bare } = hosted()
@@ -527,6 +641,32 @@ describe('what failed, in full', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('runs a cancelled check again once, under way meanwhile, and leaves it to the person cancelled again', () => {
+    const { working, bare } = hosted()
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [passing, { name: 'lint', state: 'cancelled' }],
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      // Run again, it is under way until the host says how it went.
+      const [running] = yield* until(cards(projectId), (all) => github.reruns.length === 1 && all[0]?.change?.checks?.outcome === 'running')
+      assert.strictEqual(running?.phase, 'running')
+      assert.include(yield* notices(running?.threadId ?? ''), 'Running a cancelled check on PR #1 again.')
+      // Cancelled again, it is the person's, and isn't run a third time.
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.checks?.outcome === 'passed')
+      yield* Effect.sleep('500 millis')
+      assert.lengthOf(github.reruns, 1)
+      assert.deepStrictEqual(
+        ready?.change?.checks?.list.map((check) => check.state),
+        ['passed', 'cancelled'],
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('gives its lead a check’s whole log, a page at a time', () => {
     const { working, bare } = hosted()
     const log = Array.from({ length: 700 }, (_, index) => `line ${index + 1}`).join('\n')
@@ -550,6 +690,19 @@ describe('what failed, in full', () => {
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
       const [card] = yield* until(cards(projectId), (all) => all[0]?.change != null)
       const lead = { role: 'lead' as const, projectId, threadId: card?.threadId ?? '', sessionId: 'none', taskId: card?.taskId ?? '' }
+      const listed = yield* callTool(lead, 'read_checks', {})
+      assert.include(listed, 'test')
+      assert.include(listed, 'running')
+      assert.include(listed, 'Checks on ' + tipOf(bare)())
+      assert.include(yield* callTool(lead, 'read_checks', { ref: 'main' }), 'Checks on main')
+      assert.include(yield* callTool(lead, 'read_checks', { ref: 'a'.repeat(40) }), 'Checks on ' + 'a'.repeat(40))
+      assert.include(yield* callTool(lead, 'read_checks', { pull_request: 'other#9' }), 'Name one of those')
+      assert.notInclude(yield* callTool(lead, 'read_checks', { tail: 'wrong' }), 'Checks on')
+      assert.include(yield* callTool(lead, 'read_checks', { check: 'test', save: true }), 'Saved full cleaned log: .althar/ci/')
+      const searched = yield* callTool(lead, 'read_checks', { check: 'test', grep: 'line 349', context: 0 })
+      assert.include(searched, '349: line 349')
+      assert.notInclude(searched, '348: line 348')
+      assert.include(yield* callTool(lead, 'read_checks', { check: 'ci/circleci' }), 'keeps no log')
       const last = yield* callTool(lead, 'read_check_log', { check: 'test' })
       assert.match(last, /^Lines 401 to 700 of 700 of test's log on PR #1; from_line 101 reads the page before:\n```\nline 401\n/)
       assert.match(last, /line 700\n```$/)
@@ -583,10 +736,8 @@ describe('what failed, in full', () => {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      const said = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((title) => title.includes('have run for')))
-      assert.isTrue(
-        said.some((title) => /^The checks on PR #1 have run for (a minute|\d+ minutes), so the change is yours now\.$/.test(title)),
-      )
+      const said = yield* until(notices(ready?.threadId ?? ''), (all) => all.some((title) => title.includes('still running after')))
+      assert.isTrue(said.some((title) => /^The checks on PR #1 are still running after (a minute|\d+ minutes)\.$/.test(title)))
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -614,9 +765,7 @@ describe('what failed, in full', () => {
       github.commentAs(1, 'dana', 'Looks good.')
       const threadId = card?.threadId ?? ''
       yield* until(arrivals(threadId), (all) => all.some((one) => one.kind === 'comment'))
-      assert.isTrue(
-        (yield* notices(threadId)).some((title) => title.startsWith("Althar can't read the checks on PR #1: its host refused them")),
-      )
+      assert.isTrue((yield* notices(threadId)).some((title) => title === "Can't read the checks on PR #1."))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

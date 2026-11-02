@@ -1015,7 +1015,15 @@ describe('Bitbucket Data Center as a code host', () => {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
       assert.deepStrictEqual(yield* host.account, { id: '101', login: 'jcitizen', name: 'Jane Citizen' })
       assert.strictEqual(sent[0]?.headers.authorization, 'Bearer BBDC-t')
-      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true, reviews: false })
+      assert.deepStrictEqual(host.capabilities, {
+        drafts: true,
+        checkLogs: false,
+        threads: true,
+        reviews: false,
+        pictures: false,
+        reopen: true,
+        rerun: false,
+      })
       // A project's token signs in as a service account, which the users aren't listed with.
       const project = center([whoami('bot-prj-1', '7'), ['GET', /\/users\?filter=/, { json: page([]) }]])
       assert.deepStrictEqual(yield* project.host.account, { id: '7', login: 'bot-prj-1', name: null })
@@ -1821,6 +1829,84 @@ describe('Bitbucket listing pull requests', () => {
       const none = yield* endless.host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
       assert.deepStrictEqual(none, { changes: [], more: true })
       assert.lengthOf(endless.sent, 10)
+    }),
+  )
+})
+
+describe('Bitbucket Cloud: a pipeline runs again whole, and a declined pull request stays declined', () => {
+  it.effect('runs the pipeline again on the same commit and branch, and nothing that isn’t a pipeline', () =>
+    Effect.gen(function* () {
+      const target = {
+        type: 'pipeline_ref_target',
+        ref_type: 'branch',
+        ref_name: 'feature/x',
+        commit: { type: 'commit', hash: 'abc123' },
+        selector: { type: 'default' },
+      }
+      const { host, sent } = cloud([
+        ['GET', `${ACE}/pipelines/3025`, { json: { uuid: '{p}', build_number: 3025, target } }],
+        ['POST', `${ACE}/pipelines`, { status: 201, json: { uuid: '{q}', build_number: 3026 } }],
+      ])
+      const check = (id: string) => ({ id, name: 'Pipeline', state: 'failed' as const, url: null, summary: null })
+      assert.isTrue(host.capabilities.rerun)
+      assert.isTrue(yield* host.rerun(ace, check('pipeline:3025')))
+      assert.deepStrictEqual(sent.find((one) => one.method === 'POST')?.body, { target })
+      // A build status that is no pipeline's is no run to start again.
+      assert.isFalse(yield* host.rerun(ace, check('status:jenkins')))
+      assert.lengthOf(
+        sent.filter((one) => one.method === 'POST'),
+        1,
+      )
+      const refusing = cloud([
+        ['GET', `${ACE}/pipelines/3025`, { json: { uuid: '{p}', target } }],
+        ['POST', `${ACE}/pipelines`, { status: 403, json: { error: { message: 'Forbidden' } } }],
+      ])
+      assert.strictEqual((yield* Effect.flip(refusing.host.rerun(ace, check('pipeline:3025')))).reason, 'forbidden')
+    }),
+  )
+
+  it.effect('declares it cannot reopen, and refuses in Bitbucket’s own words, sending nothing', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([['GET', PR, { json: pull({ state: 'DECLINED' }) }]])
+      assert.isFalse(host.capabilities.reopen)
+      const refused = yield* Effect.flip(host.reopenChange(ace, yield* host.change(ace, 552)))
+      assert.deepInclude(refused, { reason: 'rejected' })
+      assert.include(refused.message, 'declined')
+      assert.isFalse(sent.some((one) => one.method !== 'GET'))
+    }),
+  )
+})
+
+describe('Bitbucket Data Center: reopening, and whose builds they are', () => {
+  it.effect('opens a declined pull request at the version it read, and says a merged one can’t be', () =>
+    Effect.gen(function* () {
+      assert.isTrue(center([]).host.capabilities.reopen)
+      const { host, sent } = center([
+        ['GET', PULL, { json: pr({ state: 'DECLINED', version: 4 }) }],
+        ['POST', `${PULL}/reopen?version=4`, { json: pr({ state: 'OPEN', version: 5 }) }],
+      ])
+      const reopened = yield* host.reopenChange(prj, yield* host.change(prj, 101))
+      assert.strictEqual(reopened.state, 'open')
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+      const open = center([['GET', PULL, { json: pr() }]])
+      assert.strictEqual((yield* open.host.reopenChange(prj, reopened)).state, 'open')
+      assert.isFalse(open.sent.some((one) => one.method === 'POST'))
+      const merged = center([['GET', PULL, { json: pr({ state: 'MERGED' }) }]])
+      assert.deepInclude(yield* Effect.flip(merged.host.reopenChange(prj, reopened)), { reason: 'rejected' })
+    }),
+  )
+
+  it.effect('declares it runs no build again, and says whose build it is with its page', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([])
+      assert.isFalse(host.capabilities.rerun)
+      const refused = yield* Effect.flip(
+        host.rerun(prj, { id: 'status:build', name: 'build', state: 'failed', url: 'https://ci.example.com/job/7', summary: null }),
+      )
+      assert.deepInclude(refused, { reason: 'rejected' })
+      assert.include(refused.message, 'another service')
+      assert.include(refused.message, 'https://ci.example.com/job/7')
+      assert.lengthOf(sent, 0)
     }),
   )
 })

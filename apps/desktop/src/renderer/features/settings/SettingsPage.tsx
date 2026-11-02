@@ -26,6 +26,8 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  ReviewSeal,
+  ReviewSealGlyph,
   Segmented,
   SettingList,
   SettingRow,
@@ -66,6 +68,7 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
 import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
+import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
@@ -131,7 +134,6 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     <SettingsLayout
       section={section}
       title={open.title}
-      lede={open.lede}
       side={
         <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
@@ -340,7 +342,6 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
         <SettingSwitch
           title={text.loadTitle}
-          note={text.loadNote}
           glyph={<Icon name="load" size={15} />}
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
@@ -393,6 +394,7 @@ const face = <img src={altharFace} alt="" />
 function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
   const postTeam = usePostTeamReviews()
   const coAuthor = useCoAuthor()
+  const seal = useReviewSeal()
   // The person, on the commit co-author is shown on, as GitHub names them.
   const author = connections.list?.connections.find((connection) => connection.product === 'github')?.account.login ?? text.you
   return (
@@ -410,7 +412,6 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
         {coAuthor !== null && (
           <SettingSwitch
             title={text.coAuthorTitle}
-            note={text.coAuthorNote}
             glyph={<CoAuthorFace picture={face} size={30} />}
             checked={coAuthor.on}
             onChange={coAuthor.set}
@@ -422,7 +423,23 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
           <CoAuthor on={coAuthor.on} onChange={coAuthor.set} trailer={coAuthor.line} author={author} commit={text.commit} picture={face} />
         </div>
       )}
-      <Failed when={postTeam?.failed === true || coAuthor?.failed === true} />
+      {seal !== null && (
+        <>
+          <SettingList>
+            <SettingSwitch
+              title={text.reviewSealTitle}
+              note={text.reviewSealNote}
+              mark={<ReviewSealGlyph facts={text.pullRequest.facts} />}
+              checked={seal.on}
+              onChange={seal.set}
+            />
+          </SettingList>
+          <div className={s.coAuthor}>
+            <ReviewSeal on={seal.on} style={seal.style} onStyle={seal.choose} sample={text.pullRequest} />
+          </div>
+        </>
+      )}
+      <Failed when={postTeam?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
     </>
   )
 }
@@ -463,7 +480,6 @@ function NotificationsSection() {
               set('sound', sound)
             }}
             onPlay={sounds.play}
-            text={{ note: text.soundNote }}
           />
         )}
       </SettingList>
@@ -484,7 +500,7 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   return (
     <>
       <SettingList>
-        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+        <SettingRow title={text.theme} glyph={<Icon name="theme" size={15} />}>
           {() => (
             <Segmented<Appearance>
               label={text.theme}

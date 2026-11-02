@@ -85,6 +85,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* what a call says, not a command: as much as two lines; the rest is in its task */
+.body {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
 .glance {
   min-width: 0;
 }

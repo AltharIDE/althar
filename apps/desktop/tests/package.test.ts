@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { ADAPTER_PATCH_MARKER, adapterPatchFor, applyAdapterPatch, assertAdapterPatched, PATCHED_FILE } from '../scripts/adapterPatch'
+import { isMachO, LIPO_ARCH, macBuild, wrongArchs } from '../scripts/archs'
 import { binariesFor, speechPackage } from '../scripts/binaries'
 import { entitlementsFor } from '../scripts/entitlements'
 import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive, nodeProgram } from '../scripts/node'
@@ -50,6 +51,10 @@ describe('the packaged app', () => {
     expect(entitlementsFor(`${frameworks}/Althar Helper (GPU).app`, true)).toEqual([JIT, ANY_LIBRARY])
     expect(entitlementsFor(`${frameworks}/Squirrel.framework/Versions/A/Resources/ShipIt`, true)).toEqual([ANY_LIBRARY])
     expect(entitlementsFor('Contents/Resources/node/bin/node', true)).toEqual([JIT])
+    // Intel's Node can't start under the hardened runtime without unsigned executable memory; nothing else differs.
+    expect(entitlementsFor('Contents/Resources/node/bin/node', false, 'x64')).toEqual([JIT, UNSIGNED_MEMORY])
+    expect(entitlementsFor('', false, 'x64')).toEqual([JIT, MICROPHONE])
+    expect(entitlementsFor(`${codex}/bin/codex`, false, 'x64')).toEqual([JIT, UNSIGNED_MEMORY])
     expect(entitlementsFor(`${codex}/bin/codex`, true)).toEqual([JIT, UNSIGNED_MEMORY])
   })
 
@@ -81,8 +86,56 @@ describe('the packaged app', () => {
       '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
       'sherpa-onnx-darwin-arm64/sherpa-onnx.node',
     ])
+    expect(binariesFor('darwin', 'x64').map(({ name, file }) => `${name}/${file}`)).toEqual([
+      '@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex',
+      '@anthropic-ai/claude-agent-sdk-darwin-x64/claude',
+      'sherpa-onnx-darwin-x64/sherpa-onnx.node',
+    ])
     expect(speechPackage('linux', 'x64')).toBe('sherpa-onnx-linux-x64')
     expect(() => binariesFor('win32', 'ia32')).toThrow(/no build for win32-ia32/)
+  })
+
+  it('ships a Node for Intel Macs too, and names each Mac build with its processor', () => {
+    expect(NODE_ARCHIVES['darwin-x64']).toMatch(/^[0-9a-f]{64}$/)
+    expect(nodeArchive('darwin', 'x64').url).toBe(`https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-x64.tar.gz`)
+    expect(macBuild('Althar', '0.7.0', 'arm64')).toEqual({
+      folder: 'mac-arm64',
+      dmg: 'Althar-0.7.0-arm64.dmg',
+      zip: 'Althar-0.7.0-arm64-mac.zip',
+    })
+    expect(macBuild('Althar', '0.7.0', 'x64')).toEqual({ folder: 'mac', dmg: 'Althar-0.7.0-x64.dmg', zip: 'Althar-0.7.0-x64-mac.zip' })
+    expect(LIPO_ARCH).toEqual({ arm64: 'arm64', x64: 'x86_64' })
+  })
+
+  it('tells a Mach-O program, thin or fat, from a Java class and anything else', () => {
+    const bytes = (...words: ReadonlyArray<number>) => {
+      const view = new DataView(new ArrayBuffer(words.length * 4))
+      words.forEach((word, i) => view.setUint32(i * 4, word, false))
+      return new Uint8Array(view.buffer)
+    }
+    // A 64-bit thin file as it lies on disk (little-endian), a 32-bit one, and a fat one with two slices.
+    expect(isMachO(bytes(0xcffaedfe, 0x0c000001))).toBe(true)
+    expect(isMachO(bytes(0xcefaedfe, 0x07000000))).toBe(true)
+    expect(isMachO(bytes(0xcafebabe, 2))).toBe(true)
+    // A class file for Java 8 has the same magic, then its version, 52.
+    expect(isMachO(bytes(0xcafebabe, 52))).toBe(false)
+    expect(isMachO(new TextEncoder().encode('#!/usr/bin/env node\n'))).toBe(false)
+    expect(isMachO(bytes(0xcffaedfe))).toBe(false)
+  })
+
+  it.runIf(process.platform === 'darwin')('finds a program built for the other processor in an app', () => {
+    const app = mkdtempSync(join(tmpdir(), 'althar-archs-'))
+    mkdirSync(join(app, 'Contents', 'MacOS'), { recursive: true })
+    // macOS's own lipo, thinned to Intel, and to arm64e, the system's own Apple silicon, which an arm64 app's programs aren't.
+    execFileSync('lipo', ['/usr/bin/lipo', '-thin', 'arm64e', '-output', join(app, 'Contents', 'MacOS', 'arm64e')])
+    execFileSync('lipo', ['/usr/bin/lipo', '-thin', 'x86_64', '-output', join(app, 'Contents', 'MacOS', 'intel')])
+    expect(wrongArchs(app, 'x64')).toEqual({ read: 2, wrong: [{ path: 'Contents/MacOS/arm64e', archs: ['arm64e'] }] })
+    expect(
+      wrongArchs(app, 'arm64')
+        .wrong.map(({ path }) => path)
+        .sort(),
+    ).toEqual(['Contents/MacOS/arm64e', 'Contents/MacOS/intel'])
+    expect(() => wrongArchs(app, 'ia32')).toThrow(/No Mac build/)
   })
 
   it('refuses a platform it has no Node for, before fetching anything', async () => {

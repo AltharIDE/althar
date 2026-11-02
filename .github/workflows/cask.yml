@@ -33,7 +33,13 @@ jobs:
           brew style --cask local/althar/althar
       - name: The fill-in script keeps the cask valid
         run: |
-          packaging/homebrew/fill.sh 9.9.9 "$(printf 'a%.0s' {1..64})" > "$RUNNER_TEMP/filled.rb"
-          diff <(sed -e '/^  version /d' -e '/^  sha256 /d' packaging/homebrew/althar.rb) \
-               <(sed -e '/^  version /d' -e '/^  sha256 /d' "$RUNNER_TEMP/filled.rb")
+          arm="$(printf 'a%.0s' {1..64})"
+          intel="$(printf 'b%.0s' {1..64})"
+          packaging/homebrew/fill.sh 9.9.9 "$arm" "$intel" > "$RUNNER_TEMP/filled.rb"
+          diff <(sed -e '/^  version /d' -e '/^  sha256 arm: /d' -e '/^ *intel: "/d' packaging/homebrew/althar.rb) \
+               <(sed -e '/^  version /d' -e '/^  sha256 arm: /d' -e '/^ *intel: "/d' "$RUNNER_TEMP/filled.rb")
           grep -q '^  version "9.9.9"$' "$RUNNER_TEMP/filled.rb"
+          grep -q "^  sha256 arm:   \"$arm\",$" "$RUNNER_TEMP/filled.rb"
+          grep -q "^         intel: \"$intel\"$" "$RUNNER_TEMP/filled.rb"
+          cp "$RUNNER_TEMP/filled.rb" "$(brew --repository local/althar)/Casks/althar.rb"
+          brew style --cask local/althar/althar

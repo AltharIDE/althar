@@ -228,7 +228,7 @@ describe('automations', () => {
       assert.deepInclude(rows[1], {
         slot: '2026-10-22T09:00',
         state: 'missed',
-        reason: 'Missed: the computer was asleep, or Althar closed, at 9:00.',
+        reason: 'Missed 9:00.',
         taskId: null,
       })
       // One that skips what the computer slept through skips it.
@@ -458,12 +458,72 @@ describe('automations', () => {
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
       const refused = yield* Effect.flip(automations.runNow(automationId, instance.personId))
-      assert.strictEqual((refused as AutomationRefused).message, 'Its agent pays per use, and automations run on a plan only for now.')
+      assert.strictEqual((refused as AutomationRefused).message, 'Automations run only on a plan for now, and its agent pays per use.')
       clock.set('2026-10-21T08:00:05Z')
       const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.deepInclude(skipped, { state: 'skipped', reason: 'Its agent pays per use, and automations run on a plan only for now.' })
+      assert.deepInclude(skipped, { state: 'skipped', reason: 'Automations run only on a plan for now, and its agent pays per use.' })
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] }))))
   })
+
+  it.live(
+    'a run whose lead finished, and only its review has worked past its minutes, goes on without the review and succeeds, not stopped',
+    () => {
+      const clock = clockAt('2026-10-21T07:59:00Z')
+      // A lead that finishes at once, and a reviewer that never does, kept to five minutes.
+      const reviewed: AutomationDefinition = {
+        ...NOTES,
+        prompt: 'Check the dependencies. [lead:finish] [review:wait]',
+        work: { kind: 'task', review: { agentId: 'codex', model: null }, end: 'ready' },
+        minutes: 5,
+      }
+      const { at, github } = withOneToReview()
+      return Effect.gen(function* () {
+        const automations = yield* Automations
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const projectId = yield* openedOn(at.working)
+        const automationId = yield* automations.make({ projectId, definition: reviewed, on: true, actorId: instance.personId })
+        clock.set('2026-10-21T08:00:05Z')
+        const [running] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'running')
+        const taskId = running?.taskId ?? ''
+        // Its review is what works on: its lead's step is done.
+        yield* until(
+          sql<{ n: number }>`
+          SELECT count(*) AS n FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND n.node_key = 'review' AND a.state = 'running'`,
+          (rows) => (rows[0]?.n ?? 0) > 0,
+        )
+        // Its turns, as if the review had gone on for ten minutes.
+        yield* sql`
+        UPDATE turn_deliveries SET delivered_at = ${new Date(clock.now() - 10 * 60_000).toISOString()}
+        WHERE thread_id IN (SELECT id FROM threads WHERE task_id = ${taskId})`
+        const [made] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state !== 'running')
+        assert.deepInclude(made, { state: 'made', reason: null })
+        const [run] = yield* until(
+          sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`,
+          (rows) => rows[0]?.state === 'succeeded',
+        )
+        assert.strictEqual(run?.state, 'succeeded')
+        const [review] = yield* sql<{ state: string }>`
+        SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND n.execution_id IN
+          (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId})`
+        assert.strictEqual(review?.state, 'cancelled')
+        // Its card is the person's to settle, not stopped.
+        const cards = yield* Effect.map(Effect.orDie((yield* Queries).coordinator(projectId)), (snapshot) =>
+          snapshot.items.flatMap((item) => (item.kind === 'task' && item.content.taskId === taskId ? [item.content] : [])),
+        )
+        assert.strictEqual(cards[0]?.phase, 'ready')
+      }).pipe(
+        Effect.provide(
+          clock.on(
+            Queries.layer.pipe(
+              Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })),
+            ),
+          ),
+        ),
+      )
+    },
+  )
 
   it.live('stop a run that has worked its minutes, which failed saying so', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
@@ -609,7 +669,7 @@ describe('automations', () => {
 
   it.live('run on a plan only where the agent’s status says so: one that can’t tell is refused, and skipped on its schedule', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
-    const unsure = 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
+    const unsure = 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
@@ -656,7 +716,7 @@ describe('automations', () => {
       )
       // Nor does a session of its run start on that account when it is named.
       const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, threadId: thread?.id ?? '', accountId: key.id }))
-      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Its agent pays per use, and automations run on a plan only for now.' })
+      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Automations run only on a plan for now, and its agent pays per use.' })
       // Outside an automation's run, the project's work still moves to it.
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, key.id)
     }).pipe(

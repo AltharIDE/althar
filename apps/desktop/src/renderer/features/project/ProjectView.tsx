@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
@@ -22,6 +23,7 @@ import {
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
+import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -59,7 +61,7 @@ import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
-import { partsOf, tasksOf, trackersOf } from './front'
+import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
 import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
@@ -86,15 +88,14 @@ export const text = {
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
-  empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   keep: (from: string) => `Keep ${from}`,
-  queued: 'Queued · the coordinator reads it next',
-  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
+  queued: 'Queued',
+  queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
-  signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
+  signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
@@ -444,6 +445,11 @@ export function ProjectView({
 
   const talking = room !== Room.Board
   const boarding = room !== Room.Talk
+  /** Into the coordinator's composer, from an empty board: the conversation beside the board where it wasn't on screen. */
+  const talkToCoordinator = () => {
+    if (room === Room.Board) setRoom(Room.Both)
+    requestAnimationFrame(() => voice.inputRef.current?.focus())
+  }
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -453,7 +459,19 @@ export function ProjectView({
   // The header: its name and ink as the person last chose them, how it stands, its views, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
-  const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
+  const read = reads(useServices().client)
+  const binding = useQuery(read.projectTracker(projectId)).data ?? null
+  const teams = useQuery({
+    ...read.containers(binding?.connectionId ?? ''),
+    enabled: binding?.container != null && binding.gone == null,
+  }).data
+  const containerKey = teams?.find((team) => team.id === binding?.container?.id)?.key ?? null
+  const trackers = trackersWithBinding(
+    lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list),
+    binding,
+    connections.list,
+    containerKey,
+  )
   const settingsNeedYou = connectionsNeedYou(model.repositories, trackers, connections.list)
   // Its automations: a dot on their view where one paused itself; and what its cards in the conversation do.
   const automations = useAutomations(projectId)
@@ -564,7 +582,6 @@ export function ProjectView({
                         {text.earlier}
                       </ThreadDivider>
                     )}
-                    {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks
@@ -660,6 +677,7 @@ export function ProjectView({
                     line={board.line}
                     folds={folds}
                     onFoldsChange={setFolds}
+                    onTalk={talkToCoordinator}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

@@ -21,7 +21,7 @@ import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
  */
 
 export const carriedText = {
-  didntSend: "It didn't send. It's still here, to send again.",
+  didntSend: "Didn't send.",
 }
 
 /** Goes back to a thread's composer: the window's router, given by its frame. */

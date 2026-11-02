@@ -76,7 +76,6 @@ test('says over the composer why the task waits, opens who holds the place, and 
     // It opens who holds the place: the task by its title, what keeps it, and Stop; and the way to the front.
     await chip.click()
     const behind = page.getByRole('dialog', { name: 'Behind this task' })
-    await expect(behind.getByText('1 task is running; 1 of them only for a server it left running.')).toBeVisible()
     await expect(behind.getByText('Serve the prototype')).toBeVisible()
     await still(page)
     await behind.screenshot({ path: 'test-results/waiting-open.png', scale: 'css', animations: 'disabled' })

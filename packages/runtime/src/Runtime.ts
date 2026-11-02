@@ -29,6 +29,7 @@ import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { fillIndex } from './Search'
 import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
@@ -40,6 +41,7 @@ import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
+import { Errands } from './Errands'
 import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
@@ -80,7 +82,12 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
+  const base = Layer.mergeAll(
+    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(Instance.layer)))),
+    Live.layer,
+    ModelFacts.layer,
+    Artifacts.layer,
+  ).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
@@ -115,10 +122,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
+  // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-077).
+  const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
   const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
-    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))),
+    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))

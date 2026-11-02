@@ -46,7 +46,14 @@ const connected = Effect.gen(function* () {
       checksAppear: Duration.zero,
     }),
   )
-  yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+  yield* Effect.forkScoped(
+    Layer.launch(
+      connection(
+        emitterPort(channel.port1, (data) => data),
+        { kind: 'window' },
+      ),
+    ).pipe(Effect.provideContext(context)),
+  )
   const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
   const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
   const grant = (path: string) => Context.get(context, Folders).allow(path)
@@ -318,7 +325,7 @@ describe('what can’t be done, from the window', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { client, task } = yield* connected
-        const notHeld = "The step isn't waiting for its usage limit any more: it carried on, or was stopped."
+        const notHeld = "The step isn't waiting for its usage limit any more."
         assert.strictEqual(yield* refused(client.HandOverHeld({ commandId: commandId(), taskId: task.id, agentId: 'codex' })), notHeld)
         assert.strictEqual(
           yield* refused(

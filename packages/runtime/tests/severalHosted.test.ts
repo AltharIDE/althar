@@ -148,7 +148,7 @@ describe('a project of two repositories on one connected host', () => {
       assert.strictEqual(attached.kind, 'attached')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        `The task follows PR #1 in ${names[1] ?? ''} now: Fix the nav`,
+        `Following PR #1 in ${names[1] ?? ''}: Fix the nav`,
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -167,7 +167,7 @@ describe('a project of two repositories on one connected host', () => {
       assert.strictEqual(attached.kind === 'attached' ? attached.change.url : '', 'https://github.com/meridian/web/pull/2')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'The task follows PR #2 now: Fix the footer',
+        'Following PR #2: Fix the footer',
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -202,7 +202,7 @@ describe('a project of two repositories on one connected host', () => {
       yield* changes.refresh(task.taskId)
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
-        "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
+        "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
       )
     }).pipe(Effect.provide(withQueries(github)))
   })

@@ -9,10 +9,20 @@
 }
 /* rows of a grid, so each line is as wide as the widest and a scrolled line keeps its colour */
 .line {
+  --ink: var(--t-2);
   display: grid;
   grid-template-columns: 42px 18px 1fr;
   white-space: pre;
-  color: var(--t-2);
+  color: var(--ink);
+}
+/* the code's inks fade in from the line's own once coloured, so nothing jumps */
+.line span[style] {
+  animation: inked var(--base) var(--ease);
+}
+@keyframes inked {
+  from {
+    color: var(--ink);
+  }
 }
 .both .line {
   grid-template-columns: 42px 42px 18px 1fr;
@@ -29,8 +39,8 @@
   user-select: none;
 }
 .add {
+  --ink: var(--add-ink);
   background: var(--add-line);
-  color: var(--add-ink);
 }
 .add .n {
   background: var(--add-gutter);
@@ -40,8 +50,27 @@
   color: var(--add-sign);
 }
 .del {
+  --ink: var(--del-ink);
   background: var(--del-line);
-  color: var(--del-ink);
+}
+/* on a change's green or red the code's inks lean toward the line's own, and more on a changed word's stronger tint, so each stays readable */
+.add,
+.del {
+  --code-keyword: color-mix(in oklab, var(--syn-keyword) 80%, var(--ink));
+  --code-string: color-mix(in oklab, var(--syn-string) 80%, var(--ink));
+  --code-fn: color-mix(in oklab, var(--syn-fn) 80%, var(--ink));
+  --code-type: color-mix(in oklab, var(--syn-type) 80%, var(--ink));
+  --code-comment: color-mix(in oklab, var(--syn-comment) 80%, var(--ink));
+  --code-punct: color-mix(in oklab, var(--syn-punct) 80%, var(--ink));
+}
+.add mark,
+.del mark {
+  --code-keyword: color-mix(in oklab, var(--syn-keyword) 50%, var(--ink));
+  --code-string: color-mix(in oklab, var(--syn-string) 50%, var(--ink));
+  --code-fn: color-mix(in oklab, var(--syn-fn) 50%, var(--ink));
+  --code-type: color-mix(in oklab, var(--syn-type) 50%, var(--ink));
+  --code-comment: color-mix(in oklab, var(--syn-comment) 50%, var(--ink));
+  --code-punct: color-mix(in oklab, var(--syn-punct) 50%, var(--ink));
 }
 .del .n {
   background: var(--del-gutter);

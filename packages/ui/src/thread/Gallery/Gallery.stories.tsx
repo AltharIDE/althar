@@ -62,13 +62,12 @@ export const Plain: Story = { args: { shots: PLAIN } }
 /** One alone: wider still. */
 export const One: Story = { args: { shots: [PLAIN[1] as GalleryShot] } }
 
-/** Views shown earlier and taken again aren't shown twice: a line names them, each opening on a click. */
+/** Views shown earlier and taken again aren't shown twice: a line counts them, and opens them on a click. */
 export const Retaken: Story = {
   args: { shots: PLAIN.slice(0, 2), retaken: RETAKEN },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/It also retook/)).toBeInTheDocument()
-    await expect(c.getByRole('button', { name: /View B2 · Again/ })).toHaveTextContent('B2')
+    await expect(c.getByRole('button', { name: 'Also retook 2 shown earlier' })).toBeInTheDocument()
   },
 }
 

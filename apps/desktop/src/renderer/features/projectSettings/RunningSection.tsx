@@ -1,5 +1,5 @@
 import type { ProjectRepository, ProjectRulesView, Runnable } from '@althar/contracts'
-import { Button, Code, Icon, LinkButton, RunnableList, SettingGroup, SettingList, SettingRow, TaskEnd } from '@althar/ui'
+import { Button, Code, Icon, LinkButton, RepositorySetups, RunnableList, SettingGroup, SettingList, SettingRow, TaskEnd } from '@althar/ui'
 import { projectRulesText } from '@althar/ui/screens'
 
 import { shortFolder } from '../../shared/folders'
@@ -7,11 +7,15 @@ import { endOf, OWN } from '../rules/RulesSection'
 import { listedOf, RunDialogs, useRunDialogs } from '../runs/Runs'
 import s from './ProjectSettings.module.css'
 import { HEADING } from './sections'
+import { useSetups } from './useSetups'
 
 /*
  * What a project runs with no agent (ADR-044), in the person's order, the
  * first what one press of Run starts: reordered, made the default, changed
  * and removed in place, and added to in the same dialogs as from Run. Then
+ * how each new task's folder gets ready before its lead starts (ADR-080): a
+ * tab for each repository, its commands and the files copied from the
+ * person's checkout, as a lead recorded them, changed in place. Then
  * where its tasks' work goes: their worktrees on this computer, how their
  * branches are named (a folder and a pattern set as code) and what a task
  * ends with, the last two kept with the
@@ -23,17 +27,18 @@ export const text = {
   runs: 'What it runs',
   runsNote: 'Run starts the first. Drag to change the order.',
   add: 'Add something to run',
+  setups: 'Before each task starts',
   where: 'Where its work goes',
   worktrees: 'Worktrees',
-  worktreesUnmade: 'Made with its first task, never in its repositories’ own folders',
+  worktreesUnmade: 'Made with its first task',
   branches: 'Branch names',
   asDocsSay: 'As each repository’s docs say',
   asDocsSayElse: (own: string) => `As each repository’s docs say, else ${own}`,
   finish: 'When a task is done',
   inRules: 'Change in Rules',
   onBranch: 'Leave it on its branch',
-  unconnected: (host: string) => `Nothing goes to ${host} until Althar is connected there. Then it opens a draft pull request`,
-  unknown: 'Its repositories are on no host Althar knows, so no pull request opens',
+  unconnected: (host: string) => `${host} isn’t connected`,
+  unknown: 'No code host Althar knows',
   connect: (host: string) => `Connect ${host}`,
 }
 
@@ -96,8 +101,8 @@ export function RunningSection({
   /** What it runs, in its order; null until its coordinator is read. */
   runnables: ReadonlyArray<Runnable> | null
   rules: ProjectRulesView | null
-  /** Its repositories, each with its host and whether Althar is signed in there; null until they are read. */
-  repositories: ReadonlyArray<Pick<ProjectRepository, 'host'>> | null
+  /** Its repositories, each with its host and whether Althar is signed in there, and its setup; null until they are read. */
+  repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'path' | 'host' | 'setup'>> | null
   /** Where its tasks' worktrees are; null before it has had a task. */
   worktrees: string | null
   /** Opens the rules, where branches and how a task ends are changed. */
@@ -106,6 +111,7 @@ export function RunningSection({
   onCode: () => void
 }) {
   const dialogs = useRunDialogs(projectId)
+  const setups = useSetups(projectId)
   const { runs } = dialogs
   const kept = runnables ?? []
   const ids = kept.map((one) => one.id)
@@ -132,6 +138,20 @@ export function RunningSection({
           {...(dialogs.showing === null && runs.error !== null ? { error: runs.error } : {})}
         />
       </SettingGroup>
+      {repositories !== null && repositories.length > 0 && (
+        <SettingGroup title={text.setups} headingLevel={HEADING.part}>
+          <RepositorySetups
+            repositories={repositories.map((repository) => ({
+              id: repository.id,
+              name: repository.name,
+              checkout: repository.path === null ? null : shortFolder(repository.path),
+              setup: setups.shown(repository.id, repository.setup),
+            }))}
+            onChange={setups.change}
+            error={setups.failed ?? undefined}
+          />
+        </SettingGroup>
+      )}
       <SettingGroup title={text.where} headingLevel={HEADING.part}>
         <SettingList>
           <SettingRow

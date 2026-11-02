@@ -180,8 +180,8 @@ describe('dictating the first time', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Download' }))
     host.send({ type: 'progress', got: SIZE / 2, size: SIZE })
-    await userEvent.click(screen.getByRole('button', { name: 'Hide; the download carries on' }))
-    expect(await screen.findByRole('button', { name: 'Dictate. The speech model is downloading, 50%' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(await screen.findByRole('button', { name: 'Dictate, downloading 50%' })).toBeTruthy()
     host.send({ type: 'downloaded' })
     expect(record).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
@@ -206,11 +206,11 @@ describe('dictating the first time', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Download' }))
     host.send({ type: 'stopped', stop: { reason: 'network' }, got: 291_000_000, size: SIZE })
     expect(screen.getByText('The download stopped')).toBeTruthy()
-    expect(screen.getByText('At 291 MB of 670 MB. It carries on from there.')).toBeTruthy()
+    expect(screen.getByText('At 291 MB of 670 MB')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(host.dictation.download).toHaveBeenCalledTimes(2)
     host.send({ type: 'stopped', stop: { reason: 'space', need: SIZE, free: 2_400_000_000 }, got: 0, size: SIZE })
-    expect(screen.getByText('It needs 670 MB; 2.4 GB is free. Make room, then try again.')).toBeTruthy()
+    expect(screen.getByText('It needs 670 MB; 2.4 GB is free.')).toBeTruthy()
     // Closing it keeps the stop in view: the model isn't there yet.
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     expect(screen.getByText('Not enough space for the speech model')).toBeTruthy()
@@ -302,7 +302,7 @@ describe('dictating with the model here', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     expect(await screen.findByText('Couldn’t write that down')).toBeTruthy()
-    expect(screen.getByText('What you said (0:00) is kept; try again.')).toBeTruthy()
+    expect(screen.getByText('What you said (0:00) is kept.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'second time'))
     expect(transcribe).toHaveBeenCalledTimes(2)
@@ -457,7 +457,7 @@ describe('dictation’s edges', () => {
     await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
     // Back before it was written down: nothing to say.
-    expect(screen.queryByText('What you said was written down while you were away.')).toBeNull()
+    expect(screen.queryByText('Written down while you were away')).toBeNull()
   })
 })
 
@@ -614,7 +614,7 @@ describe('choosing the microphone', () => {
         .map((item) => item.textContent),
     ).toEqual(['System default'])
     expect(within(menu).getByRole('menuitemradio', { name: 'System default' }).getAttribute('aria-checked')).toBe('true')
-    expect(within(menu).getByText(/Other microphones show here/)).toBeTruthy()
+    expect(within(menu).getByText('Others show once the microphone is allowed')).toBeTruthy()
   })
 
   it('lists the microphones after the default, hears the chosen one, and keeps it for next time', async () => {

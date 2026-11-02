@@ -6,6 +6,9 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  ClientAuthority,
+  SocketAllowed,
+  type MessageSender,
   Api,
   ApiError,
   type AgentStatus,
@@ -19,7 +22,7 @@ import {
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Context, Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -34,6 +37,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
@@ -48,6 +52,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
   allowsEverything,
@@ -58,6 +63,7 @@ import {
   type ProjectRules,
   resolvesConflicts,
   pushesCommits,
+  postsScreenshots,
   ruleSetOf,
   usageLimitOf,
 } from './Policies'
@@ -86,6 +92,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
@@ -147,9 +154,15 @@ const requestOf = (title: string, description: string | undefined, issue: string
   const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
   return words.trim() === '' ? {} : { request: words }
 }
+/** Authority attached by the host to this connection. */
+export const ConnectionSender = Context.Reference<MessageSender>('@althar/runtime/ConnectionSender', {
+  defaultValue: () => ({ kind: 'internal' }),
+})
+
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
+    const sender = yield* ConnectionSender
     const artifacts = yield* Artifacts
     const projects = yield* Projects
     const sessions = yield* Sessions
@@ -201,6 +214,7 @@ export const handlers = Api.toLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
@@ -372,6 +386,8 @@ export const handlers = Api.toLayer(
         end: rules.end ?? null,
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
+        postScreenshots: postsScreenshots(rules),
+        leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -553,6 +569,14 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
+      PlaceRepository: ({ grant, name }) => api(Effect.flatMap(folders.path(grant), (parent) => placeRepository(parent, name))),
+      MakeRepository: ({ grant, name }) =>
+        api(
+          Effect.gen(function* () {
+            const made = yield* makeRepository(yield* folders.path(grant), name)
+            return { grant: yield* folders.allow(made.path), path: made.path }
+          }),
+        ),
       OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
@@ -690,17 +714,18 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, setup }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget }, commandId)
+              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget, setup }, commandId)
               yield* projects.setRepository({
                 projectId,
                 repositoryId,
                 ...(role === undefined ? {} : { role }),
                 ...(changeTarget === undefined ? {} : { changeTarget }),
+                ...(setup === undefined ? {} : { setup }),
                 commandId: said.commandId,
               })
             }),
@@ -758,6 +783,8 @@ export const handlers = Api.toLayer(
         ),
       // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
       SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
+      SettledWithOnePress: ({ taskId, attentionId, action }) =>
+        api(tasks.pressed({ ...(taskId === undefined ? {} : { taskId }), ...(attentionId === undefined ? {} : { attentionId }), action })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,
@@ -792,6 +819,7 @@ export const handlers = Api.toLayer(
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
+                      sender,
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(copied.length === 0 ? {} : { files: copied }),
                       ...(dictated === true ? { dictated: true } : {}),
@@ -808,7 +836,7 @@ export const handlers = Api.toLayer(
                 ...(effort === undefined ? {} : { effort }),
                 ...(message === undefined ? {} : { message }),
                 // The person's switch: its first turn goes on at once (ADR-037).
-                byPerson: true,
+                byPerson: sender.kind === 'window' || sender.kind === 'paired_device',
               })
               // Links in what the person said unfurl on their message, as when it is sent on its own.
               if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
@@ -830,6 +858,7 @@ export const handlers = Api.toLayer(
             const atOnce = yield* busy.atOnce
             return {
               coAuthor: { on, line: coAuthorLine },
+              reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
@@ -842,6 +871,9 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetReviewSealStyle: ({ commandId, style }) =>
+        once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       GetTaskFolders: () => api(cleanup.list),
@@ -1000,6 +1032,7 @@ export const handlers = Api.toLayer(
               ),
               threadId,
               body,
+              sender,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
               ...(copied.length === 0 ? {} : { files: copied }),
@@ -1102,6 +1135,7 @@ export const handlers = Api.toLayer(
                 envelope: yield* envelope('attention.answer_stuck', { attentionId, answer }, commandId),
                 attentionId,
                 answer,
+                sender,
               })
             }),
           ),
@@ -1251,6 +1285,7 @@ export const handlers = Api.toLayer(
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
+      PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
       AddAccount: ({ commandId, agentId, name, grant }) =>
         once(
           commandId,
@@ -1366,6 +1401,8 @@ export const handlers = Api.toLayer(
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
               // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
               if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
+              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-077).
+              if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* screenshots.syncNow({ projectId })
               return yield* rulesView(projectId, kept)
             }),
           ),
@@ -1546,10 +1583,24 @@ export const services = (options: Runtime.RuntimeLayerOptions) =>
   )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
-export const connection = (port: PortLike) => RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(port)))
+export const connection = (port: PortLike, sender: MessageSender) =>
+  RpcServer.layer(Api).pipe(
+    Layer.provide(handlers.pipe(Layer.provide(Layer.succeed(ConnectionSender, sender)))),
+    Layer.provide(
+      Layer.succeed(ClientAuthority, (effect, { rpc }) =>
+        sender.kind === 'socket' && !Context.get(rpc.annotations, SocketAllowed)
+          ? Effect.fail(
+              new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' }),
+            )
+          : effect,
+      ),
+    ),
+    Layer.provide(serverProtocol(port)),
+  )
 
 /**
  * The runtime serving the API over one port. Closing the layer's scope stops
  * every session and ends the launch.
  */
-export const serve = (port: PortLike, options: Runtime.RuntimeLayerOptions) => connection(port).pipe(Layer.provideMerge(services(options)))
+export const serve = (port: PortLike, options: Runtime.RuntimeLayerOptions, sender: MessageSender) =>
+  connection(port, sender).pipe(Layer.provideMerge(services(options)))

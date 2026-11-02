@@ -52,6 +52,7 @@ export type BoardCardProps = RootProps<
     kind?: TaskKind
     /** How long, or since when: 9m. */
     at?: string
+    errands?: readonly string[] | undefined
     title: string
     /** Under the title, where the word isn't enough to say why it needs you. */
     why?: string
@@ -104,6 +105,7 @@ export function BoardCard({
   kind,
   at,
   title,
+  errands,
   why,
   track,
   object,
@@ -132,7 +134,16 @@ export function BoardCard({
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {why !== undefined && why !== '' && <p className={s.why}>{why}</p>}
+      {why !== undefined && why !== '' && (
+        <p className={s.why} title={why}>
+          {why}
+        </p>
+      )}
+      {errands?.map((line) => (
+        <p className={s.why} key={line}>
+          {line}
+        </p>
+      ))}
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}

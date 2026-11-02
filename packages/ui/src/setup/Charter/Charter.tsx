@@ -327,7 +327,7 @@ export const newCommandHintText: NewCommandHintText = {
   holds: 'Holds for',
   holdsLine: 'Holds for this line alone',
   empty: {
-    [CommandMatch.Prefix]: 'How the command starts, * for anything. It holds for what an agent asks to run beyond its sandbox',
+    [CommandMatch.Prefix]: 'How the command starts, * for anything',
     [CommandMatch.Exact]: 'The whole line, as an agent would run it',
   },
   enter: '↵',

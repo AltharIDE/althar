@@ -21,7 +21,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { lacking, noReviews, stillOpen } from './model'
+import { lacking, mergedForGood, noReviews, notOurBuild, stillOpen } from './model'
 import {
   answered,
   failedOf,
@@ -481,7 +481,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false, reopen: true, rerun: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -599,6 +599,16 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline?version=${now.version}`, {}),
         )
       }),
+    reopenChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state === 'OPEN') return changeOf(repository, now)
+        if (now.state === 'MERGED') return yield* mergedForGood(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        return changeOf(
+          repository,
+          yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/reopen?version=${now.version}`, {}),
+        )
+      }),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
@@ -631,7 +641,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
       ),
     // A build's log is the build server's, which Althar isn't signed in to.
     checkLog: () => Effect.succeed(null),
-    rerun: () => Effect.succeed(false),
+    rerun: (_repository, check) => Effect.fail(notOurBuild(product, check)),
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         const activities = yield* all(ActivityAnswer, `${pull(repository, number)}/activities`)

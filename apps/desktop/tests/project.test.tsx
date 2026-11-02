@@ -98,7 +98,7 @@ describe('running the project, with no agent', () => {
     })
     withServices(<WithSettings />, client)
     // Once the conversation is read, its front offers what the project runs.
-    await screen.findByText(/^Ask the coordinator about/)
+    await screen.findByRole('button', { name: /^Coordinator: / })
     await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
@@ -547,7 +547,7 @@ describe('the Talk room', () => {
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
+    await screen.findByRole('button', { name: /^Coordinator: / })
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
@@ -657,7 +657,7 @@ describe('the Talk room', () => {
       ),
     })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText("OpenCode isn't signed in, so the coordinator starts on Claude Code.")).toBeTruthy()
+    expect(await screen.findByText("OpenCode isn't signed in. Using Claude Code.")).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
   })
@@ -712,7 +712,7 @@ describe('the Talk room', () => {
     })
     withServices(<Project room={Room.Talk} />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
-    expect(screen.getByText('Queued; the coordinator reads it next')).toBeTruthy()
+    expect(screen.getByText('Queued')).toBeTruthy()
     // While it works, its work folds too, under how long it has worked so far and what it is doing now.
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
@@ -752,8 +752,8 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     // Behind a running turn, waiting messages are in the composer's queue rather than the thread.
-    expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
-    const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
+    expect(screen.queryByText('Queued')).toBeNull()
+    const queue = screen.getByRole('region', { name: '2 queued' })
     // Waiting, it is in the composer's queue rather than the thread.
     expect(within(queue).getByText('Rename the flag')).toBeTruthy()
     await userEvent.type(composer, 'Also the docs')
@@ -780,7 +780,7 @@ describe('the Talk room', () => {
         ),
       })
       withServices(<Project room={Room.Talk} />, client)
-      await screen.findByText('Queued · the coordinator reads it next')
+      await screen.findByText('Queued')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
       // How full the coordinator's context is shows in its composer as it says.
@@ -804,7 +804,7 @@ describe('the Talk room', () => {
           .toSorted(),
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
-      await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+      await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
     } finally {
       vi.useRealTimers()
     }
@@ -826,17 +826,17 @@ describe('the Talk room', () => {
       withServices(<Project room={Room.Talk} />, client)
       // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
       expect(await screen.findByText('Thinking')).toBeTruthy()
-      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
+      expect(screen.queryByText('Queued')).toBeNull()
       act(() => emit(changed('provider_session', 's1', 'thc')))
       await vi.advanceTimersByTimeAsync(50)
       await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
       // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
-      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Queued' })).toBeNull()
       expect(screen.getByText('Why is checkout slow?')).toBeTruthy()
       act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
       await waitFor(() => expect(screen.getByRole('textbox', { name: /^Add to the queue/ })).toBeTruthy())
       expect(screen.getByText('Thinking')).toBeTruthy()
-      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Queued' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }

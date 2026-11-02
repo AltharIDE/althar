@@ -15,13 +15,6 @@
   letter-spacing: -0.015em;
   color: var(--t-1);
 }
-.note {
-  margin: 2px 0 0;
-  max-width: 520px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--t-3);
-}
 .acts {
   display: flex;
   align-items: center;

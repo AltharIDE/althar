@@ -173,7 +173,7 @@ describe('a project’s rules', () => {
     const calls = vi.mocked(client.setProjectRules).mock.calls.length
     await userEvent.click(screen.getByRole('button', { name: 'Add a command leads run outside their sandbox' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'bun run test:e2e{Enter}')
-    expect(screen.getByRole('textbox', { name: 'A command, as it starts', description: /starts with bun/ })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'A command, as it starts', description: /keeps bun commands/ })).toBeTruthy()
     expect(client.setProjectRules).toHaveBeenCalledTimes(calls)
   })
 
@@ -238,15 +238,13 @@ describe('a project’s rules', () => {
     await userEvent.click(field)
     await userEvent.paste('bun test')
     await userEvent.keyboard('{Enter}')
-    expect(screen.getByRole('alert').textContent).toBe(
-      '“bun test” is under Never, which comes first, so nothing changed. Take it out there first.',
-    )
+    expect(screen.getByRole('alert').textContent).toBe('“bun test” is already under Never. Take it out there first.')
     expect(field.getAttribute('aria-invalid')).toBe('true')
     await userEvent.clear(field)
     await userEvent.click(field)
     await userEvent.paste('npm  test')
     await userEvent.keyboard('{Enter}')
-    expect(screen.getByRole('alert').textContent).toContain('is under Ask me, which comes first')
+    expect(screen.getByRole('alert').textContent).toContain('is already under Ask me')
     // Already there: nothing to change.
     await userEvent.clear(field)
     await userEvent.click(field)
@@ -372,9 +370,7 @@ describe('a project’s rules', () => {
   it('says nothing is let through by a rule yet, and how one gets there; Escape leaves a command being added', async () => {
     const { client } = fakeClient()
     withServices(<Rules />, client)
-    expect(
-      await screen.findByText('Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('Nothing goes ahead by a rule yet.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Add a command to Go ahead' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'rm{Escape}')
     expect(screen.queryByRole('textbox', { name: 'A command, as it starts' })).toBeNull()

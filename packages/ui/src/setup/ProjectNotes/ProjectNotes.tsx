@@ -37,7 +37,7 @@ export interface ProjectNotesText {
 }
 
 export const projectNotesText: ProjectNotesText = {
-  none: 'None yet. When you decide how something should go, the coordinator keeps it here.',
+  none: 'None yet',
   edit: (note) => `Edit “${note}”`,
   remove: (note) => `Remove “${note}”`,
   field: 'Note',

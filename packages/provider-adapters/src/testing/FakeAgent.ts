@@ -125,6 +125,13 @@ export const scenarios = {
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
   wakesItself: 'wakes-itself',
+  /** Ends the turn, and its last words reach the client just after the turn's end, as they can from a real agent. */
+  lastWords: 'last-words',
+  /**
+   * Ends the turn, then goes on by itself, saying so: once the test opens the hold `keeps-going`
+   * (`FakeAgentOptions.holds`), or at once without holds.
+   */
+  keepsGoing: 'keeps-going',
   /** Reports the session's mode and model. */
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
@@ -506,6 +513,21 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/** How many more times a lead goes on its own in each worktree, as `[lead:gone-once]` and `[lead:gone-twice]` say: kept across sessions. */
+const goneLeft = new Map<string, number>()
+
+const goesOnItsOwn = (session: SessionState) => {
+  if (!goneLeft.has(session.cwd)) {
+    if (session.markers.has('[lead:gone-once]')) goneLeft.set(session.cwd, 1)
+    else if (session.markers.has('[lead:gone-twice]')) goneLeft.set(session.cwd, 2)
+    else return false
+  }
+  const left = goneLeft.get(session.cwd) ?? 0
+  if (left === 0) return false
+  goneLeft.set(session.cwd, left - 1)
+  return true
+}
+
 /**
  * A lead that stalls or goes round in circles, as markers say:
  * `[lead:hang]` runs \`npm run dev\` and never ends its turn until cancelled,
@@ -600,7 +622,7 @@ const playStall = async (
  * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after; asked to, `[lead:make-change]` makes its quick task a change
+ * it after, with `[lead:answered]` saying it only answered the person; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
  * turn there; `[review:pass]` and `[review:findings]`
@@ -611,7 +633,7 @@ const playStall = async (
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round: never ending
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
- * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
+ * `[lead:settle-quietly]` settles without reporting; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -958,9 +980,23 @@ const playRole = async (
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         if (!aside) await commitIn(session.cwd, 'settled.txt', 'Settle the review')
-        // What became of each finding, by the ids Althar gave them.
+        // `[lead:fix-elsewhere]` names a commit from before the round, which made none of the fix.
+        const fix = aside
+          ? null
+          : (
+              await gitIn(
+                session.cwd,
+                'rev-list',
+                '-1',
+                session.markers.has('[lead:fix-elsewhere]') ? '--max-parents=0' : '--max-count=1',
+                'HEAD',
+              )
+            ).trim()
+        // What became of each finding, by the ids Althar gave them: a fix with what changed and the commit that made it.
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
-          aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
+          aside
+            ? { id, outcome: 'set_aside', reason: 'It reads as intended.' }
+            : { id, outcome: 'fixed', reason: 'The heading names the retry.', commit: fix },
         )
         // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
         const shown = session.markers.has('[lead:evidence]')
@@ -1006,13 +1042,15 @@ const playRole = async (
       const finish = async () => {
         // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
         const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
-        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
+        // Asked only something, in this turn, `[lead:answered]`: what it committed came with answering.
+        const answered = text.includes('[lead:answered]') ? { answered: true } : {}
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...answered, ...evidence() })
         if (!answer.startsWith("Write the description of the task's pull request")) return answer
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
-        const text =
+        const described =
           template === undefined ? DESCRIBED : template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
         const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
-        const descriptions = names === undefined ? [{ text }] : names.map((repository) => ({ repository, text }))
+        const descriptions = names === undefined ? [{ text: described }] : names.map((repository) => ({ repository, text: described }))
         return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
@@ -1751,6 +1789,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
+      // `[lead:gone-once]` goes on its own in its first turn in its worktree, as an agent that crashes does; `[lead:gone-twice]` in its
+      // first two. Counted by worktree, as the session started again after is a new one.
+      if (!session.coordinator && goesOnItsOwn(session)) {
+        connections.get(shared(client))?.close()
+        return ended()
+      }
       // Told its checks failed, or to see them through after its agent went, `[lead:fix-gone]` goes before it does anything.
       if (
         (session.markers.has('[lead:fix-gone]') || text.includes('[lead:fix-gone]')) &&
@@ -1969,6 +2013,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
           return ended()
+        case scenarios.lastWords:
+          await say('Done')
+          setTimeout(() => void say(' and dusted.'), 0)
+          return ended()
+        case scenarios.keepsGoing: {
+          await say('Done')
+          const held = session.holds
+          void (async () => {
+            while (held !== undefined && !session.closed && !held.opened(scenarios.keepsGoing)) await pause(10)
+            await say('Checking it once more.')
+          })()
+          return ended()
+        }
         case scenarios.wakesItself:
           await say('Done')
           setTimeout(() => void say('Verify ').then(() => say('finished.')), 20)

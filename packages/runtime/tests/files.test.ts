@@ -76,7 +76,14 @@ const connected = (options: { readonly each?: Readonly<Record<string, FakeAgentO
         artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
       }),
     )
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     const grant = (path: string) => Context.get(context, Folders).allow(path)
@@ -252,7 +259,7 @@ describe('files sent with a message', () => {
           )
         assert.strictEqual(
           yield* refused([{ grant: yield* grant(join(from, 'spec.pdf')) }, { grant: yield* grant(huge) }]),
-          "huge.zip is larger than 50 MB, so it can't be sent.",
+          'huge.zip is over 50 MB.',
         )
         assert.strictEqual(yield* refused([{ grant: 'grant_gone' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ kept: 'input_0:1' }]), "A file isn't there any more. Add it again.")

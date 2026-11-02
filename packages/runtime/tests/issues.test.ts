@@ -139,8 +139,8 @@ describe('an issue', () => {
         { url: github.changes[0]?.url ?? '', title: 'PR #1: MER-231: Rate-limit refunds' },
       ])
       const snapshot = yield* queries.thread(ready?.threadId ?? '')
-      // It moved to In Progress as its task started, and the card says so.
-      assert.deepStrictEqual(snapshot.task.issue?.status, { name: 'In Progress', category: 'started' })
+      // It moved to In Progress as its task started, and on to In Review as its pull request opened, each at once, and the card says so.
+      assert.deepStrictEqual(snapshot.task.issue?.status, { name: 'In Review', category: 'started' })
       assert.deepStrictEqual(yield* notices(ready?.threadId ?? ''), ['Moved MER-231 to In Progress'])
       // The coordinator hears of it, and reads it with the task, so it doesn't ask the person to.
       assert.include(
@@ -150,7 +150,7 @@ describe('an issue', () => {
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       assert.include(
         yield* callTool(access, 'read_task', { task: ready?.slug ?? '' }),
-        'Issue: MER-231, In Progress, https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges. Althar moved it to In Progress as the task started: the person needn’t.',
+        'Issue: MER-231, In Review, https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges. Althar moved it to In Progress as the task started: the person needn’t.',
       )
       // Its header has its plan's steps, done with them, and when it started; it hasn't settled.
       assert.deepStrictEqual(
@@ -165,26 +165,26 @@ describe('an issue', () => {
       const [listed] = (yield* queries.projects).projects
       assert.deepInclude(listed, { working: 0, ready: 1, waiting: 0 })
 
-      // As its pull request opened, Althar offered to move its issue to In Review, on a card in the task's thread; applied, it moves.
+      // As its pull request opened, Althar moved its issue to In Review at once: a card in the task's thread, applied.
       const changesIn = (thread: string) =>
         Effect.map(items(thread), (all) =>
           all.flatMap((item) =>
             item.kind === 'issue_changes'
-              ? [item.content as { changesId: string; note: string | null; issues: ReadonlyArray<{ changes: unknown }> }]
+              ? [item.content as { changesId: string; state: string; note: string | null; issues: ReadonlyArray<{ changes: unknown }> }]
               : [],
           ),
         )
       const [review] = yield* changesIn(ready?.threadId ?? '')
-      assert.deepStrictEqual([review?.note, review?.issues[0]?.changes], ['PR #1 opened.', [{ field: 'status', to: 'In Review' }]])
-      const instance = yield* Instance
-      yield* (yield* IssueChanges).apply(review?.changesId ?? '', instance.personId)
+      assert.deepStrictEqual(
+        [review?.state, review?.note, review?.issues[0]?.changes],
+        ['applied', 'PR #1 opened', [{ field: 'status', to: 'In Review' }]],
+      )
       assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'In Review')
-      // Merged on the host, the task settles, and the card to close its issue as done is in the coordinator's thread.
+      // Merged on the host, the task settles, and its issue is closed as done at once: its line is in the coordinator's thread.
       github.mergeByHand(1)
       const [done] = yield* until(changesIn(threadId), (all) => all.length > 0)
-      assert.match(done?.note ?? '', /: PR #1 merged\.$/)
+      assert.deepStrictEqual([done?.state, done?.note], ['applied', 'PR #1 merged'])
       assert.deepStrictEqual(done?.issues[0]?.changes, [{ field: 'close', to: null }])
-      yield* (yield* IssueChanges).apply(done?.changesId ?? '', instance.personId)
       assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
     }).pipe(
       Effect.provide(
@@ -369,6 +369,13 @@ describe('an issue', () => {
       const unconnected = yield* Effect.flip(issues.read('https://meridian.atlassian.net/browse/PROJ-9'))
       assert.instanceOf(unconnected, NotConnected)
       assert.strictEqual(unconnected.product, 'jira_cloud')
+      // A Jira on a company's own domain, by its issue's path; anything else, as before.
+      const ownDomain = yield* Effect.flip(issues.read('https://jira.acme.dev/browse/PAY-12'))
+      assert.instanceOf(ownDomain, NotConnected)
+      assert.strictEqual(ownDomain.product, 'jira_cloud')
+      const elsewhere = yield* Effect.flip(issues.read('https://docs.acme.dev/guide/PAY-12'))
+      assert.instanceOf(elsewhere, NotConnected)
+      assert.strictEqual(elsewhere.product, 'linear')
       // A pull request's link, given for an issue, says what it is.
       const change = yield* Effect.flip(issues.read(`${HOST}/meridian/api/pull/12`))
       assert.instanceOf(change, NotAnIssue)

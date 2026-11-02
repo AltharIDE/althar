@@ -7,13 +7,11 @@ import s from './TaskHeld.module.css'
 
 export interface TaskHeldText {
   kicker: (task: string) => string
-  note: string
   start: string
 }
 
 export const taskHeldText: TaskHeldText = {
   kicker: (task) => `Task ${task} · held before it started`,
-  note: 'You held the plan in the coordinator. Nothing has run yet; tell the lead how to start, or start it as planned.',
   start: 'Start as planned',
 }
 
@@ -41,7 +39,6 @@ export function TaskHeld({ task, title, plan, onStart, starting = false, heading
       <Heading level={headingLevel} id={titleId} className={s.title}>
         {title}
       </Heading>
-      <p className={s.note}>{t.note}</p>
       <div className={s.acts}>
         <Button busy={starting} onClick={onStart}>
           {t.start}

@@ -38,42 +38,36 @@ describe('the words for what went wrong', () => {
   })
 
   it('names an image refused without a name as an image', () => {
-    assert.strictEqual(
-      said(new ImageRefused({ reason: 'unsupported', name: null })),
-      "An image isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.",
-    )
+    assert.strictEqual(said(new ImageRefused({ reason: 'unsupported', name: null })), "An image isn't a PNG, JPEG, GIF or WebP image.")
     assert.strictEqual(said(new ImageRefused({ reason: 'missing', name: 'shot.png' })), "shot.png isn't kept any more. Add it again.")
     assert.strictEqual(said(new ImageRefused({ reason: 'too_many', name: null })), 'A message can carry at most 10 images.')
-    assert.strictEqual(
-      said(new ImageRefused({ reason: 'unkept', name: 'shot.png' })),
-      'Althar has nowhere to keep images here, so none can be sent.',
-    )
+    assert.strictEqual(said(new ImageRefused({ reason: 'unkept', name: 'shot.png' })), 'Images can’t be sent here.')
   })
 
   it('says why the coordinator can’t start, and what to do', () => {
     assert.strictEqual(
       said(new CoordinatorUnavailable({ agentId: 'codex', agentName: 'Codex' })),
-      "Codex isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.",
+      "Codex isn't signed in. Sign it in, or pick another agent for the coordinator.",
     )
   })
 
   it('says an allow rule on another list as one command or as commands starting so, and which list', () => {
     assert.strictEqual(
       said(new RuleOnAnotherList({ pattern: 'git push', exact: false, list: 'never' })),
-      'Commands starting “git push” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
+      'Commands starting “git push” are on “Never”. Take them off “Never” first.',
     )
     assert.strictEqual(
       said(new RuleOnAnotherList({ pattern: 'rm -rf dist', exact: true, list: 'never' })),
-      '“rm -rf dist” is on “Never”, which comes first, so nothing changed. Take it off “Never” first.',
+      '“rm -rf dist” is on “Never”. Take it off “Never” first.',
     )
     assert.strictEqual(
       said(new RulesChanged({ projectId: 'p', revision: 3, expected: 2 })),
-      "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted.",
+      "The project's rules changed meanwhile. Make the change again.",
     )
   })
 
   it('says a message already with the agent can’t be taken back', () => {
-    assert.strictEqual(said(new AlreadyDelivered({ itemId: 'i' })), "The agent already has that message, so it can't be taken back.")
+    assert.strictEqual(said(new AlreadyDelivered({ itemId: 'i' })), 'The agent already has that message.')
   })
 
   it('says a git command it can’t name as git, with what git said', () => {
@@ -86,7 +80,7 @@ describe('the words for what went wrong', () => {
   it('says a branch that moved since the person looked, so nothing was pushed', () => {
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't', what: 'branch' })),
-      'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.',
+      'The branch changed since you looked. Look again, then push.',
     )
   })
 

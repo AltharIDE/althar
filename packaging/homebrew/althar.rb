@@ -1,8 +1,11 @@
 cask "althar" do
-  version "0.5.0"
-  sha256 "5f73e969595b6855db95ed97abf5664d3e31028daca8258813d19ba4803f5637"
+  arch arm: "arm64", intel: "x64"
 
-  url "https://github.com/AltharIDE/althar/releases/download/v#{version}/Althar-#{version}-arm64.dmg"
+  version "0.5.0"
+  sha256 arm:   "5f73e969595b6855db95ed97abf5664d3e31028daca8258813d19ba4803f5637",
+         intel: "0000000000000000000000000000000000000000000000000000000000000000"
+
+  url "https://github.com/AltharIDE/althar/releases/download/v#{version}/Althar-#{version}-#{arch}.dmg"
   name "Althar"
   desc "Desktop app for running a software project with AI coding agents"
   homepage "https://althar.ai/"
@@ -13,7 +16,6 @@ cask "althar" do
   end
 
   auto_updates true
-  depends_on arch: :arm64
   depends_on macos: :ventura
 
   app "Althar.app"

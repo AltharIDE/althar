@@ -69,7 +69,7 @@ describe('a project’s repositories part', () => {
     withServices(<Part connections={connectionList} onConnect={onConnect} />, client)
     const here = within(await screen.findByRole('list', { name: 'On this Mac' }))
     expect(here.getByText('~/code/meridian-api')).toBeTruthy()
-    expect(screen.getByText('Tasks work in their own worktrees, never in these folders')).toBeTruthy()
+    expect(screen.getByText('Tasks work in their own worktrees')).toBeTruthy()
     await userEvent.click(here.getByRole('button', { name: 'More for meridian-infra' }))
     expect(await screen.findByRole('menuitem', { name: /Leave out of The project/ })).toBeTruthy()
     await userEvent.keyboard('{Escape}')

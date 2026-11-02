@@ -3,11 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { Ids, newId } from '@althar/domain'
+
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Deferred, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from '../src/Busy'
 import { Changes } from '../src/Changes'
 import { setCoAuthor } from '../src/credit'
 import { ChangedSinceSeen } from '../src/errors'
@@ -19,7 +22,7 @@ import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
-import { HOST, hosted, turns, until } from './support'
+import { callTool, HOST, hosted, turns, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
 
@@ -76,6 +79,113 @@ describe('what the host says of a ready pull request’s conflicts', () => {
 })
 
 describe('a pull request, by the person and the lead', () => {
+  for (const news of ['comment', 'review', 'queue', 'message', 'limited', 'noise', 'merged-comment', 'place'] as const) {
+    it.live(`wakes a stopped lead with its ${news} news in hand`, () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const threadId = ready?.threadId ?? ''
+        const sessions = yield* Sessions
+        const changes = yield* Changes
+        if (news === 'queue') {
+          yield* changes.merge(taskId, ready?.change?.head ?? '')
+          yield* changes.refresh(taskId)
+        }
+        yield* sessions.stop(threadId)
+        const before = (yield* turns(threadId)).length
+        const sql = yield* SqlClient.SqlClient
+        const release = yield* Deferred.make<void>()
+        if (news === 'place') {
+          const busy = yield* Busy
+          yield* busy.set(1)
+          yield* callTool({ role: 'coordinator', projectId, threadId: 'none', sessionId: 'none', taskId: null }, 'draft_task', {
+            title: 'Blocker',
+            description: 'Holds a place.',
+          })
+          const [blocker] = yield* sql<{
+            id: string
+            threadId: string
+          }>`SELECT k.id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id WHERE k.slug = 'blocker' AND t.kind = 'task'`
+          const entered = yield* Deferred.make<void>()
+          yield* Effect.forkScoped(
+            busy.turn({ taskId: blocker?.id ?? '', threadId: blocker?.threadId ?? '', sessionId: 'test' }, () =>
+              Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release)),
+            ),
+          )
+          yield* Deferred.await(entered)
+        }
+        if (news === 'limited') {
+          const [session] = yield* sql<{
+            agentId: string
+            accountId: string
+          }>`SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+          const principalId = yield* newId(Ids.principal)
+          const at = new Date().toISOString()
+          yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: session?.agentId ?? '', accountId: session?.accountId ?? '', deviceId: (yield* Instance).deviceId, subjectHint: 'Fake', authMode: 'vendor_cli', observedAt: at })}`
+          yield* sql`INSERT INTO account_statuses ${sql.insert({ id: yield* newId(Ids.accountStatus), principalId, state: 'limited', windows: JSON.stringify([{ kind: 'usage', resetsAt: new Date(Date.now() + 3600000).toISOString() }]), source: 'error', observedAt: at })}`
+        }
+        if (news === 'noise') {
+          github.reviewAs(1, 'lee', 'approved', 'Looks good.')
+          github.commentAs(1, 'stranger', 'Outside comment.', { member: false })
+          github.mergeByHand(1)
+          yield* changes.refresh(taskId)
+          yield* changes.refresh(taskId)
+          yield* Effect.sleep('200 millis')
+          assert.lengthOf(yield* turns(threadId), before)
+          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`
+          assert.strictEqual(task?.state, 'done')
+          return
+        }
+        let expected = 'Please rename the retry.'
+        if (news === 'comment' || news === 'limited' || news === 'merged-comment' || news === 'place') github.commentAs(1, 'lee', expected)
+        if (news === 'merged-comment') github.mergeByHand(1)
+        if (news === 'review') github.reviewAs(1, 'lee', 'changes_requested', expected)
+        if (news === 'queue') {
+          github.dequeue(1, 'checks')
+          expected = 'The merge queue took PR #1 out: its checks failed.'
+        }
+        if (news === 'message') {
+          yield* callTool({ role: 'coordinator', projectId, threadId: 'none', sessionId: 'none', taskId: null }, 'message_lead', {
+            task: 'add-a-retry',
+            message: expected,
+          })
+        } else yield* changes.refresh(taskId)
+        if (news === 'place' || news === 'limited') {
+          yield* until(arrivals(threadId), (all) => all.some((arrival) => arrival['text'] === expected))
+        }
+        if (news === 'place') {
+          yield* until(
+            Effect.map((yield* Busy).line(projectId), (line) => line.continuing),
+            (ids) => ids.includes(taskId),
+          )
+          assert.lengthOf(yield* turns(threadId), before)
+          yield* Deferred.succeed(release, undefined)
+        }
+        if (news === 'limited') {
+          yield* until(
+            sql<{ waiting: string | null }>`SELECT waits_for_place AS waiting FROM threads WHERE id = ${threadId}`,
+            (rows) => rows[0]?.waiting != null,
+          )
+          assert.lengthOf(yield* turns(threadId), before)
+          const [queued] = yield* sql<{
+            body: string
+          }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' ORDER BY sequence DESC LIMIT 1`
+          assert.include(queued?.body ?? '', expected)
+          yield* sql`UPDATE account_statuses SET state = 'ok' WHERE principal_id IN (SELECT id FROM principals WHERE account_id IN (SELECT account_id FROM provider_sessions WHERE thread_id = ${threadId}))`
+        }
+        const heard = yield* until(turns(threadId), (rows) => rows.slice(before).some((row) => row.prompt?.includes(expected) === true))
+        assert.isTrue(heard.slice(before).some((row) => row.prompt?.includes(expected) === true))
+        assert.notStrictEqual(heard.at(-1)?.providerSessionId, heard.at(before - 1)?.providerSessionId)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    })
+  }
+
   it.live('is marked ready by the person, read and replied on by the lead, and pushed by the person as far as they saw', () => {
     const { working, bare } = hosted()
     const tip = tipOf(bare)
@@ -508,15 +618,17 @@ describe('a branch that parted from its pull request', () => {
         .trim()
       at(bare, 'update-ref', `refs/heads/${branch}`, theirs)
       at(here, 'commit', '-q', '--allow-empty', '-m', 'Mine')
-      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved')
-      assert.deepStrictEqual(moved?.change?.diverged, { kind: 'moved', local: 0, onPullRequest: null })
-      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, moved?.change?.localHead ?? ''))), 'PushRefused:behind')
-      // Bringing its commits in: fetched here, and the lead merges them.
+      // Bringing its commits in is the lead's: Althar fetches them here and tells it, once, to merge them (DEV-173).
+      const told = sql<{ body: string }>`SELECT body FROM user_inputs WHERE body LIKE ${`%git merge ${theirs}%`}`
+      yield* until(told, (rows) => rows.length === 1)
+      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
+      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, counted?.change?.localHead ?? ''))), 'PushRefused:behind')
+      // The task's own button says the same.
       const bringing = yield* changes.mergeNote(taskId)
       assert.strictEqual(bringing.head, theirs)
       assert.include(bringing.note, `git merge ${theirs}`)
-      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
-      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      assert.lengthOf(yield* told, 1)
       at(here, 'merge', '-q', '--no-edit', theirs)
       const [merged] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 2)
       yield* changes.push(taskId, merged?.change?.localHead ?? '')

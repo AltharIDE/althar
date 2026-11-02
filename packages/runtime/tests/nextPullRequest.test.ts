@@ -29,7 +29,7 @@ import { fakeConnectors, HOST, hosted, notices, runtime, until } from './support
 
 const runtimeWith = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
   )
 
 const git = (cwd: string, ...args: Array<string>) =>
@@ -112,8 +112,8 @@ describe('a task whose pull request merges with commits after it', () => {
         all.some((notice) => notice.title?.startsWith('Not done yet') === true),
       )
       const notDone = said.find((notice) => notice.title?.startsWith('Not done yet') === true)
-      assert.strictEqual(notDone?.title, "Not done yet: 2 commits after PR #1 aren't in a pull request.")
-      assert.strictEqual(notDone?.description, 'Open a new pull request for them from the task.')
+      assert.strictEqual(notDone?.title, 'Not done yet: 2 commits in no pull request.')
+      assert.isUndefined(notDone?.description)
       const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${ready?.taskId ?? ''}`
       assert.strictEqual(task?.state, 'open')
     }).pipe(Effect.provide(runtimeWith(github)))

@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -91,16 +91,6 @@ CREATE TABLE runtime_instances (
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 ) STRICT;
 
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proj_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
-  name TEXT NOT NULL,
-  slug TEXT NOT NULL UNIQUE CHECK (slug <> '' AND slug NOT GLOB '*[^a-z0-9-]*'),
-  created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
-  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber')), tracker_connection_id TEXT REFERENCES connections (id), tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL), tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))) STRICT;
-
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
@@ -140,7 +130,7 @@ CREATE TABLE repository_bindings (
   allowed_subpaths TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(allowed_subpaths)),
   default_base_ref TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT,
+  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT, recorded_setup TEXT,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -407,7 +397,7 @@ CREATE TABLE user_inputs (
   state TEXT NOT NULL REFERENCES vocab_user_input_state (word),
   superseded_by_input_id TEXT,
   accepted_at TEXT NOT NULL CHECK (accepted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), dictated INTEGER NOT NULL DEFAULT 0 CHECK (dictated IN (0, 1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), dictated INTEGER NOT NULL DEFAULT 0 CHECK (dictated IN (0, 1)), sender_kind TEXT NOT NULL DEFAULT 'internal' CHECK (sender_kind IN ('window', 'paired_device', 'socket', 'internal')), sender_device_id TEXT, input_origin TEXT NOT NULL DEFAULT 'system' CHECK (input_origin IN ('news', 'system')),
   UNIQUE (thread_id, sequence),
   CHECK ((state = 'superseded') = (superseded_by_input_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
@@ -432,7 +422,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -774,7 +764,7 @@ CREATE TABLE mutation_receipts (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   confirmed_at TEXT CHECK (confirmed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-) STRICT;
+, said_at TEXT) STRICT;
 
 CREATE TABLE observations (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'obs_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
@@ -1312,3 +1302,87 @@ CREATE TABLE task_request_inputs (
 ) STRICT;
 
 CREATE INDEX thread_items_by_user_input ON thread_items (user_input_id) WHERE user_input_id IS NOT NULL;
+
+CREATE TABLE "projects" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'proj_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE CHECK (slug <> '' AND slug NOT GLOB '*[^a-z0-9-]*'),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'sand', 'olive', 'moss', 'teal', 'slate', 'indigo', 'plum', 'rose', 'brick', 'umber')),
+  tracker_connection_id TEXT REFERENCES connections (id),
+  tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL),
+  tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))
+) STRICT;
+
+CREATE TABLE pull_request_pictures (
+  link_id TEXT PRIMARY KEY NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  comment_id TEXT,
+  comment_url TEXT,
+  shown TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(shown)),
+  earlier TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(earlier)),
+  left_out TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(left_out)),
+  uploads TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(uploads)),
+  posted_at TEXT CHECK (posted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  failed TEXT,
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  FOREIGN KEY (link_id, project_id) REFERENCES external_links (id, project_id)
+) STRICT;
+
+CREATE TABLE one_press_settles (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('merge', 'push', 'done', 'keep', 'resolve', 'carry_on', 'allow', 'reject')),
+    unopened INTEGER NOT NULL CHECK (unopened IN (0, 1)),
+    pressed_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX one_press_settles_by_time ON one_press_settles (pressed_at);
+
+CREATE TABLE errands (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    thread_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    words TEXT NOT NULL,
+    resume_message_id TEXT,
+    resume_words TEXT,
+    paused_after_sequence INTEGER,
+    state TEXT NOT NULL CHECK (state IN ('open', 'paused', 'done', 'cancelled')),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    news_at TEXT NOT NULL,
+    reminded_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    FOREIGN KEY (thread_id, project_id) REFERENCES threads(id, project_id),
+    FOREIGN KEY (message_id, project_id) REFERENCES user_inputs(id, project_id),
+    FOREIGN KEY (resume_message_id, project_id) REFERENCES user_inputs(id, project_id),
+    UNIQUE(id, project_id)
+  ) STRICT;
+
+CREATE TABLE errand_steps (
+    errand_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    step_key TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 1),
+    tool TEXT NOT NULL,
+    task_id TEXT,
+    target TEXT NOT NULL,
+    head TEXT,
+    target_branch TEXT,
+    request TEXT NOT NULL CHECK (json_valid(request)),
+    waits TEXT NOT NULL CHECK (json_valid(waits)),
+    state TEXT NOT NULL CHECK (state IN ('waiting', 'done')),
+    FOREIGN KEY (errand_id, project_id) REFERENCES errands(id, project_id),
+    FOREIGN KEY (task_id, project_id) REFERENCES tasks(id, project_id),
+    PRIMARY KEY (errand_id, step_key),
+    UNIQUE (errand_id, position)
+  ) STRICT;
+
+CREATE INDEX errands_open ON errands(project_id, state);
+
+CREATE INDEX errand_steps_task ON errand_steps(task_id);

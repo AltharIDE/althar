@@ -50,7 +50,7 @@ export const dictationPillText: DictationPillText = {
   retry: 'Try again',
   writing: 'Writing it down…',
   nothing: 'Listening…',
-  failed: (said) => `${said} of what you said couldn’t be written down.`,
+  failed: (said) => `${said} not written down`,
   edit: 'What you said',
 }
 

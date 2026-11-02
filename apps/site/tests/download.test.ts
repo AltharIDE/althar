@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
-import { type Asset, pickAsset } from '../src/lib/download'
+import { type Asset, otherMac, pickAsset } from '../src/lib/download'
 
 /*
  * Which of a release's files a system gets: the files as the release
@@ -27,6 +27,12 @@ const SHIPPED = [
 ].map(file)
 
 const WITH_WINDOWS = [...SHIPPED, file('Althar-0.2.0-x64-setup.exe'), file('Althar-0.2.0-x64-setup.exe.blockmap'), file('latest.yml')]
+
+/** A release with Intel's Mac build beside Apple silicon's, and the Windows installer, also x64. */
+const WITH_INTEL = [
+  ...WITH_WINDOWS,
+  ...['Althar-0.2.0-x64-mac.zip', 'Althar-0.2.0-x64-mac.zip.blockmap', 'Althar-0.2.0-x64.dmg', 'Althar-0.2.0-x64.dmg.blockmap'].map(file),
+]
 
 describe('pickAsset', () => {
   it('gives a Mac the dmg, not the zip or its blockmap', () => {
@@ -56,7 +62,24 @@ describe('pickAsset', () => {
     expect(pickAsset(null, 'arm', WITH_WINDOWS)).toBeNull()
   })
 
-  it('gives a chip with no build nothing: an Intel Mac, an ARM Linux', () => {
+  it('gives an Intel Mac Intel’s dmg once a release has one, and Apple silicon or an unsaid chip Apple silicon’s', () => {
+    expect(pickAsset('mac', 'x86', WITH_INTEL)?.name).toBe('Althar-0.2.0-x64.dmg')
+    expect(pickAsset('mac', 'arm', WITH_INTEL)?.name).toBe('Althar-0.2.0-arm64.dmg')
+    expect(pickAsset('mac', null, WITH_INTEL)?.name).toBe('Althar-0.2.0-arm64.dmg')
+    // Not the Windows installer, though it is x64 too.
+    expect(pickAsset('windows', 'x86', WITH_INTEL)?.name).toBe('Althar-0.2.0-x64-setup.exe')
+  })
+
+  it('offers a Mac the other chip’s build, where the release has it', () => {
+    expect(otherMac('mac', null, WITH_INTEL)).toMatchObject({ name: 'Althar-0.2.0-x64.dmg', chip: 'x86' })
+    expect(otherMac('mac', 'arm', WITH_INTEL)).toMatchObject({ name: 'Althar-0.2.0-x64.dmg', chip: 'x86' })
+    expect(otherMac('mac', 'x86', WITH_INTEL)).toMatchObject({ name: 'Althar-0.2.0-arm64.dmg', chip: 'arm' })
+    expect(otherMac('mac', null, SHIPPED)).toBeNull()
+    expect(otherMac('windows', 'x86', WITH_INTEL)).toBeNull()
+    expect(otherMac(null, null, WITH_INTEL)).toBeNull()
+  })
+
+  it('gives a chip with no build nothing: an Intel Mac before Intel’s build, an ARM Linux', () => {
     expect(pickAsset('mac', 'x86', SHIPPED)).toBeNull()
     expect(pickAsset('linux', 'arm', SHIPPED)).toBeNull()
   })
@@ -164,12 +187,32 @@ describe('findDownload', () => {
   it('gives a Mac the dmg, where the browser says nothing of the chip or says Apple silicon', async () => {
     browse({ ua: UA.macSafari })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg') })
+    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg'), other: null })
     browse({ ua: UA.macChrome, arch: 'arm' })
-    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg') })
+    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg'), other: null })
   })
 
-  it('sends an Intel Mac, where Chromium says so, to the releases page', async () => {
+  it('gives an Intel Mac, where Chromium says so, Intel’s dmg, with Apple silicon’s beside it', async () => {
+    browse({ ua: UA.macChrome, arch: 'x86' })
+    api({ assets: WITH_INTEL })
+    expect(await (await lookup())()).toEqual({
+      os: 'mac',
+      href: url('Althar-0.2.0-x64.dmg'),
+      other: { href: url('Althar-0.2.0-arm64.dmg'), label: 'Or for Apple silicon' },
+    })
+  })
+
+  it('gives Safari, which never says the chip, Apple silicon’s dmg, with Intel’s beside it', async () => {
+    browse({ ua: UA.macSafari })
+    api({ assets: WITH_INTEL })
+    expect(await (await lookup())()).toEqual({
+      os: 'mac',
+      href: url('Althar-0.2.0-arm64.dmg'),
+      other: { href: url('Althar-0.2.0-x64.dmg'), label: 'Or for an Intel Mac' },
+    })
+  })
+
+  it('sends an Intel Mac, where Chromium says so, to the releases page while no release has its build', async () => {
     browse({ ua: UA.macChrome, arch: 'x86' })
     api({ assets: SHIPPED })
     expect(await (await lookup())()).toBeNull()
@@ -178,11 +221,11 @@ describe('findDownload', () => {
   it('gives Linux the AppImage, and Windows its exe only once a release has one', async () => {
     browse({ ua: UA.linux, arch: 'x86' })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage') })
+    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage'), other: null })
     browse({ ua: UA.windows, arch: 'x86' })
     expect(await (await lookup())()).toBeNull()
     api({ assets: WITH_WINDOWS })
-    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-0.2.0-x64-setup.exe') })
+    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-0.2.0-x64-setup.exe'), other: null })
   })
 
   it('sends a phone or a desktop-mode iPad to the releases page without asking the API', async () => {
@@ -219,6 +262,6 @@ describe('findDownload', () => {
   it('lets ?platform= stand for the whole system, chip included', async () => {
     browse({ ua: UA.macChrome, arch: 'arm', search: '?platform=linux' })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage') })
+    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage'), other: null })
   })
 })

@@ -32,8 +32,6 @@ export interface IssueDraftText {
   prioritised: (priority: string) => string
   showAll: string
   showLess: string
-  /** Beside the buttons, until it is filed. */
-  note: string
   /** Beside the buttons, while it is being filed. */
   filing: (source: string) => string
   /** Before why it wasn't filed. */
@@ -68,7 +66,6 @@ export const issueDraftText: IssueDraftText = {
   prioritised: (priority) => `Priority: ${priority}`,
   showAll: 'Show all',
   showLess: 'Show less',
-  note: 'Nothing is filed until you file it.',
   filing: (source) => `Filing on ${source}…`,
   failed: (source) => `Couldn’t file it on ${source}.`,
   uncertain: (source) => `This may be on ${source} already.`,
@@ -332,7 +329,7 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
             )}
           </div>
           <div className={s.foot}>
-            <span className={s.note}>{filing ? t.filing(source) : t.note}</span>
+            <span className={s.note}>{filing && t.filing(source)}</span>
             {onDiscard && !filing && (
               <Button variant="quiet" onClick={onDiscard}>
                 {t.discard}

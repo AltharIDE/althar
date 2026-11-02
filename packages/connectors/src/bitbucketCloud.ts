@@ -22,7 +22,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { branchPath, lacking, noReviews, stillOpen } from './model'
+import { branchPath, lacking, noReopen, noReviews, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -113,6 +113,11 @@ const Statuses = Schema.Struct({
       description: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
+})
+
+/** A pipeline's target: where it ran (a branch, or a pull request's), at which commit, sent back as it is to run it again. */
+const PipelineAnswer = Schema.Struct({
+  target: Schema.Record(Schema.String, Schema.Unknown),
 })
 
 const Steps = Schema.Struct({
@@ -438,7 +443,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false, reopen: false, rerun: true },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -553,6 +558,9 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         if (now.state !== 'OPEN') return changeOf(repository, now)
         return changeOf(repository, yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline`))
       }),
+    // Declining is final on Bitbucket Cloud: its pull requests have no reopening.
+    reopenChange: (_repository, change) =>
+      Effect.fail(noReopen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
@@ -594,8 +602,16 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         return whole ? log : tail(log)
       })
     },
-    // A pipeline runs again only whole, as a new one: not a check of its own.
-    rerun: () => Effect.succeed(false),
+    // A pipeline runs again only whole, as a new one on the same commit and branch: not a step of its own.
+    rerun: (repository, check) => {
+      const match = /^pipeline:(\d+)$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return Effect.gen(function* () {
+        const run = yield* http.json(PipelineAnswer, 'GET', `${repo(repository.path)}/pipelines/${match[1]}`)
+        yield* http.json(Schema.Unknown, 'POST', `${repo(repository.path)}/pipelines`, { target: run.target })
+        return true
+      })
+    },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         // Read whole, to find each reply's thread; by ETag, so a quiet pull request costs little.

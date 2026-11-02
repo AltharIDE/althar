@@ -40,8 +40,8 @@ export interface ProjectSettingsPageProps {
   readonly connections: ConnectionsModel
   /** The trackers its tasks' issues are on, the one most of them name first. */
   readonly trackers: ReadonlyArray<Tracker>
-  /** Its repositories, each with the host its work goes to and whether Althar is signed in there; null until they are read. */
-  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'host'>> | null
+  /** Its repositories, each with the host its work goes to and whether Althar is signed in there, and its setup; null until they are read. */
+  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'path' | 'host' | 'setup'>> | null
   /** Something its work goes to waits on the person: a dot beside Code and issues. */
   readonly connectionsNeedYou: boolean
   /** What it runs, in its order; null until its coordinator is read. */
@@ -72,7 +72,6 @@ export function ProjectSettingsPage({
       <SettingsLayout
         section={section}
         title={open.title}
-        {...(open.lede === undefined ? {} : { lede: open.lede })}
         headingLevel={HEADING.title}
         side={
           <SettingsNav

@@ -220,7 +220,7 @@ describe('Gallery', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('names the views it took again in a line, each opening on a click', async () => {
+  it('counts the views it took again in a line, which opens them on a click', async () => {
     const user = userEvent.setup()
     const again = [shot('a2b', 'A2 · Again'), shot('b1b', 'B1 · Again'), shot('cb', 'Again, unnamed')]
     const { rerender } = render(
@@ -228,10 +228,8 @@ describe('Gallery', () => {
         <Gallery shots={[shot('s1', 'S1 · The switcher')]} retaken={again} />
       </Host>,
     )
-    const line = screen.getByText(/It also retook/)
-    expect(line).toHaveTextContent('It also retook A2, B1 and cb.png, shown earlier.')
-    await user.click(screen.getByRole('button', { name: 'View B1 · Again full size' }))
-    expect(within(await screen.findByRole('dialog')).getByText('2 of 3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Also retook 3 shown earlier' }))
+    expect(within(await screen.findByRole('dialog')).getByText('1 of 3')).toBeInTheDocument()
     rerender(
       <Host>
         <Gallery shots={[]} retaken={again.slice(0, 1)} />

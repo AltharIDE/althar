@@ -42,7 +42,11 @@ const kept = (threadId: string) =>
     const sql = yield* SqlClient.SqlClient
     const [item] = yield* sql<{ content: string }>`
       SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
-    return JSON.parse(item?.content ?? '{}') as { evidence?: ReadonlyArray<Record<string, unknown>>; unverified?: ReadonlyArray<string> }
+    return JSON.parse(item?.content ?? '{}') as {
+      evidence?: ReadonlyArray<Record<string, unknown>>
+      unverified?: ReadonlyArray<string>
+      keptViews?: ReadonlyArray<string>
+    }
   })
 
 describe('the evidence a lead hands', () => {
@@ -92,6 +96,39 @@ describe('the evidence a lead hands', () => {
       })
       assert.deepStrictEqual(unverified, ['Not tried on Windows'])
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live(
+    'keeps what each picture is: a view of the work as built by its name, or an option; and the views from before that still hold',
+    () =>
+      Effect.gen(function* () {
+        const { lead, threadId, worktree } = yield* started
+        writeFileSync(join(worktree, 'page.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        yield* callTool(lead, 'finish_step', {
+          built: 'A retry.',
+          summary: 'Did it.',
+          evidence: [
+            { kind: 'screenshot', caption: 'The retry button', path: 'page.png', view: ' Retry button ' },
+            { kind: 'screenshot', caption: 'B · A quieter retry', path: 'page.png', option: true },
+            { kind: 'note', caption: 'No view for a note', view: 'Note', option: true },
+          ],
+          kept_views: ['Settings page', ' ', 'Settings page'],
+        })
+        const { evidence, keptViews } = yield* kept(threadId)
+        assert.deepStrictEqual(
+          evidence?.map((piece) => [piece.view, piece.option]),
+          [
+            ['Retry button', undefined],
+            [undefined, true],
+            [undefined, undefined],
+          ],
+        )
+        assert.deepStrictEqual(keptViews, ['Settings page'])
+        // As the window reads them.
+        const [shown, option] = evidenceOf(evidence)
+        assert.strictEqual(shown?.view, 'Retry button')
+        assert.isTrue(option?.option)
+      }).pipe(Effect.provide(runtime())),
   )
 
   it.live('refuses what it can’t keep, saying what to do', () =>

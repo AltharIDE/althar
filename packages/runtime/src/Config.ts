@@ -100,6 +100,16 @@ export interface RuntimeOptions {
   readonly checksAppear?: Duration.Duration
   /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
   readonly checksStuck?: Duration.Duration
+  /**
+   * How long a publish step that failed for a reason that may pass (the code host's 5xx, a rate limit, a timeout, a dropped
+   * connection) waits before Althar tries it once more by itself: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly publishAgain?: Duration.Duration
+  /**
+   * How long a task its last agent left, with nothing that says why, or whose lead's commits go up as its turn ended, is
+   * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly betweenAgents?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
@@ -173,6 +183,8 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+  /** How long after its turn ends what an agent says is still that turn's, not work outside it: a second. */
+  readonly trails?: Duration.Duration
   /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
   readonly blank?: Duration.Duration
 }
@@ -313,7 +325,17 @@ export class Agents extends Context.Service<
             const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
             return {
               _tag: 'Process' as const,
-              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              spec: {
+                ...spec,
+                env: {
+                  ...spec.env,
+                  ...withoutSignIns(signedOut),
+                  ...own,
+                  ...held,
+                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held }, options),
+                  ...env,
+                },
+              },
               cwd,
               ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
             }

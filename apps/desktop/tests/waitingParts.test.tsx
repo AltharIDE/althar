@@ -23,19 +23,22 @@ const NOW = '2026-10-10T09:05:00.000Z'
 const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
 
 describe('who holds the places a task waits for', () => {
-  it('offers the front of the line alone where nobody is named as holding one', async () => {
+  it('offers the front of the line, naming none of the tasks at work', async () => {
     const onFront = vi.fn()
-    withServices(<Holders holders={undefined} onStop={vi.fn()} onFront={onFront} />, fakeClient().client)
-    expect(screen.queryByText(/^Held by/)).toBeNull()
+    const holders: ReadonlyArray<Holder> = [{ taskId: 't2', title: 'Fix the login', threadId: 'th2', kept: false, running: [] }]
+    withServices(<Holders holders={holders} onStop={vi.fn()} onFront={onFront} />, fakeClient().client)
+    expect(screen.queryByText(/Fix the login/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Move to the front of the line' }))
     expect(onFront).toHaveBeenCalled()
   })
 
-  it('names a task with no session yet, with nothing of it to stop', () => {
-    const holders: ReadonlyArray<Holder> = [{ taskId: 't2', title: 'Fix the login', threadId: null, kept: false, running: [serving] }]
-    withServices(<Holders holders={holders} onStop={vi.fn()} />, fakeClient().client)
-    expect(screen.getByText('Held by Fix the login')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
+  it('draws nothing where nothing can be stopped and it is first in line', () => {
+    const holders: ReadonlyArray<Holder> = [
+      { taskId: 't2', title: 'Fix the login', threadId: null, kept: false, running: [serving] },
+      { taskId: 't3', title: 'Tidy the docs', threadId: 'th3', kept: false, running: [] },
+    ]
+    const { container } = withServices(<Holders holders={holders} onStop={vi.fn()} />, fakeClient().client)
+    expect(container.textContent).toBe('')
   })
 
   it('opens where a server that keeps a place answers', async () => {

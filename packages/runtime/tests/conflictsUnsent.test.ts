@@ -103,7 +103,7 @@ describe('a pull request whose default branch moved while it didn’t', () => {
         moveHostMainOn(working, bare)
         // Nothing was pushed to the pull request: only main moved.
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
-        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
         assert.strictEqual((yield* asked(threadId)).length, 1)
         assert.strictEqual((yield* rounds(taskId))[0]?.url, 'https://github.com/meridian/api/pull/1')
       }).pipe(Effect.provide(runtimeWith({ github })))
@@ -118,7 +118,7 @@ describe('a conflicting task whose run didn’t succeed', () => {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
       yield* runIs(taskId, 'failed')
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       assert.strictEqual((yield* rounds(taskId)).length, 1)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -134,12 +134,12 @@ describe('a conflicting task whose run didn’t succeed', () => {
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
       )
-      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
+      assert.strictEqual(why, 'It’s stopped.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
       assert.deepStrictEqual(yield* asked(threadId), [])
       // Resolve now: asked, and the card says nothing more of why not.
       yield* (yield* Changes).resolveNow({ taskId }, true)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       assert.isNull(yield* unsentOf(projectId))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -167,7 +167,7 @@ describe('a stopped task its lead was told to carry on, its run still suspended'
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one !== null,
       )
-      assert.strictEqual(why, 'It’s stopped, so Althar doesn’t start its lead for a conflict.')
+      assert.strictEqual(why, 'It’s stopped.')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
@@ -218,7 +218,7 @@ describe('a task Althar can’t look at here, where its host says it merges clea
       // Back: Look again fetches anew, finds the conflict, and the card says no more of why.
       url = bare
       yield* (yield* Changes).resolveNow({ taskId }, true)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       yield* until(cards(projectId), ([card]) => card?.conflictUnchecked == null)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -313,7 +313,7 @@ describe('a conflict whose last round ended as Althar stopped', () => {
         settledAt: at,
       })}`
       yield* taskSays(taskId, null)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       // Pushed, the round waits for the checks on the merge, which pass once they are read.
       const settled = yield* until(rounds(taskId), (all) => all.at(-1)?.state !== 'checking')
       assert.deepStrictEqual(
@@ -377,7 +377,7 @@ describe('a branch merging here, with no pull request', () => {
       moveMainOn(working)
       yield* until(
         Effect.map(unsentOf(projectId), (one) => [one]),
-        ([one]) => one === 'It’s stopped, so Althar doesn’t start its lead for a conflict.',
+        ([one]) => one === 'It’s stopped.',
       )
       // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
       rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })
@@ -469,9 +469,9 @@ describe('a round an earlier launch left under way', () => {
 
       yield* Effect.gen(function* () {
         // Said in the thread, and its lead asked again: this task has none to start, which is what ends it.
-        yield* titled(threadId, 'Althar stopped while the lead was resolving the conflict with main')
-        const [said] = (yield* notices(threadId)).filter((one) => one.title?.startsWith('Althar stopped') === true)
-        assert.strictEqual(said?.description, 'Althar asks the lead again once an agent is free on this computer.')
+        yield* titled(threadId, 'Althar quit while the lead was resolving the conflict with main')
+        const [said] = (yield* notices(threadId)).filter((one) => one.title?.startsWith('Althar quit') === true)
+        assert.strictEqual(said?.description, 'The lead resumes once an agent is free.')
         const sql = yield* SqlClient.SqlClient
         const [ended] = yield* until(
           sql<{ state: string; failure: string | null }>`SELECT state, failure FROM conflict_resolutions WHERE task_id = ${taskId}`,

@@ -309,11 +309,15 @@
      A project's mark in its own inks, the same in every theme (ProjectMark). */
   --mark-clay: #b4532a;
   --mark-ochre: #8a6d2f;
+  --mark-sand: #998a71;
   --mark-olive: #6b7330;
   --mark-moss: #4f7a4a;
   --mark-teal: #2f6f7a;
   --mark-slate: #56616e;
+  --mark-indigo: #4e5c96;
+  --mark-plum: #814a76;
   --mark-rose: #a24d5c;
+  --mark-brick: #923b34;
   --mark-umber: #6e4b3a;
 
   /* ---- Projects --------------------------------------------------------------
@@ -322,10 +326,14 @@
      say what runs and what waits on you. */
   --project-clay: #b4532a;
   --project-ochre: #8a6d2f;
+  --project-sand: #998a71;
   --project-olive: #6b7330;
   --project-moss: #4f7a4a;
   --project-teal: #2f6f7a;
   --project-slate: #56616e;
+  --project-indigo: #4e5c96;
+  --project-plum: #814a76;
   --project-rose: #a24d5c;
+  --project-brick: #923b34;
   --project-umber: #6e4b3a;
 }

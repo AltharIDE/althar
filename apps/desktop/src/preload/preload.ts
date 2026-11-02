@@ -17,7 +17,7 @@ import type { WindowAction } from '../renderer/data/services'
  * clipboard, while connecting a service asks for one. An update ready to
  * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
- * shows in the file manager when asked. Whether DO_NOT_TRACK is set, which
+ * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
  * keeps usage data off. And reporting a problem, and the page's own errors,
  * for the log. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
@@ -77,6 +77,14 @@ ipcRenderer.on('althar:update', (_event, glance: unknown) => {
   for (const listener of updating) listener(glance)
 })
 
+/* Quit with work under way asks the person what to do (DEV-118): held for a page that listens later, and cleared when main says it is answered. */
+let quitQuestion: unknown = null
+const quitAsked = new Set<(question: unknown) => void>()
+ipcRenderer.on('althar:quit-ask', (_event, question: unknown) => {
+  quitQuestion = question
+  for (const listener of quitAsked) listener(question)
+})
+
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
@@ -90,6 +98,7 @@ contextBridge.exposeInMainWorld('althar', {
   },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   pickFolders: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:pick-folders'),
+  pickPlace: (name: string): Promise<string | null> => ipcRenderer.invoke('althar:pick-place', name),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)
@@ -166,6 +175,15 @@ contextBridge.exposeInMainWorld('althar', {
       reporting.add(listener)
       return () => void reporting.delete(listener)
     },
+  },
+  // Quit with work under way: what it would stop, as main asks; the answer is quit, background or cancel.
+  quit: {
+    onAsk: (listener: (question: unknown) => void): (() => void) => {
+      quitAsked.add(listener)
+      if (quitQuestion !== null) listener(quitQuestion)
+      return () => void quitAsked.delete(listener)
+    },
+    answer: (answer: string): void => ipcRenderer.send('althar:quit-answer', answer),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

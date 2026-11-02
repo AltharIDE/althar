@@ -45,8 +45,6 @@ import s from './Board.module.css'
 
 export interface BoardText {
   lane: Record<BoardLane, string>
-  /** An empty lane. */
-  empty: Record<BoardLane, string>
   /** The chevron on a lane's head, by the lane's name. */
   collapse: (lane: string) => string
   /** A collapsed lane's rail, by the lane's name and how many it holds. */
@@ -61,12 +59,6 @@ export const boardText: BoardText = {
     [BoardLane.Running]: 'Running',
     [BoardLane.Yours]: 'Needs you',
     [BoardLane.Settled]: 'Settled',
-  },
-  empty: {
-    [BoardLane.Next]: 'Nothing is waiting to start.',
-    [BoardLane.Running]: 'Nothing is running.',
-    [BoardLane.Yours]: 'Nothing needs you.',
-    [BoardLane.Settled]: 'Nothing has settled yet.',
   },
   collapse: (lane) => `Collapse ${lane}`,
   expand: (lane, count) => `Expand ${lane}, ${count}`,
@@ -282,6 +274,8 @@ export interface BoardColumnProps {
     readonly onChange: (value: string) => void
   }
   children?: ReactNode
+  /** What it says while it holds nothing, in its empty box: what will be here and how it gets here (BoardEmpty). Without it, the box is bare and its count, 0, says so. */
+  empty?: ReactNode
   /** The lane's name's rank in the page's outline. */
   headingLevel?: HeadingLevel
   text?: Partial<BoardText>
@@ -294,7 +288,7 @@ export interface BoardColumnProps {
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, filled = count > 0, shelves, children, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, shelves, children, empty, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -418,9 +412,30 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
         )}
       </header>
       <div className={s.body} id={bodyId}>
-        {filled ? children : <p className={s.empty}>{t.empty[lane]}</p>}
+        {/* An empty lane is an empty box: its count, 0, says so, unless it says what will be here. */}
+        {filled ? (
+          children
+        ) : empty === undefined || empty === null ? (
+          <div className={s.empty} aria-hidden="true" />
+        ) : (
+          <div className={cx(s.empty, s.says)}>{empty}</div>
+        )}
       </div>
     </section>
+  )
+}
+
+/**
+ * What an empty lane says, in its box: what will be here, then how it gets
+ * here, smaller and lighter, and the action that starts it, where there is one.
+ */
+export function BoardEmpty({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
+  return (
+    <>
+      <p className={s.emptyTitle}>{title}</p>
+      {children !== undefined && children !== null && <p className={s.emptyHow}>{children}</p>}
+      {action !== undefined && action !== null && <div className={s.emptyAction}>{action}</div>}
+    </>
   )
 }
 

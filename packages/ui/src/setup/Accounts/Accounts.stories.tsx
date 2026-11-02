@@ -222,7 +222,7 @@ export const Editing: Story = {
     await expect(args.onSignIn).toHaveBeenCalledWith('acc_usual')
     // One in a folder of its own is signed out and its folder deleted; one a switcher made stays as it is.
     await userEvent.click(c.getByRole('button', { name: 'More for side' }))
-    await expect(await page.findByRole('menuitem', { name: /Remove/ })).toHaveTextContent('Signs it out and deletes its folder.')
+    await expect(await page.findByRole('menuitem', { name: /Remove/ })).toHaveTextContent('Signs out and deletes its folder')
     await userEvent.keyboard('{Escape}')
     await userEvent.click(c.getByRole('button', { name: 'More for Client' }))
     await userEvent.click(await page.findByRole('menuitem', { name: /Remove/ }))

@@ -69,7 +69,7 @@ describe('finished tasks’ folders under Work on this computer', () => {
     await userEvent.click(within(page).getByRole('combobox', { name: 'Remove finished tasks’ folders' }))
     await userEvent.click(within(document.body).getByRole('option', { name: 'Only when I clean up' }))
     expect(client.setFolderWait).toHaveBeenLastCalledWith('never')
-    expect(await within(page).findByText('Nothing goes by itself.')).toBeTruthy()
+    expect(await within(page).findByText('Their branches stay.')).toBeTruthy()
     // The legend opens the folders, held back apart with why.
     await userEvent.click(legend)
     const held = await screen.findByRole('region', { name: 'Held back' })

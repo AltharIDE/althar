@@ -13,10 +13,10 @@ import s from './AskOnce.module.css'
 
 /*
  * The coordinator, asked once. Your ask is typed into Tally's
- * conversation and sent; the coordinator works on it, and on the way finds
- * something else wrong, a separate piece of work, so it drafts an issue for
- * that on Linear, which is filed; then it says what it will do with what
- * you asked, and puts the plan together under it a step at a time. Each
+ * conversation and sent; the coordinator works on it, says what it will do
+ * with what you asked, and puts the team together under it a step at a
+ * time. Then it mentions what else it found on the way, a separate piece
+ * of work, and drafts an issue for that on Linear, which is filed. Each
  * thing fades up as it arrives and the thread glides up to make room. While
  * it is watched it plays, and fades and plays again after a pause; with
  * motion reduced or a moment held (`?t=`) it is its last frame. On a phone,
@@ -37,14 +37,15 @@ const TYPE_FROM = 600
 const TYPE = 32
 const SENT = TYPE_FROM + ASK.length * TYPE + 450
 const WORK = SENT + 500
-const DRAFTED = WORK + 2200
-const ISSUE = DRAFTED + 900
-const FILING = ISSUE + 1800
-const FILED = FILING + 800
-const SAID = FILED + 600
+const WORKED = WORK + 2200
+const SAID = WORKED + 600
 const PLAN = SAID + 700
 const STEP = 520
-const PLAY = PLAN + PLAN_432.length * STEP + 6000
+const FOUND_AT = PLAN + PLAN_432.length * STEP + 1100
+const ISSUE = FOUND_AT + 900
+const FILING = ISSUE + 1800
+const FILED = FILING + 800
+const PLAY = FILED + 6000
 /** Before it plays again, the conversation fades, so it never empties in sight. */
 const LEAVE = PLAY - 700
 
@@ -52,13 +53,14 @@ const LEAVE = PLAY - 700
 const frameAt = (ms: number) => ({
   typed: Math.min(ASK.length, Math.max(0, Math.floor((ms - TYPE_FROM) / TYPE))),
   sent: ms >= SENT,
-  working: ms >= WORK && ms < DRAFTED,
-  worked: ms >= DRAFTED,
-  took: Math.max(1, Math.ceil((Math.min(ms, DRAFTED) - WORK) / 1000) * 3),
-  drafted: ms >= ISSUE,
-  issue: ms < FILING ? IssueDraftState.Pending : ms < FILED ? IssueDraftState.Filing : IssueDraftState.Filed,
+  working: ms >= WORK && ms < WORKED,
+  worked: ms >= WORKED,
+  took: Math.max(1, Math.ceil((Math.min(ms, WORKED) - WORK) / 1000) * 3),
   said: ms >= SAID,
   steps: ms < PLAN ? 0 : Math.min(PLAN_432.length, Math.floor((ms - PLAN) / STEP) + 1),
+  found: ms >= FOUND_AT,
+  drafted: ms >= ISSUE,
+  issue: ms < FILING ? IssueDraftState.Pending : ms < FILED ? IssueDraftState.Filing : IssueDraftState.Filed,
   leaving: ms >= LEAVE,
 })
 type Frame = ReturnType<typeof frameAt>
@@ -139,7 +141,7 @@ export function AskOnce() {
         h={720}
         phoneW={400}
         maxScale={1.15}
-        label={`Tally’s coordinator: you ask “${ASK}” It reads the code and the project’s rules, finds that refund webhooks retry too fast, a separate fix, and files ${FILED_AS} on Linear for it; then it answers with task 432’s plan for your ask, its team step by step`}
+        label={`Tally’s coordinator: you ask “${ASK}” It reads the code and the project’s rules and answers with task 432’s plan for your ask, its team step by step; then it mentions that refund webhooks retry too fast, a separate fix, and files ${FILED_AS} on Linear for it`}
         frame={s.frame}
       >
         <div className={s.talk}>
@@ -155,18 +157,6 @@ export function AskOnce() {
                   >
                     <p className={s.said}>Read 2 repositories, PR 1184 and the project’s rules.</p>
                   </WorkedFor>
-                  {f.worked && <p className={s.said}>{FOUND}</p>}
-                  {f.drafted && (
-                    <IssueDraft
-                      {...DRAFT_LINEAR}
-                      state={f.issue}
-                      issue={{ key: FILED_AS, href: 'https://linear.app' }}
-                      onFile={none}
-                      onDiscard={none}
-                      onChange={none}
-                      headingLevel={4}
-                    />
-                  )}
                   {f.said && (
                     <p className={s.said}>
                       The backfill is one task. It writes to money records, so your security review applies, and a second lab reviews.
@@ -178,6 +168,22 @@ export function AskOnce() {
                 <Growing whole={<Launch from={false} narrow={narrow} />}>
                   <Launch from={false} steps={PLAN_432.slice(0, f.steps)} narrow={narrow} />
                 </Growing>
+              )}
+              {f.found && (
+                <Turn voice="Tally’s coordinator" bare>
+                  <p className={s.said}>{FOUND}</p>
+                  {f.drafted && (
+                    <IssueDraft
+                      {...DRAFT_LINEAR}
+                      state={f.issue}
+                      issue={{ key: FILED_AS, href: 'https://linear.app' }}
+                      onFile={none}
+                      onDiscard={none}
+                      onChange={none}
+                      headingLevel={4}
+                    />
+                  )}
+                </Turn>
               )}
             </div>
           </div>
