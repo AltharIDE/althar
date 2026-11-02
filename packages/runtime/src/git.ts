@@ -4,10 +4,12 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
+import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
+import { forkOf } from './forks'
 
 /*
  * The git commands the runtime runs itself, outside any agent. They never
@@ -266,9 +268,12 @@ const signedIn = (target: { readonly header: string | null }): Record<string, st
 
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  askedRemoteTip(cwd, target, branch).pipe(Effect.orElseSucceed(() => null))
+
+/** As remoteTip, but a remote that doesn't answer fails, rather than looking as if it hasn't the branch. */
+export const askedRemoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
   run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
     Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
-    Effect.orElseSucceed(() => null),
   )
 
 /**
@@ -487,6 +492,19 @@ export const remoteUrls = (cwd: string) =>
         .filter((url) => url !== ''),
     ),
   ])
+
+/**
+ * The remote a task's branch goes to with the person's own git. A fork's go to
+ * the fork, or upstream where the person chose that, whichever its default
+ * branch follows: a fork's usually follows upstream, as that is where it comes
+ * from. Any other's goes where its work goes.
+ */
+export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget | null) =>
+  Effect.gen(function* () {
+    const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
+    if (forkOf(remotes) === null) return yield* remoteOf(cwd, base)
+    return target === 'upstream_branch' ? 'upstream' : 'origin'
+  })
 
 /** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
 export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>

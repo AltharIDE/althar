@@ -15,6 +15,8 @@ describe('classify', () => {
     ['prompt is too long: 210000 tokens > 200000 maximum', 'context_full'],
     ["This model's maximum context length is 128000 tokens", 'context_full'],
     ['Authentication required', 'auth_required'],
+    // What a review stored when OpenCode Go refused its expired key (OpenCode 2.2.5, 2 November 2026): a sign-in refused, rightly read.
+    ['Authentication required: provider authentication required', 'auth_required'],
     ['Please log in to continue', 'auth_required'],
     ['401 Unauthorized', 'auth_required'],
     ['The author of this commit logged in yesterday', 'unknown'],

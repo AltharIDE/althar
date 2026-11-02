@@ -71,6 +71,13 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /**
+   * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
+   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   */
+  providers: Schema.optional(
+    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+  ),
 })
 export type AccountStatus = typeof AccountStatus.Type
 
@@ -446,8 +453,13 @@ export type ProjectTracker = typeof ProjectTracker.Type
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
 export type RepositoryRole = typeof RepositoryRole.Type
 
-/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
-export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+/**
+ * Where a fork's tasks' work goes: pull requests on the repository it was
+ * forked from, from the fork's branches; on the fork; or, where its host says
+ * the person can push there, branches and pull requests both on the
+ * repository it was forked from (ADR-085).
+ */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branch'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
@@ -495,8 +507,20 @@ export const ProjectRepository = Schema.Struct({
   /** Where its work goes, from its `origin` (else its first remote); null with no remote, or one that is a folder. */
   host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
-  /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
-  fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
+  /**
+   * The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its work goes; whether
+   * its host says the person can push to the repository it was forked from, null where Althar couldn't ask; and whether Althar
+   * offers, once, to push its tasks' branches there now that they can (ADR-085).
+   */
+  fork: Schema.NullOr(
+    Schema.Struct({
+      fork: Schema.String,
+      upstream: Schema.String,
+      target: ChangeTarget,
+      canPush: Schema.NullOr(Schema.Boolean),
+      offer: Schema.Boolean,
+    }),
+  ),
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
   /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
@@ -1852,6 +1876,8 @@ export const RunItem = Schema.Struct({
     taskId: Schema.NullOr(Schema.String),
     /** Which of the project's runnables it runs (ADR-044), for running it again; absent on a card from before there were several. */
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
+    /** What the project keeps it as, in the Run list: Storybook; absent or null where it has no name. */
+    name: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
     /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-066); absent or null for the default branch or a task's. */
@@ -2328,6 +2354,9 @@ export const StuckStep = Schema.Struct({
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
   service: Schema.optional(Schema.String),
+  /** For a sign-in refused: the model it was on at the agent, and the provider within the agent that refused it (OpenCode Go). */
+  model: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -3125,7 +3154,11 @@ export const Api = RpcGroup.make(
   command('AddRepositories', { projectId: Schema.String, grant: Schema.String }, Schema.Void),
   /** Leaves a repository out of the project: new tasks can't change it; tasks made with it keep it. */
   command('LeaveOutRepository', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
-  /** Sets a repository's role, or, for a fork, where its pull requests open, or how each new task's folder of it gets ready. */
+  /**
+   * Sets a repository's role; for a fork, where its work goes: choosing answers the offer to push its branches upstream, as
+   * `notNow` does without changing it, and its branches go upstream only where its host says the person can push there; or how
+   * each new task's folder of it gets ready.
+   */
   command(
     'SetRepository',
     {
@@ -3133,6 +3166,7 @@ export const Api = RpcGroup.make(
       repositoryId: Schema.String,
       role: Schema.optional(RepositoryRole),
       changeTarget: Schema.optional(ChangeTarget),
+      notNow: Schema.optional(Schema.Boolean),
       setup: Schema.optional(RepositorySetup),
     },
     Schema.Void,

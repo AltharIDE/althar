@@ -67,7 +67,8 @@ import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, remoteOf } from './git'
+import type { ChangeTarget } from '@althar/domain'
+import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -265,6 +266,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   const service = field(payload, 'service')
+  const model = field(payload, 'model')
+  const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -296,6 +299,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       : {}),
     ...(limit === undefined ? {} : { limit }),
     ...(typeof service === 'string' ? { service } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof provider === 'string' ? { provider } : {}),
   }
 }
 
@@ -606,6 +611,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
+          name: text(content, 'name') || null,
           where: text(content, 'where'),
           // A branch's or a pull request's run (ADR-066): what it is at a glance, and what was asked for, to run it again.
           branch: text(content, 'branch') || null,
@@ -1050,8 +1056,9 @@ export class Queries extends Context.Service<
             projectId: string
             workspaceId: string
             state: string
+            changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
               w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -1146,9 +1153,17 @@ export class Queries extends Context.Service<
        * asked, only what git or Althar's own push noted here, which can miss
        * a push made elsewhere: so then a count above none isn't known.
        */
-      const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
+      const branchRemoteOf = (
+        root: string,
+        worktree: string,
+        branch: string,
+        base: string,
+        head: string,
+        baseCommit: string | null,
+        target: ChangeTarget | null,
+      ) =>
         Effect.gen(function* () {
-          const remote = yield* remoteOf(root, base)
+          const remote = yield* branchRemoteIn(root, base, target)
           if (remote === null) return null
           const asked = (yield* (yield* Changes).askedAt(worktree, branch)) === head
           const [there = null, pushed = null] = yield* commitsOf(root, [
@@ -1259,6 +1274,7 @@ export class Queries extends Context.Service<
                                     worktree.defaultBranch,
                                     head,
                                     worktree.baseCommit,
+                                    worktree.changeTarget,
                                   ),
                           },
                         ]

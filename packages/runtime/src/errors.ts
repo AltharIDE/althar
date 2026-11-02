@@ -42,7 +42,7 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
  * that isn't one, or a pull request target for a repository that isn't a fork.
  */
 export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
-  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken', 'bad_setup']),
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'no_upstream_access', 'id_taken', 'bad_setup']),
 }) {}
 
 /** Something the caller named does not exist. */
@@ -199,7 +199,21 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'forbidden', 'protected', 'unreachable', 'unanswered', 'refused', 'failed', 'moved', 'never']),
+  why: Schema.Literals([
+    'behind',
+    'denied',
+    'forbidden',
+    'protected',
+    'unreachable',
+    'unanswered',
+    'refused',
+    'failed',
+    'moved',
+    'never',
+    'fork_gone',
+    'unplaced',
+    'no_push_address',
+  ]),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
   /** What the remote said, for one it refused: its one line. */

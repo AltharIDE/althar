@@ -76,6 +76,24 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('OpenCode Go       default                     stored\n', 0))
   })
 
+  it('lists the providers OpenCode has a sign-in for, and the provider a model goes through', () => {
+    const providers = agents.opencode.signIn.providers
+    assert.isDefined(providers)
+    const listing = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_b', label: 'default', method: 'key' }] },
+      { id: 'anthropic', name: 'Anthropic', connections: [{ type: 'credential', id: 'cred_a', label: 'default', method: 'oauth' }] },
+      { id: 'google', name: 'Google', connections: [] },
+    ]
+    assert.deepStrictEqual(providers?.read(JSON.stringify(listing, null, 2)), [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: 'cred_b' },
+      { id: 'anthropic', name: 'Anthropic', connections: 'cred_a' },
+    ])
+    // 1.x prints a count only: no providers, not an error.
+    assert.deepStrictEqual(providers?.read('2 credentials'), [])
+    assert.strictEqual(providers?.of('opencode-go/deepseek-v4.1-flash'), 'opencode-go')
+    assert.isUndefined(providers?.of('big-pickle'))
+  })
+
   it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
     Effect.runPromise(
       Effect.gen(function* () {
