@@ -254,7 +254,14 @@ export function Question({
               key={part.id}
               wrap
               denied={!said}
-              said={said || t.notAnswered}
+              said={
+                <span className={s.block}>
+                  <span className={s.asked} title={part.question}>
+                    {part.question}
+                  </span>
+                  <span className={said ? s.saidLine : s.quiet}>{said || t.notAnswered}</span>
+                </span>
+              }
               focusOnMount={focusLine && i === 0}
               undo={t.undo}
               onUndo={
@@ -267,9 +274,7 @@ export function Question({
                     }
                   : undefined
               }
-            >
-              <span className={s.asked}>· {part.question}</span>
-            </AskAnswered>
+            />
           )
         })}
       </div>
@@ -284,12 +289,19 @@ export function Question({
             key={part.id}
             wrap
             denied
-            said={<span className={s.notAnswered}>{t.notAnswered}</span>}
+            said={
+              <span className={s.block}>
+                <span className={s.asked} title={part.question}>
+                  {part.question}
+                </span>
+                <span className={s.quiet}>
+                  <span className={s.notAnswered}>{t.notAnswered}</span>
+                  {i === 0 && withdrawn && <> · {withdrawn}</>}
+                </span>
+              </span>
+            }
             focusOnMount={focusIn && i === 0}
-          >
-            <span className={cx(s.asked, s.unasked)}>· {part.question}</span>
-            {i === 0 && withdrawn && <span className={s.why}>· {withdrawn}</span>}
-          </AskAnswered>
+          />
         ))}
       </div>
     )

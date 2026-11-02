@@ -204,12 +204,36 @@ export const Withdrawn: Story = {
     const c = within(canvasElement)
     await expect(c.queryByRole('form')).toBeNull()
     await expect(c.getByText('Not answered')).toBeInTheDocument()
-    await expect(c.getByText('· the lead stopped asking')).toBeInTheDocument()
+    await expect(c.getByText(/the lead stopped asking/)).toBeInTheDocument()
   },
 }
 
 /** Several withdrawn, when the task was stopped: a line for each, the reason once. */
 export const WithdrawnSeveral: Story = { args: { ...SEVERAL, withdrawn: 'the task was stopped' } }
+
+const LONG_QUESTION =
+  'Build this version (A with the projects page, folder-first listing and the new sidebar) or keep the current one until the review of the whole redesign is done?'
+const LONG_PART = { id: 'build', question: LONG_QUESTION, options: [{ id: 'a', label: 'Build this version' }] }
+
+/** The agent went on without an answer: the reason the desktop app gives. */
+export const WithdrawnWentOn: Story = {
+  args: { withdrawn: 'The agent went on without an answer.' },
+}
+
+/** The task stopped. */
+export const WithdrawnTaskStopped: Story = { args: { withdrawn: 'The task stopped.' } }
+
+/** A long question at a narrow width: cut at its end, the full question on hover, nothing broken mid-word. */
+export const WithdrawnLongNarrow: Story = {
+  args: { parts: [LONG_PART], withdrawn: 'The agent went on without an answer.' },
+  decorators: [(Story) => <div style={{ width: 260 }}>{Story()}</div>],
+}
+
+/** The same, answered. */
+export const AnsweredLongNarrow: Story = {
+  args: { parts: [LONG_PART], defaultAnswer: { build: { optionIds: ['a'] } } },
+  decorators: [(Story) => <div style={{ width: 260 }}>{Story()}</div>],
+}
 
 /** Answered, then taken back: the question asks again, with what was picked. */
 export const Undoing: Story = {
