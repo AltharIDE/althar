@@ -606,6 +606,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
+          name: text(content, 'name') || null,
           where: text(content, 'where'),
           // A branch's or a pull request's run (ADR-066): what it is at a glance, and what was asked for, to run it again.
           branch: text(content, 'branch') || null,
