@@ -35,13 +35,30 @@ test('says what it last read when it gives up', async () => {
   // As though this test had only a moment left.
   begin(100)
   const exit = await Effect.runPromiseExit(until(Effect.succeed({ state: 'running' }), () => false))
-  expect(Exit.isFailure(exit) && String(exit.cause)).toContain('Timed out waiting; last saw {"state":"running"}')
+  expect(Exit.isFailure(exit) && String(exit.cause)).toMatch(
+    /Timed out waiting \(at \S*deadline\.test\.ts:\d+:\d+\); last saw \{"state":"running"\}/,
+  )
   await expect(
     waitFor(
       () => 'nope',
       () => false,
     ),
-  ).rejects.toThrow('Timed out waiting; last saw "nope"')
+  ).rejects.toThrow(/Timed out waiting \(at \S*deadline\.test\.ts:\d+:\d+\); last saw "nope"$/)
+})
+
+test('says which wait gave up, by what it waits for and the line that asked for it', async () => {
+  begin(100)
+  const exit = await Effect.runPromiseExit(until(Effect.succeed([]), () => false, 'the second turn'))
+  expect(Exit.isFailure(exit) && String(exit.cause)).toMatch(
+    /Timed out waiting for the second turn \(at \S*deadline\.test\.ts:\d+:\d+\); last saw \[\]/,
+  )
+  await expect(
+    waitFor(
+      () => 0,
+      () => false,
+      'a reply',
+    ),
+  ).rejects.toThrow(/^Timed out waiting for a reply \(at \S*deadline\.test\.ts:\d+:\d+\); last saw 0$/)
 })
 
 test('cuts long words in what it last read, so what comes after them still shows', async () => {
