@@ -60,9 +60,10 @@ describe("the coordinator's copies, fetched for each turn", () => {
       const second = yield* until(turns(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'completed')
       assert.include(second[1]?.prompt, 'origin/main as last fetched')
       // The person is shown it once, not every turn.
-      const shown = (yield* notices(threadId)).filter((notice) => notice.title?.includes("couldn't bring the coordinator's copy"))
+      const shown = (yield* notices(threadId)).filter((notice) => notice.title?.startsWith('The coordinator is reading'))
       assert.lengthOf(shown, 1)
       assert.strictEqual(shown[0]?.severity, 'warning')
+      assert.strictEqual(shown[0]?.description, 'Althar couldn’t fetch it from origin: it isn’t there any more.')
 
       // Back, with a commit pushed since: the coordinator asks for it in the middle of its turn.
       renameSync(away, remote)
@@ -91,25 +92,32 @@ describe("the coordinator's copies, fetched for each turn", () => {
 describe('what is said of copies Althar couldn’t bring up to date', () => {
   it('names each, or all of them, and nothing where all are', () => {
     assert.isNull(staleWords([]))
-    const one = { name: 'api', why: "Althar couldn't fetch origin: Could not resolve host: github.com", at: 'origin/main as last fetched' }
+    const one = {
+      name: 'api',
+      why: "Althar couldn't fetch origin: this computer looks offline",
+      at: 'origin/main as last fetched',
+      fetched: true,
+    }
     assert.strictEqual(
       staleWords([one]),
       [
         "Althar couldn't bring all your copies up to date with their remotes before this turn, so they may be behind what was pushed:",
-        "- Your copy of api is at origin/main as last fetched: Althar couldn't fetch origin: Could not resolve host: github.com.",
+        "- Your copy of api is at origin/main as last fetched: Althar couldn't fetch origin: this computer looks offline.",
         'Say so where what you tell the person depends on it. fetch_from_remote tries again.',
       ].join('\n'),
     )
-    assert.strictEqual(
-      staleNotice([one]),
-      "Althar couldn't bring the coordinator's copy of api up to date: it reads origin/main as last fetched. Althar couldn't fetch origin: Could not resolve host: github.com.",
-    )
-    assert.strictEqual(
-      staleNotice([one, { ...one, name: 'web' }]),
-      "Althar couldn't fetch the remotes of api, web: the coordinator reads what this computer has of them.",
-    )
-    const all = { name: null, why: "Althar couldn't make them again", at: 'as they were before this turn' }
+    // The person reads what the coordinator reads and why, in their words: no branch names.
+    assert.deepStrictEqual(staleNotice([one]), {
+      title: 'The coordinator is reading api as it was last fetched.',
+      description: 'Althar couldn’t fetch it from origin: this computer looks offline.',
+    })
+    assert.strictEqual(staleNotice([{ ...one, fetched: false }]).title, 'The coordinator is reading api as this computer has it.')
+    assert.deepStrictEqual(staleNotice([one, { ...one, name: 'web' }]), {
+      title: 'The coordinator is reading api, web as this computer last had them.',
+      description: 'Althar couldn’t fetch them before its turn, and tries again at the next.',
+    })
+    const all = { name: null, why: "Althar couldn't make them again", at: 'as they were before this turn', fetched: false }
     assert.include(staleWords([all]), "- Your copies are as they were before this turn: Althar couldn't make them again.")
-    assert.strictEqual(staleNotice([all]), "Althar couldn't bring the coordinator's copies up to date: it reads them as they were.")
+    assert.strictEqual(staleNotice([all]).title, 'The coordinator is reading the repositories as this computer last had them.')
   })
 })

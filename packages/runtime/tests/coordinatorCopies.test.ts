@@ -197,7 +197,8 @@ describe("the coordinator's copies", () => {
       assert.strictEqual(made.commit, fetched)
       assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), fetched)
       assert.strictEqual(made.stale?.at, 'origin/main as last fetched')
-      assert.match(made.stale?.why ?? '', /^Althar couldn't fetch origin: /)
+      assert.strictEqual(made.stale?.why, "Althar couldn't fetch origin: it isn't there any more")
+      assert.isTrue(made.stale?.fetched)
       // With no remote at all, it is the branch as this computer has it, which nothing is ahead of.
       git(person, 'remote', 'remove', 'origin')
       const alone = yield* freshCopy(person, copy, 'main', refreshWithGit)
@@ -218,6 +219,7 @@ describe("the coordinator's copies", () => {
       assert.deepStrictEqual(made.stale, {
         why: "Althar couldn't fetch origin: its sign-in has expired",
         at: 'origin/main as last fetched',
+        fetched: true,
       })
     }),
   )

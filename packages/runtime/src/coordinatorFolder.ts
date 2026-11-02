@@ -75,6 +75,8 @@ export const refreshWithGit: Refresh = (repository) =>
 export interface Stale {
   readonly why: string
   readonly at: string
+  /** It is the remote's branch as last fetched, rather than this computer's own. */
+  readonly fetched: boolean
 }
 
 export interface CoordinatorFolder {
@@ -280,10 +282,11 @@ export const freshCopy = (repository: string, path: string, base: string, refres
       failed === undefined
         ? Option.isSome(tracked)
           ? null
-          : { why: `${remote} has no branch called ${base}`, at: `${base} as this computer has it` }
+          : { why: `${remote} has no branch called ${base}`, at: `${base} as this computer has it`, fetched: false }
         : {
             why: `Althar couldn't fetch ${remote}: ${failed}`,
             at: Option.isSome(tracked) ? `${remote}/${base} as last fetched` : `${base} as this computer has it`,
+            fetched: Option.isSome(tracked),
           }
     const commit = Option.isSome(tracked) ? tracked.value : yield* commitOf(repository, base)
     yield* copyAt(repository, path, commit, from)

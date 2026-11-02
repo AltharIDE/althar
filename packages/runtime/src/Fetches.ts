@@ -6,7 +6,18 @@ import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { baseRemoteOf, coordinatorMirrorAt, freshMirror, type Refreshed } from './coordinatorFolder'
 import { forkOf } from './forks'
-import { commitOf, type FetchSource, fetchRemote, fetchSpecs, git, gitOutcome, namedRemotes, redactUrl, remoteHeads } from './git'
+import {
+  commitOf,
+  type FetchSource,
+  fetchRemote,
+  fetchSpecs,
+  git,
+  gitOutcome,
+  NO_SIGN_IN,
+  namedRemotes,
+  redactUrl,
+  remoteHeads,
+} from './git'
 import { Instance } from './Instance'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
@@ -418,7 +429,8 @@ export class Fetches extends Context.Service<
             why = yield* fetchRemote(repository, source, remote)
             if (why === null) return null
           }
-          return reach.signed === null ? `${why}. Connect its host in Settings, and Althar fetches with its sign-in` : why
+          // Connecting its host only helps where what failed was the sign-in.
+          return reach.signed === null && why === NO_SIGN_IN ? `${why}. Connect its host in Settings, and Althar fetches with its own` : why
         })
 
       const refresh = (repository: string): Effect.Effect<Refreshed> =>

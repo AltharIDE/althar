@@ -354,15 +354,28 @@ export const fetchSpecs = (cwd: string, source: FetchSource, refspecs: ReadonlyA
 /** Credentials a line of git's may carry in a URL, anywhere in it, taken out: `https://user:token@host` becomes `https://host`. */
 const withoutCredentials = (line: string) => line.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]*@/gi, '$1')
 
-/** Why a git command that reached the network failed, in a line: what git said last, or that it didn't answer in time. */
+/** Why a fetch failed where git has no sign-in for the remote, as `fetchFailure` says it. */
+export const NO_SIGN_IN = 'git on this computer has no sign-in it can use for it'
+
+/**
+ * Why a git command that reached the network failed, in plain words where
+ * git's are the usual ones (offline, no sign-in, gone), else what git said
+ * last, without any credentials.
+ */
 export const fetchFailure = (failed: GitFailed) => {
   if (failed.timedOut === true) return "it didn't answer in time"
   const said = failed.stderr
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('warning:'))
-    .at(-1)
-  return said === undefined ? 'git gave no reason' : withoutCredentials(said.replace(/^(fatal|error): /, ''))
+  const all = said.join('\n')
+  if (/could not resolve host|could not resolve hostname|network is unreachable|failed to connect|connection timed out/i.test(all))
+    return 'this computer looks offline'
+  if (/authentication failed|permission denied|could not read (username|password)|terminal prompts disabled|access denied/i.test(all))
+    return NO_SIGN_IN
+  if (/repository .* not found|does not appear to be a git repository|not found/i.test(all)) return "it isn't there any more"
+  const last = said.at(-1)
+  return last === undefined ? 'git gave no reason' : withoutCredentials(last.replace(/^(fatal|error): /, ''))
 }
 
 /**

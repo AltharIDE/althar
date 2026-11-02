@@ -501,15 +501,28 @@ export const staleWords = (stale: ReadonlyArray<StaleCopy>) =>
         'Say so where what you tell the person depends on it. fetch_from_remote tries again.',
       ].join('\n')
 
-/** What the person is shown in the coordinator's thread of copies Althar couldn't bring up to date. */
-export const staleNotice = (stale: ReadonlyArray<StaleCopy>) => {
+/**
+ * What the person is shown in the coordinator's thread of copies Althar
+ * couldn't bring up to date: what the coordinator is reading, and why, in
+ * words for them; no branch names, which the coordinator has.
+ */
+export const staleNotice = (stale: ReadonlyArray<StaleCopy>): { readonly title: string; readonly description: string | null } => {
   const [one] = stale
-  if (one === undefined) return ''
-  if (stale.length > 1)
-    return `Althar couldn't fetch the remotes of ${stale.map((each) => each.name ?? 'the repositories').join(', ')}: the coordinator reads what this computer has of them.`
-  return one.name === null
-    ? "Althar couldn't bring the coordinator's copies up to date: it reads them as they were."
-    : `Althar couldn't bring the coordinator's copy of ${one.name} up to date: it reads ${one.at}. ${one.why}.`
+  if (one === undefined) return { title: '', description: null }
+  if (one.name === null || stale.length > 1) {
+    const names = stale.flatMap((each) => (each.name === null ? [] : [each.name]))
+    return {
+      title:
+        names.length === stale.length
+          ? `The coordinator is reading ${names.join(', ')} as this computer last had them.`
+          : 'The coordinator is reading the repositories as this computer last had them.',
+      description: 'Althar couldn’t fetch them before its turn, and tries again at the next.',
+    }
+  }
+  return {
+    title: `The coordinator is reading ${one.name} as ${one.fetched ? 'it was last fetched' : 'this computer has it'}.`,
+    description: `${one.why.replace(/^Althar couldn't fetch ([^:]+): /, 'Althar couldn’t fetch it from $1: ').replaceAll("'", '’')}.`,
+  }
 }
 
 export const promptFor = (
@@ -1378,7 +1391,7 @@ export class Sessions extends Context.Service<
                   ),
                   Effect.catchCause((cause) =>
                     Effect.as(Effect.logWarning('Could not refresh the coordinator folder', cause), [
-                      { name: null, why: "Althar couldn't make them again", at: 'as they were before this turn' },
+                      { name: null, why: "Althar couldn't make them again", at: 'as they were before this turn', fetched: false },
                     ]),
                   ),
                 )
@@ -1524,7 +1537,7 @@ export class Sessions extends Context.Service<
                 yield* addItem(
                   { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
                   'notice',
-                  { source: 'runtime', severity: 'warning', title: staleNotice(stale) },
+                  { source: 'runtime', severity: 'warning', ...staleNotice(stale) },
                 )
             }
           }
