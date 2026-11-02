@@ -25,7 +25,7 @@ import { fakeConnectors, HOST, hosted, runtime, until } from './support'
 
 const runtimeWith = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
   )
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()

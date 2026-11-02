@@ -35,7 +35,7 @@ const git = (cwd: string, ...args: Array<string>) =>
 
 const runtimeWith = (github: FakeService, more: Parameters<typeof runtime>[2] = {}) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), ...more })),
+    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1), ...more })),
   )
 
 /** A repository on the fake GitHub, taking what is pushed in a bare repository; its lead commits as the person does. */

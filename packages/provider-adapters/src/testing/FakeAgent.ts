@@ -125,6 +125,13 @@ export const scenarios = {
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
   wakesItself: 'wakes-itself',
+  /** Ends the turn, and its last words reach the client just after the turn's end, as they can from a real agent. */
+  lastWords: 'last-words',
+  /**
+   * Ends the turn, then goes on by itself, saying so: once the test opens the hold `keeps-going`
+   * (`FakeAgentOptions.holds`), or at once without holds.
+   */
+  keepsGoing: 'keeps-going',
   /** Reports the session's mode and model. */
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
@@ -2006,6 +2013,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
           return ended()
+        case scenarios.lastWords:
+          await say('Done')
+          setTimeout(() => void say(' and dusted.'), 0)
+          return ended()
+        case scenarios.keepsGoing: {
+          await say('Done')
+          const held = session.holds
+          void (async () => {
+            while (held !== undefined && !session.closed && !held.opened(scenarios.keepsGoing)) await pause(10)
+            await say('Checking it once more.')
+          })()
+          return ended()
+        }
         case scenarios.wakesItself:
           await say('Done')
           setTimeout(() => void say('Verify ').then(() => say('finished.')), 20)

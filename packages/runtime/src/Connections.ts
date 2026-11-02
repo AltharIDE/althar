@@ -821,7 +821,8 @@ export class Connections extends Context.Service<
             return yield* new NotConnected({ product: input.product, what: 'a product Althar has no adapter for yet' })
           // The address as the product keeps it: a Jira Cloud site by its origin, whatever page of it was pasted.
           const webUrl = addressOf(info, input.webUrl)
-          const apiUrl = info.apiFor(webUrl)
+          // Its API, where the address alone doesn't say it: a Jira Cloud site on its own domain has its API at its atlassian.net one.
+          const apiUrl = info.apiAt === undefined ? info.apiFor(webUrl) : yield* info.apiAt(connectors.fetch, webUrl)
           const credential: Credential =
             'accessToken' in input.secret
               ? { kind: 'bearer', token: input.secret.accessToken }
@@ -893,6 +894,7 @@ export class Connections extends Context.Service<
                   } else {
                     const revision = yield* change('connections', id, {
                       state: 'ready',
+                      apiUrl,
                       auth: input.auth,
                       cli: input.cli ?? 'none',
                       accountLogin: account.login,
@@ -1607,15 +1609,19 @@ export class Connections extends Context.Service<
           })
         })
 
+      /**
+       * The hosts a connection's links are on: its address's, and a Jira Cloud
+       * site's atlassian.net one too where it lives on its own domain, since
+       * its links are on either.
+       */
+      const linkHostsOf = (row: Pick<Row, 'product' | 'webUrl' | 'apiUrl'>): ReadonlyArray<string> =>
+        [...new Set([hostnameOf(row.webUrl), ...(row.product === 'jira_cloud' ? [hostnameOf(row.apiUrl)] : [])])].filter(
+          (host) => host !== '',
+        )
+
       const knownHosts = Effect.map(rows, (all): KnownHosts => {
         const hosts = new Map(hostedOf(connectors.products))
-        for (const row of all) {
-          try {
-            hosts.set(new URL(row.webUrl).hostname.toLowerCase(), row.product)
-          } catch {
-            // A connection's address is checked when it is made; nothing to add.
-          }
-        }
+        for (const row of all) for (const host of linkHostsOf(row)) hosts.set(host, row.product)
         return hosts
       })
 
@@ -1679,10 +1685,7 @@ export class Connections extends Context.Service<
           const ref = parseLink(link, yield* knownHosts)
           if (ref === null) return null
           const there = (yield* rows).filter(
-            (candidate) =>
-              candidate.state === 'ready' &&
-              candidate.product === ref.product &&
-              new URL(candidate.webUrl).hostname.toLowerCase() === ref.host,
+            (candidate) => candidate.state === 'ready' && candidate.product === ref.product && linkHostsOf(candidate).includes(ref.host),
           )
           // A link that names its workspace goes to the connection in it, else to one that doesn't know its own yet, never to
           // another workspace's, where the same key is another issue; one that names none, to any.

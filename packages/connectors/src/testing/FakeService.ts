@@ -25,7 +25,19 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { cantChange, leftAsItIs, noListing, noPictures, noReviews, stillOpen, unchangeable, unstarted } from '../model'
+import {
+  cantChange,
+  leftAsItIs,
+  mergedForGood,
+  noListing,
+  noPictures,
+  noReopen,
+  noReviews,
+  notOurBuild,
+  stillOpen,
+  unchangeable,
+  unstarted,
+} from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -345,6 +357,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       threads: true,
       reviews: options.reviews ?? product === 'github',
       pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
+      // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
+      reopen: product !== 'bitbucket_cloud',
+      rerun: product !== 'bitbucket_dc',
       links: true,
       starts: true,
       changes: changesHere,
@@ -505,6 +520,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (changeNumbered(change.number).state === 'open') update(change.number, { state: 'closed' })
         return Effect.succeed(changeNumbered(change.number))
       }),
+    reopenChange: (_repository, change) =>
+      Effect.andThen(called('reopenChange'), () => {
+        if (product === 'bitbucket_cloud') return Effect.fail(noReopen(product, service.words, change.number))
+        const now = changeNumbered(change.number)
+        if (now.state === 'merged') return Effect.fail(mergedForGood(product, service.words, change.number))
+        if (now.state === 'closed') update(change.number, { state: 'open' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
     deleteBranch: (_repository, change) =>
       Effect.andThen(called('deleteBranch'), () => {
         if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
@@ -555,6 +578,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('rerun'), () => {
         const again = fixed.get(check.id)
         if (again instanceof ConnectorFailed) return Effect.fail(again)
+        if (product === 'bitbucket_dc') return Effect.fail(notOurBuild(product, { name: check.name, url: check.url }))
         if (options.reruns === false || again === false) return Effect.succeed(false)
         reran.push(check.id)
         starting.add(check.id)

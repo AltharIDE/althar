@@ -1459,3 +1459,29 @@ describe('GitHub’s pictures', () => {
     }),
   )
 })
+
+describe('GitHub opening a closed pull request again', () => {
+  it.effect('opens a closed one, leaves an open one as it is, and says a merged one can’t be', () =>
+    Effect.gen(function* () {
+      assert.isTrue(github([]).host.capabilities.reopen)
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }],
+        ['PATCH', `${REPO}/pulls/12`, { json: pull({ state: 'open' }) }],
+      ])
+      const closed = yield* host.change(repository, 12)
+      assert.strictEqual((yield* host.reopenChange(repository, closed)).state, 'open')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PATCH')?.body, { state: 'open' })
+      const open = github([['GET', `${REPO}/pulls/12`, { json: pull() }]])
+      assert.strictEqual((yield* open.host.reopenChange(repository, closed)).state, 'open')
+      assert.isFalse(open.sent.some((request) => request.method === 'PATCH'))
+      const merged = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-02T00:00:00Z' }) }]])
+      assert.deepInclude(yield* Effect.flip(merged.host.reopenChange(repository, closed)), { reason: 'rejected' })
+      assert.isFalse(merged.sent.some((request) => request.method === 'PATCH'))
+      const refusing = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }],
+        ['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(refusing.host.reopenChange(repository, closed)), { reason: 'forbidden', status: 403 })
+    }),
+  )
+})
