@@ -50,6 +50,17 @@ const hostDenied =
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
+/**
+ * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`
+ * rebuilt the `workspace` table without `project_id`, which 1.x still updates
+ * when it opens a repository, so it stops on every start there (anomalyco/opencode#42170).
+ * GitHub's latest release is still 1.x, so a bare `opencode upgrade` doesn't
+ * help: the way out names version 2. Seen 2 November 2026, 1.18.31 against 2.2.5.
+ */
+const olderOpenCode = /no such column: project_id/
+const olderOpenCodeWords =
+  'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Update OpenCode to version 2 (in a terminal: opencode upgrade 2.2.5), then try again.'
+
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
@@ -71,6 +82,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       const said = lastLine(text(error, 'stderr'))
       // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
       if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
+      if (olderOpenCode.test(said)) return olderOpenCodeWords
       return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed':

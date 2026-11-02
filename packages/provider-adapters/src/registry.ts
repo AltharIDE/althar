@@ -421,6 +421,8 @@ export type AgentDownload = GitHubDownload | PinnedDownload
 export interface GitHubDownload {
   /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
   readonly repository: string
+  /** Only releases whose tag starts so, such as `v2.`: the newest of them, where its latest release is on another line. */
+  readonly line?: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
@@ -1081,12 +1083,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         }),
       }
     },
-    /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
+    /*
+     * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.
+     * Its 2.x is what Althar runs (`--standalone` above), and GitHub's latest is still 1.x, which also can't open a
+     * data folder 2.x has migrated: the newest 2.x it is. Seen 2 November 2026, v2.2.5 beside v1.19.5.
+     */
     cli: {
       name: 'opencode',
       guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
+        line: 'v2.',
         assets: {
           'darwin-arm64': 'opencode-darwin-arm64.zip',
           'darwin-x64': 'opencode-darwin-x64.zip',
