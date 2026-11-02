@@ -3,9 +3,9 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { ModelBrowser } from '../../composer/ModelBrowser/ModelBrowser'
-import { ModelPick } from '../../composer/ModelPick/ModelPick'
-import { effortFor, MODEL_LIST, model, RUNTIMES, useModelPrefs } from '../../fixtures/models'
+import { MODEL_LIST, model, RUNTIMES, useModelPrefs } from '../../fixtures/models'
 import { STUCK } from '../../fixtures/stuck'
+import type { ModelInfo } from '../../primitives/Model/Model'
 import { States, statesOn } from '../../storybook/States'
 import { ThreadFrame } from '../../storybook/ThreadFrame'
 import { Stuck, type StuckProps } from './Stuck'
@@ -14,59 +14,32 @@ import { Stuck, type StuckProps } from './Stuck'
 const handedOn = fn()
 
 /**
- * The consumer's wiring: the model picker with its pins and every model one
- * step away, starting on a suggestion; the card keeps only what to do with
- * the pick. The model that failed isn't offered.
+ * The consumer's wiring: the best bet first, then the pinned models, and
+ * every model in the browser, where picking one hands it the step too. The
+ * model that failed, Opus 5, isn't offered.
  */
-function HandingOn({ open = false, ...props }: StuckProps & { open?: boolean }) {
-  const [id, setId] = useState('gpt-5.2-codex')
-  const [effort, setEffort] = useState<string | null>(null)
-  const [browsing, setBrowsing] = useState(false)
+function HandingOn(props: StuckProps) {
+  const [browsing, setBrowsing] = useState<((picked: ModelInfo) => void) | null>(null)
   const prefs = useModelPrefs()
   const offered = MODEL_LIST.filter((each) => each.id !== 'claude-opus-5')
-  const current = model(id)
-  const change = (next: string) => {
-    setId(next)
-    setEffort(null)
-  }
+  const best = model('gpt-5.2-codex')
+  const models = [best, ...prefs.pinned.filter((each) => each.id !== best.id && each.id !== 'claude-opus-5')]
   return (
     <>
-      <Stuck
-        {...props}
-        handOn={{
-          model: current,
-          onHandOn: () => handedOn(current, effort),
-          picker: (
-            <ModelPick
-              model={current}
-              pinned={prefs.pinned.filter((each) => each.id !== 'claude-opus-5')}
-              effort={effort ?? prefs.defaultEffort(current)}
-              defaultEffort={effortFor(current)}
-              owner="Review"
-              variant="field"
-              placement="below"
-              defaultOpen={open}
-              count={offered.length}
-              onChange={change}
-              onEffort={setEffort}
-              onBrowse={() => setBrowsing(true)}
-            />
-          ),
-        }}
-      />
+      <Stuck {...props} handOn={{ models, onHandOn: handedOn, onBrowse: (handTo) => setBrowsing(() => handTo), count: offered.length }} />
       {browsing && (
         <ModelBrowser
           models={offered}
           runtimes={RUNTIMES}
-          value={id}
+          value=""
           pins={prefs.pins}
           defaultEffort={prefs.defaultEffort}
           onTogglePin={prefs.togglePin}
           onSetDefaultEffort={prefs.setDefaultEffort}
-          onClose={() => setBrowsing(false)}
-          onPick={(next) => {
-            setBrowsing(false)
-            change(next)
+          onClose={() => setBrowsing(null)}
+          onPick={(id) => {
+            setBrowsing(null)
+            browsing(model(id))
           }}
         />
       )}
@@ -168,7 +141,7 @@ export const ProviderRefused: Story = {
     fix: { label: 'Sign in to OpenCode Go', onFix: fn() },
     text: {
       again: 'Review again',
-      retry: 'Review with another agent',
+      retry: 'Review with another model',
       retryLabel: 'Review with',
       abandon: 'Skip the review',
     },
@@ -208,40 +181,59 @@ export const TellingTheLead: Story = {
   },
 }
 
-/**
- * Handing the step to a model: the picker opens on a suggestion, its pins
- * first and every model one step away, the one that failed left out.
- */
+/** Another model takes the step over: picked in the menu, it has it at once. */
 export const HandingToAnother: Story = {
   play: async ({ canvasElement }) => {
     handedOn.mockClear()
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
-    await userEvent.click(c.getByRole('button', { name: /Review: Codex/ }))
-    const page = within(document.body)
-    await userEvent.click(await page.findByRole('radio', { name: /Sonnet 5/ }))
-    await userEvent.click(c.getByRole('button', { name: 'Hand over' }))
-    await expect(handedOn).toHaveBeenCalledWith(model('claude-sonnet-5'), null)
-    await expect(document.activeElement).toHaveTextContent('Handed to Sonnet 5')
+    await userEvent.click(c.getByRole('button', { name: 'Continue with another model' }))
+    const menu = within(await within(document.body).findByRole('menu', { name: 'Continue with' }))
+    await userEvent.click(menu.getByRole('menuitem', { name: /Sonnet 5/ }))
+    await expect(handedOn).toHaveBeenCalledWith(model('claude-sonnet-5'))
+    await expect(document.activeElement).toHaveTextContent('Continuing with Sonnet 5')
   },
 }
 
-/** Handing on, its picker open: the models you pinned, then all of them; the model that failed isn't there. */
+/** A model that isn't pinned, picked among all of them, has the step at once too. */
+export const FromAllModels: Story = {
+  play: async ({ canvasElement }) => {
+    handedOn.mockClear()
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Continue with another model' }))
+    const page = within(document.body)
+    await userEvent.click(await page.findByRole('menuitem', { name: /All models/ }))
+    await userEvent.click(await within(await page.findByRole('dialog')).findByRole('button', { name: 'Use Kimi K2' }))
+    await expect(handedOn).toHaveBeenCalledWith(model('kimi-k2'))
+    await expect(await c.findByText('Continuing with Kimi K2')).toBeInTheDocument()
+  },
+}
+
+/**
+ * A review whose agent is signed out, its menu of models open: the best bet,
+ * another maker's, first, then the pinned ones, then all of them. The model
+ * that failed isn't there.
+ */
 export const ModelMenuOpen: Story = {
-  render: (args) => <HandingOn {...args} open />,
+  args: {
+    ...ProviderRefused.args,
+    what: 'Claude Code is signed out.',
+    said: undefined,
+    fix: { label: 'Sign in again', onFix: fn() },
+  },
   decorators: [
     (Story) => (
-      <div style={{ paddingBottom: 260 }}>
+      <div style={{ paddingBottom: 220 }}>
         <Story />
       </div>
     ),
   ],
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
-    const page = within(document.body)
-    await expect(page.queryByRole('radio', { name: /Opus 5/ })).toBeNull()
-    await expect(await page.findByRole('button', { name: /All models/ })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Review with another model' }))
+    const menu = within(await within(document.body).findByRole('menu', { name: 'Review with' }))
+    await expect(menu.queryByRole('menuitem', { name: /Opus 5/ })).toBeNull()
+    await expect(menu.getAllByRole('menuitem')[0]).toHaveTextContent('Codex')
+    await expect(menu.getByRole('menuitem', { name: /All models/ })).toBeInTheDocument()
   },
 }
 

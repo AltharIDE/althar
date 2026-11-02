@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { StuckAnswer, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { useRefocus } from '../../lib/refocus'
@@ -30,14 +31,16 @@ export interface StuckAttempt {
   result: string
 }
 
-/** Who could take the step, as the consumer's model picker shows it: the card holds only what to do with the pick. */
+/** Who could take the step: a menu of models, where picking one hands it the step. */
 export interface StuckHandOn {
-  /** The model picker, with the suggestion in it: its pins first, every model one step away. */
-  picker: ReactNode
-  /** The model picked now, which the step goes to. */
-  model: ModelInfo
-  /** Hand the step to it. */
-  onHandOn: () => void
+  /** The models offered at once, the best bet first, then the pinned ones; the one that failed isn't among them. */
+  models: readonly ModelInfo[]
+  /** Hand the step to a model. */
+  onHandOn: (model: ModelInfo) => void
+  /** Open every model, in a browser the consumer shows, which hands the step to the one picked there with `handTo`. Without it, no All models. */
+  onBrowse?: (handTo: (model: ModelInfo) => void) => void
+  /** How many models there are in all, beside All models. */
+  count?: number
 }
 
 export interface StuckOutput {
@@ -57,10 +60,10 @@ export interface StuckText {
   cancel: string
   empty: string
   retry: string
-  /** Before the picker, once handing on was chosen. */
+  /** The menu of models' name. */
   retryLabel: string
-  /** The button that hands the step to the model picked. */
-  retryGo: string
+  /** The menu's last row, which opens every model. */
+  all: string
   again: string
   abandon: string
   told: string
@@ -84,13 +87,13 @@ export const stuckText: StuckText = {
   send: 'Send to the lead',
   cancel: 'Cancel',
   empty: 'Say what it should do first',
-  retry: 'Hand to another agent',
-  retryLabel: 'Hand the step to',
-  retryGo: 'Hand over',
+  retry: 'Continue with another model',
+  retryLabel: 'Continue with',
+  all: 'All models',
   again: 'Try again',
   abandon: 'Abandon this step',
   told: 'Told the lead',
-  retried: (agent) => `Handed to ${agent}`,
+  retried: (agent) => `Continuing with ${agent}`,
   tryingAgain: 'Trying again',
   abandoned: 'Abandoned',
   undo: 'Undo',
@@ -119,7 +122,7 @@ export interface StuckProps {
   read?: { by: ModelInfo; says: ReactNode }
   /** The output that keeps failing, as it last ran. */
   output?: StuckOutput
-  /** Hand the step to any model, picked in the consumer's picker. Without it, no Hand to another agent. */
+  /** Hand the step to another model, picked in a menu. Without it, no Continue with another model. */
   handOn?: StuckHandOn
   /** Tell the lead what to do instead. Without it, no Tell the lead. */
   onTell?: (note: string) => void
@@ -178,7 +181,6 @@ export function Stuck({
   const t = { ...stuckText, ...text }
   const [result, setResult] = useControlled<StuckResult | null>(resultProp, defaultResult)
   const [telling, setTelling] = useState(false)
-  const [handing, setHanding] = useState(false)
   const tellRef = useRefocus<HTMLButtonElement>(telling)
   const [answeredHere, setAnsweredHere] = useState(false)
   const give = (r: StuckResult) => {
@@ -222,6 +224,10 @@ export function Stuck({
   }
 
   const retrying = handOn !== undefined
+  const handTo = (model: ModelInfo) => {
+    handOn?.onHandOn(model)
+    give({ kind: StuckAnswer.Retried, agent: model })
+  }
   // Try again first, where it is the way to take; otherwise after telling the lead and handing the step on.
   const first = againFirst && onAgain !== undefined && fix === undefined
   // What puts it right comes before everything, as the card's own button.
@@ -285,24 +291,6 @@ export function Stuck({
             onCancel={() => setTelling(false)}
           />
         </div>
-      ) : handing && handOn ? (
-        <AskFoot>
-          <span className={s.handLabel}>{t.retryLabel}</span>
-          <span className={s.picker}>{handOn.picker}</span>
-          <Button
-            variant="signal"
-            onClick={() => {
-              setHanding(false)
-              handOn.onHandOn()
-              give({ kind: StuckAnswer.Retried, agent: handOn.model })
-            }}
-          >
-            {t.retryGo}
-          </Button>
-          <Button variant="quiet" onClick={() => setHanding(false)}>
-            {t.cancel}
-          </Button>
-        </AskFoot>
       ) : (
         (fix || onTell || retrying || onAgain || onAbandon || onReport) && (
           <AskFoot>
@@ -317,11 +305,31 @@ export function Stuck({
                 {t.tell}
               </Button>
             )}
-            {retrying && (
-              // The first way on is the one to take, unless the lead can be told or it is to try again.
-              <Button variant={onTell || lead ? 'default' : 'signal'} icon="agents" onClick={() => setHanding(true)}>
-                {t.retry}
-              </Button>
+            {handOn && (
+              <Menu
+                label={t.retryLabel}
+                width={300}
+                trigger={
+                  // The first way on is the one to take, unless the lead can be told or it is to try again.
+                  <Button variant={onTell || lead ? 'default' : 'signal'} icon="agents">
+                    {t.retry}
+                  </Button>
+                }
+              >
+                {handOn.models.map((model) => (
+                  <MenuItem key={model.id} onSelect={() => handTo(model)}>
+                    <Model model={model} />
+                  </MenuItem>
+                ))}
+                {handOn.onBrowse && (
+                  <>
+                    {handOn.models.length > 0 && <MenuSeparator />}
+                    <MenuItem hint={handOn.count} onSelect={() => handOn.onBrowse?.(handTo)}>
+                      {t.all}
+                    </MenuItem>
+                  </>
+                )}
+              </Menu>
             )}
             {!first && again}
             {onAbandon && (

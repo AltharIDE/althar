@@ -206,52 +206,49 @@ describe('trying a step again', () => {
 })
 
 describe('handing a step on to a model', () => {
-  const opened = async () => {
-    await userEvent.click(await screen.findByRole('button', { name: 'Review with another agent' }))
+  /** The menu of models a review is handed on in. */
+  const menu = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Review with another model' }))
+    return within(await screen.findByRole('menu', { name: 'Review with' }))
   }
 
-  it('offers every model but the one whose failure it was, and hands the step to the one picked, another of the same agent’s too', async () => {
+  it('offers every model but the one whose failure it was, another maker’s first, and hands the step to the one picked, another of the same agent’s too', async () => {
     const onAnswer = show(
       stuck({ step: 'review', why: 'signed_out', agentId: 'codex', model: 'gpt-5.2-codex' }),
       undefined,
       undefined,
       true,
     )
-    await opened()
-    // Suggested: another maker's model, not the one that ran out.
-    await userEvent.click(await screen.findByRole('button', { name: /^Review: / }))
-    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    const models = await menu()
+    expect(models.getAllByRole('menuitem')[0]?.textContent).toMatch(/Claude/)
+    expect(models.queryByRole('menuitem', { name: /gpt-5\.2-codex/ })).toBeNull()
+    await userEvent.click(models.getByRole('menuitem', { name: /All models/ }))
     const all = within(await screen.findByRole('dialog'))
     expect(all.queryByRole('button', { name: 'Use gpt-5.2-codex' })).toBeNull()
     await userEvent.click(all.getByRole('button', { name: 'Use gpt-5.2' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex', model: 'gpt-5.2' })
     expect(await screen.findByText('Reviewing with gpt-5.2')).toBeTruthy()
   })
 
-  it('leaves out no model where the step stalled, and suggests another maker’s', async () => {
+  it('leaves out no model where the step stalled, and hands it to the one picked at once', async () => {
     const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'codex', model: 'gpt-5.2-codex' }), undefined, undefined, true)
-    await opened()
-    await userEvent.click(await screen.findByRole('button', { name: /^Review: Claude/ }))
-    expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
-    await userEvent.keyboard('{Escape}')
-    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const models = await menu()
+    expect(models.getByRole('menuitem', { name: /gpt-5\.2-codex/ })).toBeTruthy()
+    await userEvent.click(models.getAllByRole('menuitem')[0]!)
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default' })
   })
 
-  it('hands the step on at the effort picked', async () => {
+  it('keeps the step’s effort where the agent it goes to offers it', async () => {
     const onAnswer = show(
       stuck({ step: 'review', why: 'stalled', agentId: 'claude-code', model: 'opus', effort: 'high' }),
       undefined,
       undefined,
       true,
     )
-    await opened()
-    await userEvent.click(await screen.findByRole('button', { name: /^Review: Codex|^Review: gpt-5/ }))
-    await userEvent.click(await screen.findByRole('radio', { name: 'Extra high' }))
-    await userEvent.keyboard('{Escape}')
-    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
-    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'extra-high' })
+    const models = await menu()
+    // Another maker's first, then the pins: Claude Code's own at the step's effort.
+    expect(models.getAllByRole('menuitem')[0]?.textContent).toMatch(/gpt-5\.2-codex/)
+    await userEvent.click(models.getByRole('menuitem', { name: /Claude|Default/ }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default', effort: 'high' })
   })
 })
