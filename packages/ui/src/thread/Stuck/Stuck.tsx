@@ -284,7 +284,7 @@ export function Stuck({
       ) : handing && handOn ? (
         <AskFoot>
           <span className={s.handLabel}>{t.retryLabel}</span>
-          {handOn.picker}
+          <span className={s.picker}>{handOn.picker}</span>
           <Button
             variant="signal"
             onClick={() => {
