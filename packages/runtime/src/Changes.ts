@@ -6080,7 +6080,7 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'rerun_check',
-          "Runs checks on the task's pull request again, as for one that may have failed by chance (a flaky test, a runner that went away): with check, the one by that name, as read_pull_request gives it; without, each that failed. Should they fail again, you'll be told, as for any checks. A check its host can't run again from Althar, such as one another CI service reports to GitHub (Cloudflare's builds, Vercel, CircleCI's app), or any on Bitbucket, is said so, with its page, where the person can. Fix a failure that is the change's rather than running it again. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
+          "Runs checks on the task's pull request again, as for one that may have failed by chance (a flaky test, a runner that went away): with check, the one by that name, as read_pull_request gives it; without, each that failed. Should they fail again, you'll be told, as for any checks. A check its host can't run again from Althar, such as one another CI service reports to GitHub (Cloudflare's builds, Vercel, CircleCI's app), or any of Bitbucket Data Center's, whose builds are another service's, is said so, with its page, where the person can. Bitbucket Cloud runs the whole pipeline again, on the same commit. Fix a failure that is the change's rather than running it again. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
           {
             type: 'object',
             properties: { check: { type: 'string' }, pull_request: { type: 'string' } },
