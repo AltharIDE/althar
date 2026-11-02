@@ -213,7 +213,7 @@ export const AllStates: Story = {
   render: () => <Example onConnect={() => {}} />,
 }
 
-const OPENCODE = { id: 'opencode', name: 'OpenCode', how: 'signed in', brand: Brand.OpenCode }
+const OPENCODE = { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode }
 const LONG_NAMES: typeof MODEL_LIST = [
   ...MODEL_LIST.slice(0, 3),
   ...[
@@ -244,4 +244,78 @@ function Long({ blocked }: { blocked: readonly string[] }) {
 /** Long names, and models switched off: no text spills into another column, at any width. */
 export const LongNames: Story = {
   render: () => <Long blocked={['opencode-1', 'opencode-2']} />,
+}
+
+/* OpenCode's list as it really runs: long names, some told apart by their provider, none with a context window. */
+const OPENCODE_NAMES = [
+  'DeepSeek V4 Pro',
+  'DeepSeek V4 Flash',
+  'DeepSeek V4.1 Flash Free',
+  'DeepSeek V4 Pro · OpenCode Go',
+  'DeepSeek V4.1 Flash · OpenCode Go',
+  'GLM-5.3',
+  'GLM-5.3-Flash Free',
+  'GLM-5.3 Air · OpenCode Zen',
+  'Kimi K3',
+  'Kimi K3 Thinking · OpenCode Go',
+  'Kimi K2.6 Turbo Preview · OpenCode Zen',
+  'Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen',
+  'Muse Spark 1.3 Contributor · OpenCode Go',
+  'Nemotron 3.5 Super VL Free',
+  'MiMo-V2.6-Flash Free',
+  ...Array.from({ length: 69 }, (_, i) => `Open Model ${i + 1}${i % 4 === 0 ? ' Instruct Preview Free' : ''}`),
+]
+const OPENCODE_MODELS: typeof MODEL_LIST = OPENCODE_NAMES.map((name, i) => ({
+  id: `oc-${i}`,
+  name,
+  short: name,
+  runtime: 'opencode',
+  efforts: ['low', 'high'],
+}))
+
+function OpenCodeList({ signedOut = false, room = false }: { signedOut?: boolean; room?: boolean }) {
+  return (
+    <ModelBrowser
+      models={[...MODEL_LIST.slice(0, 3), ...OPENCODE_MODELS]}
+      runtimes={[...RUNTIMES, { ...OPENCODE, ...(signedOut ? { how: 'signed out' } : {}) }]}
+      value="oc-2"
+      pins={[]}
+      defaultEffort={() => 'high'}
+      onTogglePin={fn()}
+      onSetDefaultEffort={fn()}
+      onClose={fn()}
+      onPick={fn()}
+      blocked={['oc-4', 'oc-9']}
+      onToggleBlocked={fn()}
+      {...(room ? { room: (m) => (m.id === 'oc-0' ? { left: 18, until: 'Mon 09:00', account: null } : null) } : {})}
+    />
+  )
+}
+
+/**
+ * OpenCode's 84 models, searched for "deepse": every name in full, the agent
+ * only its name, no column of "no reading" or "—", the model in use tinted and
+ * the ones switched off last, dimmed. Where a name is still cut, hovering or
+ * focusing it says it in full.
+ */
+export const OpenCodeModels: Story = {
+  render: () => <OpenCodeList />,
+  play: async () => {
+    const body = within(document.body)
+    await userEvent.type(body.getByRole('searchbox'), 'deepse')
+    await expect(body.queryByText(/no reading|signed in/)).toBeNull()
+    await expect(body.queryByText('Context')).toBeNull()
+    await expect(body.getByRole('button', { name: 'Use DeepSeek V4.1 Flash Free, in use' })).toHaveAttribute('aria-current', 'true')
+  },
+}
+
+/** Where the agent isn't in its normal state, its row says so; and a model with a reading shows it in a column of its own. */
+export const OpenCodeSignedOut: Story = {
+  render: () => <OpenCodeList signedOut room />,
+  play: async () => {
+    const body = within(document.body)
+    await expect(body.getAllByText('· signed out').length).toBeGreaterThan(0)
+    await expect(body.getByText('Usage')).toBeInTheDocument()
+    await expect(body.getByText('18%')).toBeInTheDocument()
+  },
 }
