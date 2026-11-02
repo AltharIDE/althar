@@ -1,3 +1,4 @@
+import { Errands } from './Errands'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
@@ -477,6 +478,7 @@ const snapshotOf = (
 })
 
 type Store =
+  | Errands
   | SqlClient.SqlClient
   | Instance
   | Ledger
@@ -3349,7 +3351,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
-          if (thread === undefined || thread.state !== 'open') return
+          if (thread === undefined || !['open', 'done'].includes(thread.state)) return
           const running = Option.isSome(yield* sessions.running(thread.id))
           if (!running && !wake) return
           yield* sessions.send({
@@ -3565,6 +3567,9 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
+          // Only new words from the person or members, or a queue return, wake a stopped lead.
+          // Approvals, bots, outsiders and state/check updates alone leave a merged task asleep.
+          let addressed = false
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
             if (
@@ -3586,7 +3591,10 @@ export class Changes extends Context.Service<
               url: review.url,
               outsider: voice === 'outsider',
             })
-            if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') forLead.push(reviewForLead(review, name))
+            if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') {
+              addressed = true
+              forLead.push(reviewForLead(review, name))
+            }
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
@@ -3603,7 +3611,10 @@ export class Changes extends Context.Service<
               url: comment.url,
               outsider: voice === 'outsider',
             })
-            if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
+            if (voice === 'person' || voice === 'member') {
+              addressed = true
+              forLead.push(commentForLead(comment, name))
+            }
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
           // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
@@ -3628,6 +3639,8 @@ export class Changes extends Context.Service<
             yield* heard(link, 'queue_left', `queue_left:${after.leftQueue}`, { reason: now.leftQueue ?? 'other', sha: now.headSha })
             happened = true
             yield* sayOn(link, leftQueueNote(name, now.leftQueue))
+            addressed = true
+            forLead.push(leftQueueNote(name, now.leftQueue))
           }
           if (after.state !== before.state) {
             if (after.state === 'merged' || after.state === 'closed')
@@ -3653,7 +3666,11 @@ export class Changes extends Context.Service<
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
-          yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
+          yield* tellLead(
+            link,
+            theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
+            addressed || (after.state === 'open' && alone && !theRounds),
+          )
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
               Effect.catchCause((cause) =>
@@ -5605,8 +5622,11 @@ export class Changes extends Context.Service<
        * fetched, fetched again where that was a while ago, without asking its
        * host; a branch with none, with its default branch here.
        */
+      const errands = yield* Errands
       const sweep = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
+        for (const project of yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`)
+          yield* errands.remind(project.id).pipe(contained('Errands.remind', () => undefined))
         const links = yield* sql<LinkRow>`
           SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
           WHERE kind = 'change' AND listening = 1 AND json_extract(snapshot, '$.state') = 'open'

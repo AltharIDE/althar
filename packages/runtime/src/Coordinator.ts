@@ -1,3 +1,4 @@
+import type { MessageSender } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import type { Priority } from '@althar/connectors'
@@ -243,6 +244,8 @@ export class Coordinator extends Context.Service<
       readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
       readonly dictated?: boolean
+      readonly sender?: MessageSender
+      readonly origin?: 'news' | 'system'
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -295,6 +298,8 @@ export class Coordinator extends Context.Service<
         readonly images?: ReadonlyArray<InputImage>
         readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
+        readonly sender?: MessageSender
+        readonly origin?: 'news' | 'system'
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
@@ -1102,8 +1107,8 @@ export class Coordinator extends Context.Service<
             disposition: now === true ? 'interrupt_and_continue' : 'after_current',
             quiet: true,
           })
-          // Queued for a lead that isn't running, it waits until one starts: the coordinator says so to the person.
-          return Option.isSome(lead)
+          const started = Option.isNone(lead) && (yield* sessions.startLast(task.threadId))
+          return Option.isSome(lead) || started
             ? `Passed on to ${task.slug}'s lead.`
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
@@ -1752,7 +1757,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'message_lead',
-          "Passes a message to a task's lead: after its current turn, or at once with now.",
+          "Passes a message to a task's lead, starting it if it stopped: after its current turn, or at once with now. It waits for an agent place and available usage.",
           {
             type: 'object',
             properties: { task: { type: 'string' }, message: { type: 'string' }, now: { type: 'boolean' } },

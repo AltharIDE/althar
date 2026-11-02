@@ -827,6 +827,7 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
+            errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />
         ))}
@@ -839,6 +840,7 @@ export function BoardView({
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
+              errands={ask.waiting.task.errands}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
@@ -846,10 +848,16 @@ export function BoardView({
           ),
         )}
         {lanes.stopped.map((work) => (
-          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} errands={work.errands} onOpen={() => onOpen(work.threadId)} />
         ))}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} data-move={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...readyCardOf(work, actions)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
       </BoardColumn>
 
