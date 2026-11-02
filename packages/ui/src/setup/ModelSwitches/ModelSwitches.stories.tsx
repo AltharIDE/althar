@@ -105,7 +105,7 @@ export const Long: Story = {
     const c = within(canvasElement)
     await expect(c.getByText('2 of 38 used')).toBeInTheDocument()
     c.getByRole('group', { name: 'OpenCode models' }).scrollTop = 120
-    await userEvent.click(c.getByText('Nemotron 3.5 Super VL Free'))
+    await userEvent.click(c.getByRole('checkbox', { name: 'Nemotron 3.5 Super VL Free' }))
     await expect(c.getByText('3 of 38 used')).toBeInTheDocument()
   },
 }
