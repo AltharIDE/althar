@@ -526,7 +526,7 @@ CREATE TABLE provider_sessions (
   last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_event_sequence >= 0),
   started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), account_id TEXT REFERENCES agent_accounts (id),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), account_id TEXT REFERENCES agent_accounts (id), reported_cost REAL CHECK (reported_cost IS NULL OR reported_cost >= 0), reported_currency TEXT,
   CHECK ((state = 'superseded') = (superseded_by_session_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (run_attempt_id, project_id) REFERENCES run_attempts (id, project_id),
@@ -1386,3 +1386,11 @@ CREATE TABLE errand_steps (
 CREATE INDEX errands_open ON errands(project_id, state);
 
 CREATE INDEX errand_steps_task ON errand_steps(task_id);
+
+CREATE TABLE plan_usage_weeks (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  used_percent REAL NOT NULL CHECK (used_percent >= 0 AND used_percent <= 100),
+  resets_at TEXT,
+  observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id, observed_at)
+) STRICT;

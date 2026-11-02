@@ -148,6 +148,8 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
+    /** How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it yet. */
+    readonly paidBy: (accountId: string) => Effect.Effect<{ readonly paidBy: 'plan' | 'key'; readonly plan: string | null } | null, Failure>
   }
 >()('@althar/runtime/PlanUsage') {
   static readonly layer: Layer.Layer<PlanUsage, never, SqlClient.SqlClient | Agents | Accounts | SignIns | Live | RuntimeConfig> =
@@ -226,9 +228,42 @@ export class PlanUsage extends Context.Service<
           hydrated = true
         })
 
+        /* Each account's week as last kept in plan_usage_weeks, read from the store once. */
+        const weeks = new Map<string, { readonly usedPercent: number; readonly resetsAt: string | null } | null>()
+        /*
+         * The account's week, kept as it moves (ADR-084): a task's share of it is the rise between two of these, put on the
+         * turns that ran on the account then. The plan's own week, every model's, before a model's own.
+         */
+        const keepWeek = (accountId: string, windows: ReadonlyArray<Dated>) =>
+          Effect.gen(function* () {
+            const weekly = windows.filter((window) => window.kind === 'weekly' && window.spend !== true)
+            const week = weekly.find((window) => window.label === undefined && window.model === undefined) ?? weekly[0]
+            if (week === undefined) return
+            if (!weeks.has(accountId)) {
+              const [last] = yield* sql<{ usedPercent: number; resetsAt: string | null }>`
+                SELECT used_percent, resets_at FROM plan_usage_weeks WHERE account_id = ${accountId} ORDER BY observed_at DESC LIMIT 1`
+              weeks.set(accountId, last ?? null)
+            }
+            const last = weeks.get(accountId)
+            const resetsAt = week.resetsAt ?? null
+            if (last != null && last.usedPercent === week.usedPercent && last.resetsAt === resetsAt) return
+            const observed = Date.parse(week.observedAt)
+            if (!Number.isFinite(observed)) return
+            weeks.set(accountId, { usedPercent: week.usedPercent, resetsAt })
+            yield* sql`
+            INSERT INTO plan_usage_weeks ${sql.insert({
+              accountId,
+              usedPercent: week.usedPercent,
+              resetsAt,
+              observedAt: new Date(observed).toISOString(),
+            })}
+            ON CONFLICT (account_id, observed_at) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at`
+          })
+
         const keep = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
+            if (next.paidBy !== 'key') yield* keepWeek(accountId, next.windows)
             // A key has no windows: one read while it was on a plan no longer steers work, nor says it is on one (SignIns).
             if (next.paidBy === 'key') return yield* sql`DELETE FROM plan_usage_readings WHERE account_id = ${accountId}`
             if (next.source === null || next.observedAt === null || next.windows.length === 0) return
@@ -515,6 +550,12 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          paidBy: (accountId) =>
+            Effect.map(hydrate, () => {
+              const one = held.get(accountId)
+              const paidBy = one?.paidBy ?? (one?.source != null ? 'plan' : null)
+              return one === undefined || paidBy === null ? null : { paidBy, plan: paidBy === 'plan' ? one.plan : null }
+            }),
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh

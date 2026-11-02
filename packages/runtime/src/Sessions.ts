@@ -813,16 +813,40 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
+      const sessionsSql = yield* SqlClient.SqlClient
       /*
        * Claude Code's adapter says the plan's windows with the usage it streams:
        * kept for the account the session runs on, in a fiber of its own, so
        * the stream never waits on the store or the view.
        */
+      /* The cost each session's agent last said, so the store is written only when it moves. */
+      const costs = new Map<string, number>()
+      /*
+       * And the cost it says, a running total for the session (ACP's usage_update): kept on the session, as what was paid
+       * per use (ADR-084).
+       */
+      const heardCost = (running: Running, event: SessionEvent) => {
+        if (event._tag !== 'ContextUsage' || event.cost === undefined) return Effect.void
+        const { amount, currency } = event.cost
+        if (!Number.isFinite(amount) || amount < 0 || costs.get(running.sessionId) === amount) return Effect.void
+        costs.set(running.sessionId, amount)
+        return Effect.asVoid(
+          Effect.forkIn(
+            sessionsSql`UPDATE provider_sessions SET reported_cost = ${amount}, reported_currency = ${currency} WHERE id = ${running.sessionId}`.pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep what a session cost', cause)),
+            ),
+            sessionsScope,
+          ),
+        )
+      }
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
-        return windows === undefined
-          ? Effect.void
-          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope))
+        return Effect.andThen(
+          heardCost(running, event),
+          windows === undefined
+            ? Effect.void
+            : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope)),
+        )
       }
       const toolServer = yield* ToolServer
       const setups = yield* Setups
