@@ -80,6 +80,40 @@ export const SignedOut: Story = {
   },
 }
 
+/**
+ * One provider within its agent refused its sign-in, not the agent: the card names the provider and the model, and the agent's
+ * own words stay under it. Signing in to that provider is the card's own button.
+ */
+export const ProviderRefused: Story = {
+  args: {
+    step: 'Review',
+    what: 'OpenCode Go refused the sign-in for DeepSeek V4.1 Flash.',
+    said: 'Authentication required: provider authentication required',
+    tried: [],
+    read: undefined,
+    output: undefined,
+    // A review: it can't be told anything, and goes on with another agent, again, or without.
+    onTell: undefined,
+    onAgain: fn(),
+    onReport: fn(),
+    fix: { label: 'Sign in to OpenCode Go', onFix: fn() },
+    text: {
+      again: 'Review again',
+      retry: 'Review with another agent',
+      retryLabel: 'Review with',
+      abandon: 'Skip the review',
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Authentication required: provider authentication required')).toBeInTheDocument()
+    const [first] = c.getAllByRole('button')
+    await expect(first).toHaveAccessibleName('Sign in to OpenCode Go')
+    await userEvent.click(first!)
+    await expect(args.fix?.onFix).toHaveBeenCalled()
+  },
+}
+
 export const TryingAgain: Story = {
   args: ServiceKeptFailing.args,
   play: async ({ args, canvasElement }) => {

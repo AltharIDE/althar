@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
+import { agents } from '@althar/provider-adapters'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -19,7 +20,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
-import { anyOf, SignIns } from '../src/SignIns'
+import { anyOf, latestRefusals, SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
 import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
 
@@ -371,6 +372,29 @@ describe('accounts', () => {
       }
     }).pipe(Effect.provide(withAccounts())),
   )
+
+  it('tells which provider within an agent refused its sign-in, from its latest turns', () => {
+    const providerOf = agents.opencode.signIn.providers?.of ?? (() => undefined)
+    const turn = (model: string, endedAt: string, errorClass: string | null) => ({ model, endedAt, errorClass })
+    // Newest first: Go was refused twice, Anthropic went through after a refusal, and a model with no provider says nothing.
+    const latest = latestRefusals(
+      [
+        turn('opencode-go/deepseek-v4.1-flash', '2026-11-02T20:43:44.187Z', 'auth_required'),
+        turn('anthropic/claude-sonnet-5-5', '2026-11-02T20:30:00.000Z', null),
+        turn('opencode-go/gemini-4-argon', '2026-11-02T20:43:19.132Z', 'auth_required'),
+        turn('anthropic/claude-sonnet-5-5', '2026-11-02T19:00:00.000Z', 'auth_required'),
+        turn('sonnet', '2026-11-02T18:00:00.000Z', 'auth_required'),
+      ],
+      providerOf,
+    )
+    assert.deepStrictEqual(
+      [...latest],
+      [
+        ['opencode-go', '2026-11-02T20:43:44.187Z'],
+        ['anthropic', null],
+      ],
+    )
+  })
 
   it.effect('are each signed in on their own, and a session runs on the first one that can, in its home', () => {
     const away = folder('away')

@@ -41,6 +41,30 @@ export const EveryState: Story = {
   },
 }
 
+/**
+ * An agent that reaches several providers, each with a sign-in of its own: the account is signed in, and one provider that
+ * refused work lately is the line's only word, as the button that signs it in.
+ */
+export const AProviderRefused: Story = {
+  args: {
+    agent: 'OpenCode',
+    accounts: [
+      {
+        id: 'acc_usual',
+        name: 'Personal',
+        place: { kind: 'usual' },
+        state: { kind: 'ready', paid: 'key' },
+        refused: 'OpenCode Go',
+      },
+    ],
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'OpenCode Go: sign in again' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith('acc_usual')
+  },
+}
+
 /** The agent's usual sign-in alone: no word on the order, which only matters with two. */
 export const OnlyTheUsual: Story = {
   args: { accounts: ACCOUNTS.slice(0, 1) },

@@ -3,7 +3,7 @@ import { Stuck, type StuckAttempt } from '@althar/ui'
 import { useState } from 'react'
 
 import type { StuckAnswer } from '../../data/client'
-import { useModelNames } from '../../shared/modelNames'
+import { useModelNames, useProviderNames } from '../../shared/modelNames'
 import { clock } from '../../shared/time'
 import { LimitCall, limitText } from './LimitCall'
 
@@ -49,6 +49,8 @@ export const text = {
         return `${agent} is signed out.`
     }
   },
+  /** One provider within the agent refused its sign-in, not the agent: which, and for which model. */
+  refused: (provider: string, model: string): string => `${provider} refused the sign-in for ${model}.`,
   /** What Althar did before it asked. */
   tried: (agent: string): Record<NonNullable<StuckStep['tried']>[number], { what: string; result: string }> => ({
     carried_on: { what: 'Told it to carry on', result: 'it stopped again' },
@@ -62,7 +64,7 @@ export const text = {
     restarted: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
   },
   /** What puts it right elsewhere: the agent's sign-in, or the repository's host, in Settings. */
-  fix: { signIn: 'Sign in again', connect: 'Connect' },
+  fix: { signIn: 'Sign in again', provider: (provider: string) => `Sign in to ${provider}`, connect: 'Connect' },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
@@ -133,7 +135,15 @@ function StuckCard({
   onConnect,
 }: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
+  const providerName = useProviderNames()
   const agent = agentName(stuck.agentId) || 'The agent'
+  // A provider within the agent refused it: said by its name and the model's, and signed in to by its name.
+  const provider =
+    stuck.why === 'signed_out' && stuck.provider !== undefined && stuck.model !== undefined
+      ? providerName(stuck.agentId, stuck.model, stuck.provider)
+      : undefined
+  // The agent's own words under it, where they say more than the headline.
+  const said = stuck.why === 'signed_out' && stuck.detail !== null && !/signed out/i.test(stuck.detail) ? stuck.detail : undefined
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
   if (stuck.why === 'usage_limit' && stuck.limit !== undefined)
     return (
@@ -182,7 +192,12 @@ function StuckCard({
   return (
     <Stuck
       step={text.step[stuck.step]}
-      what={text.what(stuck, agent)}
+      what={
+        provider === undefined || stuck.model === undefined
+          ? text.what(stuck, agent)
+          : text.refused(provider, named(stuck.agentId, stuck.model).name)
+      }
+      {...(said === undefined ? {} : { said })}
       tried={tried}
       {...(stuck.why === 'transient' ? { tries: text.waited.tries } : {})}
       agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
@@ -190,7 +205,12 @@ function StuckCard({
       {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
       againFirst={againFirst}
       {...(stuck.why === 'signed_out' && stuck.agentId !== null && onSignIn !== undefined
-        ? { fix: { label: text.fix.signIn, onFix: () => onSignIn(stuck.agentId ?? '') } }
+        ? {
+            fix: {
+              label: provider === undefined ? text.fix.signIn : text.fix.provider(provider),
+              onFix: () => onSignIn(stuck.agentId ?? ''),
+            },
+          }
         : {})}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}

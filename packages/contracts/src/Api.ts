@@ -71,6 +71,13 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /**
+   * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
+   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   */
+  providers: Schema.optional(
+    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+  ),
 })
 export type AccountStatus = typeof AccountStatus.Type
 
@@ -2347,6 +2354,9 @@ export const StuckStep = Schema.Struct({
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
   service: Schema.optional(Schema.String),
+  /** For a sign-in refused: the model it was on at the agent, and the provider within the agent that refused it (OpenCode Go). */
+  model: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
