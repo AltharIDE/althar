@@ -233,7 +233,7 @@ export const OnTwoProviders: Story = {
   ],
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('button', { name: /DeepSeek V4.1 Flash/ })).not.toHaveTextContent(/opencode|Default/i)
+    await expect(c.getByRole('button', { name: /DeepSeek V4.1 Flash/ })).not.toHaveTextContent(/opencode-go|Default/i)
     await expect(await within(document.body).findByText('OpenCode Zen')).toBeInTheDocument()
   },
 }
