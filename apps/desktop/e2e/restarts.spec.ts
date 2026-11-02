@@ -60,7 +60,7 @@ const crash = async (electronApp: ElectronApplication) => {
   const pid = await runtimePid(electronApp)
   expect(pid).toBeDefined()
   process.kill(pid ?? 0, 'SIGKILL')
-  await expect.poll(async () => [undefined, pid].includes(await runtimePid(electronApp)), { timeout: 30_000 }).toBe(false)
+  await expect.poll(async () => [undefined, pid].includes(await runtimePid(electronApp))).toBe(false)
 }
 
 /** Opens the task in a window whose app was opened again. */
@@ -112,11 +112,11 @@ test('A runtime killed twice while the step runs pauses it, offering only what f
     await working(electronApp, page, home)
     // Killed once: the app starts the runtime again, and it carries the step on.
     await crash(electronApp)
-    await expect(shown(page, CARRIED)).toBeVisible({ timeout: 30_000 })
+    await expect(shown(page, CARRIED)).toBeVisible()
     // Killed again soon after: it waits on the person.
     await crash(electronApp)
     const card = shown(page, CRASHED).locator('xpath=ancestor::*[.//button[normalize-space()="Abandon this step"]][1]')
-    await expect(card).toBeVisible({ timeout: 30_000 })
+    await expect(card).toBeVisible()
     await expect(card.getByRole('button')).toHaveText([/^Start .+ again$/, 'Hand to another agent', 'Abandon this step', 'Report this'])
     await still(page)
     await card.screenshot({ path: 'test-results/restarts-crashed.png', scale: 'css' })
