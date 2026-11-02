@@ -393,7 +393,7 @@ export class Launches extends Context.Service<
           const busy = [...launches.values()].some(
             (launch) => launch.taskId === null && launch.branch === null && launch.bindingId === binding.id && launch.ended === null,
           )
-          if (!busy || !existsSync(path)) yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+          if (!busy || !existsSync(path)) yield* freshCopy(binding.repository, path, binding.base ?? 'main', fetches.refresh)
           return path
         })
 

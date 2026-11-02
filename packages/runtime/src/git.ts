@@ -351,6 +351,37 @@ export const fetchSpecs = (cwd: string, source: FetchSource, refspecs: ReadonlyA
     Effect.orElseSucceed(() => false),
   )
 
+/** Credentials a line of git's may carry in a URL, anywhere in it, taken out: `https://user:token@host` becomes `https://host`. */
+const withoutCredentials = (line: string) => line.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]*@/gi, '$1')
+
+/** Why a git command that reached the network failed, in a line: what git said last, or that it didn't answer in time. */
+export const fetchFailure = (failed: GitFailed) => {
+  if (failed.timedOut === true) return "it didn't answer in time"
+  const said = failed.stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('warning:'))
+    .at(-1)
+  return said === undefined ? 'git gave no reason' : withoutCredentials(said.replace(/^(fatal|error): /, ''))
+}
+
+/**
+ * Every branch a remote has, into `refs/remotes/<remote>/*`, and the tags
+ * that come with them, as `git fetch <remote>` brings them; a branch the
+ * remote no longer has goes from there too. Nothing is written to
+ * FETCH_HEAD. Null where git could, else why it couldn't.
+ */
+export const fetchRemote = (cwd: string, source: FetchSource, remote: string): Effect.Effect<string | null> =>
+  run(
+    60_000,
+    cwd,
+    ['fetch', '--quiet', '--prune', '--no-write-fetch-head', source.url, `+refs/heads/*:refs/remotes/${remote}/*`],
+    signedIn(source),
+  ).pipe(
+    Effect.as(null),
+    Effect.catchTag('GitFailed', (failed) => Effect.succeed(fetchFailure(failed))),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 
