@@ -85,8 +85,10 @@ import { signedOutWords, summarize } from './words'
 export const ROUNDS = 3
 
 /**
- * How long a step carried on after a restart must have been at work for the
- * next restart to carry it on again; stopped sooner, it needs the person.
+ * How long a step carried on after Althar crashed must have been at work for
+ * the next crash to carry it on again; stopped sooner, it needs the person.
+ * Quitting, updating or restarting Althar never counts: only a launch that
+ * stopped without closing (Instance's `afterCrash`).
  */
 export const RESTART_GRACE = Duration.minutes(5)
 
@@ -4163,27 +4165,38 @@ export class Runs extends Context.Service<
           yield* touchCard(current.taskId)
         })
 
+      /** The last line in the task's thread that said Althar carried the step on by itself, keyed so; and whether a crash came before it. */
+      const lastCarried = (current: RunRow, key: '$.restarted' | '$.startedAgain', value: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [carried] = yield* sql<{ createdAt: string; crashed: number | null }>`
+            SELECT created_at, json_extract(content, '$.crashed') AS crashed FROM thread_items
+            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, ${key}) = ${value}
+            ORDER BY sequence DESC LIMIT 1`
+          return carried === undefined ? undefined : { createdAt: carried.createdAt, crashed: carried.crashed === 1 }
+        })
+
       /**
-       * Whether a restart stopped the step soon after the last one carried it
-       * on: the last sign of life in the task's thread or its review's, the
-       * line that said it carried on at least, came within RESTART_GRACE of
-       * that line.
+       * Whether Althar crashed on the step twice in a row: this launch follows
+       * a crash, and so did the one that last carried the step on, and the
+       * last sign of life in the task's thread or its review's, the line that
+       * said it carried on at least, came within RESTART_GRACE of that line.
+       * Quitting or restarting Althar in between never counts.
        */
-      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) => soonAgain(current, '$.restarted', step.nodeId)
+      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) =>
+        instance.afterCrash ? soonAgain(current, '$.restarted', step.nodeId, true) : Effect.succeed(false)
 
       /**
        * Whether a step Althar carried on by itself, as its notice keyed so in
        * the task's thread says, stopped again soon after: nothing of the task's
-       * thread or its review's came RESTART_GRACE after that notice.
+       * thread or its review's came RESTART_GRACE after that notice. `crashed`,
+       * only where that notice followed a crash.
        */
-      const soonAgain = (current: RunRow, key: '$.restarted' | '$.startedAgain', value: string) =>
+      const soonAgain = (current: RunRow, key: '$.restarted' | '$.startedAgain', value: string, crashed = false) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [carried] = yield* sql<{ createdAt: string }>`
-            SELECT created_at FROM thread_items
-            WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, ${key}) = ${value}
-            ORDER BY sequence DESC LIMIT 1`
-          if (carried === undefined) return false
+          const carried = yield* lastCarried(current, key, value)
+          if (carried === undefined || (crashed && !carried.crashed)) return false
           const grace = new Date(Date.parse(carried.createdAt) + Duration.toMillis(RESTART_GRACE)).toISOString()
           const [alive] = yield* sql<{ later: number }>`
             SELECT count(*) AS later FROM thread_items i JOIN threads t ON t.id = i.thread_id
@@ -4213,9 +4226,12 @@ export class Runs extends Context.Service<
        * A step running when Althar stopped carries on by itself, as the
        * person's resume would carry it on, and the thread says so in a line.
        * A lead that asked the person a question still waits on them. A step
-       * carried on after a restart that stops with Althar again before its
-       * agent has been at it for RESTART_GRACE (Althar crashing on it, say)
-       * needs the person instead, so it doesn't start over forever. A step on
+       * Althar crashed on twice, the second time before its agent had been at
+       * it for RESTART_GRACE, needs the person instead, so it doesn't start
+       * over forever; quitting or restarting Althar never counts. After a
+       * clean quit, a step an earlier version paused for restarts, which
+       * couldn't tell them from crashes, carries on too, its call withdrawn;
+       * one paused for crashes waits on the person. A step on
        * an agent takes a place among the agents at work on this machine like
        * any other (Busy.ts): each waits for one, in the order they were first
        * admitted, so those that were working go before what waited behind
@@ -4235,18 +4251,26 @@ export class Runs extends Context.Service<
             ranModel: string | null
             admittedAt: string
             input: string
+            state: string
           }>`
-            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, a.admitted_at, a.input,
+            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, a.admitted_at, a.input, a.state,
               -- The agent it ran on, on its model; one not started yet, the plan's for the step (Althar's own, none).
               coalesce(s.agent_id, json_extract(n.config, '$.agentId')) AS ran_on,
               CASE WHEN s.id IS NULL THEN json_extract(n.config, '$.model') ELSE s.model END AS ran_model
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
-            WHERE r.state = 'running' AND a.state IN ('admitted', 'running')`
+            WHERE r.state = 'running' AND (a.state IN ('admitted', 'running') OR (${instance.afterCrash ? 0 : 1} = 1
+              AND a.state = 'waiting_attention' AND EXISTS (SELECT 1 FROM attention_requests q WHERE q.node_attempt_id = a.id
+                AND q.kind = 'stuck' AND q.state = 'open' AND json_extract(q.payload, '$.why') = 'restarted')))`
           const carrying: Array<Interrupted> = []
           for (const step of left) {
             const current = yield* currentRun(step.taskId)
             if (current === undefined) continue
+            // Paused for restarts: by crashes, it still waits on the person; by restarts an earlier version counted, it carries on.
+            if (step.state === 'waiting_attention') {
+              if ((yield* lastCarried(current, '$.restarted', step.nodeId))?.crashed === true) continue
+              yield* sql.withTransaction(unstuck(current))
+            }
             // A lead that asked the person a question still waits on them: their answer carries the step on.
             if (step.nodeKey !== 'review' && (yield* asking(current.threadId))) {
               const revision = yield* change('node_attempts', step.attemptId, { state: 'waiting_attention' })
@@ -4318,12 +4342,13 @@ export class Runs extends Context.Service<
                   out.value.accountId,
                 )
               : Effect.gen(function* () {
-                  // Said first, so a restart while it starts counts as one soon after.
+                  // Said first, so a crash while it starts counts as one soon after; after a crash, it says so for the next.
                   yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
                     source: 'runtime',
                     severity: 'info',
                     title: 'Carried on after Althar restarted.',
                     restarted: step.nodeId,
+                    ...(instance.afterCrash ? { crashed: true } : {}),
                   })
                   const carrying = yield* envelope('thread.send', { threadId: current.threadId, restarted: step.attemptId })
                   yield* carryOn(
