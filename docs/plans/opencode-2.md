@@ -59,8 +59,8 @@ over ACP with Althar's own config and a fake model, in throwaway homes, with
 |---|---|---|
 | A rejected command | turn carries on, the model hears of it | turn ends `cancelled`, the model doesn't |
 | The person's MCP server, nothing switched off | started, its tool offered | started, its tools listed |
-| Althar's switch-off, `{name: {enabled: false}}` in `OPENCODE_CONFIG_CONTENT` | not started | **started, its tools listed** |
-| 2.x's own form, `mcp.servers.<name>.disabled` there | not run | **started, its tools listed** |
+| Althar's switch-off, `{name: {enabled: false}}` in `OPENCODE_CONFIG_CONTENT` | not started | **started** |
+| 2.x's own form, `mcp.servers.<name>.disabled` there | not run | **started** |
 | `disabled: true` in the person's own file | not run | not started |
 
 So neither reason has gone and the gate stays: the download stays on 1.x, and
@@ -71,8 +71,9 @@ the environment doesn't switch off a server a file names, in either form.
 Not settled: whether the model can call such a server on 2.2.5. Its tools
 aren't offered directly; they'd come through `execute`, whose `search` found
 nothing for this server, even with nothing switched off. That may be how the
-fake server was written, so the server is known to start and be asked for its
-tools, not to be out of reach. Also since 15 October, 2.x has GitHub Releases.
+fake server was written. The server is known to start with either switch-off,
+and to be asked for its tools with nothing switched off (what it was asked was
+logged only in that run), not to be out of reach. Also since 15 October, 2.x has GitHub Releases.
 
 ## What OpenCode 2 is
 
