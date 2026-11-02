@@ -948,8 +948,18 @@ describe('a task’s first pull request in a repository, and a reported round wi
         yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
         const [workspace] = yield* sql<{ id: string; path: string }>`SELECT id, path FROM workspaces WHERE task_id = ${created.taskId}`
         const path = workspace?.path ?? ''
-        // Where its run left it is kept: its head as the run ended.
-        assert.strictEqual(git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`), git(path, 'rev-parse', 'HEAD'))
+        // Where its run left it is kept: its head as the run ended, a moment after its state says so.
+        const head = git(path, 'rev-parse', 'HEAD')
+        yield* until(
+          Effect.sync(() => {
+            try {
+              return git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`)
+            } catch {
+              return ''
+            }
+          }),
+          (rested) => rested === head,
+        )
         const [lead] = yield* sql<{
           id: string
         }>`SELECT id FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC LIMIT 1`
