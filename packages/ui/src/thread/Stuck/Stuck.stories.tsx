@@ -142,6 +142,7 @@ export const ProviderRefused: Story = {
     onTell: undefined,
     onAgain: fn(),
     onReport: fn(),
+    primary: 'again',
     fix: { label: 'Sign in to OpenCode Go', onFix: fn() },
     text: {
       again: 'Review again',
