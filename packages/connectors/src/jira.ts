@@ -125,6 +125,13 @@ const personOf = (user: User): Person =>
     ? { id: user.accountId, login: user.displayName ?? user.accountId, name: user.displayName ?? null, bot: user.accountType === 'app' }
     : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null, bot: false }
 
+/** An address without its trailing slashes, in one pass: a pattern for them is slow on a long run of slashes not at the end. */
+export const withoutTrailingSlashes = (address: string): string => {
+  let end = address.length
+  while (end > 0 && address[end - 1] === '/') end -= 1
+  return address.slice(0, end)
+}
+
 /**
  * A Jira Cloud site's address: its origin alone. A site has no path of its
  * own, so a board's address pasted for it (`/jira/software/projects/PAY/
@@ -134,7 +141,7 @@ export const siteOf = (webUrl: string): string => {
   try {
     return new URL(webUrl).origin
   } catch {
-    return webUrl.replace(/\/+$/, '')
+    return withoutTrailingSlashes(webUrl)
   }
 }
 
@@ -194,8 +201,8 @@ const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
 const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   const cloud = product === 'jira_cloud'
-  const site = cloud ? siteOf(options.webUrl) : options.webUrl.replace(/\/+$/, '')
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const site = cloud ? siteOf(options.webUrl) : withoutTrailingSlashes(options.webUrl)
+  const api = withoutTrailingSlashes(options.apiUrl)
   // Where its API is: the site, or, for a site on its own domain, its atlassian.net address, which its gateway id is asked of.
   const apiSite = cloud ? siteOf(api) : site
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
@@ -559,8 +566,8 @@ const Email = Schema.Struct({ emailAddress: Schema.optional(Schema.NullOr(Schema
 export const accessJira: Access = (input) =>
   Effect.gen(function* () {
     const cloud = /\/rest\/api\/3\/?$/.test(input.apiUrl)
-    const site = cloud ? siteOf(input.webUrl) : input.webUrl.replace(/\/+$/, '')
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const site = cloud ? siteOf(input.webUrl) : withoutTrailingSlashes(input.webUrl)
+    const api = withoutTrailingSlashes(input.apiUrl)
     const apiSite = cloud ? siteOf(api) : site
     const ask = (url: string) => probe(input, url)
 

@@ -2,7 +2,16 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, priorityFor, siteOf } from '../src/jira'
+import {
+  categoryOf,
+  jiraLabelOf,
+  levelOf,
+  makeJiraCloud,
+  makeJiraDataCenter,
+  priorityFor,
+  siteOf,
+  withoutTrailingSlashes,
+} from '../src/jira'
 import type { Issue } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
@@ -338,6 +347,13 @@ describe('Jira Cloud', () => {
       )
       assert.strictEqual(siteOf(board), SITE)
       assert.strictEqual(siteOf('hibernate.atlassian.net/'), 'hibernate.atlassian.net')
+      assert.strictEqual(withoutTrailingSlashes('https://jira.acme.dev/jira///'), 'https://jira.acme.dev/jira')
+      assert.strictEqual(withoutTrailingSlashes('///'), '')
+      // A long run of slashes not at the end is quick to read past.
+      const slashes = `${'/'.repeat(100_000)}x`
+      const started = performance.now()
+      assert.strictEqual(siteOf(slashes), slashes)
+      assert.isBelow(performance.now() - started, 100)
     }),
   )
 
