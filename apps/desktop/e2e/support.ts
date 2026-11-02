@@ -166,7 +166,10 @@ export const openFirstProject = async (electronApp: ElectronApplication, page: P
   await toFirstProject(page)
   await chooseFolder(electronApp, path)
   await page.getByRole('button', { name: /Add a folder/ }).click()
-  await expect(page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true })).toBeVisible()
+  // Ticked once found: one repository, or each of a folder of several.
+  await expect(
+    page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
+  ).toBeVisible()
   await page.getByRole('button', { name: /Make the project/ }).click()
   await openMadeProject(page)
 }
