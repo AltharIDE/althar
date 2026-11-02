@@ -137,11 +137,41 @@ export const chooseFolder = (electronApp: ElectronApplication, path: string | Re
     typeof path === 'string' ? [path] : [...path],
   )
 
-/** Makes the first project of the folder at `path`, added from the first screen as the person would. */
+/** Past the welcome's tour, where it shows: on a profile that hasn't seen it. Then the welcome is on its agents. */
+export const pastTheTour = async (page: Page) => {
+  const skip = page.getByRole('button', { name: 'Skip', exact: true })
+  const agents = page.getByRole('heading', { name: 'Your agents', level: 1 })
+  await expect(skip.or(agents).first()).toBeVisible()
+  if (await skip.isVisible()) await skip.click()
+  await expect(agents).toBeVisible()
+}
+
+/** Past the welcome's tour and its agents, to its first project's step. */
+export const toFirstProject = async (page: Page) => {
+  await pastTheTour(page)
+  await page.getByRole('button', { name: /^Continue/ }).click()
+}
+
+/** Past the welcome's code host and tracker, where a tracker can be connected, opening the project made on it. */
+export const openMadeProject = async (page: Page) => {
+  const on = page.getByRole('button', { name: /^(Not now|Continue)$/ })
+  const open = page.getByRole('button', { name: /^Open (?!a project$)/ })
+  await expect(on.or(open).first()).toBeVisible()
+  if (await on.isVisible()) await on.click()
+  await open.click()
+}
+
+/** Makes the first project of the folder at `path`, added on the welcome as the person would, and opens it. */
 export const openFirstProject = async (electronApp: ElectronApplication, page: Page, path: string) => {
+  await toFirstProject(page)
   await chooseFolder(electronApp, path)
   await page.getByRole('button', { name: /Add a folder/ }).click()
+  // Ticked once found: one repository, or each of a folder of several.
+  await expect(
+    page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
+  ).toBeVisible()
   await page.getByRole('button', { name: /Make the project/ }).click()
+  await openMadeProject(page)
 }
 
 /**

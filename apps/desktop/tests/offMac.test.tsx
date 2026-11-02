@@ -19,6 +19,7 @@ import { StartView } from '../src/renderer/features/start/StartView'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { coordinatorSnapshot, fakeClient, fakeHost, items } from './fixtures'
 import { useSettingsOf, withServices } from './render'
+import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 /*
  * The window off a Mac, on Linux here: every key it names is the system's,
@@ -59,7 +60,9 @@ describe('the first screen off a Mac', () => {
       })),
     })
     const host = fakeHost()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
+    await toTheProject()
     const add = await screen.findByRole('button', { name: /Add a folder/ })
     expect(add.textContent).toContain('Ctrl+N')
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
@@ -69,6 +72,7 @@ describe('the first screen off a Mac', () => {
     await screen.findByRole('list', { name: 'Repositories for the project' })
     expect(screen.getByRole('button', { name: /Make the project/ }).textContent).toContain('Ctrl+Enter')
     fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true })
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
   })
 })

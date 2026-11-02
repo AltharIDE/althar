@@ -1,14 +1,14 @@
 import type { ModelInfo } from '../../primitives/Model/Model'
 import { Brand } from '../../foundations/brands/brands'
-import { CheckState, RuntimeState, SourceOrigin, TaskStatus, Wait } from '../../foundations/vocabulary'
-import type { ChangeCheck } from '../../primitives/Checks/Checks'
+import { FindingState, RuntimeState, Severity, TaskStatus, Wait } from '../../foundations/vocabulary'
 import type { RuntimeEntry } from '../../setup/Runtimes/Runtimes'
-import type { SourceEntry } from '../../setup/SourceMap/SourceMap'
+import type { SealFacts } from '../../seal/seal'
+import type { ReviewFinding } from '../../thread/Review/Review'
 
 /*
  * What the welcome shows: one made-up project, Meridian, and one task in it,
- * 418, followed from the project to the change. Content, not fixtures: it
- * ships with the welcome.
+ * 418, followed from what was asked to its review. Content, not fixtures:
+ * it ships with the welcome.
  */
 
 const model = (id: string, name: string, short: string, mark: Brand, runtime: string): ModelInfo => ({
@@ -27,39 +27,6 @@ export const GPT = model('gpt-5.2', 'GPT-5.2', 'GPT-5.2', Brand.OpenAI, 'codex')
 export const GEMINI = model('gemini-3-pro', 'Gemini 3 Pro', 'Gemini 3 Pro', Brand.Google, 'gemini-cli')
 
 export const STEPS = ['Implement', 'Review', 'Security review', 'Verify'] as const
-
-export const SOURCES: SourceEntry[] = [
-  {
-    id: 'api',
-    name: 'meridian-api',
-    where: '~/code/meridian-api',
-    origin: SourceOrigin.Existing,
-    branch: 'main',
-    remote: 'github.com/meridian/api',
-    role: 'service',
-  },
-  {
-    id: 'web',
-    name: 'meridian-web',
-    where: '~/code/meridian-web',
-    origin: SourceOrigin.Existing,
-    branch: 'main',
-    remote: 'github.com/meridian/web',
-    role: 'frontend',
-  },
-]
-
-export const ROLES = [
-  { value: 'service', label: 'Service' },
-  { value: 'frontend', label: 'Frontend' },
-]
-
-export const NOTES = [
-  { id: 'n1', title: 'All money values are integer minor units', meta: 'Convention · used by 24 tasks' },
-  { id: 'n2', title: 'Webhook deliveries must stay idempotent', meta: 'Decision · used by 9 tasks' },
-]
-
-export const LEARNED = { id: 'n3', title: 'Session tokens rotate on privilege change', meta: 'Found by task 418 · just now' }
 
 export const TASK = {
   task: '418',
@@ -93,43 +60,6 @@ export const CALL = {
 
 export const RUNNING_421 = { task: '421', kind: 'Delivery', title: 'Rate-limit refund creation per merchant', status: TaskStatus.Running }
 
-export const PRS = [
-  {
-    repo: 'meridian/api',
-    number: 1191,
-    files: [
-      { path: 'src/auth/refresh.ts', add: 31, del: 9 },
-      { path: 'src/auth/principal.ts', add: 12, del: 4 },
-      { path: 'test/auth/refresh.test.ts', add: 44, del: 0 },
-    ],
-  },
-  {
-    repo: 'meridian/web',
-    number: 512,
-    after: { number: 1191, why: 'uses the new refresh endpoint' },
-    files: [{ path: 'app/session/useSession.ts', add: 14, del: 6 }],
-  },
-]
-
-export const checks = (stage: number): ChangeCheck[] => [
-  { id: 'unit', name: 'Unit', state: CheckState.Passed, detail: '216 passed' },
-  { id: 'review', name: 'Review', state: CheckState.Passed, by: [GPT, GEMINI], detail: '3 findings, 3 fixed' },
-  {
-    id: 'security',
-    name: 'Security review',
-    state: stage > 0 ? CheckState.Passed : CheckState.Running,
-    by: [SONNET],
-    added: true,
-    detail: stage > 0 ? 'no findings' : 'reading the diff',
-  },
-  {
-    id: 'integration',
-    name: 'Integration',
-    state: stage > 1 ? CheckState.Passed : stage > 0 ? CheckState.Running : CheckState.Queued,
-    detail: stage > 1 ? '38 passed, across both repositories' : stage > 0 ? 'running' : 'after the security review',
-  },
-]
-
 export const AGENTS: RuntimeEntry[] = [
   {
     id: 'claude-code',
@@ -149,3 +79,28 @@ export const AGENTS: RuntimeEntry[] = [
     version: '1.8.0',
   },
 ]
+
+/* The review of 418's change: GPT-5.2 read what Opus 5 wrote. The lead fixes one finding and sets the other aside. */
+export const REVIEWING = 'reading the change'
+export const FIX = 'r1'
+export const FINDINGS: readonly ReviewFinding[] = [
+  {
+    id: FIX,
+    severity: Severity.High,
+    at: 'src/auth/refresh.ts:48',
+    by: [GPT],
+    state: FindingState.Open,
+    claim: 'The old cache is read before the role check, so a demoted session keeps its old scopes until the token expires.',
+  },
+  {
+    id: 'r2',
+    severity: Severity.Medium,
+    at: 'src/auth/principal.ts:21',
+    by: [GPT],
+    state: FindingState.Open,
+    claim: 'Rotate the token on every role change, not only when a role is taken away.',
+  },
+]
+export const SET_ASIDE = 'Promotions already get a new token at sign-in, and the task asked for demotions only.'
+export const SEALED = 'Reviewed by GPT-5.2 in 2 passes'
+export const SEAL: SealFacts = { model: 'GPT-5.2', sha: '2f67c42', passes: 2, date: '2026-11-01' }
