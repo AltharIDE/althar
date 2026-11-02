@@ -13,9 +13,14 @@ import { launch, still } from './support'
  * repository found where people keep code, where its code is and a tracker,
  * and the project opened, its empty conversation asking for the code host
  * and a tracker not connected. Opened again, the window goes to the home.
- * Each step is shot at 1×, light, and the tour's last page and the agents
- * dark too, into the repository's test-results.
+ * The agents are as a person's own might be: Claude Code signed in, Codex
+ * signed out, and the rest of the registry not on this computer. Each step
+ * is shot at 1×, light, and the tour's last page and the agents dark too,
+ * into the repository's test-results.
  */
+
+/** Every service Althar connects, as a person's own install offers them, and every agent, one of them signed out. */
+const ENV = { ALTHAR_FAKE_CONNECTORS: 'demo', ALTHAR_FAKE_EVERY_AGENT: '1', ALTHAR_FAKE_SIGNED_OUT: 'codex' }
 
 const SHOTS = '../../test-results/welcome'
 
@@ -46,8 +51,7 @@ test('walks a first run from the tour to the project, which asks for its code ho
   mkdirSync(projects)
   repository(projects)
   mkdirSync(SHOTS, { recursive: true })
-  // Every service Althar connects, as a person's own install offers them.
-  let { electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTORS: 'demo' })
+  let { electronApp, page } = await launch(home, ENV)
   try {
     // The tour: four pages, each a scene of the real components, walked with Next. With reduced motion each arrives as it
     // ends, as the kit's scenes do, so each is shot played out.
@@ -70,8 +74,24 @@ test('walks a first run from the tour to the project, which asks for its code ho
     // The agents on this computer, and those Althar can fetch; one ready is enough.
     await expect(page.getByRole('heading', { name: 'Your agents', level: 1 })).toBeVisible()
     await expect(page.getByRole('switch', { name: 'Crash reports' })).toBeVisible()
+    const rows = page.getByRole('list', { name: /^Agents on / })
+    await expect(rows.getByRole('listitem').filter({ hasText: 'Claude Code' }).getByText('Signed in')).toBeVisible()
+    const codex = rows.getByRole('listitem').filter({ hasText: 'Codex' }).first()
+    await expect(codex.getByRole('button', { name: 'Sign in' })).toBeVisible()
+    await expect(
+      page
+        .getByRole('list', { name: /^Agents not on / })
+        .getByRole('listitem')
+        .first(),
+    ).toContainText('OpenCode')
     await shoot(page, '2-agents')
     await shootDark(page, '2-agents-dark')
+    // Codex's own account signs in again, in its row, named.
+    await codex.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page.getByRole('group', { name: 'Signing main in' })).toBeVisible()
+    await shoot(page, '2-agents-signing-in')
+    await page.getByRole('group', { name: 'Signing main in' }).getByRole('button', { name: 'Cancel signing in' }).click()
+    await expect(page.getByRole('group', { name: 'Signing main in' })).toHaveCount(0)
     await page.getByRole('button', { name: /^Continue/ }).click()
 
     // The first project, of the repository found.
@@ -103,7 +123,7 @@ test('walks a first run from the tour to the project, which asks for its code ho
   }
 
   // Opened again: the home, and no welcome.
-  ;({ electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTORS: 'demo' }))
+  ;({ electronApp, page } = await launch(home, ENV))
   try {
     await expect(page.getByRole('complementary', { name: 'Projects' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Your agents', level: 1 })).toHaveCount(0)
