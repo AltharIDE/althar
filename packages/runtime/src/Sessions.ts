@@ -1798,7 +1798,16 @@ export class Sessions extends Context.Service<
             // News can start a stopped session outside a workflow step. Keep its input queued until
             // this account has usage again, before asking Busy for a place. The thread marker also
             // lets Busy restore this wait after a restart.
-            const out = yield* run(limits.outAccount(running.account.id))
+            const inWorkflow = yield* run(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                return (
+                  (yield* sql`SELECT id FROM runs WHERE task_id = ${thread.taskId} AND state IN ('running', 'suspended') LIMIT 1`).length >
+                  0
+                )
+              }),
+            )
+            const out = inWorkflow ? Option.none() : yield* run(limits.outAccount(running.account.id))
             if (Option.isSome(out)) {
               yield* run(
                 Effect.gen(function* () {
