@@ -13,6 +13,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/Board/CardTitle.tsx': 'a card’s or row’s title, stretched over it',
   'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
+  'setup/RepositoryPick/RepositoryPick.tsx': 'Add a folder, a row of the list of repositories, the whole of which adds one',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
@@ -51,7 +52,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
-  'screens/Start/Start.tsx': 'the ways to start, as large options',
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */

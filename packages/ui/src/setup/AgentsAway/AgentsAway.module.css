@@ -1,0 +1,64 @@
+/* The agents not on this computer, quieter than those on it: a tile each, two to a line where there is room. */
+.away {
+  container-type: inline-size;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.title {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container (max-width: 420px) {
+  .tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.tile {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 38px;
+  padding: 4px 0;
+}
+.mark {
+  display: flex;
+  justify-content: center;
+  color: var(--t-3);
+}
+.name {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.way {
+  display: flex;
+  justify-content: flex-end;
+}
+.busy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.failed {
+  grid-column: 2 / -1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}

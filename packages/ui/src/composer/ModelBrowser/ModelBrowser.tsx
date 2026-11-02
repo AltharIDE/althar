@@ -171,11 +171,17 @@ export function ModelBrowser({
           return unreachable(filter)
       }
     }
-    return models
-      .filter(shown)
-      .filter((m) => !needle || `${m.name} ${m.id} ${runtimeName(m.runtime)}`.toLowerCase().includes(needle))
-      .toSorted((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id)))
-  }, [q, filter, pins, models, runtimes])
+    return (
+      models
+        .filter(shown)
+        .filter((m) => !needle || `${m.name} ${m.id} ${runtimeName(m.runtime)}`.toLowerCase().includes(needle))
+        // Usable before switched off, pinned first within each; the sort is stable, so the rest keep their order.
+        .toSorted(
+          (a, b) =>
+            Number(blocked.includes(a.id)) - Number(blocked.includes(b.id)) || Number(pins.includes(b.id)) - Number(pins.includes(a.id)),
+        )
+    )
+  }, [q, filter, pins, blocked, models, runtimes])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     /* a select in a row handles its own arrows, and they bubble here through its portal */

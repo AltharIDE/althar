@@ -149,6 +149,36 @@ export const SwitchingOff: Story = {
   },
 }
 
+/** Usable models first, pinned ones leading their group; the switched-off ones last, pinned or not. */
+export const UsableFirst: Story = {
+  args: {
+    pins: ['gpt-5.2-codex', 'gemini-3-pro'],
+    blocked: ['gpt-5.2-codex', 'kimi-k2'],
+    onToggleBlocked: fn(),
+  },
+  play: async () => {
+    const body = within(document.body)
+    const order = body.getAllByRole('listitem').map((row) => row.getAttribute('data-id'))
+    await expect(order).toEqual([
+      'gemini-3-pro',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-haiku-4-5',
+      'gpt-5.2',
+      'gpt-5-mini',
+      'gemini-3-flash',
+      'qwen3-coder',
+      'devstral-small',
+      'deepseek-v3.2',
+      'glm-4.6',
+      'grok-4',
+      'llama-4-maverick',
+      'gpt-5.2-codex',
+      'kimi-k2',
+    ])
+  },
+}
+
 export const NoMatch: Story = {
   render: () => <Example />,
   play: async () => {

@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, startTask } from './support'
+import { launch, openMadeProject, startTask, toFirstProject } from './support'
 
 /*
  * Anonymous usage data (ADR-036), from the app as someone uses it: what the
@@ -63,11 +63,13 @@ test('sends usage data while its switch is on, named events only, and nothing on
     await expect(page.getByRole('switch', { name: 'Usage data' })).toHaveCount(0)
 
     // The first project, of the repository found, and a task started on it.
+    await toFirstProject(page)
     await page
       .getByRole('list', { name: 'Repositories for the project' })
       .getByRole('checkbox', { name: /meridian/ })
       .click()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await expect.poll(names).toEqual(expect.arrayContaining(['project_made', 'first_screen_done']))
     await startTask(page, 'Add a retry to the checkout call')

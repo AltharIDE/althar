@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
-import { launch, still } from './support'
+import { launch, pastTheTour, still } from './support'
 
 /*
  * An update whose migration can't run on the person's data: a profile made
@@ -33,6 +33,7 @@ test('an update that can’t move the data keeps a copy from before, leaves the 
   const profile = join(home, 'profile')
 
   const before = await launch(home)
+  await pastTheTour(before.page)
   await expect(before.page.getByText('Claude Code').first()).toBeVisible()
   await before.electronApp.close()
   const was = migrationOf(join(profile, 'althar.sqlite'))
