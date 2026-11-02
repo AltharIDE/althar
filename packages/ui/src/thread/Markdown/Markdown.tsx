@@ -5,13 +5,15 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
 import { Code } from '../../primitives/Code/Code'
-import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
+import type { CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type FoundCode, mayBeCode, PLAIN_PATH } from '../Code/code'
 import { CodeRef } from '../Code/CodeRef'
 import { type CodeShell, useThreadShell } from '../Shell/Shell'
 import { Table, type TableText } from '../Table/Table'
+import { closedFence, isDiagram } from './drawing'
+import { CodeBlock, Diagram, type DiagramText } from './Diagram'
 import s from './Markdown.module.css'
 
 /*
@@ -21,7 +23,8 @@ import s from './Markdown.module.css'
  * https. The reading voice of the thread, a size down. Where the thread's
  * host finds code (ThreadShell's code), the names in it that name code (a
  * path in backticks, a name in code, a path written into the words) are
- * the files they name, to peek at and open.
+ * the files they name, to peek at and open. A ```mermaid block is drawn
+ * (Diagram), mermaid fetched the first time one shows.
  */
 
 const KNOWN: ReadonlySet<string> = new Set<MarkedToken['type']>([
@@ -67,6 +70,8 @@ export interface MarkdownText {
   table?: Partial<TableText>
   /** A code block's copy button. */
   copy?: Partial<CopyButtonText>
+  /** A ```mermaid block's, drawn. */
+  diagram?: Partial<DiagramText>
 }
 
 export const markdownText: MarkdownText = { newTab: '(opens in a new tab)', done: 'done', notDone: 'not done' }
@@ -174,16 +179,10 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
       )
     }
     case 'code':
-      /* the copy sits in the block's corner, over a band the code keeps clear of; beside a single line instead */
-      return (
-        <div className={token.text.includes('\n') ? s.block : `${s.block} ${s.oneLine}`}>
-          <pre>
-            <code>{token.text}</code>
-          </pre>
-          <span className={s.copy}>
-            <CopyButton value={token.text} text={t.copy} ghost />
-          </span>
-        </div>
+      return isDiagram(token.lang) ? (
+        <Diagram source={token.text} done={closedFence(token.raw)} text={t.diagram} copy={t.copy} />
+      ) : (
+        <CodeBlock text={token.text} copy={t.copy} />
       )
     case 'blockquote':
       return (

@@ -2,7 +2,16 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, priorityFor, siteOf } from '../src/jira'
+import {
+  categoryOf,
+  jiraLabelOf,
+  levelOf,
+  makeJiraCloud,
+  makeJiraDataCenter,
+  priorityFor,
+  siteOf,
+  withoutTrailingSlashes,
+} from '../src/jira'
 import type { Issue } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
@@ -338,6 +347,28 @@ describe('Jira Cloud', () => {
       )
       assert.strictEqual(siteOf(board), SITE)
       assert.strictEqual(siteOf('hibernate.atlassian.net/'), 'hibernate.atlassian.net')
+      assert.strictEqual(withoutTrailingSlashes('https://jira.acme.dev/jira///'), 'https://jira.acme.dev/jira')
+      assert.strictEqual(withoutTrailingSlashes('///'), '')
+      // A long run of slashes not at the end is quick to read past.
+      const slashes = `${'/'.repeat(100_000)}x`
+      const started = performance.now()
+      assert.strictEqual(siteOf(slashes), slashes)
+      assert.isBelow(performance.now() - started, 100)
+    }),
+  )
+
+  it.effect('on its own domain, calls its API and the gateway at its atlassian.net address, and links issues on its own', () =>
+    Effect.gen(function* () {
+      const own = 'https://hibernate.example.org'
+      const { fetch, sent } = stubFetch([
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 401, text: '' }],
+        ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+        ['GET', `${GATEWAY}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      const credential = Effect.succeed<Credential>({ kind: 'basic', user: 'you@meridian.dev', token: 'ATATT3x' })
+      const tracker = makeJiraCloud({ fetch, apiUrl: CLOUD, webUrl: `${own}/browse/HHH-1`, credential })
+      assert.strictEqual((yield* tracker.issue('HHH-20844')).url, `${own}/browse/HHH-20844`)
+      assert.isTrue(sent.every((request) => new URL(request.url).origin !== own))
     }),
   )
 

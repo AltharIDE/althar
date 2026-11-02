@@ -948,6 +948,59 @@ describe('a repository’s page on its code host', () => {
 })
 
 describe('a Jira Cloud site', () => {
+  const withJira = (info: ProductInfo, fetch: Fetch = () => Promise.reject(new Error('No network in tests'))) =>
+    Runtime.layer({
+      database: ':memory:',
+      worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+      appVersion: '0.0.0-test',
+      deviceName: 'Test Mac',
+      agents: fakeAgents(),
+      secrets: Secrets.memory(),
+      connectors: Layer.succeed(
+        Connectors,
+        Connectors.of({ products: [info], fetch, clientIds: {}, callbackPort: 0, cliToken: () => Effect.succeed(null) }),
+      ),
+    })
+
+  it.live('on its own domain, keeps that address, calls its API at its atlassian.net one, and reads links on either', () => {
+    const jira = makeFakeService({ product: 'jira_cloud' })
+    const made: Array<{ readonly apiUrl: string; readonly webUrl: string }> = []
+    const fetch: Fetch = (url) =>
+      Promise.resolve(
+        String(url) === 'https://tickets.meridian.dev/rest/api/2/serverInfo'
+          ? Response.json({
+              baseUrl: 'https://meridian.atlassian.net',
+              version: '1001.0.0',
+              versionNumbers: [1001, 0, 0],
+              deploymentType: 'Cloud',
+            })
+          : new Response('', { status: 404 }),
+      )
+    const info: ProductInfo = {
+      ...products.jira_cloud,
+      make: (options) => {
+        made.push({ apiUrl: options.apiUrl, webUrl: options.webUrl })
+        return { tracker: jira }
+      },
+    }
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const connection = yield* connections.connectToken({
+        product: 'jira_cloud',
+        webUrl: 'https://tickets.meridian.dev/browse/PAY-1',
+        user: 'you@meridian.dev',
+        token: 't',
+        actorId: instance.personId,
+      })
+      assert.strictEqual(connection.webUrl, 'https://tickets.meridian.dev')
+      assert.deepStrictEqual(made[0], { apiUrl: 'https://meridian.atlassian.net/rest/api/3', webUrl: 'https://tickets.meridian.dev' })
+      assert.strictEqual((yield* connections.resolve('https://tickets.meridian.dev/browse/PAY-1'))?.connectionId, connection.id)
+      assert.strictEqual((yield* connections.resolve('https://meridian.atlassian.net/browse/PAY-1'))?.connectionId, connection.id)
+      assert.isNull(yield* connections.resolve('https://other.atlassian.net/browse/PAY-1'))
+    }).pipe(Effect.provide(withJira(info, fetch)))
+  })
+
   it.live('is kept by its origin, whatever page of it was pasted', () => {
     const jira = makeFakeService({ product: 'jira_cloud' })
     return Effect.gen(function* () {
@@ -962,28 +1015,7 @@ describe('a Jira Cloud site', () => {
       })
       assert.strictEqual(connection.webUrl, 'https://meridian.atlassian.net')
       assert.strictEqual((yield* connections.resolve('https://meridian.atlassian.net/browse/PAY-1'))?.connectionId, connection.id)
-    }).pipe(
-      Effect.provide(
-        Runtime.layer({
-          database: ':memory:',
-          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
-          appVersion: '0.0.0-test',
-          deviceName: 'Test Mac',
-          agents: fakeAgents(),
-          secrets: Secrets.memory(),
-          connectors: Layer.succeed(
-            Connectors,
-            Connectors.of({
-              products: [{ ...products.jira_cloud, make: () => ({ tracker: jira }) }],
-              fetch: () => Promise.reject(new Error('No network in tests')),
-              clientIds: {},
-              callbackPort: 0,
-              cliToken: () => Effect.succeed(null),
-            }),
-          ),
-        }),
-      ),
-    )
+    }).pipe(Effect.provide(withJira({ ...products.jira_cloud, make: () => ({ tracker: jira }) })))
   })
 })
 
