@@ -1386,8 +1386,9 @@ export const NoticeItem = Schema.Struct({
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
-     * (`auth_required`, `usage_limit`, `context_full`, `invalid_request`,
-     * `unknown`, `agent_exited`…), so the thread offers the way out that fits.
+     * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
+     * `invalid_request`, `unknown`, `agent_exited`…), so the thread offers the
+     * way out that fits.
      */
     failure: Schema.optional(Schema.String),
   }),
