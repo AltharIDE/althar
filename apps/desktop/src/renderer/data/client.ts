@@ -386,6 +386,8 @@ export interface Client {
     readonly repositoryId: string
     readonly role?: RepositoryRole
     readonly changeTarget?: ChangeTarget
+    /** Answers the offer to push a fork's branches upstream with no. */
+    readonly notNow?: boolean
     readonly setup?: RepositorySetup
   }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
