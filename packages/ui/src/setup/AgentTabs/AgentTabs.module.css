@@ -106,7 +106,7 @@
 /* its settings, and beside them, narrower, what new work starts on */
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   gap: 26px;
 }
 .main,
