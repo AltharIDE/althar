@@ -65,6 +65,11 @@
   }
 }
 
+/* its ways on wrap as whole buttons where the card is narrow, never into it */
+.foot {
+  flex-wrap: wrap;
+}
+
 /* reporting it is no answer to the step: quiet, at the far end of the answers, on one line */
 .report {
   flex-shrink: 0;

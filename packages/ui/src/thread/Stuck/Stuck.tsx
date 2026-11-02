@@ -335,7 +335,7 @@ export function Stuck({
         </div>
       ) : (
         (fix || onTell || retrying || onAgain || onAbandon || onReport) && (
-          <AskFoot>
+          <AskFoot className={s.foot}>
             {fix && (
               <Button variant="signal" onClick={fix.onFix}>
                 {fix.label}
