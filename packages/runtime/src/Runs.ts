@@ -1371,6 +1371,24 @@ export class Runs extends Context.Service<
         key === 'review' ? 'review' : key === 'settle' ? 'settle' : key === 'publish' ? 'publish' : 'implement'
 
       /**
+       * Whether a step's attempt, as its agent's turn `turnId` ended, is past
+       * what that turn's end decides: it reported meanwhile, or ended
+       * otherwise, or the thread has had a turn since, which may yet report and
+       * whose own end decides. Read again where it decides, as the git a
+       * round's end reads can take a while: under load the lead's next turn
+       * starts before then, and both looked at the same step (#430).
+       */
+      const pastTurn = (threadId: string, turnId: string, attemptId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [attempt] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+          if (!['admitted', 'running', 'waiting_attention'].includes(attempt?.state ?? '')) return true
+          const [latest] = yield* sql<{ id: string }>`
+            SELECT id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+          return latest !== undefined && latest.id !== turnId
+        })
+
+      /**
        * How many of the thread's latest turns, up to `turnId`, ended having
        * done nothing at all, in a row: each completed having used no tokens, as
        * its agent said, and said or did nothing. None where `turnId` isn't its
@@ -1539,14 +1557,16 @@ export class Runs extends Context.Service<
             SELECT provider_session_id AS session_id FROM turn_deliveries WHERE id = ${event.turnId}`
           const live = yield* sessions.running(event.threadId)
           if (Option.isSome(live) && turn?.sessionId != null && live.value.sessionId !== turn.sessionId) return
-          // More input waits on the thread, so another turn comes, which may yet report.
+          // More input waits on the thread, so another turn comes, which may yet report; or one came already, or the step reported.
           const [queued] = yield* sql<{ id: string }>`
             SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
-          if (queued !== undefined) return
+          if (queued !== undefined || (yield* pastTurn(event.threadId, event.turnId, on.attemptId))) return
           const inARow = event.state === 'completed' && event.errorClass === undefined ? yield* blanks(event.threadId, event.turnId) : 0
           if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
           // A round whose lead made nothing new, as for a question answered, ends there: the task is back where it was (ADR-034).
-          if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
+          if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input }, event.turnId)) return
+          // Seeing what the round made took a while: the step may have reported meanwhile, or the lead's next turn begun.
+          if (yield* pastTurn(event.threadId, event.turnId, on.attemptId)) return
           // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
           // Signed out, or refused, it won't go on however it's reminded.
@@ -2018,11 +2038,14 @@ export class Runs extends Context.Service<
       /**
        * A round's Implement step whose lead's turn ended, or whose session
        * went, having made nothing new, and asking the person nothing: the
-       * round ends there, and the task is back where it was. Whether it did.
+       * round ends there, and the task is back where it was. Whether it did,
+       * or, for the end of its lead's turn `turnId`, the step is past it
+       * (`pastTurn`): either way, nothing more is that turn's to do.
        */
       const quietly = (
         run: RunRow,
         attempt: { readonly id: string; readonly nodeId: string; readonly nodeKey: string; readonly input: string },
+        turnId?: string,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2030,15 +2053,16 @@ export class Runs extends Context.Service<
           if (round === undefined || (yield* asking(run.threadId)) || (yield* madeSince(run.taskId, round.start))) return false
           const closed = yield* sql.withTransaction(
             Effect.gen(function* () {
+              if (turnId !== undefined && (yield* pastTurn(run.threadId, turnId, attempt.id))) return 'past'
               const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attempt.id}`
-              if (!(yield* going(run)) || !['admitted', 'running', 'waiting_attention'].includes(still?.state ?? '')) return false
+              if (!(yield* going(run)) || !['admitted', 'running', 'waiting_attention'].includes(still?.state ?? '')) return 'kept'
               yield* ended(run, attempt, 'succeeded', { quiet: true })
               yield* unstuck(run)
               yield* backWhereItWas(run, round.round)
-              return true
+              return 'closed'
             }),
           )
-          if (!closed) return false
+          if (closed !== 'closed') return closed === 'past'
           yield* rest(run.taskId)
           // A pull request that merged while it ran settles the task now.
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
