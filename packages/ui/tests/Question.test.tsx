@@ -162,7 +162,7 @@ describe('Question, answered and withdrawn', () => {
     rerender(<Question parts={[DATABASE, WAITING]} withdrawn="the lead stopped asking" />)
     await settle()
     expect(document.activeElement).toHaveTextContent(
-      'Not answered· Which database should the refund queue live in?· the lead stopped asking',
+      'Which database should the refund queue live in?Not answered · the lead stopped asking',
     )
   })
 
@@ -174,7 +174,7 @@ describe('Question, answered and withdrawn', () => {
     await settle()
     expect(document.activeElement).toBe(document.body)
     expect(screen.getByText('Not answered').closest('div')?.textContent).toBe(
-      'Not answered· Should a partner over the limit get the refund queued, or refused?',
+      'Should a partner over the limit get the refund queued, or refused?Not answered',
     )
   })
 
