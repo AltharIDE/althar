@@ -37,9 +37,7 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, run
  */
 
 const runtimeWith = (github: FakeService, file = ':memory:', agents: FakeAgentOptions = {}) =>
-  Queries.layer.pipe(
-    Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
-  )
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })))
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
