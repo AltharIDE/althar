@@ -63,7 +63,11 @@ const ranOnCodex = (projectId?: string) =>
     const plans = yield* Plans
     const instance = yield* Instance
     const project =
-      projectId ?? (yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })).projectId
+      projectId ??
+      (yield* projects.open({
+        envelope: yield* Runtime.envelope('project.open', {}),
+        path: repository(),
+      })).projectId
     const task = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project,
@@ -85,7 +89,12 @@ const ranOnCodex = (projectId?: string) =>
       ),
       (lines) => lines.some((line) => line.includes('Did the task.')),
     )
-    return { projectId: project, taskId: task.taskId, threadId: task.threadId, said: said.join('\n') }
+    return {
+      projectId: project,
+      taskId: task.taskId,
+      threadId: task.threadId,
+      said: said.join('\n'),
+    }
   })
 
 /** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
@@ -96,9 +105,45 @@ const insideOnly = (agentId: string) =>
       const agents = yield* Agents
       const inside = (entry: AgentEntry): AgentEntry =>
         entry.definition.id === agentId
-          ? { ...entry, definition: { ...entry.definition, signIn: { ...entry.definition.signIn, login: '' } } }
+          ? {
+              ...entry,
+              definition: {
+                ...entry.definition,
+                signIn: { ...entry.definition.signIn, login: '' },
+              },
+            }
           : entry
-      return Agents.of({ list: agents.list.map(inside), get: (id) => Effect.map(agents.get(id), inside) })
+      return Agents.of({
+        list: agents.list.map(inside),
+        get: (id) => Effect.map(agents.get(id), inside),
+      })
+    }),
+  ).pipe(Layer.provide(fakeAgents()))
+
+/** The fake agents, with one that reaches several providers, each with a sign-in of its own, as OpenCode does. */
+const throughProviders = (agentId: string) =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const here = yield* Agents
+      const providers = agents.opencode.signIn.providers
+      const through = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId
+          ? {
+              ...entry,
+              definition: {
+                ...entry.definition,
+                signIn: {
+                  ...entry.definition.signIn,
+                  ...(providers === undefined ? {} : { providers }),
+                },
+              },
+            }
+          : entry
+      return Agents.of({
+        list: here.list.map(through),
+        get: (id) => Effect.map(here.get(id), through),
+      })
     }),
   ).pipe(Layer.provide(fakeAgents()))
 
@@ -122,7 +167,10 @@ describe('accounts', () => {
       const accounts = yield* Accounts
       const [usual] = yield* accounts.of('codex')
       if (usual === undefined) throw new Error('Codex has its usual account')
-      assert.deepInclude(yield* Effect.flip(accounts.login(usual.id)), { _tag: 'AccountRefused', reason: 'no_terminal' })
+      assert.deepInclude(yield* Effect.flip(accounts.login(usual.id)), {
+        _tag: 'AccountRefused',
+        reason: 'no_terminal',
+      })
       // Another still signs in in a terminal.
       const [claude] = yield* accounts.of('claude-code')
       if (claude === undefined) throw new Error('Claude Code has its usual account')
@@ -149,7 +197,15 @@ describe('accounts', () => {
       // The line to sign in names that same home: what the person runs signs
       // the account in where its sessions will read the sign-in.
       assert.strictEqual(yield* accounts.login(account.id), `FAKE_HOME='${home}' fake-login claude-code`)
-    }).pipe(Effect.provide(withAccounts({}, [], { reachable: false, where: () => null, run: (spec) => spec }))),
+    }).pipe(
+      Effect.provide(
+        withAccounts({}, [], {
+          reachable: false,
+          where: () => null,
+          run: (spec) => spec,
+        }),
+      ),
+    ),
   )
 
   it.effect(
@@ -172,13 +228,35 @@ describe('accounts', () => {
         assert.deepStrictEqual(accounts.env(work), { FAKE_HOME: work.home })
         assert.deepStrictEqual(accounts.env(usual ?? work), {})
 
-        const client = yield* accounts.add({ agentId: 'codex', name: 'Client', folder: folder('client') })
+        const client = yield* accounts.add({
+          agentId: 'codex',
+          name: 'Client',
+          folder: folder('client'),
+        })
         assert.strictEqual(client.adoptedFrom, 'a folder you chose')
         assert.deepStrictEqual(
           [
-            yield* refusal(accounts.add({ agentId: 'codex', name: 'Again', folder: client.home ?? '' })),
-            yield* refusal(accounts.add({ agentId: 'codex', name: 'Usual', folder: usualFolder })),
-            yield* refusal(accounts.add({ agentId: 'codex', name: 'Nowhere', folder: join(tmpdir(), 'althar-no-such-folder') })),
+            yield* refusal(
+              accounts.add({
+                agentId: 'codex',
+                name: 'Again',
+                folder: client.home ?? '',
+              }),
+            ),
+            yield* refusal(
+              accounts.add({
+                agentId: 'codex',
+                name: 'Usual',
+                folder: usualFolder,
+              }),
+            ),
+            yield* refusal(
+              accounts.add({
+                agentId: 'codex',
+                name: 'Nowhere',
+                folder: join(tmpdir(), 'althar-no-such-folder'),
+              }),
+            ),
             yield* refusal(accounts.add({ agentId: 'codex', name: '  ' })),
             yield* refusal(accounts.add({ agentId: 'nobody', name: 'x' })),
             yield* refusal(accounts.remove(usual?.id ?? '')),
@@ -284,7 +362,10 @@ describe('accounts', () => {
       rmSync(join(usualFolder, 'pnpm'), { recursive: true, force: true })
       mkdirSync(join(usualFolder, 'mise'), { recursive: true })
       writeFileSync(join(usualFolder, 'auth.json'), '{}')
-      const own = yield* accounts.add({ agentId: 'opencode', name: 'second' })
+      const own = yield* accounts.add({
+        agentId: 'opencode',
+        name: 'second',
+      })
       const home = own.home ?? ''
       assert.isTrue(lstatSync(join(home, 'mise')).isSymbolicLink())
       assert.isFalse(existsSync(join(home, 'auth.json')))
@@ -294,7 +375,11 @@ describe('accounts', () => {
       yield* accounts.prepare(own)
       assert.strictEqual(readlinkSync(join(home, 'pnpm')), join(usualFolder, 'pnpm'))
       // A folder another tool made is left as it is.
-      const adopted = yield* accounts.add({ agentId: 'opencode', name: 'third', folder: folder('third') })
+      const adopted = yield* accounts.add({
+        agentId: 'opencode',
+        name: 'third',
+        folder: folder('third'),
+      })
       yield* accounts.prepare(adopted)
       assert.isFalse(existsSync(join(adopted.home ?? '', 'pnpm')))
     }).pipe(Effect.provide(withAccounts())),
@@ -305,7 +390,14 @@ describe('accounts', () => {
       const accounts = yield* Accounts
       assert.strictEqual(yield* refusal(accounts.add({ agentId: 'codex', name: 'work' })), 'no_room')
       // A folder that exists is still added.
-      assert.strictEqual((yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })).name, 'work')
+      assert.strictEqual(
+        (yield* accounts.add({
+          agentId: 'codex',
+          name: 'work',
+          folder: folder('work'),
+        })).name,
+        'work',
+      )
     }).pipe(
       Effect.provide(
         Runtime.layer({
@@ -358,7 +450,11 @@ describe('accounts', () => {
           ['side'],
         )
         assert.deepStrictEqual(yield* accounts.found('opencode'), [])
-        const work = yield* accounts.add({ agentId: 'codex', name: 'work', folder: join(home, '.codex-work') })
+        const work = yield* accounts.add({
+          agentId: 'codex',
+          name: 'work',
+          folder: join(home, '.codex-work'),
+        })
         assert.strictEqual(work.adoptedFrom, 'codex-profiles')
         assert.notInclude(
           (yield* accounts.found('codex')).map((place) => place.name),
@@ -396,6 +492,88 @@ describe('accounts', () => {
     )
   })
 
+  it.effect('names the providers whose sign-in was refused lately, until a turn goes through or its sign-in changes', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const signIns = yield* SignIns
+      const sql = yield* SqlClient.SqlClient
+      const [account] = yield* accounts.of('codex')
+      if (account === undefined) return assert.fail('Codex has its usual account')
+      // The agent without providers has none to name.
+      const [other] = yield* accounts.of('claude-code')
+      if (other === undefined) return assert.fail('Claude Code has its usual account')
+      assert.isUndefined(
+        yield* signIns.providers(other, {
+          status: 'signed_in',
+          paidBy: 'key',
+        }),
+      )
+      // Turns are written whole here; what they hang from isn't what is read.
+      yield* sql`PRAGMA foreign_keys = OFF`
+      let count = 0
+      const turn = (model: string | null, endedAt: string | null, errorClass: string | null, state = 'completed') => {
+        count += 1
+        const hex = count.toString(16).padStart(32, '0')
+        return sql`INSERT INTO turn_deliveries ${sql.insert({
+          id: `turn_${hex}`,
+          projectId: 'proj_0',
+          threadId: 'thread_0',
+          providerSessionId: `sess_${hex}`,
+          controllerGeneration: 1,
+          model,
+          errorClass,
+          state,
+          requestedAt: '2026-11-02T20:00:00.000Z',
+          endedAt,
+        })}`
+      }
+      const session = (n: number) => {
+        const hex = n.toString(16).padStart(32, '0')
+        return sql`INSERT INTO provider_sessions ${sql.insert({
+          id: `sess_${hex}`,
+          projectId: 'proj_0',
+          threadId: 'thread_0',
+          agentId: 'codex',
+          accountId: account.id,
+          controllerGeneration: 1,
+          state: 'closed',
+          startedAt: '2026-11-02T20:00:00.000Z',
+        })}`
+      }
+      const listed = (connections: string) => ({
+        status: 'signed_in' as const,
+        paidBy: 'key' as const,
+        providers: [
+          { id: 'opencode-go', name: 'OpenCode Go', connections },
+          { id: 'anthropic', name: 'Anthropic', connections: '1' },
+        ],
+      })
+      const refused = (check: Parameters<typeof signIns.providers>[1]) =>
+        Effect.map(signIns.providers(account, check), (rows) =>
+          (rows ?? []).flatMap((row) => (row.refusedAt === null ? [] : [`${row.id}@${row.refusedAt}`])),
+        )
+      // Nothing refused, so nothing to name.
+      assert.deepStrictEqual(yield* refused(listed('1')), [])
+      for (const n of [1, 2, 3, 4, 5, 6]) yield* session(n)
+      yield* turn('opencode-go/glm-5.3', '2026-11-02T20:10:00.000Z', 'auth_required')
+      // Said nothing: no model, never ended, or failed another way.
+      yield* turn(null, '2026-11-02T20:11:00.000Z', 'auth_required')
+      yield* turn('opencode-go/glm-5.3', null, 'auth_required')
+      yield* turn('opencode-go/glm-5.3', '2026-11-02T20:12:00.000Z', 'rate_limited')
+      assert.deepStrictEqual(yield* refused(listed('1')), ['opencode-go@2026-11-02T20:10:00.000Z'])
+      // The same again, as seen before.
+      assert.deepStrictEqual(yield* refused(listed('1')), ['opencode-go@2026-11-02T20:10:00.000Z'])
+      // Its sign-in changed since: it was put right.
+      assert.deepStrictEqual(yield* refused(listed('2')), [])
+      // A provider refused whose sign-in is gone from the listing is still one to sign in to; one whose sign-in changed is not.
+      yield* turn('zen/some-model', '2026-11-02T20:20:00.000Z', 'auth_required')
+      assert.deepStrictEqual(yield* refused({ status: 'signed_in', paidBy: 'key' }), ['zen@2026-11-02T20:20:00.000Z'])
+      // A later turn that went through lets the refusal go.
+      yield* turn('opencode-go/glm-5.3', '2026-11-02T20:30:00.000Z', null)
+      assert.deepStrictEqual(yield* refused(listed('2')), ['zen@2026-11-02T20:20:00.000Z'])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: throughProviders('codex') }))))),
+  )
+
   it.effect('are each signed in on their own, and a session runs on the first one that can, in its home', () => {
     const away = folder('away')
     return Effect.gen(function* () {
@@ -403,8 +581,16 @@ describe('accounts', () => {
       const signIns = yield* SignIns
       const limits = yield* Limits
       const [usual] = yield* accounts.of('codex')
-      const signedOut = yield* accounts.add({ agentId: 'codex', name: 'Away', folder: away })
-      const work = yield* accounts.add({ agentId: 'codex', name: 'Work', folder: folder('work') })
+      const signedOut = yield* accounts.add({
+        agentId: 'codex',
+        name: 'Away',
+        folder: away,
+      })
+      const work = yield* accounts.add({
+        agentId: 'codex',
+        name: 'Work',
+        folder: folder('work'),
+      })
       yield* accounts.order('codex', [signedOut.id, work.id])
       assert.strictEqual((yield* signIns.account(signedOut)).status, 'signed_out')
       assert.strictEqual(yield* signIns.of('codex'), 'signed_in')
@@ -425,8 +611,15 @@ describe('accounts', () => {
       const instance = yield* Instance
       const projects = yield* Projects
       const models = yield* Models
-      const signedOut = yield* accounts.add({ agentId: 'codex', name: 'Away', folder: away })
-      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const signedOut = yield* accounts.add({
+        agentId: 'codex',
+        name: 'Away',
+        folder: away,
+      })
+      const project = yield* projects.open({
+        envelope: yield* Runtime.envelope('project.open', {}),
+        path: repository(),
+      })
       yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       const routesOn = Effect.map(usableModels(project.projectId), (usable) =>
         usable.flatMap((model) => model.routes.map((route) => route.agentId)),
@@ -445,7 +638,11 @@ describe('accounts', () => {
       const accounts = yield* Accounts
       const limits = yield* Limits
       const [usual] = yield* accounts.of('codex')
-      yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })
+      yield* accounts.add({
+        agentId: 'codex',
+        name: 'work',
+        folder: folder('work'),
+      })
       const ran = yield* ranOnCodex()
       assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
@@ -472,8 +669,15 @@ describe('accounts', () => {
       const projects = yield* Projects
       const limits = yield* Limits
       const [usual] = yield* accounts.of('codex')
-      const work = yield* accounts.add({ agentId: 'codex', name: 'work', folder: workFolder })
-      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const work = yield* accounts.add({
+        agentId: 'codex',
+        name: 'work',
+        folder: workFolder,
+      })
+      const project = yield* projects.open({
+        envelope: yield* Runtime.envelope('project.open', {}),
+        path: repository(),
+      })
       yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
       // Saying it again makes no new revision.
       yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
@@ -496,17 +700,43 @@ describe('accounts', () => {
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
 
       // The conversation stays on its account where the project rotates; where it doesn't, work goes back to the first.
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId, threadId: ran.threadId })).id, work.id)
+      assert.strictEqual(
+        (yield* limits.pick({
+          agentId: 'codex',
+          projectId: project.projectId,
+          threadId: ran.threadId,
+        })).id,
+        work.id,
+      )
       yield* policies.setAccounts(project.projectId, { rotate: false }, instance.personId)
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId, threadId: ran.threadId })).id, usual?.id)
+      assert.strictEqual(
+        (yield* limits.pick({
+          agentId: 'codex',
+          projectId: project.projectId,
+          threadId: ran.threadId,
+        })).id,
+        usual?.id,
+      )
       // A project left with none of an agent's accounts, as when the one it named is gone, has all of them back.
       yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: ['acc_gone'] } }, instance.personId)
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, work.id)
+      assert.strictEqual(
+        (yield* limits.pick({
+          agentId: 'codex',
+          projectId: project.projectId,
+        })).id,
+        work.id,
+      )
 
       // Limited to the usual account, the project has no other: Codex is out there, and a new step goes to another agent.
       yield* policies.setAccounts(project.projectId, { rotate: true, only: { codex: [usual?.id ?? ''] } }, instance.personId)
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'Some')
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, usual?.id)
+      assert.strictEqual(
+        (yield* limits.pick({
+          agentId: 'codex',
+          projectId: project.projectId,
+        })).id,
+        usual?.id,
+      )
       const limited = yield* ranOnCodex(project.projectId)
       assert.match(limited.said, /Fake codex ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
