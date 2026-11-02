@@ -433,7 +433,11 @@ in two layers:
    failure that ends a turn comes on the prompt's response, the turn
    `end_turn` like any other; a warning while the agent retries by itself
    comes on a `session_info_update`. Every failure is one of `usage_limit`,
-   `context_full` (start a new session from a brief), `transient` (a lost
+   `context_full` (start a new session from a brief), `session_lost` (the
+   agent no longer has the session, as Claude Code's adapter answers
+   "Resource not found", -32002, for one whose process died: what the turn
+   was given goes to a fresh session briefed from the record, and where none
+   can start, the turn fails saying so, and Try again starts one), `transient` (a lost
    connection, a short rate limit, an overloaded or failing service: waited
    out while offline, and retried after a pause, ADR-060), `auth_required`,
    `invalid_request` or `unknown`.

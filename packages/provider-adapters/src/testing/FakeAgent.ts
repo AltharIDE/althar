@@ -513,6 +513,9 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/** Worktrees where a lead's session has been lost once (`[lead:lost-once]`): a fresh session there carries on. */
+const lostIn = new Set<string>()
+
 /** How many more times a lead goes on its own in each worktree, as `[lead:gone-once]` and `[lead:gone-twice]` say: kept across sessions. */
 const goneLeft = new Map<string, number>()
 
@@ -535,8 +538,9 @@ const goesOnItsOwn = (session: SessionState) => {
  * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
  * failing \`npm test\` three times in a row, every turn, then waits until
  * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
- * at its output limit, `[lead:refuse]` refuses, and `[lead:signed-out]` fails
- * as its account is signed out. `[lead:explore]` reads
+ * at its output limit, `[lead:refuse]` refuses, `[lead:signed-out]` fails
+ * as its account is signed out, and `[lead:lost-once]` has lost its first
+ * session in its worktree. `[lead:explore]` reads
  * a few files, changes none, and works on until cancelled. Otherwise, nothing: the
  * turn goes on as it would.
  */
@@ -551,6 +555,12 @@ const playStall = async (
   const hang = async (stubborn = false) => {
     while ((stubborn || !session.cancelled) && !session.closed) await pause(10)
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
+  }
+  // Its first session in its worktree is lost, as claude-agent-acp drops one whose Claude Code process died, and it answers
+  // the prompt as that did on 2 November 2026; the coordinator that plans it only passes the marker on.
+  if (session.markers.has('[lead:lost-once]') && !session.coordinator && !lostIn.has(session.cwd)) {
+    lostIn.add(session.cwd)
+    throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
   // The coordinator that plans it only passes the marker on.
