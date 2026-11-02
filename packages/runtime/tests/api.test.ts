@@ -2594,7 +2594,7 @@ describe('words', () => {
       (['fork_gone', 'unplaced'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'PR #1' }))),
       [
         'PR #1’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.',
-        'The host doesn’t say where PR #1’s branch is, and it isn’t where this task pushes, so nothing was pushed.',
+        'The host doesn’t say where PR #1’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.',
       ],
     )
     // A push the remote refused says how to put it right.

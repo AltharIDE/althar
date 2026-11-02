@@ -40,7 +40,15 @@ const hasBranch = (bare: string, branch = BRANCH) => {
 }
 
 /** A fork's clone, with `origin` the fork and `upstream` the repository it came from, each a bare repository of its own. */
-const forkClone = (options: { readonly canPush?: boolean; readonly upstreamDefault?: string; readonly saysHead?: boolean } = {}) => {
+const forkClone = (
+  options: {
+    readonly canPush?: boolean
+    readonly upstreamDefault?: string
+    readonly saysHead?: boolean
+    /** What the host says the pull request's head is, where not the commit its branch on the fork is at. */
+    readonly headOf?: () => string
+  } = {},
+) => {
   const { working, bare: fork } = hosted(FORK)
   git(working, 'remote', 'add', 'upstream', `${HOST}/${UPSTREAM.join('/')}.git`)
   git(working, 'config', 'user.name', 'Fake')
@@ -51,6 +59,7 @@ const forkClone = (options: { readonly canPush?: boolean; readonly upstreamDefau
   const pushedTo: Array<string> = []
   const github = makeFakeService({
     ...(options.saysHead === undefined ? {} : { saysHead: options.saysHead }),
+    headOf: () => options.headOf?.() ?? (hasBranch(fork) ? git(fork, 'rev-parse', BRANCH) : null),
     pushUrl: (path) => {
       const name = path.join('/')
       pushedTo.push(name)
@@ -270,8 +279,7 @@ describe('a clone whose remotes were renamed by hand', () => {
     Effect.gen(function* () {
       const changes = yield* Changes
       git(here, 'commit', '-q', '--allow-empty', '-m', 'One more')
-      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
-      const pushed = yield* Effect.flip(changes.push(taskId, seen?.change?.localHead ?? ''))
+      const pushed = yield* Effect.flip(changes.push(taskId, git(here, 'rev-parse', 'HEAD')))
       const [run] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId}`
       const published = yield* Effect.flip(
         changes.publish({ projectId: projectId as ProjectId, taskId, runId: run?.id ?? '', end: 'draft' }),
@@ -302,19 +310,67 @@ describe('a clone whose remotes were renamed by hand', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('refuses to push a pull request its host doesn’t place where no branch of that name is, rather than make one', () => {
+  it.live('finds a pull request its host doesn’t place on the fork, where its branch stands at its head', () => {
     const { working, fork, upstream, github } = forkClone({ saysHead: false })
     return Effect.gen(function* () {
       yield* opened(working, 'upstream')
       const { projectId, taskId, here } = yield* taskToPullRequest(working)
       rename(working)
 
+      yield* pushOneMore(projectId, taskId, here, 'One more')
+      assert.strictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
+      assert.isFalse(hasBranch(upstream), 'no new branch upstream for the open pull request')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leaves an unrelated branch of that name upstream alone, though the push would have gone through', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      // At a commit the task's is built on, so the plain push isn't refused as behind.
+      git(upstream, 'update-ref', `refs/heads/${BRANCH}`, 'refs/heads/main')
+      const theirs = git(upstream, 'rev-parse', BRANCH)
+
+      yield* pushOneMore(projectId, taskId, here, 'One more')
+      assert.strictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
+      assert.strictEqual(git(upstream, 'rev-parse', BRANCH), theirs)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('refuses a pull request its branch could be either of two for, each at its head', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      const head = git(fork, 'rev-parse', BRANCH)
+      git(fork, 'push', '-q', upstream, `${head}:refs/heads/${BRANCH}`)
+
       assert.deepStrictEqual(yield* refusedBoth(projectId, taskId, here), [
         { tag: 'PushRefused', why: 'unplaced' },
         { tag: 'PushRefused', why: 'unplaced' },
       ])
+      assert.strictEqual(git(fork, 'rev-parse', BRANCH), head)
+      assert.strictEqual(git(upstream, 'rev-parse', BRANCH), head)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('refuses a pull request no branch of that name stands at the head of', () => {
+    const { working, fork, upstream, github } = forkClone({ saysHead: false, headOf: () => 'f'.repeat(40) })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { projectId, taskId, here } = yield* taskToPullRequest(working)
+      rename(working)
+      const head = git(fork, 'rev-parse', BRANCH)
+
+      assert.deepStrictEqual(yield* refusedBoth(projectId, taskId, here), [
+        { tag: 'PushRefused', why: 'unplaced' },
+        { tag: 'PushRefused', why: 'unplaced' },
+      ])
+      assert.strictEqual(git(fork, 'rev-parse', BRANCH), head)
       assert.isFalse(hasBranch(upstream), 'no new branch upstream for the open pull request')
-      assert.notStrictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
@@ -335,7 +391,11 @@ describe('a pull request whose host doesn’t say where its branch is', () => {
     const { working, bare } = hosted(FORK)
     git(working, 'config', 'user.name', 'Fake')
     git(working, 'config', 'user.email', 'fake@althar.test')
-    const github = makeFakeService({ saysHead: false, pushUrl: () => bare })
+    const github = makeFakeService({
+      saysHead: false,
+      headOf: () => (hasBranch(bare) ? git(bare, 'rev-parse', BRANCH) : null),
+      pushUrl: () => bare,
+    })
     github.addRepository(FORK)
     return Effect.gen(function* () {
       yield* connect('github', HOST)

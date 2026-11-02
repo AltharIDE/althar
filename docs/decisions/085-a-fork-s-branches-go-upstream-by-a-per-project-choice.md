@@ -32,9 +32,11 @@
     repository the host last said its branch is on, whatever the project says
     now, until it closes. Only tasks without an open pull request, and new
     ones, follow the setting, so no commit lands on a stray branch. Where the
-    host says its fork is gone, or doesn't say where its branch is and no
-    branch of that name is where the clone's remotes would send it, nothing is
-    pushed and the person is told why.
+    host says its fork is gone, nothing is pushed and the person is told why.
+    Where it doesn't say, the push goes only to the one repository of the
+    clone's remotes whose branch of that name stands at the pull request's
+    head, for a name alone doesn't make a branch the pull request's; failing
+    that, it is refused in the same way.
   - **A clone whose remotes were renamed by hand just works.** With `origin`
     the repository it came from and `fork` the fork, it is a normal project:
     new work goes to `origin`, not to whichever remote sorts first, and pull

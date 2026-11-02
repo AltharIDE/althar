@@ -16,6 +16,7 @@ import {
   type Product,
   products,
   type Repository,
+  parseRemote,
 } from '@althar/connectors'
 import { knownModelName, PushRequestItem, standsFor } from '@althar/contracts'
 import type { PermissionRequest } from '@althar/provider-adapters'
@@ -2007,36 +2008,53 @@ export class Changes extends Context.Service<
        * The repository a pull request's branch is on, where its commits are
        * pushed, whatever the project says of the task's next ones (ADR-085):
        * where its host last said, else where it says now. Where it says the
-       * fork is gone, nowhere. Where it doesn't say, its own repository, or for
-       * one from a fork into the repository it was forked from, the fork, as
-       * the clone's remotes say, and only with a branch of that name there: a
-       * push for an open pull request never makes a new one, and a clone's
-       * remotes renamed since can't say where a fork's is.
+       * fork is gone, nowhere. Where it doesn't say, the one repository of the
+       * clone's remotes whose branch of that name stands at the pull request's
+       * head: a branch's name alone doesn't make it the pull request's, and a
+       * push for an open pull request never makes a new one.
        */
       const branchRepositoryOf = (
         taskId: string,
         host: CodeHost,
         repository: Repository,
         path: string,
-        pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
+        pull: {
+          readonly number: number
+          readonly source: string
+          readonly headSha: string | null
+          readonly head?: ReadonlyArray<string> | null | undefined
+        },
       ) =>
         Effect.gen(function* () {
           const remote = `${host.words.short} ${host.words.prefix}${pull.number}`
-          const head =
-            pull.head !== undefined
-              ? pull.head
-              : (yield* host.change(repository, pull.number).pipe(Effect.orElseSucceed(() => null)))?.headRepository
+          const read = pull.head !== undefined ? null : yield* host.change(repository, pull.number).pipe(Effect.orElseSucceed(() => null))
+          const head = pull.head !== undefined ? pull.head : read?.headRepository
           if (head === null) return repository
           if (head !== undefined && head.length > 0) return samePath(head, repository.path) ? repository : yield* host.repository(head)
           if (head !== undefined) return yield* new PushRefused({ taskId, why: 'fork_gone', remote })
-          const fork = yield* namedRemotes(path).pipe(
-            Effect.map(forkOf),
-            Effect.orElseSucceed(() => null),
+          const at = read?.headSha ?? pull.headSha
+          const remotes = yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))
+          const places = remotes.flatMap(({ url }) => parseRemote(url) ?? [])
+          // Its own remote says the name the clone knows this host by, which its web address may not.
+          const here = places.find((place) => samePath(place.path, repository.path))?.host ?? parseRemote(repository.webUrl)?.host
+          const paths = places.filter((place) => place.host === here && !samePath(place.path, repository.path)).map((place) => place.path)
+          const others = yield* Effect.forEach(
+            paths.filter((one, index) => paths.findIndex((other) => samePath(one, other)) === index),
+            (other) =>
+              host.repository(other).pipe(
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.succeed(null),
+                ),
+              ),
           )
-          const into = fork !== null && samePath(repository.path, fork.upstream.path)
-          const on = into ? yield* host.repository(fork.fork.path) : repository
-          if ((yield* remoteTip(path, yield* host.pushTarget(on), pull.source)) === null)
-            return yield* new PushRefused({ taskId, why: 'unplaced', remote })
+          const holding = yield* Effect.filter([repository, ...others.filter((other) => other !== null)], (candidate) =>
+            Effect.gen(function* () {
+              return at !== null && (yield* remoteTip(path, yield* host.pushTarget(candidate), pull.source)) === at
+            }),
+          )
+          const [on] = holding
+          if (on === undefined || holding.length > 1) return yield* new PushRefused({ taskId, why: 'unplaced', remote })
           return on
         })
 
@@ -2046,7 +2064,12 @@ export class Changes extends Context.Service<
         host: CodeHost,
         repository: Repository,
         path: string,
-        pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
+        pull: {
+          readonly number: number
+          readonly source: string
+          readonly headSha: string | null
+          readonly head?: ReadonlyArray<string> | null | undefined
+        },
       ) => Effect.flatMap(branchRepositoryOf(taskId, host, repository, path, pull), (on) => host.pushTarget(on))
 
       /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
@@ -3496,6 +3519,7 @@ export class Changes extends Context.Service<
           const target = yield* pushTargetOf(link.taskId, host, repository, workspace.path, {
             number: read.number,
             source: onto,
+            headSha: read.headSha,
             head: read.headRepository,
           })
           return (yield* remoteTip(workspace.path, target, onto)) === sent ? sent : said
@@ -6114,6 +6138,7 @@ export class Changes extends Context.Service<
             yield* pushTargetOf(taskId, host, repository, workspace.path, {
               number: now.number,
               source: now.source,
+              headSha: now.headSha,
               head: now.headRepository !== undefined ? now.headRepository : snapshot.head,
             }).pipe(
               Effect.catchTag(
