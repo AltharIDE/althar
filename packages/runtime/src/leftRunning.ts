@@ -70,6 +70,14 @@ export const WAKE_FOR = Duration.minutes(5)
  */
 export const REPORT_FOR = Duration.seconds(2)
 
+/**
+ * How long after a turn ends what the agent says is still that turn's: its
+ * last words can reach Althar after the turn's own end, and ACP's updates
+ * don't say which turn they are of. A call it begins is new work however
+ * soon, and words after this are the agent going on by itself.
+ */
+export const TRAILS_FOR = Duration.seconds(1)
+
 /** A command that ends by itself, whatever it prints of where it answers: tests, builds, checks. */
 const FINITE = /\b(test|tests|vitest|jest|mocha|playwright|cypress|pytest|check|lint|build|tsc|typecheck|e2e|ci)\b/i
 

@@ -18,6 +18,9 @@ import { Layer } from 'effect'
 /** Agents whose sign-in can't be checked, as where their status command isn't there: ALTHAR_FAKE_UNCHECKED lists them. */
 const unchecked = new Set((process.env.ALTHAR_FAKE_UNCHECKED ?? '').split(',').filter((agentId) => agentId !== ''))
 
+/** Agents whose sign-in reads as signed out, as where no one signed in: ALTHAR_FAKE_SIGNED_OUT lists them. */
+const signedOut = new Set((process.env.ALTHAR_FAKE_SIGNED_OUT ?? '').split(',').filter((agentId) => agentId !== ''))
+
 /**
  * The fake agents' connection, where ALTHAR_FAKE_CONNECTION names a file:
  * what it says as each prompt starts, `offline`, `server` or `waits`, ends
@@ -50,7 +53,7 @@ const definition = ({ service, ...real }: AgentDefinition): AgentDefinition => (
       if (unchecked.has(real.id)) throw new Error(`${real.name}’s status command isn’t there`)
       return { command: 'true', args: [] }
     },
-    read: () => true,
+    read: () => !signedOut.has(real.id),
     paidBy: () => 'plan',
     login: real.signIn.login,
   },

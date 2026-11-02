@@ -1,6 +1,7 @@
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, within } from 'storybook/test'
 
+import { diagramDoc } from '../../fixtures/diagrams'
 import { refDoc, reviewDoc } from '../../fixtures/meridian'
 import { DocPanel } from './DocPanel'
 import { States, statesOn } from '../../storybook/States'
@@ -25,6 +26,16 @@ const beside: Decorator = (Story) => (
 export const AFile: Story = { decorators: [beside] }
 /** Written in the thread, not a file: its title stands in. */
 export const ADocument: Story = { args: { doc: reviewDoc }, decorators: [beside] }
+
+/** A doc with diagrams, as an agent wrote it: drawn in the panel as in the thread. */
+export const WithDiagrams: Story = {
+  args: { doc: { path: 'docs/architecture/05-workflow-engine.md', body: diagramDoc } },
+  decorators: [beside],
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(await c.findAllByRole('img', { name: 'Diagram' })).toHaveLength(2)
+  },
+}
 
 /** Still being read. */
 export const Loading: Story = { args: { loading: true, doc: { path: 'docs/api/refunds-rate-limits.md', body: '' } }, decorators: [beside] }

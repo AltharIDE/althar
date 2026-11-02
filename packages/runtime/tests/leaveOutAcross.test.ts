@@ -119,7 +119,7 @@ describe('a done task of two repositories with commits after in each', () => {
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
-          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
         ),
       ),
     )

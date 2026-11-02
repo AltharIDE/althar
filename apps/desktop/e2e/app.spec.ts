@@ -6,7 +6,19 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, still, toConversation } from './support'
+import {
+  backToWork,
+  launch,
+  openFirstProject,
+  openMadeProject,
+  pastTheTour,
+  projectSettings,
+  say,
+  shown,
+  startTask,
+  still,
+  toConversation,
+} from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -29,7 +41,9 @@ test('makes the first project of a repository it found, starts a task, and talks
   const { electronApp, page } = await launch(home)
   try {
     await expect(page.getByText('Fake')).toHaveCount(0)
+    await pastTheTour(page)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
+    await page.getByRole('button', { name: /^Continue/ }).click()
     const found = page.getByRole('list', { name: 'Repositories for the project' })
     await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/, /Add a folder/])
     await still(page)
@@ -40,6 +54,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await still(page)
     await page.screenshot({ path: 'test-results/start-forming.png' })
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await openMadeProject(page)
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })

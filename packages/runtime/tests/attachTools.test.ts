@@ -80,7 +80,7 @@ const forked = (state?: 'open' | 'closed') => {
 
 const withQueries = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),
+    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
   )
 
 /** GitHub connected, the fork opened as a project whose pull requests open upstream, a task in it, and the coordinator's tools. */
