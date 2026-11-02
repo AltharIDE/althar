@@ -16,14 +16,15 @@ const handedOn = fn()
 /**
  * The consumer's wiring: the best bet first, then the pinned models, and
  * every model in the browser, where picking one hands it the step too. The
- * model that failed, Opus 5, isn't offered.
+ * model that failed, Opus 5, isn't offered, nor any of an agent signed out.
  */
-function HandingOn(props: StuckProps) {
+function HandingOn({ away, ...props }: StuckProps & { away?: string }) {
   const [browsing, setBrowsing] = useState<((picked: ModelInfo) => void) | null>(null)
-  const prefs = useModelPrefs()
-  const offered = MODEL_LIST.filter((each) => each.id !== 'claude-opus-5')
+  const prefs = useModelPrefs(['claude-opus-5', 'gpt-5.2-codex', 'claude-sonnet-5', 'gemini-3-pro', 'kimi-k2'])
+  const offers = (each: ModelInfo) => each.id !== 'claude-opus-5' && each.runtime !== away
+  const offered = MODEL_LIST.filter(offers)
   const best = model('gpt-5.2-codex')
-  const models = [best, ...prefs.pinned.filter((each) => each.id !== best.id && each.id !== 'claude-opus-5')]
+  const models = [best, ...prefs.pinned.filter((each) => each.id !== best.id && offers(each))]
   return (
     <>
       <Stuck {...props} handOn={{ models, onHandOn: handedOn, onBrowse: (handTo) => setBrowsing(() => handTo), count: offered.length }} />
@@ -210,8 +211,8 @@ export const FromAllModels: Story = {
 
 /**
  * A review whose agent is signed out, its menu of models open: the best bet,
- * another maker's, first, then the pinned ones, then all of them. The model
- * that failed isn't there.
+ * another maker's, first, then the pinned ones, then all of them. None of
+ * the agent signed out is there.
  */
 export const ModelMenuOpen: Story = {
   args: {
@@ -220,6 +221,7 @@ export const ModelMenuOpen: Story = {
     said: undefined,
     fix: { label: 'Sign in again', onFix: fn() },
   },
+  render: (args) => <HandingOn {...args} away="claude-code" />,
   decorators: [
     (Story) => (
       <div style={{ paddingBottom: 220 }}>
@@ -231,7 +233,7 @@ export const ModelMenuOpen: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Review with another model' }))
     const menu = within(await within(document.body).findByRole('menu', { name: 'Review with' }))
-    await expect(menu.queryByRole('menuitem', { name: /Opus 5/ })).toBeNull()
+    await expect(menu.queryByRole('menuitem', { name: /Opus 5|Sonnet 5/ })).toBeNull()
     await expect(menu.getAllByRole('menuitem')[0]).toHaveTextContent('Codex')
     await expect(menu.getByRole('menuitem', { name: /All models/ })).toBeInTheDocument()
   },
