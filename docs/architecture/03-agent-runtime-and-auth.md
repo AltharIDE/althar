@@ -1002,9 +1002,13 @@ the line plainly is one, is refused; what Althar can't read is refused too
 where Never lists what the boundary doesn't stop (a deploy, a named
 command); a command it asks about asks; and no one reads the keychain or
 git's stored passwords where the words show it, whose service a Mac's
-sandbox still reaches (ADR-071's trade-off). With everything allowed, a
-command the agent asks to run outside that Althar can't read is refused,
-saying to run it inside (`decideLeaving`). Where nothing holds a session (Windows, a Flatpak,
+sandbox still reaches (ADR-071's trade-off). What crosses meets the rules
+as any request does: with everything allowed, what Althar can't read goes
+ahead, and only what they read as irreversible asks
+([ADR-086](../decisions/086-the-asks-and-refusals-left-are-what-can-t-be-undone.md)).
+A lead's line is read from the folder its shell is in, where its agent
+records it (Claude Code's transcript, `shellFolder`), not from the
+worktree's top. Where nothing holds a session (Windows, a Flatpak,
 Codex, OpenCode, a review's lead), every request meets the rules below.
 
 **Git stops what can't be undone, wherever it comes from.** Every lead's
