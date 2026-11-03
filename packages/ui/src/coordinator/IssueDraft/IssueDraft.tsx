@@ -17,10 +17,13 @@ import s from './IssueDraft.module.css'
 
 /*
  * An issue the coordinator drafted on one of your trackers, as a card in its
- * thread. Nothing reaches the tracker until you file it: you can change it
- * first, or throw it away. If filing fails the card says why and can be filed
- * again. Filed or discarded, it folds to a line: the issue's key and link, or
- * that it was thrown away.
+ * thread, with what else it is filed with (its project, milestone, assignee)
+ * beside its priority and labels. Nothing reaches the tracker until you file
+ * it: you can change it first, or throw it away; or file this one and every
+ * later one at once. If filing fails the card says why and can be filed
+ * again. Filed or discarded, it folds to a line: the issue's key and link,
+ * and what its tracker left off; or that it was thrown away. One filed at
+ * once, without asking, says so, and you can ask to be asked first.
  */
 
 export interface IssueDraftText {
@@ -28,6 +31,12 @@ export interface IssueDraftText {
   kicker: (source: string, container: string) => string
   /** The labels, as quiet text. */
   labelled: (labels: readonly string[]) => string
+  /** Files this one, and has every later issue filed at once, without a card. */
+  alwaysAtOnce: string
+  /** On one filed at once: have each later one wait on a card again. */
+  alwaysAsk: string
+  /** Before what its tracker left off once filed. */
+  leftOff: string
   /** Its priority, as quiet text beside them. */
   prioritised: (priority: string) => string
   showAll: string
@@ -63,6 +72,9 @@ export interface IssueDraftText {
 export const issueDraftText: IssueDraftText = {
   kicker: (source, container) => `Issue draft · ${source} · ${container}`,
   labelled: (labels) => `Labels: ${labels.join(', ')}`,
+  alwaysAtOnce: 'Always file at once',
+  alwaysAsk: 'Always ask first',
+  leftOff: 'Left off:',
   prioritised: (priority) => `Priority: ${priority}`,
   showAll: 'Show all',
   showLess: 'Show less',
@@ -108,6 +120,12 @@ export type IssueDraftProps = RootProps<
     labels: readonly string[]
     /** The priority it is filed with, in the tracker's word: Low. */
     priority?: string
+    /** What else it is filed with, a phrase each in the tracker's words: Project: Q4 launch, Milestone: Beta. */
+    details?: readonly string[]
+    /** Once filed, what its tracker left off, a line each: a label it hasn't, a field it refused. */
+    leftOff?: readonly string[]
+    /** Filed at once, without asking: its line says it can ask first next time. */
+    direct?: boolean
     state: IssueDraftState
     /** Why it wasn't filed, while it stands failed; or why it may have been, while uncertain. */
     error?: string
@@ -118,6 +136,10 @@ export type IssueDraftProps = RootProps<
     /** Save what the person changed in the edit form. */
     onChange?: (edit: IssueDraftEdit) => void
     onDiscard?: () => void
+    /** File it, and every later issue, at once. Without it, no such link. */
+    onAlwaysAtOnce?: () => void
+    /** On one filed at once: have each later issue wait on its card. Without it, no such link. */
+    onAlwaysAsk?: () => void
     /** A save is under way: the form's save button shows it. */
     saving?: boolean
     headingLevel?: HeadingLevel
@@ -145,12 +167,17 @@ export function IssueDraft({
   bodyView,
   labels,
   priority,
+  details = [],
+  leftOff = [],
+  direct = false,
   state,
   error,
   issue,
   onFile,
   onChange,
   onDiscard,
+  onAlwaysAtOnce,
+  onAlwaysAsk,
   saving = false,
   headingLevel = 3,
   text,
@@ -171,7 +198,13 @@ export function IssueDraft({
     case IssueDraftState.Filed: {
       const href = safeHref(issue?.href)
       return (
-        <article ref={setLine} tabIndex={-1} className={cx(s.line, className)} data-rhythm={Rhythm.Fold} {...rest}>
+        <article
+          ref={setLine}
+          tabIndex={-1}
+          className={cx(s.line, leftOff.length > 0 && s.lineWraps, className)}
+          data-rhythm={Rhythm.Fold}
+          {...rest}
+        >
           <BrandMark brand={mark} size={12} className={s.lineMark} />
           <span className={s.said}>
             {t.filed(source)}{' '}
@@ -185,6 +218,16 @@ export function IssueDraft({
             )}
           </span>
           <span className={s.lineTitle}>{title}</span>
+          {direct && onAlwaysAsk && (
+            <LinkButton className={s.lineAsk} onClick={onAlwaysAsk}>
+              {t.alwaysAsk}
+            </LinkButton>
+          )}
+          {leftOff.length > 0 && (
+            <span className={s.leftOff}>
+              {t.leftOff} {leftOff.join(' ')}
+            </span>
+          )}
         </article>
       )
     }
@@ -203,11 +246,12 @@ export function IssueDraft({
       return (
         <DraftCard
           root={{ ...rest, ref, className }}
-          draft={{ mark, source, container, title, body, bodyView, labels, priority, error }}
+          draft={{ mark, source, container, title, body, bodyView, labels, priority, details, error }}
           state={state}
           onFile={onFile}
           onChange={onChange}
           onDiscard={onDiscard}
+          onAlwaysAtOnce={onAlwaysAtOnce}
           saving={saving}
           headingLevel={headingLevel}
           t={t}
@@ -235,20 +279,24 @@ function folds(state: IssueDraftState) {
 
 interface CardProps {
   root: ComponentPropsWithRef<'article'>
-  draft: Pick<IssueDraftProps, 'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'priority' | 'error'>
+  draft: Pick<
+    IssueDraftProps,
+    'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'priority' | 'details' | 'error'
+  >
   state: IssueDraftState
   onFile?: () => void
   onChange?: (edit: IssueDraftEdit) => void
   onDiscard?: () => void
+  onAlwaysAtOnce?: () => void
   saving: boolean
   headingLevel: HeadingLevel
   t: IssueDraftText
 }
 
 /** The draft before it is filed: what it says, and the buttons that file it, change it, or throw it away. */
-function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, headingLevel, t }: CardProps) {
-  const { mark, source, container, title, body, bodyView, labels, priority, error } = draft
-  const quiet = [...(priority ? [t.prioritised(priority)] : []), ...(labels.length > 0 ? [t.labelled(labels)] : [])]
+function DraftCard({ root, draft, state, onFile, onChange, onDiscard, onAlwaysAtOnce, saving, headingLevel, t }: CardProps) {
+  const { mark, source, container, title, body, bodyView, labels, priority, details = [], error } = draft
+  const quiet = [...(priority ? [t.prioritised(priority)] : []), ...details, ...(labels.length > 0 ? [t.labelled(labels)] : [])]
   const { className, ...rest } = root
   const kickerId = useId()
   const titleId = useId()
@@ -329,7 +377,11 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
             )}
           </div>
           <div className={s.foot}>
-            <span className={s.note}>{filing && t.filing(source)}</span>
+            <span className={s.note}>
+              {filing
+                ? t.filing(source)
+                : onAlwaysAtOnce && state === IssueDraftState.Pending && <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>}
+            </span>
             {onDiscard && !filing && (
               <Button variant="quiet" onClick={onDiscard}>
                 {t.discard}
