@@ -1,7 +1,16 @@
 import { createHash } from 'node:crypto'
 
 import { ConnectorFailed } from '@althar/connectors'
-import { PLANS_AND_REVIEWS, type LimitCall, LimitChoice, type MessageSender } from '@althar/contracts'
+import {
+  type CheckoutAnswer,
+  type CheckoutAsk,
+  type CheckoutWait,
+  type LimitCall,
+  LimitChoice,
+  type MessageSender,
+  PLANS_AND_REVIEWS,
+  WorksIn,
+} from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -32,6 +41,7 @@ import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
+import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
@@ -170,6 +180,14 @@ export const PlanParameters = Schema.Struct({
    * its lead starts in the task's thread (Reviews.lead).
    */
   reads: Schema.optional(Schema.Boolean),
+  /**
+   * Where it works (ADR-091): a worktree of its own, or Local, in its
+   * repositories' own checkouts here, taken as its first step begins. A
+   * worktree without it, as before.
+   */
+  worksIn: Schema.optional(WorksIn),
+  /** Why it works there, in the coordinator's words, where that isn't the project's default. */
+  worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -477,6 +495,26 @@ interface Waiting {
 }
 
 /**
+ * What a Local task's first step held for its checkout keeps (ADR-091): as
+ * one waiting for a place, since when it waits; the person's answers to what
+ * Althar asked, each for the one checkout it was about, as it was then
+ * (local.ts), which hold until it starts; and what it waits for now.
+ */
+interface CheckoutHold extends Waiting {
+  readonly consents?: ReadonlyArray<CheckoutConsent>
+  readonly waits?: CheckoutWait
+}
+
+/** What a step held for its checkout waits for, from its output; null where it waits on the person's answer. */
+export const checkoutWaitOf = (output: string | null): CheckoutWait | null => {
+  try {
+    return (JSON.parse(output ?? '') as Partial<CheckoutHold>).waits ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Where a waiting step stands (ADR-037): one the person resumed or answered starts at once; a plan's first step is new
  * work; the rest (the step after another, one carried on after a restart or back from a usage limit) is a task's work
  * under way.
@@ -495,7 +533,11 @@ const waitingOf = (output: string | null, now: string): Waiting => {
   return { place: { how: 'restart' }, since: now }
 }
 
-/** Whether the task's run waits for a place before its first step: its one attempt, Implement, held for one, to start. */
+/**
+ * Whether the task's run waits before its first step: its one attempt,
+ * Implement, held for a place among the agents at work here, to start, or,
+ * Local, for its checkout (ADR-091).
+ */
 export const planWaits = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -505,7 +547,8 @@ export const planWaits = (taskId: string) =>
       WHERE r.id = (SELECT id FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1) AND r.state = 'running'`
     const [only] = rows
     if (rows.length !== 1 || only === undefined) return false
-    if (only.nodeKey !== 'implement' || only.state !== 'held' || only.holdReason !== 'machine_busy') return false
+    if (only.nodeKey !== 'implement' || only.state !== 'held') return false
+    if (only.holdReason !== 'machine_busy' && only.holdReason !== 'checkout') return false
     return waitingOf(only.output, '').place.how === 'start'
   })
 
@@ -605,6 +648,14 @@ export class Runs extends Context.Service<
      * counted from where the task started. Whether one opened.
      */
     madeRound(taskId: string, sessionId: string): Effect.Effect<boolean, unknown>
+    /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091); its task is placed again at once. */
+    answerCheckout(input: {
+      readonly envelope: CommandEnvelope
+      readonly attentionId: string
+      readonly answer: CheckoutAnswer
+    }): Effect.Effect<void, unknown>
+    /** Looks again at what waits for a checkout, as a plan changed where it works, or a task settled. */
+    readonly checkoutsMoved: Effect.Effect<void>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -614,6 +665,15 @@ export class Runs extends Context.Service<
       const instance = yield* Instance
       const sessions = yield* Sessions
       const leftBehind = yield* LeftBehind
+      /**
+       * Tasks with something still at work here: an agent, in a turn or idle,
+       * or a settling not done stopping what they ran. A settled Local task's
+       * checkout stays its own until it has none (ADR-091).
+       */
+      const notYetStopped = Effect.gen(function* () {
+        const live = (yield* sessions.onTasks).map((session) => session.taskId)
+        return new Set([...live, ...(yield* leftBehind.stopping)])
+      })
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -2920,6 +2980,274 @@ export class Runs extends Context.Service<
           yield* Effect.forkIn(provide(look), scope)
         })
 
+      /* ---- Local tasks (ADR-091): a plan's first step takes its checkouts, or waits for them ---- */
+
+      /** Settled tasks' checkouts Althar said stay on their branch, by workspace: said once a launch. */
+      const toldStays = new Set<string>()
+      const toldOnce = (spot: Spot) => {
+        if (toldStays.has(spot.id)) return true
+        toldStays.add(spot.id)
+        return false
+      }
+      const checkoutWakes = yield* Queue.sliding<void>(1)
+      const checkoutsEvery = (yield* RuntimeConfig).local?.every ?? Duration.seconds(5)
+      const worksInOf = (run: Pick<RunRow, 'parameters'>): WorksIn =>
+        (JSON.parse(run.parameters) as { worksIn?: WorksIn }).worksIn ?? 'worktree'
+
+      /** Holds a first step for its checkout, with what it waits for: inside the caller's transaction. */
+      const holdForCheckout = (run: RunRow, attemptId: string, hold: CheckoutHold) =>
+        Effect.gen(function* () {
+          const revision = yield* change('node_attempts', attemptId, {
+            state: 'held',
+            holdReason: 'checkout',
+            output: JSON.stringify(hold),
+          })
+          yield* fact({
+            projectId: run.projectId,
+            aggregateType: 'node_attempt',
+            aggregateId: attemptId,
+            revision,
+            type: 'node_attempt.held',
+            payload: { reason: 'checkout', waits: hold.waits ?? null },
+            actorId: instance.systemId,
+          })
+        })
+
+      /** Asks the person about a checkout before the task takes it, once, keeping what was seen, which the answer holds for: inside the caller's transaction. */
+      const askCheckout = (run: RunRow, attemptId: string, ask: CheckoutAsk, seen: CheckoutSeen) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [open] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE task_id = ${run.taskId} AND kind = 'checkout' AND state = 'open'`
+          if (open !== undefined) return
+          const id = yield* newId(Ids.attentionRequest)
+          yield* sql`INSERT INTO attention_requests ${sql.insert({
+            id,
+            projectId: run.projectId,
+            taskId: run.taskId,
+            nodeAttemptId: attemptId,
+            kind: 'checkout',
+            addresseeActorId: instance.personId,
+            payload: JSON.stringify({ ...ask, seen }),
+            state: 'open',
+            createdAt: yield* timestamp,
+          })}`
+          yield* fact({
+            projectId: run.projectId,
+            aggregateType: 'attention_request',
+            aggregateId: id,
+            revision: 1,
+            type: 'attention_request.opened',
+            payload: ask,
+            actorId: instance.systemId,
+          })
+        })
+
+      /**
+       * Places a plan's first step where its plan says it works, before its
+       * lead starts (local.ts): true where it is. Otherwise it is held for its
+       * checkout, freeing its place among the agents at work, with what it
+       * waits for, or asking the person; and it is looked at again
+       * (`lookAtCheckouts`). A worktree that can't be made leaves the step
+       * needing the person, as a lead that can't start does.
+       */
+      const placeFirst = (run: RunRow, attemptId: string, hold?: CheckoutHold) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const placed = yield* Effect.exit(place(run.taskId, worksInOf(run), hold?.consents ?? [], toldOnce, notYetStopped))
+          if (placed._tag === 'Failure') {
+            const { implement } = yield* stepsOf(run)
+            yield* stuck(
+              run,
+              { id: attemptId },
+              {
+                step: 'implement',
+                why: 'failed_to_start',
+                detail: summarize(placed.cause) || null,
+                agentId: implement?.agentId ?? null,
+                round: 0,
+                open: 0,
+              },
+            )
+            return false
+          }
+          const where = placed.value
+          if (where.kind === 'ready') return true
+          const waits: CheckoutWait | undefined =
+            where.kind === 'taken'
+              ? { why: 'taken', by: where.by }
+              : where.kind === 'changes'
+                ? { why: 'changes', repository: where.repository }
+                : undefined
+          const next: CheckoutHold = {
+            place: { how: 'start' },
+            since: hold?.since ?? (yield* timestamp),
+            ...(hold?.consents === undefined ? {} : { consents: hold.consents }),
+            ...(waits === undefined ? {} : { waits }),
+          }
+          const changed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [now] = yield* sql<{ state: string; holdReason: string | null; output: string | null }>`
+                SELECT state, hold_reason, output FROM node_attempts WHERE id = ${attemptId}`
+              const held = now?.state === 'held' && now.holdReason === 'checkout'
+              if (now === undefined || (now.state !== 'admitted' && !held)) return false
+              if (held && now.output === JSON.stringify(next) && where.kind !== 'asks') return false
+              yield* holdForCheckout(run, attemptId, next)
+              if (where.kind === 'asks') yield* askCheckout(run, attemptId, where.ask, where.seen)
+              return true
+            }),
+          )
+          if (changed) {
+            yield* touchCard(run.taskId)
+            // The place among the agents at work it had is another's meanwhile.
+            yield* busy.wake
+          }
+          return false
+        })
+
+      /** A first step held for its checkout, looked at again: placed now, it waits for a place among the agents at work, as any first step. */
+      const lookAgain = (row: { readonly taskId: string; readonly attemptId: string; readonly output: string | null }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const current = yield* currentRun(row.taskId)
+          if (current === undefined) return
+          const hold = waitingOf(row.output, yield* timestamp) as CheckoutHold
+          if (!(yield* placeFirst(current, row.attemptId, hold))) return
+          const moved = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                SELECT state, hold_reason FROM node_attempts WHERE id = ${row.attemptId}`
+              if (still?.state !== 'held' || still.holdReason !== 'checkout') return false
+              // From when it began waiting, so it keeps its place in the line.
+              yield* waitForPlace(current, row.attemptId, { how: 'start' }, hold.since)
+              return true
+            }),
+          )
+          if (moved) {
+            yield* touchCard(row.taskId)
+            yield* busy.wake
+          }
+        })
+
+      /**
+       * What waits on a checkout, looked at: each checkout a settled task
+       * still holds, given back where it can be now; then each first step held
+       * for one, with nothing asked of the person, placed again, oldest first.
+       * True while any of them is left, or any task holds a checkout here:
+       * what is looked at again in a few seconds, as the person commits or a
+       * task settles.
+       */
+      const lookAtCheckouts = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // Not while anything of its task is still at work: settling stops it first (LeftBehind.ts), read again under the checkout's lock.
+        const working = yield* notYetStopped
+        for (const spot of (yield* settledHolding).filter((one) => !working.has(one.taskId)))
+          yield* giveBackSpot(spot, toldOnce, notYetStopped).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not give a checkout back', cause)),
+          )
+        const held = yield* sql<{ taskId: string; attemptId: string; output: string | null }>`
+          SELECT r.task_id, a.id AS attempt_id, a.output FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+          JOIN nodes n ON n.execution_id = e.id JOIN node_attempts a ON a.node_id = n.id
+          JOIN tasks k ON k.id = r.task_id JOIN projects p ON p.id = r.project_id
+          WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason = 'checkout'
+            AND k.state IN ('draft', 'open') AND p.archived_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM attention_requests q WHERE q.task_id = r.task_id AND q.kind = 'checkout' AND q.state = 'open')
+          ORDER BY a.admitted_at`
+        for (const row of held)
+          yield* lookAgain(row).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not place a task waiting for its checkout', cause)),
+          )
+        return held.length > 0 || (yield* checkoutsHeld)
+      })
+
+      /** Where a task's plan and run say it works: as the person's answer moved it. Inside the caller's transaction. */
+      const moveTo = (taskId: string, worksIn: WorksIn, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ table: 'runs' | 'task_plans'; id: string; projectId: ProjectId; parameters: string }>`
+            SELECT 'runs' AS "table", id, project_id, parameters FROM runs WHERE task_id = ${taskId} AND state = 'running'
+            UNION ALL
+            SELECT 'task_plans' AS "table", id, project_id, parameters FROM task_plans WHERE task_id = ${taskId} AND state = 'accepted'`
+          for (const row of rows) {
+            const parameters = JSON.stringify({ ...(JSON.parse(row.parameters) as object), worksIn, worksInWhy: null })
+            const revision = yield* change(row.table, row.id, { parameters })
+            yield* fact({
+              projectId: row.projectId,
+              aggregateType: row.table === 'runs' ? 'run' : 'task_plan',
+              aggregateId: row.id,
+              revision,
+              type: row.table === 'runs' ? 'run.plan_changed' : 'task_plan.changed',
+              payload: { worksIn },
+              actorId,
+            })
+          }
+        })
+
+      const answerCheckout = (input: {
+        readonly envelope: CommandEnvelope
+        readonly attentionId: string
+        readonly answer: CheckoutAnswer
+      }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { answer } = input
+          const call = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [row] = yield* sql<{ projectId: ProjectId; taskId: string; attemptId: string | null; payload: string; state: string }>`
+                SELECT project_id, task_id, node_attempt_id AS attempt_id, payload, state FROM attention_requests
+                WHERE id = ${input.attentionId} AND kind = 'checkout'`
+              if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
+              if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
+              const ask = JSON.parse(row.payload) as CheckoutAsk & { readonly seen?: CheckoutSeen }
+              // Only what fits what was asked: waiting is for changes not committed, the branch's two answers for a branch.
+              const fits = answer === 'worktree' || (answer === 'wait' ? ask.holdup === 'changes' : ask.holdup === 'branch')
+              if (!fits) return yield* new NothingToWaitFor({ attentionId: input.attentionId })
+              const revision = yield* change('attention_requests', input.attentionId, {
+                state: 'answered',
+                answeredAt: yield* timestamp,
+                payload: JSON.stringify({ ...ask, answer }),
+              })
+              yield* fact({
+                projectId: row.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: input.attentionId,
+                revision,
+                type: 'attention_request.answered',
+                payload: { answer },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              if (answer === 'worktree') yield* moveTo(row.taskId, 'worktree', input.envelope.actorId)
+              else if (row.attemptId !== null && ask.seen !== undefined) {
+                // For that checkout only, as it was when asked: another, or this one changed since, is asked about again (local.ts).
+                const consent: CheckoutConsent = { ...ask.seen, holdup: ask.holdup, answer }
+                const [attempt] = yield* sql<{ output: string | null }>`SELECT output FROM node_attempts WHERE id = ${row.attemptId}`
+                const hold = waitingOf(attempt?.output ?? null, yield* timestamp) as CheckoutHold
+                const consents = [...(hold.consents ?? []).filter((one) => one.spotId !== consent.spotId), consent]
+                yield* change('node_attempts', row.attemptId, { output: JSON.stringify({ ...hold, consents }) })
+              }
+              return row
+            }),
+          )
+          yield* touchCard(call.taskId)
+          // Placed again now, as answered.
+          yield* Queue.offer(checkoutWakes, undefined)
+        })
+
+      yield* Effect.forkScoped(
+        provide(
+          keptGoing(
+            'Runs.checkouts',
+            // With no task Local here, nothing to look at until one is.
+            Effect.forever(
+              Effect.flatMap(lookAtCheckouts, (waits) =>
+                waits ? Effect.raceFirst(Queue.take(checkoutWakes), Effect.sleep(checkoutsEvery)) : Queue.take(checkoutWakes),
+              ),
+            ),
+          ),
+        ),
+      )
+
       const run = (planId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3025,20 +3353,27 @@ export class Runs extends Context.Service<
             yield* touchCard(plan.taskId)
             return 'waiting' as const
           }
-          yield* startFirst(current, admitted.attemptId)
-          return 'running' as const
+          // Local, held for its checkout, it waits as one with no place does (ADR-091).
+          return (yield* startFirst(current, admitted.attemptId)) ? ('running' as const) : ('waiting' as const)
         })
 
-      /** A plan's first step under way: its lead, as the plan says, on it. A lead that can't start leaves Implement needing the person, who can hand it to another agent. */
+      /**
+       * A plan's first step under way: its lead, as the plan says, on it. A lead that can't start leaves Implement needing the
+       * person, who can hand it to another agent. False where it is held for its checkout instead (ADR-091).
+       */
       const startFirst = (current: RunRow, attemptId: string) =>
         Effect.gen(function* () {
+          // Where it works first: Local, its checkouts taken, or held for them, which are looked at from now on.
+          const placed = yield* placeFirst(current, attemptId)
+          if (worksInOf(current) === 'checkout') yield* Queue.offer(checkoutWakes, undefined)
+          if (!placed) return false
           // The plan's lead nearly out, where the project waits or asks: held or asked before it starts.
           const { implement: lead } = yield* stepsOf(current)
-          if (lead !== undefined && (yield* heldLow(current, 'implement', attemptId, 0, lead))) return
+          if (lead !== undefined && (yield* heldLow(current, 'implement', attemptId, 0, lead))) return true
           const begun = yield* Effect.exit(leadOn(current))
           if (begun._tag === 'Failure') {
             const { implement } = yield* stepsOf(current)
-            return yield* stuck(
+            yield* stuck(
               current,
               { id: attemptId },
               {
@@ -3050,11 +3385,13 @@ export class Runs extends Context.Service<
                 open: 0,
               },
             )
+            return true
           }
           yield* begin(current, attemptId, begun.value, current.threadId)
           // Its first step has started: the issue it came from moves to In Progress, as the person would move it.
           yield* issues.started(current.taskId)
           yield* touchCard(current.taskId)
+          return true
         })
 
       /**
@@ -5165,6 +5502,8 @@ export class Runs extends Context.Service<
         planWaits,
         makeChange,
         madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId, false, true), (opened) => opened !== undefined)),
+        answerCheckout: (input) => provide(answerCheckout(input)),
+        checkoutsMoved: Queue.offer(checkoutWakes, undefined).pipe(Effect.asVoid),
         changeWaiting: (taskId, parameters, actorId) =>
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
@@ -5182,6 +5521,22 @@ export class Runs extends Context.Service<
             })
             // Its first step starts on the lead the plan now names, as admitted.
             const steps = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(parameters)
+            // Moved to a worktree, what was asked about its checkout no longer stands (ADR-091).
+            if ((steps.worksIn ?? 'worktree') === 'worktree') {
+              const open = yield* sql<{ id: string }>`
+                SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'checkout' AND state = 'open'`
+              for (const call of open) {
+                const withdrawn = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+                yield* fact({
+                  projectId: current.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: call.id,
+                  revision: withdrawn,
+                  type: 'attention_request.withdrawn',
+                  actorId,
+                })
+              }
+            }
             const implement = steps.steps.find((step) => step.key === 'implement')
             if (implement !== undefined)
               yield* sql`UPDATE nodes SET config = ${JSON.stringify(implement)} WHERE execution_id = ${current.executionId} AND node_key = 'implement'`

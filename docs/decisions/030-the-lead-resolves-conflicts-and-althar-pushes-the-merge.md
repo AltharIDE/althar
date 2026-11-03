@@ -1,6 +1,6 @@
 # ADR-030: Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge
 
-- **Status:** Accepted; amended by [ADR-090](090-conflicts-and-failed-checks-send-a-task-back-to-work.md)
+- **Status:** Accepted; amended by [ADR-092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md)
 - **Date:** 2026-10-12
 - **Amended:** 2026-10-27: a conflict is never skipped without a word. A
   pull request's host works out whether it conflicts lazily and needn't say
@@ -25,7 +25,7 @@
   checks say whether it holds (DEV-85).
 - **Decision:**
   - **A project rule, off unless the person turns it on** (on unless they
-    turn it off since [ADR-090](090-conflicts-and-failed-checks-send-a-task-back-to-work.md)), from a switch in
+    turn it off since [ADR-092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md)), from a switch in
     the project's settings, beside its rules: "Resolve conflicts
     automatically". It is
     kept as a revision of the rules like any other

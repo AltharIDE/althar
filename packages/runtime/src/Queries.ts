@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
+  CheckoutAsk,
   AllowedBy,
   AttachedFile,
   AttentionRequest,
@@ -51,7 +52,8 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Busy, type Line } from './Busy'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
-import { PlanParameters, planWaits } from './Runs'
+import { checkoutWaitOf, PlanParameters, planWaits } from './Runs'
+import { localTakenFor } from './local'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
@@ -319,6 +321,12 @@ const number = (value: unknown, key: string): number | null => {
 const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
   Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
+/** What a checkout's ask says at a glance, as a card's headline: on another branch, or with changes not committed (ADR-091). */
+const checkoutTitle = (payload: unknown) =>
+  text(payload, 'holdup') === 'branch'
+    ? `${text(payload, 'repository') || 'Local'} is on another branch`
+    : `${text(payload, 'repository') || 'Local'} has uncommitted changes`
+
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
   readonly id: string
@@ -333,14 +341,31 @@ const callOf = (request: {
   const command = text(payload, 'command') || null
   return {
     id: request.id,
-    kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
-    title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
+    kind:
+      request.kind === 'stuck'
+        ? ('stuck' as const)
+        : request.kind === 'question'
+          ? ('question' as const)
+          : request.kind === 'checkout'
+            ? ('checkout' as const)
+            : ('permission' as const),
+    title:
+      request.kind === 'question'
+        ? questionTitle(questionOf(payload))
+        : request.kind === 'checkout'
+          ? checkoutTitle(payload)
+          : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command,
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    // What Althar asks before a Local task takes a checkout (ADR-091).
+    ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
+      onNone: () => ({}),
+      onSome: (checkout) => ({ checkout }),
+    }),
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
       : {}),
@@ -1943,6 +1968,7 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
+            local: number
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
@@ -1964,6 +1990,9 @@ export class Queries extends Context.Service<
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
               -- A turn of its lead or reviewer that waits for a place.
               (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
+              -- Whether it works Local, in its repositories' own checkouts here (ADR-091).
+              (SELECT count(*) FROM workspaces lw WHERE lw.task_id = k.id AND lw.device_id = ${instance.deviceId} AND lw.kind = 'checkout')
+                AS local,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -2022,8 +2051,12 @@ export class Queries extends Context.Service<
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
           // has worked on it, whatever its kind, it is in its project's line.
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
-          // Held for a usage limit or the connection, none of its agents in a turn, it goes on by itself: up next too.
-          const paused = !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable')
+          // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-091).
+          const waitsForCheckout = task.heldFor === 'checkout' ? checkoutWaitOf(task.held) : null
+          // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
+          // up next too.
+          const paused =
+            !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null)
           const unshipped =
             after.length === 0
               ? null
@@ -2204,7 +2237,14 @@ export class Queries extends Context.Service<
                             .filter((entry) => entry.definition.reviewing?.outside === true)
                             .map((entry) => entry.definition.id),
                         }
-                      : {}),
+                      : {
+                          // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
+                          worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
+                          worksInWhy: text(parameters, 'worksInWhy') || null,
+                          ...(task.planState === 'proposed' || (yield* planWaits(taskId))
+                            ? { localTaken: yield* localTakenFor(taskId) }
+                            : {}),
+                        }),
                   },
             issue:
               issue === null
@@ -2246,6 +2286,8 @@ export class Queries extends Context.Service<
             leadEffort,
             branch: task.branch,
             startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
+            ...(task.local > 0 ? { local: true } : {}),
+            ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
@@ -2888,6 +2930,8 @@ export class Queries extends Context.Service<
               state: head.state,
               branch: head.branch,
               worktree: head.worktree,
+              ...(card?.local === true ? { local: true } : {}),
+              ...(card?.waitsForCheckout == null ? {} : { waitsForCheckout: card.waitsForCheckout }),
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,

@@ -7,14 +7,15 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
+import { MAIN, placeOfLaunch, runsAt, STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
 /*
- * What a project runs, from its front (ADR-044): the default one press away,
- * the rest from the list, several at once; adding something more to run,
+ * What a project runs, from its front (ADR-090): Run opens the list, each
+ * started and stopped there, several at once; where it runs picked beside it,
+ * a branch or pull request fetched as it runs; adding something more to run,
  * three ways; and the whole list to order, edit and remove.
  */
 
@@ -53,18 +54,20 @@ const shown = async (launches: ReadonlyArray<Launch> = [], more: Parameters<type
   return { client, emit }
 }
 
-/** The list under the Run button's chevron. */
+/** The list Run opens. */
 const listed = async () => {
-  await userEvent.click(screen.getByRole('button', { name: 'Everything to run' }))
-  return within(await screen.findByRole('menu', { name: 'What it runs' }))
+  await userEvent.click(screen.getByRole('button', { name: /^Run/ }))
+  return within(await screen.findByRole('dialog', { name: 'What it runs' }))
 }
 
 describe('what the project runs, from its front', () => {
-  it('runs the default at a press, and starts and stops the rest from the list, several at once', async () => {
+  it('runs nothing at a press: the list starts and stops each, several at once', async () => {
     const { client, emit } = await shown()
-    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
+    const list = await listed()
+    expect(client.runProject).not.toHaveBeenCalled()
+    await userEvent.click(list.getByRole('button', { name: 'Run bun run dev' }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
-    // Up, it says where it answers; Storybook starts beside it.
+    // Up, it says where it answers; Storybook starts beside it; the button still says Run, and how many run.
     act(() =>
       emit({
         _tag: 'Launches',
@@ -80,21 +83,19 @@ describe('what the project runs, from its front', () => {
         ],
       }),
     )
+    expect(await screen.findByRole('button', { name: /^Run\s*1 running$/ })).toBeTruthy()
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
-    await userEvent.click(await screen.findByRole('button', { name: 'bun run dev · localhost:5173' }))
+    await userEvent.click(list.getByText('localhost:5173'))
     expect(opened).toHaveBeenCalledWith('http://localhost:5173/', '_blank')
     opened.mockRestore()
-    const list = await listed()
-    expect(within(list.getByRole('group', { name: 'Running' })).getAllByRole('menuitemcheckbox')).toHaveLength(2)
     expect(list.getByText('Starting…')).toBeTruthy()
-    // Picking one that runs stops it, here.
-    await userEvent.click(list.getByRole('menuitemcheckbox', { name: 'Storybook' }))
+    await userEvent.click(list.getByRole('button', { name: 'Stop Storybook' }))
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_2')
   })
 
   it('adds one by its command, picks scripts from package.json, or asks the coordinator to work it out', async () => {
     const { client } = await shown()
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.type(add.getByRole('textbox', { name: /Command/ }), 'bun run test:watch')
     await userEvent.type(add.getByRole('textbox', { name: /Name/ }), 'Tests, watching')
@@ -108,7 +109,7 @@ describe('what the project runs, from its front', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull())
 
     // From package.json: only what isn't kept already, each named after its script.
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const pick = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(pick.getByRole('radio', { name: 'From package.json' }))
     const offered = await pick.findAllByRole('checkbox')
@@ -124,7 +125,7 @@ describe('what the project runs, from its front', () => {
 
     // The coordinator is asked in the project's conversation.
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull())
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const ask = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(ask.getByRole('radio', { name: 'Ask the coordinator' }))
     await userEvent.click(ask.getByRole('button', { name: 'Ask the coordinator' }))
@@ -136,7 +137,7 @@ describe('what the project runs, from its front', () => {
     vi.mocked(client.runProject).mockRejectedValueOnce(
       new ApiError({ reason: 'LaunchRefused', message: 'Could not fetch main from origin.' }),
     )
-    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Run bun run dev' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Could not fetch main from origin.')
   })
 
@@ -146,7 +147,7 @@ describe('what the project runs, from its front', () => {
       getRepositories: vi.fn(async () => [repositories[0]!, web]),
       getRepositoryScripts: vi.fn(async () => [...scripts, { ...scripts[2]!, repository: 'meridian-web' }]),
     })
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const pick = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(pick.getByRole('radio', { name: 'From package.json' }))
     // Storybook is kept in meridian-api, not in meridian-web; its dev server is kept.
@@ -160,7 +161,7 @@ describe('what the project runs, from its front', () => {
   it('says what went wrong adding one, and keeps the dialog open', async () => {
     const { client } = await shown()
     vi.mocked(client.keepRunnable).mockRejectedValueOnce(new Error('The project has no repository on this Mac to run it in.'))
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.type(add.getByRole('textbox', { name: /Command/ }), 'make docs')
     await userEvent.click(add.getByRole('button', { name: 'Add' }))
@@ -169,7 +170,7 @@ describe('what the project runs, from its front', () => {
 
   it('orders, edits and removes them in the whole list, the first its default', async () => {
     const { client } = await shown()
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Edit the list…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Edit the list' }))
     const list = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
     await userEvent.click(list.getByRole('button', { name: 'Make default' }))
     expect(client.orderRunnables).toHaveBeenCalledWith('p1', ['rnbl_storybook', 'rnbl_dev'])
@@ -203,7 +204,7 @@ describe('what the project runs, from its front', () => {
     expect(await screen.findByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
   })
 
-  it('runs a branch or a pull request from the list, picked from what the remote has now, and says in the picker what went wrong', async () => {
+  it('runs on a branch or pull request picked beside Run, fetching it, and says on its line what went wrong', async () => {
     // The host has more open than it listed: words are searched there.
     const older = { number: 12, name: 'PR #12', title: 'An older pull request', branch: 'older', author: 'sam', draft: false, fork: true }
     const getRunnableRefs = vi.fn(async (_projectId: string, text?: string) =>
@@ -222,7 +223,7 @@ describe('what the project runs, from its front', () => {
                   fork: false,
                 },
               ],
-              branches: ['main', 'feature/find-a-pro'],
+              branches: ['main', 'feature/gone'],
               note: null,
               more: true,
             },
@@ -234,31 +235,46 @@ describe('what the project runs, from its front', () => {
       .mockRejectedValueOnce(new ApiError({ reason: 'LaunchRefused', message: 'origin has no branch feature/gone.' }))
       .mockResolvedValue(launch({ id: 'proc_9', branch: 'PR #41 · feature/find-a-pro', where: 'PR #41 · feature/find-a-pro' }))
     const { client, emit } = await shown([], { getRunnableRefs, runProject })
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Run a branch or pull request…' }))
-    const picker = within(await screen.findByRole('dialog', { name: 'Run a branch' }))
-    // Asked as it opens: the pull request first, then the branches.
-    const options = await picker.findAllByRole('option')
+    // Run runs on the default branch until another place is picked.
+    await userEvent.click(screen.getByRole('button', { name: 'main' }))
+    const picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    // Asked as it opens: the default branch, then the pull request, then the branches.
+    await picker.findByRole('option', { name: /Add a services directory/ })
     expect(getRunnableRefs).toHaveBeenCalledWith('p1')
-    expect(options.map((one) => one.textContent)).toEqual([
+    expect(picker.getAllByRole('option').map((one) => one.textContent)).toEqual([
+      'main',
       expect.stringContaining('Add a services directory'),
       'main',
-      'feature/find-a-pro',
+      'feature/gone',
     ])
     // One past the listing, found on the host by its words.
     await userEvent.type(picker.getByRole('combobox'), 'older')
     expect(await picker.findByRole('option', { name: /An older pull request/ })).toBeTruthy()
     expect(getRunnableRefs).toHaveBeenCalledWith('p1', 'older')
     await userEvent.clear(picker.getByRole('combobox'))
-    // Refused, it says why and stays open.
-    await userEvent.type(picker.getByRole('combobox'), 'main')
-    await userEvent.keyboard('{Enter}')
-    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', undefined, { branch: 'main' })
-    expect((await picker.findByRole('alert')).textContent).toBe('origin has no branch feature/gone.')
-    await userEvent.clear(picker.getByRole('combobox'))
-    await userEvent.click(picker.getByRole('option', { name: /Add a services directory/ }))
-    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', undefined, { pullRequest: '41' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run a branch' })).toBeNull())
-    // Running, the pill names it, and the default branch's run is still one press away.
+    await userEvent.type(picker.getByRole('combobox'), 'gone{Enter}')
+    expect(await screen.findByRole('button', { name: 'feature/gone' })).toBeTruthy()
+
+    // Run there fetches it; refused, its line says why, and tries again.
+    let list = await listed()
+    await userEvent.click(list.getByRole('button', { name: 'Run bun run dev' }))
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev', { branch: 'feature/gone' })
+    expect(await list.findByText('origin has no branch feature/gone.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Run\s*1 failed$/ })).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Clear bun run dev' }))
+    expect(list.queryByText('origin has no branch feature/gone.')).toBeNull()
+    await userEvent.keyboard('{Escape}')
+
+    // On the pull request, it runs and says where it answers; the switcher says it.
+    await userEvent.click(screen.getByRole('button', { name: 'feature/gone' }))
+    await userEvent.click(
+      await within(await screen.findByRole('dialog', { name: 'Where Run runs' })).findByRole('option', {
+        name: /Add a services directory/,
+      }),
+    )
+    list = await listed()
+    await userEvent.click(list.getByRole('button', { name: 'Run bun run dev' }))
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev', { pullRequest: '41' })
     act(() =>
       emit({
         _tag: 'Launches',
@@ -273,8 +289,10 @@ describe('what the project runs, from its front', () => {
         ],
       }),
     )
-    expect((await screen.findByRole('button', { name: /^Running/ })).textContent).toContain('PR #41 · feature/find-a-pro')
-    expect(screen.getByRole('button', { name: /^Run$/ })).toBeTruthy()
+    expect(await list.findByText('localhost:5199')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'PR #41' })).toBeTruthy()
+    // Nothing over the composer says it: Run and its switcher do.
+    expect(screen.queryByRole('button', { name: /^Running/ })).toBeNull()
   })
 
   it('says in the whole list what went wrong removing or ordering one', async () => {
@@ -282,13 +300,13 @@ describe('what the project runs, from its front', () => {
     vi.mocked(client.dropRunnable).mockRejectedValueOnce(
       new ApiError({ reason: 'SqlError', message: 'Storybook is running; stop it first.' }),
     )
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Edit the list…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Edit the list' }))
     const list = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
     await userEvent.click(list.getByRole('button', { name: 'Remove Storybook' }))
     expect((await list.findByRole('alert')).textContent).toBe('Storybook is running; stop it first.')
     // Done, and opened again, it starts afresh.
     await userEvent.click(list.getByRole('button', { name: 'Done' }))
-    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Edit the list…' }))
+    await userEvent.click((await listed()).getByRole('button', { name: 'Edit the list' }))
     expect(within(await screen.findByRole('dialog', { name: 'What meridian runs' })).queryByRole('alert')).toBeNull()
   })
 })
@@ -299,33 +317,52 @@ describe('what the Run button says of each', () => {
   it('takes one that says nothing of where it answers as starting, then as running, as an app’s window', () => {
     const fresh = launch({ startedAt: new Date(Date.parse(now) - STARTING_FOR / 2).toISOString() })
     const long = launch({ startedAt: new Date(Date.parse(now) - STARTING_FOR * 2).toISOString() })
-    expect(targetsOf(runnables, [fresh], null, now)[0]?.run).toEqual({ state: 'starting' })
-    expect(targetsOf(runnables, [long], null, now)[0]?.run).toEqual({ state: 'running', since: '20s' })
+    expect(targetsOf(runnables, [fresh], MAIN, now)[0]?.run).toEqual({ state: 'starting' })
+    expect(targetsOf(runnables, [long], MAIN, now)[0]?.run).toEqual({ state: 'running', since: '20s' })
     // How one ended by itself.
-    expect(targetsOf(runnables, [launch({ ended: { at: '2026-10-14T09:05:00.000Z', code: 1 } })], null, now)[0]?.run).toEqual({
+    expect(targetsOf(runnables, [launch({ ended: { at: '2026-10-14T09:05:00.000Z', code: 1 } })], MAIN, now)[0]?.run).toEqual({
       state: 'ended',
       code: 1,
       since: '5m ago',
     })
   })
 
-  it('says, on the project, where one runs in a task; on the task, where it runs is this task', () => {
+  it('says what runs at the place picked: the default branch, a task, or a pull request or branch', () => {
     const inTask = launch({ taskId: 't1', where: 'Fix the login timeout', url: 'http://localhost:5174/' })
-    expect(targetsOf(runnables, [inTask], null, now)[0]).toMatchObject({
-      where: 'default branch',
-      elsewhere: { where: 'in Fix the login timeout', url: 'localhost:5174' },
-    })
-    expect(targetsOf(runnables, [inTask], 't1', now)[0]).toMatchObject({
-      where: 'this task',
-      run: { state: 'running', url: 'localhost:5174' },
-    })
-    expect(targetsOf(runnables, [], 't1', now)[1]).toEqual({
+    const onPull = launch({ id: 'proc_3', branch: 'PR #41 · feature/x', where: 'PR #41 · feature/x' })
+    const onBranch = launch({ id: 'proc_4', branch: 'feature/x', where: 'feature/x' })
+    const task = placeOfLaunch(inTask)
+    const pull = placeOfLaunch(onPull)
+    const branch = placeOfLaunch(onBranch)
+    expect(task).toMatchObject({ key: 'task:t1', kind: 'task', label: 'Fix the login timeout' })
+    expect(pull).toMatchObject({ kind: 'pull', label: 'PR #41', detail: 'feature/x' })
+    expect(branch).toMatchObject({ kind: 'branch', label: 'feature/x' })
+    expect(targetsOf(runnables, [inTask, onPull, onBranch], MAIN, now)[0]?.run).toBeUndefined()
+    expect(targetsOf(runnables, [inTask], task, now)[0]?.run).toEqual({ state: 'running', url: 'localhost:5174', since: '10m' })
+    expect([inTask, onPull, onBranch].map((one) => [runsAt(one, MAIN), runsAt(one, task), runsAt(one, pull), runsAt(one, branch)])).toEqual(
+      [
+        [false, true, false, false],
+        [false, false, true, false],
+        [false, false, false, true],
+      ],
+    )
+    expect(targetsOf(runnables, [], task, now)[1]).toEqual({
       id: 'rnbl_storybook',
       name: 'Storybook',
       command: 'bun --filter @meridian/ui storybook',
-      where: 'this task',
       from: 'person',
     })
+  })
+
+  it('says a fetch on its way, or what went wrong with it, over the last run there', () => {
+    const pull = placeOfLaunch(launch({ branch: 'PR #41 · feature/x' }))
+    const ended = launch({ branch: 'PR #41 · feature/x', ended: { at: '2026-10-14T09:05:00.000Z', code: 1 } })
+    const key = `${pull.key}\nrnbl_dev`
+    expect(targetsOf(runnables, [ended], pull, now, new Map([[key, { state: 'fetching' }]]))[0]?.run).toEqual({ state: 'fetching' })
+    expect(
+      targetsOf(runnables, [ended], pull, now, new Map([[key, { state: 'unfetched', why: 'offline', at: '2026-10-14T09:09:00.000Z' }]]))[0]
+        ?.run,
+    ).toEqual({ state: 'unfetched', why: 'offline', since: '1m ago' })
   })
 
   it('names a picked script after itself, or with its package for a workspace’s', () => {

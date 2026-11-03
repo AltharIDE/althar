@@ -1,4 +1,4 @@
-# ADR-090: Conflicts and failed checks send a task back to work, unless the person turned it off or stopped it
+# ADR-092: Conflicts and failed checks send a task back to work, unless the person turned it off or stopped it
 
 - **Status:** Accepted
 - **Date:** 2026-11-03

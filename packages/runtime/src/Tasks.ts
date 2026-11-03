@@ -35,6 +35,8 @@ import { indexTask } from './Search'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
+import { reopenedSpot, spotsOf } from './local'
+import { RuntimeConfig } from './Config'
 import { Setups } from './Setups'
 
 /*
@@ -163,7 +165,18 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes | LeftBehind
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Ledger
+  | Crypto.Crypto
+  | Sessions
+  | Runs
+  | Plans
+  | Setups
+  | Changes
+  | LeftBehind
+  | RuntimeConfig
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -368,7 +381,11 @@ export class Tasks extends Context.Service<
           yield* changes.leaveOut(input)
         })
 
+      // Counted as stopping from before it settles until LeftBehind has it: a Local task's checkout stays its own meanwhile (ADR-091).
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        leftBehind.stoppingWhile(input.taskId, abandoning(input))
+
+      const abandoning = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const standing = yield* standingOf(input.taskId)
@@ -495,6 +512,8 @@ export class Tasks extends Context.Service<
             )
             restored = true
           }
+          // Local, its checkout gone back as it was settled: it carries on in a worktree of its own, on its branch (ADR-091).
+          for (const spot of yield* spotsOf(input.taskId)) yield* reopenedSpot(spot)
           const reopened = yield* sql.withTransaction(
             Effect.gen(function* () {
               // Read again where it is written: reopened meanwhile, the lifecycle refuses it.
@@ -655,7 +674,11 @@ export class Tasks extends Context.Service<
           return task !== undefined && task.state === 'open' && finished && task.open === 0 ? task : undefined
         })
 
+      // As abandoning: counted as stopping until LeftBehind has it.
       const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        leftBehind.stoppingWhile(input.taskId, markingDone(input))
+
+      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const ready = yield* doneable(input.taskId)

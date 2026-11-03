@@ -326,6 +326,7 @@ describe('the client', () => {
           PostReviewDraft: () => Effect.die('unused'),
           DiscardReviewDraft: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
+          AnswerCheckout: () => Effect.die('unused'),
           HandOverHeld: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),

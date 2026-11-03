@@ -427,13 +427,13 @@ request that names the issue links it.
   turn for a few turns, not taken for a no. Where the project resolves
   conflicts, Althar doesn't go by the host alone (below).
 
-**Resolving a conflict, where the project says so** (ADR-030, ADR-090). A
+**Resolving a conflict, where the project says so** (ADR-030, ADR-092). A
 project's leads resolve a conflict with the default branch on their own
 unless the person turns off "Resolve merge conflicts automatically" in its
 settings. Off, a conflict waits for the person, and its card says it is off,
 for the task or the project, beside Resolve now.
 
-- **Conflicts and failed checks at once are one ask** (ADR-090). A conflict
+- **Conflicts and failed checks at once are one ask** (ADR-092). A conflict
   found as the checks fail, or after they failed while they are the lead's
   (ADR-070), is asked with them, to fix in the one commit on top of the merge.
   While a round is under way, failed checks aren't told to the lead apart

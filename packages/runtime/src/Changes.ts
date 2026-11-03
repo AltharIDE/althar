@@ -4238,23 +4238,29 @@ export class Changes extends Context.Service<
             })
             return yield* touchCard(taskId)
           }
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              const revision = yield* change('tasks', taskId, { state: 'done', settledAt: at })
-              yield* fact({
-                projectId: task.projectId,
-                aggregateType: 'task',
-                aggregateId: taskId,
-                revision,
-                type: 'task.done',
-                payload: { merged: true, ...(by.here === undefined ? {} : { here: by.here }) },
-                actorId: by.actorId,
-              })
-            }),
-          )
           // Its agents, what they left running and its runs stop, in the background: the merge never waits on them.
-          yield* leftBehind.settled(taskId)
+          // Counted as stopping from before it is done, so a checkout it holds stays its own until they have (ADR-091).
+          yield* leftBehind.stoppingWhile(
+            taskId,
+            Effect.andThen(
+              sql.withTransaction(
+                Effect.gen(function* () {
+                  const at = yield* timestamp
+                  const revision = yield* change('tasks', taskId, { state: 'done', settledAt: at })
+                  yield* fact({
+                    projectId: task.projectId,
+                    aggregateType: 'task',
+                    aggregateId: taskId,
+                    revision,
+                    type: 'task.done',
+                    payload: { merged: true, ...(by.here === undefined ? {} : { here: by.here }) },
+                    actorId: by.actorId,
+                  })
+                }),
+              ),
+              leftBehind.settled(taskId),
+            ),
+          )
           yield* touchCard(taskId)
         })
 
