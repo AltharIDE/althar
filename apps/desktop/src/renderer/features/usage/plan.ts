@@ -31,7 +31,24 @@ export const text = {
   signedOut: 'Signed out',
   /** An agent every window read of which has reset since: how much is used no one has said yet. */
   unread: 'Not read since reset',
+  /** A plan signed in and able to run, whose usage nothing reads (OpenCode Go without a Console sign-in). */
+  connected: 'Connected',
 }
+
+/** The providers within an agent that are a plan of their own, as the registry has them: a model through one is on it. */
+const PLAN_PROVIDERS: Readonly<Record<string, ReadonlyArray<string>>> = { opencode: ['opencode-go'] }
+
+/** An agent's row, by its plan where the plan is named for it (OpenCode Go), else by the agent. */
+const nameOf = (account: AccountUsage) =>
+  account.plan !== null && account.plan.startsWith(`${account.agentName} `) ? account.plan : account.agentName
+
+/** A plan Althar names but reads nothing of (OpenCode Go with its key alone): shown connected, or as needing its sign-in. */
+const namedUnread = (account: AccountUsage) =>
+  account.paidBy === 'plan' &&
+  account.plan !== null &&
+  account.windows.length === 0 &&
+  !account.resetSince &&
+  (account.noReading !== null || account.fault?.kind === 'sign_in_again')
 
 /** Numbers older than this say how old they are. */
 const OLD = 15 * 60_000
@@ -112,18 +129,24 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
     if (read.length === 0) {
       // Every window read has reset since: no figure, never all of its plan left, and each account says how old and why.
       const reset = accounts.filter((account) => wasRead.has(account.accountId))
-      if (reset.length === 0) continue
-      const out = reset.every((account) => account.fault?.kind === 'sign_in_again')
+      // A plan named but never read: connected, or needing its sign-in, each account saying why in the detail.
+      const named = accounts.filter((account) => !wasRead.has(account.accountId) && namedUnread(account))
+      const shown = [...reset, ...named]
+      if (shown.length === 0) continue
+      const out = shown.every((account) => account.fault?.kind === 'sign_in_again')
       agents.push({
         id: agentId,
-        name: first.agentName,
+        name: nameOf(first),
         ...(brand === undefined ? {} : { brand }),
         left: 0,
         limit: '',
         until: null,
         account: null,
-        accounts: reset.map((account) => ({ ...accountOf(account, several, now), fault: account.fault?.message ?? null })),
-        ...(out ? { stopped: text.signedOut } : { unread: text.unread }),
+        accounts: shown.map((account) => ({
+          ...accountOf(account, several, now),
+          fault: account.fault?.message ?? account.noReading ?? null,
+        })),
+        ...(out ? { stopped: text.signedOut, signIn: true } : reset.length > 0 ? { unread: text.unread } : { connected: text.connected }),
       })
       continue
     }
@@ -134,7 +157,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       // None signed in: no room to give it, only why, with its saved numbers in the detail.
       agents.push({
         id: agentId,
-        name: first.agentName,
+        name: nameOf(first),
         ...(brand === undefined ? {} : { brand }),
         left: 0,
         limit: '',
@@ -142,13 +165,14 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         account: null,
         accounts: each,
         stopped: text.signedOut,
+        signIn: true,
       })
       continue
     }
     const route = usable.reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
     agents.push({
       id: agentId,
-      name: first.agentName,
+      name: nameOf(first),
       ...(brand === undefined ? {} : { brand }),
       left: leftOf(route.window),
       limit: limitWords(route.window),
@@ -158,7 +182,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
     })
   }
   // Least room first, an agent that can't run, or has no figure, after every one that can.
-  const stopped = (agent: PlanAgent) => (agent.stopped === undefined && agent.unread === undefined ? 0 : 1)
+  const stopped = (agent: PlanAgent) => (agent.stopped === undefined && agent.unread === undefined && agent.connected === undefined ? 0 : 1)
   return { agents: agents.toSorted((a, b) => stopped(a) - stopped(b) || a.left - b.left) }
 }
 
@@ -175,6 +199,9 @@ export const roomOf = (
   now: Date,
 ): ModelRoom | null | undefined => {
   const { agentId, model } = choiceOf(info.id)
+  // A model through a provider that isn't the agent's plan (OpenCode Zen beside Go) is paid per use: nothing to say.
+  const plans = PLAN_PROVIDERS[agentId]
+  if (plans !== undefined && model !== null && !plans.some((provider) => model.startsWith(`${provider}/`))) return undefined
   // The runtime's, unless its window has reset since: what's known of the agent's accounts then, until the rooms are read again.
   const found = rooms.find((room) => room.agentId === agentId && room.model === model && !past(room.resetsAt, now))
   if (found !== undefined)

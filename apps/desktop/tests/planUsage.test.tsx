@@ -146,6 +146,73 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'codex:' }, [], planUsage([signedOut]), NOW)).toBeUndefined()
   })
 
+  it('shows OpenCode Go as its plan: read like any other, connected where nothing reads it, and signed in again from its row', () => {
+    const goWindows = [
+      { kind: 'five_hour' as const, label: null, usedPercent: 9, resetsAt: RESET },
+      { kind: 'weekly' as const, label: null, usedPercent: 42, resetsAt: WEEK },
+    ]
+    const go = usageAccount({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      accountId: 'acc_opencode',
+      plan: 'OpenCode Go',
+      source: 'agent',
+      windows: goWindows,
+    })
+    const [read] = planOf(planUsage([go]), NOW).agents
+    expect([read?.name, read?.left, read?.limit]).toEqual(['OpenCode Go', 58, 'weekly limit'])
+    const why = 'OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.'
+    const connected = { ...go, source: null, observedAt: null, windows: [], noReading: why }
+    const [unread] = planOf(planUsage([connected, claudeBoth]), NOW).agents.toReversed()
+    expect([unread?.name, unread?.connected, unread?.stopped, unread?.accounts[0]?.fault]).toEqual([
+      'OpenCode Go',
+      'Connected',
+      undefined,
+      why,
+    ])
+    // Connected but unread, after the agents with a figure, and never the one that counts.
+    expect(planOf(planUsage([connected, claudeBoth]), NOW).agents[0]?.name).toBe('Claude Code')
+    const refused = { ...connected, fault: { kind: 'sign_in_again' as const, message: 'OpenCode Go needs signing in again.' } }
+    expect(planOf(planUsage([refused]), NOW).agents[0]).toMatchObject({ name: 'OpenCode Go', stopped: 'Signed out', signIn: true })
+    // Refused with numbers read: kept in the detail, its row signed in again the same way.
+    expect(planOf(planUsage([{ ...go, fault: refused.fault }]), NOW).agents[0]).toMatchObject({ stopped: 'Signed out', signIn: true })
+    // A plan that reports nothing and names no plan of its agent's own (Copilot) still has no row.
+    expect(planOf(planUsage([copilot]), NOW).agents).toEqual([])
+  })
+
+  it('gives OpenCode Go’s models Go’s room in the pickers, and says nothing for OpenCode’s per-use ones', () => {
+    const connected = usageAccount({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      accountId: 'acc_opencode',
+      plan: 'OpenCode Go',
+      source: null,
+      observedAt: null,
+      windows: [],
+      noReading: 'OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.',
+    })
+    expect(roomOf({ id: 'opencode:opencode-go/glm-5.3' }, [], planUsage([connected]), NOW)).toBeNull()
+    expect(roomOf({ id: 'opencode:opencode/deepseek-v4.1-flash' }, [], planUsage([connected]), NOW)).toBeUndefined()
+  })
+
+  it('signs OpenCode Go in again from its row, in Settings, with its sign-in started', async () => {
+    const refused = usageAccount({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      accountId: 'acc_opencode',
+      plan: 'OpenCode Go',
+      source: null,
+      observedAt: null,
+      windows: [],
+      noReading: 'OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.',
+      fault: { kind: 'sign_in_again', message: 'OpenCode Go needs signing in again.' },
+    })
+    const signIn = vi.fn()
+    render(<PlanGauge agents={planOf(planUsage([refused]), NOW).agents} defaultOpen onSignIn={signIn} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(signIn).toHaveBeenCalledWith('opencode')
+  })
+
   it('shows no room in the bar for an agent whose only account is signed out', async () => {
     const signedOut = usageAccount({
       windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
