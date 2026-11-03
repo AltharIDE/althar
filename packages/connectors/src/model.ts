@@ -543,8 +543,54 @@ export const Issue = Schema.Struct({
   /** Where it lives, by the tracker's name for it: a team, a project, a board, a repository. */
   container: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
+  /*
+   * What else it is in or has, where the tracker has the field and says it
+   * as it reads one: null where it has none; absent where the tracker hasn't
+   * the field, or Althar doesn't read it there.
+   */
+  /** The project it is in, besides where it lives: Linear's project. */
+  project: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** Its milestone: Linear's project milestone, GitHub's and GitLab's milestone, Jira's fix version. */
+  milestone: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** Linear's cycle it is in. */
+  cycle: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The issue it is part of: Linear's parent, Jira's parent or epic, GitHub's parent issue. */
+  parent: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String, title: Schema.String }))),
+  /** Its kind: Jira's issue type, GitHub's issue type, GitLab's (issue, incident, task). */
+  type: Schema.optional(Schema.NullOr(Schema.String)),
+  /** When it is due, as a day (2026-11-30). */
+  due: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Its estimate: Linear's points, GitLab's weight. */
+  estimate: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** Jira's components it is in. */
+  components: Schema.optional(Schema.Array(Schema.String)),
 })
 export type Issue = typeof Issue.Type
+
+/** A comment on an issue: who wrote it, what it says, in Markdown, and when. */
+export const IssueComment = Schema.Struct({ author: Schema.NullOr(Person), body: Schema.String, at: Schema.String })
+export type IssueComment = typeof IssueComment.Type
+
+/** Which issues a search finds by where their work stands: open (not done or cancelled), closed (done or cancelled), or all. */
+export const IssueState = Schema.Literals(['open', 'closed', 'all'])
+export type IssueState = typeof IssueState.Type
+
+/** What a search for issues is narrowed to. Each left out narrows nothing. */
+export interface IssueQuery {
+  /** Words in its title or description. */
+  readonly text?: string
+  /**
+   * Where it lives, by its `Container.id`. Without one, a code host (GitHub,
+   * GitLab), which has no bound of its own, finds only those that involve
+   * the account.
+   */
+  readonly container?: string
+  readonly state: IssueState
+  /** Only those assigned to the account. */
+  readonly mine?: boolean
+  /** How many at most, newest change first. */
+  readonly limit: number
+}
 
 /**
  * Where an issue can be filed, by the tracker's name for it: a Linear team,
@@ -563,49 +609,97 @@ export type Container = typeof Container.Type
 /**
  * An issue to file: its title, its body in Markdown, the labels to put on it,
  * and its priority, where the tracker has priorities (`changes` holds
- * `priority`); left out, or on a tracker without them, it has none.
+ * `priority`); left out, or on a tracker without them, it has none. What
+ * else it is filed with is `fields`, by the tracker's own ids as
+ * `Tracker.choicesIn` gave them: only fields in `capabilities.creates`.
  */
 export interface NewIssue {
   readonly title: string
   readonly body: string
   readonly labels: ReadonlyArray<string>
   readonly priority?: Priority
+  readonly fields?: IssueChange
 }
 
 /**
  * What of an issue Althar can change, where the tracker can: its status (any
  * of the tracker's own), closing it, its priority, who it is assigned to, its
- * labels, the project it is in (Linear's project, a GitHub or GitLab
- * milestone), and its title.
+ * labels, the project it is in (Linear's project, a GitHub project board),
+ * its milestone (Linear's project milestone, GitHub's and GitLab's
+ * milestone, Jira's fix version), Linear's cycle, its parent issue, its
+ * estimate (Linear's points, GitLab's weight), its type (Jira's issue type,
+ * GitHub's issue type, GitLab's), Jira's components, when it is due, its
+ * title and its description.
  */
-export const IssueField = Schema.Literals(['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'])
+export const IssueField = Schema.Literals([
+  'status',
+  'close',
+  'priority',
+  'assignee',
+  'labels',
+  'project',
+  'milestone',
+  'cycle',
+  'parent',
+  'estimate',
+  'type',
+  'components',
+  'due',
+  'title',
+  'description',
+])
 export type IssueField = typeof IssueField.Type
 
-/** The fields set to one of the tracker's own, which `Tracker.choices` lists. */
-export type ChosenField = 'status' | 'labels' | 'assignee' | 'project'
+/** The fields set to one of the tracker's own, which `Tracker.choices` and `Tracker.choicesIn` list. */
+export type ChosenField = 'status' | 'labels' | 'assignee' | 'project' | 'milestone' | 'cycle' | 'type' | 'components'
 
-/** Something a field can be set to, as the tracker lists it: its own id, its name, and other words it answers to (a login, an email). */
+/**
+ * Something a field can be set to, as the tracker lists it: its own id, its
+ * name, and other words it answers to (a login, an email, `current` for
+ * Linear's cycle under way). `in` is the id of the choice it sits within,
+ * where it does: a Linear milestone's project.
+ */
 export interface Choice {
   readonly id: string
   readonly name: string
   readonly also?: ReadonlyArray<string>
+  readonly in?: string
+}
+
+/** An issue another is part of, as `Tracker.issue` read it: its id, its ref, and its key. */
+export interface ParentIssue {
+  readonly id: string
+  readonly ref: string
+  readonly key: string
 }
 
 /**
  * A change to an issue, by the tracker's own ids as `Tracker.choices` gave
  * them: each field left out stays as it is. `close` closes it as done, by
  * the tracker's own way (Linear's and Jira's done status, GitHub's and
- * GitLab's closed, Trello's archive). Null takes an assignee or a project
- * off. Labels are added and taken off; others stay.
+ * GitLab's closed, Trello's archive). People are put on it and taken off;
+ * others stay, but where an issue has one assignee (`capabilities.assignees`
+ * is `one`), the one added is in place of whoever had it. Null takes every
+ * assignee off, or a project, milestone, cycle, parent, estimate or due day.
+ * Labels are added and taken off; others stay. Components are those it is
+ * in after, in place of those it had. A due day is `2026-11-30`.
  */
 export interface IssueChange {
   readonly status?: Choice
   readonly close?: true
   readonly priority?: Priority
-  readonly assignee?: Choice | null
+  readonly assignee?: { readonly add: ReadonlyArray<Choice>; readonly remove: ReadonlyArray<Choice> } | null
   readonly labels?: { readonly add: ReadonlyArray<Choice>; readonly remove: ReadonlyArray<Choice> }
   readonly project?: Choice | null
+  readonly milestone?: Choice | null
+  readonly cycle?: Choice | null
+  readonly parent?: ParentIssue | null
+  readonly estimate?: number | null
+  readonly type?: Choice
+  readonly components?: ReadonlyArray<Choice>
+  readonly due?: string | null
   readonly title?: string
+  readonly description?: string
 }
 
 /** What a tracker can do beyond the model's floor. */
@@ -616,11 +710,34 @@ export interface TrackerCapabilities {
   readonly starts: boolean
   /** What of an issue `update` can change here; what isn't listed, the tracker has no field for, or Althar can't reach it yet. */
   readonly changes: ReadonlyArray<IssueField>
+  /**
+   * What of `changes` `create` sets as it files an issue, beside its title,
+   * body, labels and priority; the rest of what an issue is filed with is
+   * set by `update` right after, as a Jira status by its workflow.
+   */
+  readonly creates: ReadonlyArray<IssueField>
+  /** How many people an issue is assigned to: one (Linear, Jira), or several (GitHub, GitLab, Trello). */
+  readonly assignees: 'one' | 'many'
 }
 
 /** A tracker's refusal of a change it can't make: said for the field, in words an agent can pass on. */
 export const cantChange = (product: Product, field: IssueField, why: string): ConnectorFailed =>
   new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t change an issue’s ${field} here: ${why}` })
+
+/** What of a change `create` takes, and what is left for `update` right after: by `capabilities.creates`. */
+export const splitForCreate = (
+  capabilities: TrackerCapabilities,
+  change: IssueChange,
+): { readonly onCreate: IssueChange; readonly after: IssueChange } => {
+  const onCreate: Record<string, unknown> = {}
+  const after: Record<string, unknown> = {}
+  for (const field of fieldsOf(change)) (capabilities.creates.includes(field) ? onCreate : after)[field] = change[field]
+  return { onCreate: onCreate as IssueChange, after: after as IssueChange }
+}
+
+/** The one person a change puts on an issue that has one assignee: the last added; null where it takes them off. */
+export const oneAssignee = (change: NonNullable<IssueChange['assignee']> | null): Choice | null =>
+  change === null ? null : (change.add.at(-1) ?? null)
 
 /** What `Tracker.start` did: moved the issue, or left it as it was; and the status it is in now. */
 export interface Started {
@@ -643,6 +760,10 @@ export interface Tracker {
   issue(ref: string): Effect.Effect<Issue, ConnectorFailed>
   /** Open issues assigned to the account, newest change first; within a container (a repository) when given. */
   mine(options?: { readonly container?: string; readonly limit?: number }): Effect.Effect<ReadonlyArray<Issue>, ConnectorFailed>
+  /** Issues found as a query narrows them, whoever they are assigned to unless it says, newest change first, to its limit. */
+  find(query: IssueQuery): Effect.Effect<ReadonlyArray<Issue>, ConnectorFailed>
+  /** An issue's comments, oldest first: its latest, to a limit. */
+  comments(issue: Issue, limit: number): Effect.Effect<ReadonlyArray<IssueComment>, ConnectorFailed>
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
   /** Attaches a link to an issue, where the tracker has links. */
   link(issue: Issue, link: { readonly url: string; readonly title: string }): Effect.Effect<void, ConnectorFailed>
@@ -674,6 +795,13 @@ export interface Tracker {
    * not in `capabilities.changes`.
    */
   choices(issue: Issue, field: ChosenField, wanted?: string): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>
+  /**
+   * What a field of an issue filed in a container can be set to, by its
+   * `Container.id`, as `choices` lists them for an issue there: before the
+   * issue is filed. A status is any its container's issues can have. Refused,
+   * as `rejected`, for a field not in `capabilities.changes`.
+   */
+  choicesIn(container: string, field: ChosenField, wanted?: string): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>
   /**
    * Changes an issue as the person approved, or their own setting lets
    * through: never on an agent's word alone. The issue as the tracker has it
