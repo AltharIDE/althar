@@ -1,11 +1,10 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import type { CheckoutAnswer, CheckoutAsk, OtherTask, WorksIn } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
-import type { Ledger } from '@althar/persistence-sqlite'
 import { removeFully } from '@althar/provider-adapters'
-import { type Crypto, Effect, Option } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type Checkout, giveBack, holdupOf, readCheckout, takeCheckout } from './checkouts'
@@ -33,9 +32,13 @@ import { addItem } from './threads'
  * workspace between a worktree and the checkout as its first step begins, so
  * nothing waits on git while the person decides, and a worktree made for a
  * draft that then starts Local goes, unused.
+ *
+ * A checkout is the folder it is, whatever names it (`checkoutKey`): two
+ * projects may add the same one, and still only one task holds it. A settled
+ * task holds it until everything of it has stopped (`atWork`), and the
+ * person's answer holds for the one checkout they were asked about, as it was
+ * then (`CheckoutConsent`).
  */
-
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeConfig
 
 /** A task's workspace in one of its repositories, as Local reads it. */
 export interface Spot {
@@ -96,46 +99,77 @@ const spotById = (id: string) =>
   })
 
 /**
+ * A checkout as the folder it is, whatever path names it: its device and
+ * inode, so the same folder added to two projects, or by a link or in
+ * another case, is one checkout; its resolved path where those can't be read.
+ */
+export const checkoutKey = (path: string) => {
+  try {
+    const { dev, ino } = statSync(path, { bigint: true })
+    return ino === 0n ? resolve(path) : `${dev}:${ino}`
+  } catch {
+    return resolve(path)
+  }
+}
+
+/**
  * One at a time for each checkout: taking it, and giving it back, read
  * again under the lock, so the loop that gives settled tasks' checkouts back
  * and a task that asks for one never both act on what they read before.
  */
 const checkoutLocks = makeKeyedLock()
 const lockingCheckouts = <A, E, R>(paths: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-  [...new Set(paths)].toSorted().reduceRight<Effect.Effect<A, E, R>>((inner, path) => checkoutLocks.withLock(path, inner), effect)
+  [...new Set(paths.map(checkoutKey))]
+    .toSorted()
+    .reduceRight<Effect.Effect<A, E, R>>((inner, key) => checkoutLocks.withLock(key, inner), effect)
+
+/**
+ * The tasks with something of theirs still at work here: an agent, in a turn
+ * or not, or a settling that hasn't finished stopping what they ran. A
+ * settled task's checkout is its own until it has none (Runs passes it).
+ */
+export type AtWork = Effect.Effect<ReadonlySet<string>>
+const nobodyAtWork: AtWork = Effect.succeed(new Set())
+
+const settledState = (state: string) => state === 'done' || state === 'abandoned'
 
 /** Whether a task works Local: any of its workspaces here is its repository's checkout. */
 export const worksLocal = (taskId: string) => Effect.map(spotsOf(taskId), (spots) => spots.some((spot) => spot.kind === 'checkout'))
 
 /**
- * The task that holds a repository's checkout here, other than `taskId`:
- * one that took it and hasn't given it back, settled or not. A settled one
- * whose checkout stays on its branch, for changes the person hasn't
- * committed, holds it until they are.
+ * Checkouts here that tasks other than `taskId` hold, in any project: taken
+ * and not given back, settled or not, oldest first. One a removed project's
+ * task held is read as the checkout it is, for the person to answer.
  */
-export const holderOf = (bindingId: string, taskId: string) =>
+const holding = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
-    const [holder] = yield* sql<Spot>`${sql.unsafe(SPOT)}
-      WHERE w.binding_id = ${bindingId} AND w.device_id = ${instance.deviceId} AND w.kind = 'checkout' AND w.state = 'ready'
-        AND w.returned_at IS NULL AND w.task_id <> ${taskId}
-      LIMIT 1`
-    return holder ?? null
+    return yield* sql<Spot>`${sql.unsafe(SPOT)}
+      WHERE w.device_id = ${instance.deviceId} AND w.kind = 'checkout' AND w.state = 'ready' AND w.returned_at IS NULL
+        AND w.task_id <> ${taskId} AND p.archived_at IS NULL
+      ORDER BY w.created_at, w.rowid`
   })
 
-/** Who works Local now in any of a project's repositories, other than `taskId`: what a task planned there would wait for. */
-export const localTakenFor = (projectId: string, taskId: string) =>
+/**
+ * The task that holds a repository's checkout here, other than `taskId`, in
+ * whichever project added it: one that took it and hasn't given it back,
+ * settled or not. A settled one whose checkout stays on its branch, for
+ * changes the person hasn't committed, holds it until they are.
+ */
+export const holderOf = (repository: string, taskId: string) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const instance = yield* Instance
-    const [holder] = yield* sql<OtherTask>`
-      SELECT k.id AS task_id, k.title FROM workspaces w JOIN tasks k ON k.id = w.task_id
-      WHERE w.project_id = ${projectId} AND w.device_id = ${instance.deviceId} AND w.kind = 'checkout' AND w.state = 'ready'
-        AND w.returned_at IS NULL AND w.task_id <> ${taskId}
-        AND w.binding_id IN (SELECT binding_id FROM workspaces WHERE task_id = ${taskId} AND access = 'write')
-      ORDER BY w.created_at LIMIT 1`
-    return holder ?? null
+    const key = checkoutKey(repository)
+    return (yield* holding(taskId)).find((one) => checkoutKey(one.repository) === key) ?? null
+  })
+
+/** Who works Local now in any of a task's repositories' checkouts, other than it, from any project: what it would wait for there. */
+export const localTakenFor = (taskId: string) =>
+  Effect.gen(function* () {
+    const keys = new Set((yield* spotsOf(taskId)).map((spot) => checkoutKey(spot.repository)))
+    if (keys.size === 0) return null
+    const holder = (yield* holding(taskId)).find((one) => keys.has(checkoutKey(one.repository)))
+    return holder === undefined ? null : ({ taskId: holder.taskId, title: holder.title } satisfies OtherTask)
   })
 
 /* ---- Moving a task that hasn't started between a worktree and the checkout ---- */
@@ -222,29 +256,50 @@ export const toCheckout = (spot: Spot) =>
 
 /* ---- Taking a checkout, and giving it back ---- */
 
+/** A repository's checkout as the person was asked about it: the workspace, and what it was on and at. */
+export interface CheckoutSeen {
+  readonly spotId: string
+  readonly branch: string | null
+  readonly head: string
+}
+
+/**
+ * The person's answer about one repository's checkout, as it was when they
+ * were asked. It holds for that checkout only: waiting, while it still has
+ * changes not committed; switching it, or starting from its branch, while it
+ * is still on that branch at that commit. Anything else is asked again.
+ */
+export interface CheckoutConsent extends CheckoutSeen {
+  readonly holdup: CheckoutAsk['holdup']
+  readonly answer: Exclude<CheckoutAnswer, 'worktree'>
+}
+
 /** Where a task stands as its first step would begin: placed where it works, or waiting, and why. */
 export type Placed =
   | { readonly kind: 'ready' }
   /** Another task works in the checkout. */
   | { readonly kind: 'taken'; readonly by: OtherTask }
-  /** The person is asked first: the checkout has changes not committed, or is on a branch of their own. */
-  | { readonly kind: 'asks'; readonly ask: CheckoutAsk }
+  /** The person is asked first: the checkout has changes not committed, or is on a branch of their own; `seen` is what their answer holds for. */
+  | { readonly kind: 'asks'; readonly ask: CheckoutAsk; readonly seen: CheckoutSeen }
   /** The person chose to wait until the checkout's changes are committed, and they aren't yet. */
   | { readonly kind: 'changes'; readonly repository: string }
 
 /**
- * Gives a checkout back: to the branch it was on, where it is clean and
- * still on the task's branch. With changes not committed it stays, said in
- * the task's thread the first time (`told`). One the person switched
- * themselves is left where they put it.
+ * Gives a settled task's checkout back: to the branch it was on, where it is
+ * clean and still on the task's branch. Not while anything of the task is
+ * still at work (`held`): settling stops its agents and what they ran first.
+ * With changes not committed it stays, said in the task's thread the first
+ * time (`told`). One the person switched themselves is left where they put it.
  */
-export const giveBackSpot = (spot: Spot, told: (spot: Spot) => boolean = () => false) =>
-  lockingCheckouts([spot.repository], givingBack(spot, told))
+export const giveBackSpot = (spot: Spot, told: (spot: Spot) => boolean = () => false, atWork: AtWork = nobodyAtWork) =>
+  lockingCheckouts([spot.repository], givingBack(spot, told, atWork))
 
-const givingBack = (was: Spot, told: (spot: Spot) => boolean) =>
+const givingBack = (was: Spot, told: (spot: Spot) => boolean, atWork: AtWork) =>
   Effect.gen(function* () {
     const spot = yield* spotById(was.id)
     if (spot === null || spot.kind !== 'checkout' || spot.state !== 'ready' || spot.returnedAt !== null) return 'back' as const
+    // Opened again, or still stopping: it is the task's yet. Read under the lock, as nothing starts a settled task's agent.
+    if (!settledState(spot.taskState) || (yield* atWork).has(spot.taskId)) return 'held' as const
     const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
     const gave = yield* giveBack(spot.repository, spot.branch, returnsTo)
     if (gave.kind === 'changes') {
@@ -279,20 +334,34 @@ const onOf = (checkout: Checkout) => checkout.branch ?? checkout.head.slice(0, 7
  * Places a task where its plan says, as its first step begins (ADR-086).
  * A worktree: a planned Local workspace becomes one now. Local: a worktree
  * made with its draft goes, and it takes each of its repositories' checkouts,
- * unless another task holds one (`taken`), or one has changes not committed
- * or is on a branch of the person's own, which the person is asked about
- * (`asks`) or answered (`answer`). Nothing is taken until every checkout can
- * be: a task never holds one while it waits for another.
+ * unless another task holds one (`taken`; a settled one only until all of it
+ * has stopped, `atWork`), or one has changes not committed or is on a branch
+ * of the person's own, which the person is asked about (`asks`), one
+ * repository at a time, or answered for that checkout as it still is
+ * (`consents`). Nothing is taken until every checkout can be: a task never
+ * holds one while it waits for another.
  */
-export const place = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null = null, told?: (spot: Spot) => boolean) =>
+export const place = (
+  taskId: string,
+  worksIn: WorksIn,
+  consents: ReadonlyArray<CheckoutConsent> = [],
+  told?: (spot: Spot) => boolean,
+  atWork: AtWork = nobodyAtWork,
+) =>
   Effect.flatMap(spotsOf(taskId), (spots) =>
     lockingCheckouts(
       spots.map((spot) => spot.repository),
-      placing(taskId, worksIn, answer, told ?? (() => false)),
+      placing(taskId, worksIn, consents, told ?? (() => false), atWork),
     ),
   )
 
-const placing = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null, told: (spot: Spot) => boolean) =>
+const placing = (
+  taskId: string,
+  worksIn: WorksIn,
+  consents: ReadonlyArray<CheckoutConsent>,
+  told: (spot: Spot) => boolean,
+  atWork: AtWork,
+) =>
   Effect.gen(function* () {
     const spots = yield* spotsOf(taskId)
     if (worksIn === 'worktree') {
@@ -305,12 +374,9 @@ const placing = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null
     // First, whether each can be taken, changing nothing.
     const taking: Array<{ readonly spot: Spot; readonly start: string; readonly baseRef: string; readonly was: Checkout }> = []
     for (const spot of waiting) {
-      const holder = yield* holderOf(spot.bindingId, taskId)
-      // One settled whose checkout stayed for changes not committed then: given back now, if they are.
-      const freed =
-        holder !== null && (holder.taskState === 'done' || holder.taskState === 'abandoned')
-          ? (yield* givingBack(holder, told)) === 'back'
-          : false
+      const holder = yield* holderOf(spot.repository, taskId)
+      // One settled, all of it stopped, whose checkout stayed for changes not committed then: given back now, if they are.
+      const freed = holder !== null && settledState(holder.taskState) ? (yield* givingBack(holder, told, atWork)) === 'back' : false
       if (holder !== null && !freed) return { kind: 'taken', by: { taskId: holder.taskId, title: holder.title } } as Placed
       const was = yield* readCheckout(spot.repository)
       // Taken already, by this task, as Althar stopped before it said so: it is the task's.
@@ -321,16 +387,25 @@ const placing = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null
       const { remote, base } = yield* startOf(spot)
       const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
       const holdup = holdupOf(was, base, baseCommit)
+      const seen: CheckoutSeen = { spotId: spot.id, branch: was.branch, head: was.head }
+      // What the person answered about this checkout, while it is as it was when they were asked.
+      const agreed = (about: CheckoutConsent['holdup']) =>
+        consents.find(
+          (one) =>
+            one.spotId === spot.id && one.holdup === about && (about === 'changes' || (one.branch === was.branch && one.head === was.head)),
+        )?.answer
       if (holdup?.kind === 'changes') {
-        if (answer === 'wait') return { kind: 'changes', repository: spot.name } as Placed
+        if (agreed('changes') === 'wait') return { kind: 'changes', repository: spot.name } as Placed
         return {
           kind: 'asks',
           ask: { repository: spot.name, holdup: 'changes', files: holdup.files, branch: was.branch, base },
+          seen,
         } as Placed
       }
-      if (holdup?.kind === 'branch' && answer !== 'switch' && answer !== 'from_branch')
-        return { kind: 'asks', ask: { repository: spot.name, holdup: 'branch', files: [], branch: holdup.branch, base } } as Placed
-      taking.push({ spot, start: holdup?.kind === 'branch' && answer === 'from_branch' ? was.head : baseCommit, baseRef, was })
+      const onBranch = holdup?.kind === 'branch' ? agreed('branch') : undefined
+      if (holdup?.kind === 'branch' && onBranch !== 'switch' && onBranch !== 'from_branch')
+        return { kind: 'asks', ask: { repository: spot.name, holdup: 'branch', files: [], branch: holdup.branch, base }, seen } as Placed
+      taking.push({ spot, start: onBranch === 'from_branch' ? was.head : baseCommit, baseRef, was })
     }
     // Then each is taken: its branch made where the task starts, and checked out.
     for (const { spot, start, baseRef, was } of taking) {

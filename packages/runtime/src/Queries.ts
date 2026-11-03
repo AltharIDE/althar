@@ -2182,7 +2182,7 @@ export class Queries extends Context.Service<
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
                           worksInWhy: text(parameters, 'worksInWhy') || null,
                           ...(task.planState === 'proposed' || (yield* planWaits(taskId))
-                            ? { localTaken: yield* localTakenFor(task.projectId, taskId) }
+                            ? { localTaken: yield* localTakenFor(taskId) }
                             : {}),
                         }),
                   },

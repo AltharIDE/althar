@@ -381,7 +381,11 @@ export class Tasks extends Context.Service<
           yield* changes.leaveOut(input)
         })
 
+      // Counted as stopping from before it settles until LeftBehind has it: a Local task's checkout stays its own meanwhile (ADR-086).
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        leftBehind.stoppingWhile(input.taskId, abandoning(input))
+
+      const abandoning = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const standing = yield* standingOf(input.taskId)
@@ -656,7 +660,11 @@ export class Tasks extends Context.Service<
           return task !== undefined && task.state === 'open' && finished && task.open === 0 ? task : undefined
         })
 
+      // As abandoning: counted as stopping until LeftBehind has it.
       const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        leftBehind.stoppingWhile(input.taskId, markingDone(input))
+
+      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const ready = yield* doneable(input.taskId)

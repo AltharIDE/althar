@@ -1,21 +1,25 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 
 import type { ActorId, ProjectId, WorksIn } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { holds } from '@althar/provider-adapters/testing'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
-import { giveBackSpot, place, spotsOf } from '../src/local'
+import { LeftBehind } from '../src/LeftBehind'
+import { type CheckoutConsent, checkoutKey, giveBackSpot, localTakenFor, place, type Placed, spotsOf } from '../src/local'
 import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { callTool, notices, repository, runtime, until } from './support'
 import type { ToolAccess } from '../src/ToolServer'
 
@@ -46,7 +50,7 @@ const opened = (root: string) =>
     return project.projectId as ProjectId
   })
 
-const drafted = (projectId: ProjectId, title: string, worksIn: WorksIn = 'checkout') =>
+const drafted = (projectId: ProjectId, title: string, worksIn: WorksIn = 'checkout', repositories?: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     return yield* (yield* Projects).createTask({
       envelope: yield* Runtime.envelope('task.create', { title }),
@@ -54,8 +58,13 @@ const drafted = (projectId: ProjectId, title: string, worksIn: WorksIn = 'checko
       title,
       draft: true,
       worksIn,
+      ...(repositories === undefined ? {} : { repositories }),
     })
   })
+
+/** The person's answer to what placing a task asked: for that checkout, as it was then (Runs keeps it so). */
+const answered = (asked: Placed, answer: CheckoutConsent['answer']): ReadonlyArray<CheckoutConsent> =>
+  asked.kind === 'asks' ? [{ ...asked.seen, holdup: asked.ask.holdup, answer }] : []
 
 /** The task's one workspace, as Local reads it. */
 const spotOf = (taskId: string) =>
@@ -64,7 +73,7 @@ const spotOf = (taskId: string) =>
     return one
   })
 
-/** Settles a task as merging it would: done, now. */
+/** Settles a task as merging it would: done, now, without stopping its agents (`merged` does that too). */
 const settle = (taskId: string) =>
   Effect.flatMap(
     SqlClient.SqlClient,
@@ -136,12 +145,13 @@ describe('a task working Local', () => {
       assert.strictEqual(git(root, 'stash', 'list'), '')
 
       // Waiting, as the person answered: nothing switches until they commit.
-      assert.deepInclude(yield* place(task.taskId, 'checkout', 'wait'), { kind: 'changes' })
+      const waiting = answered(asked, 'wait')
+      assert.deepInclude(yield* place(task.taskId, 'checkout', waiting), { kind: 'changes' })
       assert.strictEqual(git(root, 'diff', '--name-only'), 'README.md')
       assert.strictEqual(git(root, 'ls-files', '--others', '--exclude-standard'), 'notes.txt')
       git(root, 'add', '.')
       git(root, 'commit', '-q', '-m', 'Mine')
-      assert.deepStrictEqual(yield* place(task.taskId, 'checkout', 'wait'), { kind: 'ready' })
+      assert.deepStrictEqual(yield* place(task.taskId, 'checkout', waiting), { kind: 'ready' })
       assert.strictEqual(branchOf(root), (yield* spotOf(task.taskId)).branch)
     }).pipe(Effect.provide(byHand()))
   })
@@ -162,7 +172,7 @@ describe('a task working Local', () => {
       assert.strictEqual(branchOf(root), 'feature/onboarding')
 
       // Checked out from main, as answered; back on the person's branch once settled.
-      assert.deepStrictEqual(yield* place(switched.taskId, 'checkout', 'switch'), { kind: 'ready' })
+      assert.deepStrictEqual(yield* place(switched.taskId, 'checkout', answered(asked, 'switch')), { kind: 'ready' })
       assert.strictEqual(git(root, 'rev-parse', 'HEAD'), git(root, 'rev-parse', 'main'))
       yield* settle(switched.taskId)
       assert.strictEqual(yield* giveBackSpot(yield* spotOf(switched.taskId)), 'back')
@@ -170,7 +180,8 @@ describe('a task working Local', () => {
 
       // Started from the person's branch: its branch begins at that branch's head.
       const built = yield* drafted(projectId, 'Onboarding copy')
-      assert.deepStrictEqual(yield* place(built.taskId, 'checkout', 'from_branch'), { kind: 'ready' })
+      const again = yield* place(built.taskId, 'checkout')
+      assert.deepStrictEqual(yield* place(built.taskId, 'checkout', answered(again, 'from_branch')), { kind: 'ready' })
       assert.strictEqual(git(root, 'rev-parse', 'HEAD'), feature)
       assert.strictEqual((yield* spotOf(built.taskId)).baseCommit, feature)
     }).pipe(Effect.provide(byHand()))
@@ -226,6 +237,102 @@ describe('a task working Local', () => {
       assert.strictEqual(branchOf(root), on)
     }).pipe(Effect.provide(byHand()))
   })
+
+  it.live('holds the checkout against a task of another project that added the same folder, and says who is there', () => {
+    const root = repository()
+    const other = repository()
+    return Effect.gen(function* () {
+      // One folder, whatever names it.
+      const link = join(mkdtempSync(join(tmpdir(), 'althar-link-')), 'checkout')
+      symlinkSync(root, link)
+      assert.strictEqual(checkoutKey(link), checkoutKey(root))
+
+      const mine = yield* opened(root)
+      const theirs = yield* opened(other)
+      yield* (yield* Projects).addRepositories(theirs, link)
+      const first = yield* drafted(mine, 'Dark mode')
+      const second = yield* drafted(theirs, 'Fix the login', 'checkout', [basename(other), basename(root)])
+      assert.deepStrictEqual(yield* place(first.taskId, 'checkout'), { kind: 'ready' })
+      const by = { taskId: first.taskId, title: 'Dark mode' }
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout'), { kind: 'taken', by })
+      assert.deepStrictEqual(yield* localTakenFor(second.taskId), by)
+      // It waits for all of them: its other repository's checkout isn't taken meanwhile.
+      assert.strictEqual(branchOf(other), 'main')
+      assert.strictEqual(branchOf(root), (yield* spotOf(first.taskId)).branch)
+
+      yield* settle(first.taskId)
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout'), { kind: 'ready' })
+      const [own, shared] = yield* spotsOf(second.taskId)
+      assert.strictEqual(branchOf(other), own?.branch)
+      assert.strictEqual(branchOf(root), shared?.branch)
+    }).pipe(Effect.provide(byHand()))
+  })
+
+  it.live('keeps a settled task’s checkout while anything of it is still at work, and gives it back once all of it has stopped', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const first = yield* drafted(projectId, 'Dark mode')
+      const second = yield* drafted(projectId, 'Fix the login')
+      yield* place(first.taskId, 'checkout')
+      const held = (yield* spotOf(first.taskId)).branch
+      // Not settled, or opened again: its checkout is its own.
+      assert.strictEqual(yield* giveBackSpot(yield* spotOf(first.taskId)), 'held')
+
+      yield* settle(first.taskId)
+      const working = new Set([first.taskId])
+      const atWork = Effect.sync(() => working)
+      const by = { taskId: first.taskId, title: 'Dark mode' }
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout', [], undefined, atWork), { kind: 'taken', by })
+      assert.strictEqual(yield* giveBackSpot(yield* spotOf(first.taskId), undefined, atWork), 'held')
+      assert.strictEqual(branchOf(root), held)
+      assert.isNull((yield* spotOf(first.taskId)).returnedAt)
+
+      working.delete(first.taskId)
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout', [], undefined, atWork), { kind: 'ready' })
+      assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
+    }).pipe(Effect.provide(byHand()))
+  })
+
+  it.live('asks about each repository’s checkout in turn, and again about one that changed since the person answered', () => {
+    const app = repository()
+    const api = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(app)
+      yield* (yield* Projects).addRepositories(projectId, api)
+      for (const root of [app, api]) git(root, 'switch', '-q', '-c', 'feature/mine')
+      const task = yield* drafted(projectId, 'Fix the login', 'checkout', [basename(app), basename(api)])
+      const [inApp, inApi] = yield* spotsOf(task.taskId)
+      const about = (placed: Placed) => (placed.kind === 'asks' ? `${placed.ask.repository} on ${placed.ask.branch}` : placed.kind)
+
+      const first = yield* place(task.taskId, 'checkout')
+      assert.strictEqual(about(first), `${inApp?.name} on feature/mine`)
+      const one = answered(first, 'from_branch')
+      // The answer was for the first only: the second is asked about, and nothing is taken until it is answered.
+      const second = yield* place(task.taskId, 'checkout', one)
+      assert.strictEqual(about(second), `${inApi?.name} on feature/mine`)
+      assert.deepStrictEqual([branchOf(app), branchOf(api)], ['feature/mine', 'feature/mine'])
+      const both = [...one, ...answered(second, 'switch')]
+
+      // The person moves the first meanwhile: they answered for the branch they saw, so it is asked about again.
+      git(app, 'switch', '-q', '-c', 'feature/other')
+      assert.strictEqual(about(yield* place(task.taskId, 'checkout', both)), `${inApp?.name} on feature/other`)
+      assert.strictEqual(branchOf(app), 'feature/other')
+      // Back on it, with a commit since: starting from it was for the commit they saw.
+      git(app, 'switch', '-q', 'feature/mine')
+      git(app, 'commit', '-q', '--allow-empty', '-m', 'More')
+      const now = yield* place(task.taskId, 'checkout', both)
+      assert.strictEqual(about(now), `${inApp?.name} on feature/mine`)
+      assert.deepStrictEqual([branchOf(app), branchOf(api)], ['feature/mine', 'feature/mine'])
+
+      // Answered as it is now: both are taken, the first from its branch as it is, the second from main.
+      const fresh = [...answered(now, 'from_branch'), ...answered(second, 'switch')]
+      assert.deepStrictEqual(yield* place(task.taskId, 'checkout', fresh), { kind: 'ready' })
+      assert.deepStrictEqual([branchOf(app), branchOf(api)], [inApp?.branch, inApi?.branch])
+      assert.strictEqual(git(app, 'rev-parse', 'HEAD'), git(app, 'rev-parse', 'feature/mine'))
+      assert.strictEqual(git(api, 'rev-parse', 'HEAD'), git(api, 'rev-parse', 'main'))
+    }).pipe(Effect.provide(byHand()))
+  })
 })
 
 describe('a Local plan', () => {
@@ -254,6 +361,13 @@ describe('a Local plan', () => {
       return { ...task, planId, outcome: yield* plans.start(planId, actor) }
     })
 
+  /** Settled as merging it would: done, then its agents and what they ran stopped, in the background (LeftBehind.ts). */
+  const merged = (taskId: string) =>
+    Effect.andThen(
+      settle(taskId),
+      Effect.flatMap(LeftBehind, (left) => left.settled(taskId)),
+    )
+
   const cardOf = (projectId: string, taskId: string) =>
     Effect.gen(function* () {
       const board = yield* Effect.orDie((yield* Queries).board(projectId))
@@ -277,11 +391,79 @@ describe('a Local plan', () => {
       assert.deepInclude(waiting, { phase: 'running', local: true, continues: true })
       assert.deepInclude(waiting?.plan, { worksIn: 'checkout', localTaken: { taskId: first.taskId, title: 'Dark mode' } })
 
-      yield* settle(first.taskId)
+      yield* merged(first.taskId)
       yield* until(spotOf(second.taskId), (spot) => spot.state === 'ready', 'the second task takes the checkout')
       assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
       const after = yield* until(cardOf(projectId, second.taskId), (card) => card?.waitsForCheckout == null, 'it no longer waits')
       assert.isTrue(after?.local)
+    }).pipe(Effect.provide(withQueries()))
+  })
+
+  it.live('keeps the checkout from the next task while a settled one’s lead is still in its turn, until it has stopped', () => {
+    const lead = holds()
+    const root = repository()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const projectId = yield* opened(root)
+      const first = yield* started(projectId, 'Dark mode [lead:slowly]')
+      const turn = (running: boolean) =>
+        until(
+          Effect.map(sessions.running(first.threadId), (one) => Option.exists(one, (on) => on.turnRunning === running)),
+          (seen) => seen,
+          running ? 'its lead is in its turn' : 'its lead’s turn ends',
+        )
+      yield* turn(true)
+      const second = yield* started(projectId, 'Fix the login')
+      assert.strictEqual(second.outcome, 'waiting')
+      const held = (yield* spotOf(first.taskId)).branch
+
+      // Merged while its lead is still at it: what waits for the checkout is looked at many times, and it stays the first's.
+      yield* merged(first.taskId)
+      yield* Effect.sleep(Duration.millis(800))
+      assert.strictEqual((yield* spotOf(second.taskId)).state, 'preparing')
+      assert.strictEqual(branchOf(root), held)
+      assert.isNull((yield* spotOf(first.taskId)).returnedAt)
+
+      // Its turn over, settling stops it: then the checkout goes back, and the next task takes it.
+      lead.open('[lead:slowly]')
+      yield* until(spotOf(second.taskId), (spot) => spot.state === 'ready', 'the second task takes the checkout')
+      assert.isTrue(Option.isNone(yield* sessions.running(first.threadId)))
+      assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: lead })))))
+  })
+
+  it.live('waits, as answered, for the changes in the checkout it asked about, and takes it once they are committed', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      writeFileSync(join(root, 'README.md'), '# Mine\n')
+      const task = yield* started(projectId, 'Fix the login')
+      const sql = yield* SqlClient.SqlClient
+      const [call] = yield* until(
+        sql<{ id: string; payload: string }>`
+          SELECT id, payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'checkout' AND state = 'open'`,
+        (rows) => rows.length === 1,
+        'Althar asks about the checkout',
+      )
+      // What the person saw is kept with the ask: their answer holds for that checkout only.
+      const spot = yield* spotOf(task.taskId)
+      assert.deepStrictEqual((JSON.parse(call?.payload ?? '{}') as { seen?: unknown }).seen, {
+        spotId: spot.id,
+        branch: 'main',
+        head: git(root, 'rev-parse', 'HEAD'),
+      })
+      yield* (yield* Runs).answerCheckout({
+        envelope: yield* Runtime.envelope('attention.answer_checkout', {}),
+        attentionId: call?.id ?? '',
+        answer: 'wait',
+      })
+      const waiting = yield* until(cardOf(projectId, task.taskId), (card) => card?.waitsForCheckout != null, 'it waits for the commit')
+      assert.deepStrictEqual(waiting?.waitsForCheckout, { why: 'changes', repository: spot.name })
+      assert.strictEqual(branchOf(root), 'main')
+
+      git(root, 'commit', '-q', '-am', 'Mine')
+      yield* until(spotOf(task.taskId), (one) => one.state === 'ready', 'it takes the checkout')
+      assert.strictEqual(branchOf(root), (yield* spotOf(task.taskId)).branch)
     }).pipe(Effect.provide(withQueries()))
   })
 

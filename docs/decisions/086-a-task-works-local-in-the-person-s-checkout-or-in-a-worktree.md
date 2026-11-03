@@ -38,7 +38,10 @@
     as the checkout goes back, looked at again every few seconds. A draft
     doesn't hold it: nothing is made for it until its plan starts, and a
     worktree made for a draft that then starts Local goes, unused. A task
-    never holds one checkout while it waits for another.
+    never holds one checkout while it waits for another. A checkout is the
+    folder it is (its device and inode), not a project's repository: the
+    same folder added to two projects is one checkout, and a task of either
+    waits for the other's.
   - **Althar never switches a checkout with uncommitted changes, and never
     stashes, resets or cleans it.** Taking a checkout, Althar reads it first.
     Clean, on its default branch or with no branch it would leave behind, it
@@ -48,12 +51,21 @@
     call, in the task's thread and Needs you): wait until they are
     committed, or start in a worktree. On a branch of the person's own, it
     asks: check out the task's branch from where tasks start, start the task
-    from that branch, or start in a worktree.
+    from that branch, or start in a worktree. It asks about one repository's
+    checkout at a time, and an answer holds for that checkout only, as it was
+    when asked: waiting, while it still has uncommitted changes; checking out
+    the task's branch or starting from the person's, while it is still on
+    that branch at that commit. A checkout that changed since is asked about
+    again.
   - **The checkout goes back when the task is settled.** Settled done or
     abandoned, the checkout is switched back to the branch it was on, if it
-    is clean and still on the task's branch, and not while an agent of the
-    task is still in a turn. With uncommitted changes it stays, says so in
-    the task's thread, and goes back once they are committed. A checkout the
+    is clean and still on the task's branch, and not until everything of the
+    task has stopped: no agent of it left, in a turn or idle, and its
+    settling done stopping what they ran (LeftBehind's `stopping`, counted
+    from before a task is abandoned or marked done). Until then it is the
+    task's, for a task waiting for it too. With uncommitted changes it stays,
+    says so in the task's thread, and goes back once they are committed. A
+    checkout the
     person switched themselves is left where they put it. A settled task
     opened again whose checkout went back carries on in a worktree of its
     own, on its branch.

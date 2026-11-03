@@ -88,6 +88,14 @@ export class LeftBehind extends Context.Service<
     settled(taskId: string): Effect.Effect<void>
     /** Stops what settled tasks and removed projects left running that Althar lost track of, and agents left idle on settled tasks. */
     readonly sweep: Effect.Effect<void>
+    /**
+     * Tasks whose settling is asked for or under way, until everything of
+     * theirs it stops has stopped: what a settled Local task holds, its
+     * checkout, is its own until then (ADR-086).
+     */
+    readonly stopping: Effect.Effect<ReadonlySet<string>>
+    /** Counts the task as stopping (`stopping`) while `effect` settles it and stops what it can itself, as abandoning it does. */
+    stoppingWhile<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
 >()('@althar/runtime/LeftBehind') {
   static readonly layer: Layer.Layer<LeftBehind, never, Store> = Layer.effect(
@@ -202,6 +210,14 @@ export class LeftBehind extends Context.Service<
           })
         })
 
+      /** Settlings asked for and not yet over, by task: from when `settled` is said, before its fiber begins. */
+      const owed = new Map<string, number>()
+      const owe = (taskId: string, by: 1 | -1) => {
+        const left = (owed.get(taskId) ?? 0) + by
+        if (left > 0) owed.set(taskId, left)
+        else owed.delete(taskId)
+      }
+
       const settle = (taskId: string, at: string) =>
         Effect.suspend(() => {
           if (stopping.has(taskId)) return Effect.void
@@ -220,7 +236,13 @@ export class LeftBehind extends Context.Service<
        */
       const asked = yield* Queue.unbounded<{ readonly taskId: string; readonly at: string }>()
       yield* Effect.forkIn(
-        provide(Effect.forever(Effect.flatMap(Queue.take(asked), ({ taskId, at }) => Effect.forkIn(provide(settle(taskId, at)), scope)))),
+        provide(
+          Effect.forever(
+            Effect.flatMap(Queue.take(asked), ({ taskId, at }) =>
+              Effect.forkIn(provide(settle(taskId, at).pipe(Effect.ensuring(Effect.sync(() => owe(taskId, -1))))), scope),
+            ),
+          ),
+        ),
         scope,
       )
 
@@ -274,8 +296,21 @@ export class LeftBehind extends Context.Service<
       )
 
       return LeftBehind.of({
-        settled: (taskId) => Effect.flatMap(now, (at) => Queue.offer(asked, { taskId, at })).pipe(Effect.asVoid),
+        settled: (taskId) =>
+          Effect.flatMap(now, (at) =>
+            Effect.andThen(
+              Effect.sync(() => owe(taskId, 1)),
+              Queue.offer(asked, { taskId, at }),
+            ),
+          ).pipe(Effect.asVoid),
         sweep: provide(sweep.pipe(contained('LeftBehind.sweep', () => undefined))),
+        stopping: Effect.sync(() => new Set([...owed.keys(), ...stopping])),
+        stoppingWhile: (taskId, effect) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => owe(taskId, 1)),
+            () => effect,
+            () => Effect.sync(() => owe(taskId, -1)),
+          ),
       })
     }),
   )

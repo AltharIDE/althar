@@ -40,7 +40,7 @@ import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
-import { giveBackSpot, place, settledHolding, type Spot } from './local'
+import { type CheckoutConsent, type CheckoutSeen, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
@@ -472,11 +472,12 @@ interface Waiting {
 
 /**
  * What a Local task's first step held for its checkout keeps (ADR-086): as
- * one waiting for a place, since when it waits; the person's answer to what
- * Althar asked, which holds until it starts; and what it waits for now.
+ * one waiting for a place, since when it waits; the person's answers to what
+ * Althar asked, each for the one checkout it was about, as it was then
+ * (local.ts), which hold until it starts; and what it waits for now.
  */
 interface CheckoutHold extends Waiting {
-  readonly answer?: CheckoutAnswer
+  readonly consents?: ReadonlyArray<CheckoutConsent>
   readonly waits?: CheckoutWait
 }
 
@@ -640,6 +641,15 @@ export class Runs extends Context.Service<
       const instance = yield* Instance
       const sessions = yield* Sessions
       const leftBehind = yield* LeftBehind
+      /**
+       * Tasks with something still at work here: an agent, in a turn or idle,
+       * or a settling not done stopping what they ran. A settled Local task's
+       * checkout stays its own until it has none (ADR-086).
+       */
+      const notYetStopped = Effect.gen(function* () {
+        const live = (yield* sessions.onTasks).map((session) => session.taskId)
+        return new Set([...live, ...(yield* leftBehind.stopping)])
+      })
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -2951,8 +2961,8 @@ export class Runs extends Context.Service<
           })
         })
 
-      /** Asks the person about a checkout before the task takes it, once: inside the caller's transaction. */
-      const askCheckout = (run: RunRow, attemptId: string, ask: CheckoutAsk) =>
+      /** Asks the person about a checkout before the task takes it, once, keeping what was seen, which the answer holds for: inside the caller's transaction. */
+      const askCheckout = (run: RunRow, attemptId: string, ask: CheckoutAsk, seen: CheckoutSeen) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [open] = yield* sql<{ id: string }>`
@@ -2966,7 +2976,7 @@ export class Runs extends Context.Service<
             nodeAttemptId: attemptId,
             kind: 'checkout',
             addresseeActorId: instance.personId,
-            payload: JSON.stringify(ask),
+            payload: JSON.stringify({ ...ask, seen }),
             state: 'open',
             createdAt: yield* timestamp,
           })}`
@@ -2992,7 +3002,7 @@ export class Runs extends Context.Service<
       const placeFirst = (run: RunRow, attemptId: string, hold?: CheckoutHold) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const placed = yield* Effect.exit(place(run.taskId, worksInOf(run), hold?.answer ?? null, toldOnce))
+          const placed = yield* Effect.exit(place(run.taskId, worksInOf(run), hold?.consents ?? [], toldOnce, notYetStopped))
           if (placed._tag === 'Failure') {
             const { implement } = yield* stepsOf(run)
             yield* stuck(
@@ -3020,7 +3030,7 @@ export class Runs extends Context.Service<
           const next: CheckoutHold = {
             place: { how: 'start' },
             since: hold?.since ?? (yield* timestamp),
-            ...(hold?.answer === undefined ? {} : { answer: hold.answer }),
+            ...(hold?.consents === undefined ? {} : { consents: hold.consents }),
             ...(waits === undefined ? {} : { waits }),
           }
           const changed = yield* sql.withTransaction(
@@ -3031,7 +3041,7 @@ export class Runs extends Context.Service<
               if (now === undefined || (now.state !== 'admitted' && !held)) return false
               if (held && now.output === JSON.stringify(next) && where.kind !== 'asks') return false
               yield* holdForCheckout(run, attemptId, next)
-              if (where.kind === 'asks') yield* askCheckout(run, attemptId, where.ask)
+              if (where.kind === 'asks') yield* askCheckout(run, attemptId, where.ask, where.seen)
               return true
             }),
           )
@@ -3074,12 +3084,12 @@ export class Runs extends Context.Service<
        */
       const lookAtCheckouts = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        // Not while an agent of its task is still in a turn, or has something running: settling stops them first (LeftBehind.ts).
-        const working = new Set(
-          (yield* sessions.onTasks).filter((session) => session.turnRunning || session.background).map((session) => session.taskId),
-        )
+        // Not while anything of its task is still at work: settling stops it first (LeftBehind.ts), read again under the checkout's lock.
+        const working = yield* notYetStopped
         for (const spot of (yield* settledHolding).filter((one) => !working.has(one.taskId)))
-          yield* giveBackSpot(spot, toldOnce).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not give a checkout back', cause)))
+          yield* giveBackSpot(spot, toldOnce, notYetStopped).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not give a checkout back', cause)),
+          )
         const held = yield* sql<{ taskId: string; attemptId: string; output: string | null }>`
           SELECT r.task_id, a.id AS attempt_id, a.output FROM runs r JOIN workflow_executions e ON e.run_id = r.id
           JOIN nodes n ON n.execution_id = e.id JOIN node_attempts a ON a.node_id = n.id
@@ -3132,7 +3142,7 @@ export class Runs extends Context.Service<
                 WHERE id = ${input.attentionId} AND kind = 'checkout'`
               if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
               if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
-              const ask = JSON.parse(row.payload) as CheckoutAsk
+              const ask = JSON.parse(row.payload) as CheckoutAsk & { readonly seen?: CheckoutSeen }
               // Only what fits what was asked: waiting is for changes not committed, the branch's two answers for a branch.
               const fits = answer === 'worktree' || (answer === 'wait' ? ask.holdup === 'changes' : ask.holdup === 'branch')
               if (!fits) return yield* new NothingToWaitFor({ attentionId: input.attentionId })
@@ -3152,10 +3162,13 @@ export class Runs extends Context.Service<
                 commandId: input.envelope.commandId,
               })
               if (answer === 'worktree') yield* moveTo(row.taskId, 'worktree', input.envelope.actorId)
-              else if (row.attemptId !== null) {
+              else if (row.attemptId !== null && ask.seen !== undefined) {
+                // For that checkout only, as it was when asked: another, or this one changed since, is asked about again (local.ts).
+                const consent: CheckoutConsent = { ...ask.seen, holdup: ask.holdup, answer }
                 const [attempt] = yield* sql<{ output: string | null }>`SELECT output FROM node_attempts WHERE id = ${row.attemptId}`
                 const hold = waitingOf(attempt?.output ?? null, yield* timestamp) as CheckoutHold
-                yield* change('node_attempts', row.attemptId, { output: JSON.stringify({ ...hold, answer }) })
+                const consents = [...(hold.consents ?? []).filter((one) => one.spotId !== consent.spotId), consent]
+                yield* change('node_attempts', row.attemptId, { output: JSON.stringify({ ...hold, consents }) })
               }
               return row
             }),

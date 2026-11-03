@@ -566,7 +566,7 @@ export class Coordinator extends Context.Service<
       const localLine = (projectId: string, taskId: string, worksIn: WorksIn) =>
         Effect.gen(function* () {
           if (worksIn !== 'checkout') return ''
-          const taken = yield* localTakenFor(projectId, taskId)
+          const taken = yield* localTakenFor(taskId)
           return taken === null
             ? ' It works Local, in the person’s checkout.'
             : ` It works Local, so it waits for ${taken.title}, which works there now; with works_in: worktree it would start beside it.`
@@ -738,7 +738,7 @@ export class Coordinator extends Context.Service<
           })
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {
-            const taken = yield* localTakenFor(access.projectId, created.taskId)
+            const taken = yield* localTakenFor(created.taskId)
             if (taken !== null)
               return `Started ${created.slug} Local, but it waits for ${taken.title}, which works in the person's checkout now. Its lead starts by itself once that is settled. Say so in a sentence.`
             return `Started ${created.slug} Local, but Althar asks the person about their checkout first, as its card shows. Say so in a sentence.`
