@@ -18,7 +18,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
@@ -39,6 +39,7 @@ import {
   reopenPullRequest,
   rerunChecks,
 } from './coordinatorPullRequests'
+import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
@@ -113,6 +114,7 @@ type Store =
   | Runs
   | Connections
   | Automations
+  | RuntimeConfig
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -1638,6 +1640,7 @@ export class Coordinator extends Context.Service<
               return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
             }),
         ),
+        ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
           'list_models',
