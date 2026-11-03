@@ -327,6 +327,29 @@ describe('the board’s lanes', () => {
         expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
       })
 
+      it('says after which task one waiting for the checkout starts, and that it works Local (ADR-086)', () => {
+        const local = task({
+          taskId: 'l',
+          threadId: 'th-l',
+          kind: 'change',
+          title: 'Fix the login',
+          phase: 'running',
+          step: 'implement',
+          queued: null,
+          continues: true,
+          local: true,
+          waitsForCheckout: { why: 'taken', by: { taskId: 'w', title: 'Dark mode for Settings' } },
+        })
+        const lanes = lanesOf(board({ tasks: [working, local], calls: [] }))
+        expect(lanes.next.map((work) => work.taskId)).toEqual(['l'])
+        withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+        const next = within(screen.getByRole('region', { name: 'Up next' }))
+        expect(next.getByText('After Dark mode for Settings')).toBeTruthy()
+        expect(next.getByText('Change · Local')).toBeTruthy()
+        // Nothing of it has begun: it doesn't continue.
+        expect(next.queryByText(/^Continues/)).toBeNull()
+      })
+
       it('stays in the lane it was in while the person points at the board, and moves once they look away', async () => {
         const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
         // Its turn has its place: it is at work.

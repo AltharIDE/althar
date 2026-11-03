@@ -289,6 +289,33 @@ describe('a task’s card in the Talk room', () => {
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), to))
   })
 
+  it('shows where a plan works, why, and who works Local now, and moves it as the person picks (ADR-086)', async () => {
+    const plan = card().plan!
+    const client = await talking(
+      card({
+        plan: { ...plan, worksIn: 'worktree', worksInWhy: null, localTaken: { taskId: 't7', title: 'Dark mode for Settings' } },
+      }),
+    )
+    const where = await screen.findByRole('radiogroup', { name: 'Works in' })
+    expect(within(where).getByRole('radio', { name: 'Worktree' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeTruthy()
+    await userEvent.click(within(where).getByRole('radio', { name: 'Local' }))
+    await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), plan.end, 'checkout'))
+    expect(await screen.findByText('Waits for Dark mode for Settings.')).toBeTruthy()
+  })
+
+  it('says what a plan started Local waits for, where the clock was', async () => {
+    await talking(
+      card({
+        phase: 'running',
+        planWaits: true,
+        plan: { ...card().plan!, worksIn: 'checkout' },
+        waitsForCheckout: { why: 'taken', by: { taskId: 't7', title: 'Dark mode for Settings' } },
+      }),
+    )
+    expect(await screen.findByText('Waits for Local: Dark mode for Settings is there')).toBeTruthy()
+  })
+
   it('shows the plan as the runtime has it once its copy comes back changed', async () => {
     const plan = card().plan!
     const kept = items.card(card({ plan }), 'c0')

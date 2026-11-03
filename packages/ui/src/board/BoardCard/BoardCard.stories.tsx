@@ -86,6 +86,14 @@ export const ChangeRunning: Story = {
 }
 /** A follow-up on a change whose pull request is open: the pull request, and its checks so far. */
 export const ChangeRunningWithItsPullRequest: Story = { args: CHANGE_RUNNING_PR }
+/** In the person's own checkout, Local (ADR-086): said with its kind's word, nothing else about it changes. */
+export const ChangeRunningLocal: Story = {
+  args: { ...CHANGE_RUNNING, local: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Change · Local')).toBeInTheDocument()
+  },
+}
+export const ChangeRunningLocalDark: Story = { ...ChangeRunningLocal, globals: { theme: 'dark' } }
 export const ReadyToAccept: Story = {
   args: CHANGE_READY,
   play: async ({ canvasElement }) => {

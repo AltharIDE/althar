@@ -20,7 +20,11 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /** The checkout has changes that aren't committed: the task waits for them, or starts in a worktree. Nothing is stashed. */
-export const Changes: Story = {
+export const Changes: Story = {}
+export const ChangesDark: Story = { globals: { theme: 'dark' } }
+
+/** Answered once: the rest wait for the runtime, which moves on and takes the card with the call. */
+export const AnsweredOnce: Story = {
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Wait until they’re committed' }))
@@ -32,7 +36,9 @@ export const Changes: Story = {
 }
 
 /** On a branch of the person's own: the task's branch is checked out from main, or from that branch. */
-export const Branch: Story = {
+export const Branch: Story = { args: { holdup: 'branch', files: [], branch: 'feature/onboarding' } }
+
+export const StartFromTheirBranch: Story = {
   args: { holdup: 'branch', files: [], branch: 'feature/onboarding' },
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)

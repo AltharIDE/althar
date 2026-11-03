@@ -398,7 +398,8 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
-    changePlan: (planId, steps, end, worksIn) => act(() => client.changePlan(planId, steps, end, worksIn)),
+    changePlan: (planId, steps, end, worksIn) =>
+      act(() => (worksIn === undefined ? client.changePlan(planId, steps, end) : client.changePlan(planId, steps, end, worksIn))),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
