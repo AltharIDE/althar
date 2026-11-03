@@ -28,10 +28,10 @@ const PER_USE: ReadonlyArray<UsageLine> = [
   { id: 'key', name: 'Claude Code', mark: Brand.ClaudeCode, spent: 21.59, estimated: true, models: ['Claude Opus 5'], tokens: 13_400_000 },
   { id: 'router', name: 'OpenCode', mark: Brand.OpenCode, spent: null, models: ['Qwen3 Coder'], tokens: 2_400_000 },
 ]
-/** An OpenCode account's turns, a line for each provider they ran on: Zen in dollars, Go with no figure, and why. */
+/** A task's lines: Claude Code on its plan, GPT-6 Astra on OpenCode Zen in dollars, and Go with no figure, and why. */
 const BY_PROVIDER: ReadonlyArray<UsageLine> = [
-  { id: 'cc', name: 'Claude Code', mark: Brand.ClaudeCode, took: 0.04, estimated: true, models: ['Claude Opus 5.5'], tokens: 74_000_000 },
-  { id: 'zen', name: 'OpenCode Zen', mark: Brand.OpenCode, spent: 1.2, estimated: true, models: ['GPT-6 Astra'], tokens: 966_000 },
+  { id: 'cc', name: 'Claude Code', mark: Brand.ClaudeCode, took: 0, estimated: true, models: ['Claude Opus 5.5'], tokens: 74_107_422 },
+  { id: 'zen', name: 'OpenCode Zen', mark: Brand.OpenCode, spent: 1.485206, estimated: true, models: ['GPT-6 Astra'], tokens: 965_656 },
   {
     id: 'go',
     name: 'OpenCode Go',
@@ -96,7 +96,7 @@ export const ByProvider: Story = {
   ],
   play: async ({ canvasElement }) => {
     const lines = within(canvasElement).getAllByRole('listitem')
-    await expect(lines[1]).toHaveTextContent('OpenCode ZenGPT-6 Astra · 966k tokens~$1.20')
+    await expect(lines[1]).toHaveTextContent('OpenCode ZenGPT-6 Astra · 966k tokens~$1.49')
     await userEvent.tab()
     await expect(within(lines[2]!).getByText('—')).toHaveFocus()
     await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('OpenCode Go doesn’t report its usage to Althar.')
