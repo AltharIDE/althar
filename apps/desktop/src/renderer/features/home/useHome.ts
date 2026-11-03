@@ -47,6 +47,9 @@ export const useHome = (): HomeModel => {
     return () => {
       window.removeEventListener('pagehide', left)
       homeSince(client).since = undefined
+      // Kept hidden while the person is elsewhere (KeptScreens, React's Activity), the home hears nothing. Stale at once,
+      // so that showing it again reads it anew, as it is: not once the runtime answers, which may be after they are back.
+      void cache.invalidateQueries({ queryKey: keys.home, refetchType: 'none' })
       void client.leftHome().then(
         () => cache.invalidateQueries({ queryKey: keys.home, refetchType: 'all' }),
         () => undefined,

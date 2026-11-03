@@ -57,10 +57,14 @@ describe('what the person sent', () => {
     const sent = sending([items.says('Ready.')], { text: 'Use the helper', queued: true, interrupting: false, dictated: true })
     const copy = sent.items.at(-1)
     expect(copy?.kind === 'user_message' && copy.input).toEqual({ state: 'queued', interrupting: false, dictated: true })
-    expect(queuedOf(sent.items, true)).toEqual([{ id: sent.id, text: 'Use the helper', pictures: [], files: [], dictated: true }])
+    // On its way it goes straight to the thread; waiting its turn after, the queue says its words were dictated.
+    const waited = items.you('Use the helper', { state: 'queued', interrupting: false, dictated: true })
+    expect(queuedOf([...sent.items, waited], true)).toEqual([
+      { id: waited.id, text: 'Use the helper', pictures: [], files: [], dictated: true },
+    ])
     // Typed, it says nothing of it.
-    const typed = sending([], { text: 'Typed', queued: true, interrupting: false })
-    expect(queuedOf(typed.items, true)[0]).not.toHaveProperty('dictated')
+    const typed = items.you('Typed', { state: 'queued', interrupting: false })
+    expect(queuedOf([typed], true)[0]).not.toHaveProperty('dictated')
   })
 
   it('leaves the thread as it is when a send that failed has no copy to take away', () => {

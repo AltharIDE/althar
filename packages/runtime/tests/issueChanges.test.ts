@@ -79,6 +79,12 @@ const led = (projectId: ProjectId, access: ToolAccess, title: string, issue?: st
     const [task] = yield* sql<{ id: string; threadId: string }>`
       SELECT k.id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = ${title}`
     if (task === undefined) return assert.fail('no task')
+    // Its lead has started, so Althar has already looked for the issue its task came from to move it to In Progress: a
+    // task with none attaches its issue after, and one attached before that look is the one a task starts to move.
+    yield* until(
+      sql<{ n: number }>`SELECT count(*) AS n FROM turn_deliveries WHERE thread_id = ${task.threadId}`,
+      (rows) => (rows[0]?.n ?? 0) > 0,
+    )
     if (issue !== undefined) yield* (yield* Issues).attach({ projectId, taskId: task.id, issue })
     const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'lead-session', taskId: task.id }
     return { task, lead }
@@ -247,7 +253,7 @@ describe('changes to issues', () => {
       yield* sql`UPDATE policies SET rules = json_set(rules, '$.changeIssues', json('true')) WHERE project_id = ${projectId}`
       // A revision that has the switch still reads: it is nothing now.
       assert.notProperty((yield* (yield* Policies).current(projectId)).rules, 'changeIssues')
-      const fields = migrations.find((migration) => migration.key === '0056_issue_fields') ?? assert.fail('no migration')
+      const fields = migrations.find((migration) => migration.key === '0057_issue_fields') ?? assert.fail('no migration')
       for (const statement of fields.statements.filter((each) => each.startsWith('INSERT INTO project_notes'))) yield* sql.unsafe(statement)
       const notes = yield* notesOf(projectId)
       assert.deepStrictEqual(
@@ -652,13 +658,15 @@ describe('changes to issues', () => {
         const changes = yield* IssueChanges
         const instance = yield* Instance
         const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        // Where the issue stands before the move: a plain task starting may have moved it to In Progress already, as it does
+        // once its issue is attached, and the refused move must leave it exactly there.
+        const before = (yield* tracker.issue('MER-231')).status.name
         tracker.failNext('update', 'forbidden')
         yield* changes.followPullRequest(task.id, 'merged', pr(12))
         const [card] = yield* cardsIn(threadId)
         assert.strictEqual(card?.state, 'failed')
         assert.match(card?.issues[0]?.error ?? '', /may not change it/)
-        // Not closed: the task's start may have moved it to In Progress meanwhile, in the background.
-        assert.notStrictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, before)
         yield* changes.apply(card?.changesId ?? '', instance.personId)
         assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
       }).pipe(Effect.provide(withQueries({ linear: tracker })))

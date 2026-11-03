@@ -675,7 +675,7 @@ Leads and the coordinator change issues that already exist
   did, as a line; a card's **Always change at once** and **Always ask
   first** are kept as a note, as a draft's are. "Change issues without
   asking" was a switch until DEV-182; a project that had it on keeps it as
-  such a note (migration 0056).
+  such a note (migration 0057).
 - **Read field by field, never all or nothing** (`issueFields.ts`): each
   name is read against the tracker before the card is made (its statuses,
   members, labels, projects, milestones, cycles), a parent by reading that
