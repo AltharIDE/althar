@@ -105,8 +105,10 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(shown(page, 'Needs you', { exact: true })).toHaveCount(0)
 
     await say(page, 'think')
-    await expect(page.getByText('Done', { exact: true })).toBeVisible()
-    // Its line says how long it worked once the round has ended; until then it is still working.
+    await expect(page.getByRole('article').getByText('Done', { exact: true })).toBeVisible()
+    // Its line says how long it worked once the round has ended; until then it is still working. Built nothing, the task offers
+    // Done in its header once its lead is at rest.
+    await expect(page.getByRole('banner', { name: 'Add a retry to the checkout call' }).getByRole('button', { name: 'Done' })).toBeVisible()
     await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
     await page
       .getByRole('button', { name: /[Ww]orked \d/ })
@@ -135,8 +137,8 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect.poll(runtimePid).not.toBe(killed)
     // Asked mid-reload, the page has no context to answer from: still reloading.
     await expect.poll(() => page.evaluate(() => 'beforeCrash' in window).catch(() => true)).toBe(false)
-    // Its run passed, so the task is still ready, with no lead running and nothing in the thread about the restart.
-    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
+    // Its run passed, so the task still stands as it did, with no lead running and nothing in the thread about the restart.
+    await expect(shown(page, 'Nothing built', { exact: true })).toBeVisible()
     await expect(page.getByText(/Althar restarted/)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start the lead' })).toHaveCount(0)
     // Nothing to press to start it, and nothing to stop: what the person says next reaches the new runtime and starts it.
