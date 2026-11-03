@@ -30,6 +30,15 @@ const TRACKERS: ServiceOption[] = [
 ]
 const GITHUB_YOU: ServiceConnection = { id: 'conn1', service: 'github', account: 'you' }
 
+/* Every agent Althar runs on a first run: two on this computer, two it can fetch, and two only their own installers put there. */
+const EVERY_AGENT = [
+  ...FIRST_RUN.slice(0, 2),
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Missing, download: '45 MB' },
+  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, state: RuntimeState.Installing, download: '110 MB' },
+  { id: 'junie', name: 'Junie', brand: Brand.Junie, state: RuntimeState.Missing },
+  { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing },
+] satisfies RuntimeEntry[]
+
 const onCreate = fn()
 const onOpen = fn()
 const onToured = fn()
@@ -42,7 +51,7 @@ const list = (label: string, services: readonly ServiceOption[], connections: re
 
 /* As a consumer keeps it: the step, what is ticked, the name from the first one until it is given, and the project once made. */
 function FirstRun(props: Partial<WelcomeProps>) {
-  const [step, setStep] = useState<WelcomeStep>(props.defaultStep ?? (props.toured === true ? 'agents' : 'ask'))
+  const [step, setStep] = useState<WelcomeStep>(props.defaultStep ?? (props.toured === true ? 'agents' : 'projects'))
   const [picked, setPicked] = useState<readonly string[]>(props.picked ?? [])
   const [name, setName] = useState<string | null>(null)
   const [made, setMade] = useState(props.made ?? false)
@@ -99,14 +108,20 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The tour's first page: the coordinator plans what was asked into a task, and its lead works through the steps. */
-export const Ask: Story = {}
+/** The tour's first page: a project, its repositories wired into it, and its tasks out of it, each on a branch of its own. */
+export const Projects: Story = {}
 
-/** Agents from different makers, signed in as you, wired to the task they share. */
-export const Build: Story = { args: { defaultStep: 'build' } }
+/** The coordinator plans what was asked into a task, and its lead works through the steps. */
+export const Coordinator: Story = { args: { defaultStep: 'coordinator' } }
 
-/** Work moves across the board on its own; a call comes to you and is answered. */
-export const Decide: Story = { args: { defaultStep: 'decide' } }
+/** Every agent Althar runs, a mark each under the line, and one task's steps across two makers: one leads, another's reviews. */
+export const Makers: Story = {
+  args: { defaultStep: 'makers', runtimes: EVERY_AGENT },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(within(c.getByRole('list', { name: 'The agents Althar runs' })).getAllByRole('img')).toHaveLength(EVERY_AGENT.length)
+  },
+}
 
 /** Another maker's agent reviews the change; the lead fixes one finding and sets one aside; the pull request carries the review. */
 export const Review: Story = { args: { defaultStep: 'review' } }
@@ -121,11 +136,11 @@ export const Walking: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Next' })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
-    await expect(c.getByRole('heading', { name: 'Agents from different makers' })).toBeVisible()
+    await expect(c.getByRole('heading', { name: 'Meet the coordinator' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
-    await expect(c.getByRole('heading', { name: 'Only the calls come to you' })).toBeVisible()
-    await userEvent.keyboard('{ArrowLeft}')
     await expect(c.getByRole('heading', { name: 'Agents from different makers' })).toBeVisible()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(c.getByRole('heading', { name: 'Meet the coordinator' })).toBeVisible()
     await userEvent.click(c.getByRole('button', { name: 'Skip' }))
     await expect(c.getByRole('heading', { name: 'Your agents' })).toBeVisible()
     await expect(onToured).toHaveBeenCalled()
@@ -135,15 +150,6 @@ export const Walking: Story = {
 
 /** The agents on this computer: one signed in, one signed out, one to download. One is enough to go on. */
 export const Agents: Story = { args: { toured: true } }
-
-/* Every agent Althar runs on a first run: two on this computer, two it can fetch, and two only their own installers put there. */
-const EVERY_AGENT = [
-  ...FIRST_RUN.slice(0, 2),
-  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Missing, download: '45 MB' },
-  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, state: RuntimeState.Installing, download: '110 MB' },
-  { id: 'junie', name: 'Junie', brand: Brand.Junie, state: RuntimeState.Missing },
-  { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing },
-] satisfies RuntimeEntry[]
 
 /** Every agent Althar runs: those on this computer a row each, the others under them, quieter, a tile each. */
 export const EveryAgent: Story = {
@@ -160,7 +166,7 @@ export const NoneHere: Story = {
   args: { toured: true, runtimes: EVERY_AGENT.slice(2) },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/None on .* yet/)).toBeVisible()
+    await expect(c.getByText(/None yet/)).toBeVisible()
     await expect(c.queryByRole('list', { name: /Agents on/ })).toBeNull()
     await expect(c.getByRole('button', { name: 'Continue without one' })).toBeVisible()
   },
@@ -200,8 +206,9 @@ export const Project: Story = {
   args: { toured: true, defaultStep: 'project' },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByRole('searchbox')).toHaveFocus()
     await userEvent.click(c.getByRole('button', { name: /Make the project/ }))
-    await expect(c.getByRole('alert')).toHaveTextContent('Tick a repository, or add a folder.')
+    await expect(c.getByRole('alert')).toHaveTextContent('Tick a repository, or choose a folder.')
     await expect(onCreate).not.toHaveBeenCalled()
     await userEvent.click(c.getByRole('checkbox', { name: /meridian-web/ }))
     await expect(c.queryByRole('alert')).toBeNull()

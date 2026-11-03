@@ -10,7 +10,20 @@ import type { SettingsWays } from '../src/renderer/features/settings/open'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
+import {
+  agents,
+  card,
+  changed,
+  coordinatorSnapshot,
+  efforts,
+  fakeClient,
+  items,
+  models,
+  project,
+  repositories,
+  status,
+  streamed,
+} from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { useSettingsOf, withServices } from './render'
 
@@ -211,6 +224,21 @@ describe('the project’s bar', () => {
 })
 
 describe('the Talk room', () => {
+  it('offers, once, to push a fork’s branches to the repository it came from, over the composer', async () => {
+    const [api, forked] = repositories
+    const offering = {
+      ...forked!,
+      fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream' as const, canPush: true, offer: true },
+    }
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()), getRepositories: vi.fn(async () => [api!, offering]) })
+    withServices(<Project room={Room.Talk} onTask={vi.fn()} />, client)
+    expect(await screen.findByText('You can push to meridian/web now. Push new tasks’ branches there instead of your fork?')).toBeTruthy()
+    vi.mocked(client.getRepositories).mockResolvedValue([api!, { ...offering, fork: { ...offering.fork, offer: false } }])
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: forked!.id, notNow: true })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Push there' })).toBeNull())
+  })
+
   it("shows the coordinator's thread with each task's card, folds its finished work, and opens a task", async () => {
     const onTask = vi.fn()
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })

@@ -67,13 +67,13 @@ export function AgentsAway({ agents, onInstall, onHelp, className, text }: Agent
   const ordered = [...agents.filter(fetchable), ...agents.filter((r) => !fetchable(r))]
   return (
     <section className={cx(s.away, className)} aria-labelledby={id}>
-      <h3 id={id} className={s.title}>
+      <h2 id={id} className={s.title}>
         {t.title}
-      </h3>
+      </h2>
       <ul className={s.tiles} aria-label={t.label}>
         {ordered.map((r) => (
           <li key={r.id} className={s.tile}>
-            <span className={s.mark}>{r.brand ? <BrandMark brand={r.brand} size={15} /> : <Icon name="plug" size={14} />}</span>
+            <span className={s.mark}>{r.brand ? <BrandMark brand={r.brand} size={16} /> : <Icon name="plug" size={15} />}</span>
             <span className={s.name} title={r.name}>
               {r.name}
             </span>

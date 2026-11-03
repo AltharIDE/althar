@@ -2,7 +2,8 @@ import { act, render, screen } from '@testing-library/react'
 import { createRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MAP_HOSTS, MAP_MERIDIAN } from '../src/fixtures/setup'
+import { MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../src/fixtures/setup'
+import { ChangeTarget } from '../src/foundations/vocabulary'
 import { RepositoryMap, type RepositoryMapProps } from '../src/setup/RepositoryMap/RepositoryMap'
 
 /*
@@ -70,6 +71,38 @@ describe('where each repository’s work goes', () => {
     const held = createRef<HTMLDivElement>()
     map({ ref: held })
     expect(held.current).toBeInstanceOf(HTMLDivElement)
+  })
+})
+
+describe('a fork’s branches', () => {
+  const forkWith = (fork: { target: ChangeTarget; canPush?: boolean }) =>
+    MAP_HALYARD.map((one) => (one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...fork } }))
+  const NO_PUSH = 'You can’t push to halyard/api yet. Its owners can give you access.'
+
+  it('says nothing of pushing there until its host has said', () => {
+    map({ repositories: forkWith({ target: ChangeTarget.Upstream }) })
+    expect(screen.queryByText(NO_PUSH)).toBeNull()
+    expect(screen.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeTruthy()
+  })
+
+  it('says plainly where its host says the person can’t push there', () => {
+    map({ repositories: forkWith({ target: ChangeTarget.Upstream, canPush: false }) })
+    expect(screen.getByText(NO_PUSH)).toBeTruthy()
+  })
+
+  it('draws one wire to the repository it forks where they go there, and says so', () => {
+    map({ repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: true }) })
+    expect(wires()).toHaveLength(1)
+    expect(screen.getByText('pushes, pull requests')).toBeTruthy()
+    expect(screen.getByText('It pushes to halyard/api on GitHub, and its pull requests open on halyard/api.')).toBeTruthy()
+    expect(screen.queryByText(NO_PUSH)).toBeNull()
+  })
+
+  it('draws them on the fork, where they go, once its host says the person no longer can', () => {
+    map({ repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: false }) })
+    expect(wires()).toHaveLength(2)
+    expect(screen.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeTruthy()
+    expect(screen.getByText(NO_PUSH)).toBeTruthy()
   })
 })
 

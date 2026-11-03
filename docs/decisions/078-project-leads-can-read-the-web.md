@@ -9,7 +9,7 @@
   the permissive direction in the project’s notes of 29 October.
 - **Decision:**
   - “Leads can reach the web” (`leadsReachWeb`) is a project switch, on by
-    default, in Settings → General. Implementers and the project’s own
+    default, in Settings → Rules. Implementers and the project’s own
     reviewers get Claude Code’s WebSearch/WebFetch, Codex’s live web_search
     (including opening pages), and OpenCode’s websearch/webfetch without
     permission requests reaching Althar or the person. It applies when a new

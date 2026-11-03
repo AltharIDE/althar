@@ -2,13 +2,13 @@ import { useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { StuckAnswer, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { useRefocus } from '../../lib/refocus'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
-import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import { Terminal } from '../Terminal/Terminal'
@@ -31,10 +31,16 @@ export interface StuckAttempt {
   result: string
 }
 
-export interface StuckAgent {
-  model: ModelInfo
-  /** Why it might do better, or what it costs: Codex · 38% of this week used. */
-  note?: string
+/** Who could take the step: a menu of models, where picking one hands it the step. */
+export interface StuckHandOn {
+  /** The models offered at once, the best bet first, then the pinned ones; the one that failed isn't among them. */
+  models: readonly ModelInfo[]
+  /** Hand the step to a model. */
+  onHandOn: (model: ModelInfo) => void
+  /** Open every model, in a browser the consumer shows, which hands the step to the one picked there with `handTo`. Without it, no All models. */
+  onBrowse?: (handTo: (model: ModelInfo) => void) => void
+  /** How many models there are in all, beside All models. */
+  count?: number
 }
 
 export interface StuckOutput {
@@ -54,7 +60,10 @@ export interface StuckText {
   cancel: string
   empty: string
   retry: string
+  /** The menu of models' name. */
   retryLabel: string
+  /** The menu's last row, which opens every model. */
+  all: string
   again: string
   abandon: string
   told: string
@@ -78,17 +87,21 @@ export const stuckText: StuckText = {
   send: 'Send to the lead',
   cancel: 'Cancel',
   empty: 'Say what it should do first',
-  retry: 'Hand to another agent',
-  retryLabel: 'Hand the step to',
+  retry: 'Continue with another model',
+  retryLabel: 'Continue with',
+  all: 'All models',
   again: 'Try again',
   abandon: 'Abandon this step',
   told: 'Told the lead',
-  retried: (agent) => `Handed to ${agent}`,
+  retried: (agent) => `Continuing with ${agent}`,
   tryingAgain: 'Trying again',
   abandoned: 'Abandoned',
   undo: 'Undo',
   report: 'Report this',
 }
+
+/** The ways on a card answers with: tell the lead, hand the step on, try it again, or abandon it. */
+export type StuckWay = 'tell' | 'retry' | 'again' | 'abandon'
 
 /** What you told a stuck task to do. */
 export type StuckResult =
@@ -102,6 +115,8 @@ export interface StuckProps {
   step: string
   /** What keeps going wrong, in a sentence. */
   what: ReactNode
+  /** What the agent itself said, under it, where it said something short. */
+  said?: string
   /** What Althar tried on its own, in order. */
   tried: readonly StuckAttempt[]
   /** How many tries, where one line of `tried` stands for several (Tried again 3 times); else one for each line. */
@@ -110,20 +125,20 @@ export interface StuckProps {
   read?: { by: ModelInfo; says: ReactNode }
   /** The output that keeps failing, as it last ran. */
   output?: StuckOutput
-  /** Other agents that could take the step. Without them, no Try another agent. */
-  agents?: readonly StuckAgent[]
+  /** Hand the step to another model, picked in a menu. Without it, no Continue with another model. */
+  handOn?: StuckHandOn
   /** Tell the lead what to do instead. Without it, no Tell the lead. */
   onTell?: (note: string) => void
-  /** Hand the step to another agent. Without it (or `agents`), no Try another agent. */
-  onRetry?: (model: ModelInfo) => void
   /** Run the step again as it was, on the agent it was on, or Althar's own, such as opening the pull request. Without it, no Try again. */
   onAgain?: () => void
   /**
-   * Try again is the way to take, as where the connection or the session
-   * failed rather than the work: it comes first, as the card's own button,
-   * and the other ways after it.
+   * The way to take, first, as the card's own button, and the others after
+   * it: Try again where the connection or the session failed rather than the
+   * work, Abandon where going on without the step is the likely answer.
+   * Without it, the first of telling the lead, handing the step on and
+   * trying again that the card offers.
    */
-  againFirst?: boolean
+  primary?: StuckWay
   /**
    * What puts it right elsewhere, such as signing the agent in again in
    * Settings, or connecting the repository's host: the card's own button,
@@ -149,15 +164,15 @@ export interface StuckProps {
 export function Stuck({
   step,
   what,
+  said,
   tried,
   tries = tried.length,
   read,
   output,
-  agents = [],
+  handOn,
   onTell,
-  onRetry,
   onAgain,
-  againFirst = false,
+  primary,
   fix,
   onAbandon,
   onReport,
@@ -213,24 +228,82 @@ export function Stuck({
     }
   }
 
-  const retrying = onRetry && agents.length > 0
-  // Try again first, where it is the way to take; otherwise after telling the lead and handing the step on.
-  const first = againFirst && onAgain !== undefined && fix === undefined
-  // What puts it right comes before everything, as the card's own button.
-  const lead = first || fix !== undefined
-  const again = onAgain && (
-    <Button
-      variant={first || !(onTell || retrying || fix) ? 'signal' : 'default'}
-      onClick={() => {
-        onAgain()
-        give({ kind: StuckAnswer.Again })
-      }}
-    >
-      {t.again}
-    </Button>
-  )
+  const retrying = handOn !== undefined
+  const handTo = (model: ModelInfo) => {
+    handOn?.onHandOn(model)
+    give({ kind: StuckAnswer.Retried, agent: model })
+  }
+  const offered: Record<StuckWay, boolean> = {
+    tell: onTell !== undefined,
+    retry: retrying,
+    again: onAgain !== undefined,
+    abandon: onAbandon !== undefined,
+  }
+  // The way to take, where the card offers it; else the first of telling, handing on and trying again it offers.
+  const chosen = primary !== undefined && offered[primary] ? primary : (['tell', 'retry', 'again'] as const).find((way) => offered[way])
+  // What puts it right comes before everything, as the card's own button; the way to take follows it, in ink.
+  const variant = (way: StuckWay) => (way !== chosen ? (way === 'abandon' ? 'quiet' : 'default') : fix ? 'default' : 'signal')
+  const ways: Record<StuckWay, ReactNode> = {
+    tell: onTell && (
+      <Button key="tell" ref={tellRef} variant={variant('tell')} onClick={() => setTelling(true)}>
+        {t.tell}
+      </Button>
+    ),
+    retry: handOn && (
+      <Menu
+        key="retry"
+        label={t.retryLabel}
+        width={300}
+        trigger={
+          <Button variant={variant('retry')} icon="agents">
+            {t.retry}
+          </Button>
+        }
+      >
+        {handOn.models.map((model) => (
+          <MenuItem key={model.id} onSelect={() => handTo(model)}>
+            <Model model={model} />
+          </MenuItem>
+        ))}
+        {handOn.onBrowse && (
+          <>
+            {handOn.models.length > 0 && <MenuSeparator />}
+            <MenuItem hint={handOn.count} onSelect={() => handOn.onBrowse?.(handTo)}>
+              {t.all}
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+    ),
+    again: onAgain && (
+      <Button
+        key="again"
+        variant={variant('again')}
+        onClick={() => {
+          onAgain()
+          give({ kind: StuckAnswer.Again })
+        }}
+      >
+        {t.again}
+      </Button>
+    ),
+    abandon: onAbandon && (
+      <Button
+        key="abandon"
+        variant={variant('abandon')}
+        onClick={() => {
+          onAbandon()
+          give({ kind: StuckAnswer.Abandoned })
+        }}
+      >
+        {t.abandon}
+      </Button>
+    ),
+  }
+  const order: ReadonlyArray<StuckWay> = ['tell', 'retry', 'again', 'abandon']
   return (
     <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tries)} what={what} className={className}>
+      {said !== undefined && <p className={s.said}>{said}</p>}
       {/* when it came straight to you, as when the agent couldn't start, there is nothing it tried */}
       {tried.length > 0 && (
         <section className={s.section}>
@@ -278,55 +351,14 @@ export function Stuck({
         </div>
       ) : (
         (fix || onTell || retrying || onAgain || onAbandon || onReport) && (
-          <AskFoot>
+          <AskFoot className={s.foot}>
             {fix && (
               <Button variant="signal" onClick={fix.onFix}>
                 {fix.label}
               </Button>
             )}
-            {first && again}
-            {onTell && (
-              <Button ref={tellRef} variant={lead ? 'default' : 'signal'} onClick={() => setTelling(true)}>
-                {t.tell}
-              </Button>
-            )}
-            {retrying && (
-              <Menu
-                label={t.retryLabel}
-                width={300}
-                trigger={
-                  // The first way on is the one to take, unless the lead can be told or it is to try again.
-                  <Button variant={onTell || lead ? 'default' : 'signal'} icon="agents">
-                    {t.retry}
-                  </Button>
-                }
-              >
-                {agents.map((a) => (
-                  <MenuItem
-                    key={a.model.id}
-                    description={a.note}
-                    onSelect={() => {
-                      onRetry(a.model)
-                      give({ kind: StuckAnswer.Retried, agent: a.model })
-                    }}
-                  >
-                    <Model model={a.model} />
-                  </MenuItem>
-                ))}
-              </Menu>
-            )}
-            {!first && again}
-            {onAbandon && (
-              <Button
-                variant="quiet"
-                onClick={() => {
-                  onAbandon()
-                  give({ kind: StuckAnswer.Abandoned })
-                }}
-              >
-                {t.abandon}
-              </Button>
-            )}
+            {chosen !== undefined && ways[chosen]}
+            {order.filter((way) => way !== chosen).map((way) => ways[way])}
             {onReport && (
               <LinkButton className={s.report} onClick={onReport}>
                 {t.report}

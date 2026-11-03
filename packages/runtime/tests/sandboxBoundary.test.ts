@@ -201,6 +201,35 @@ describe('what crosses a lead’s sandbox', () => {
     assert.strictEqual(decideLeaving(command(writes, { dangerouslyDisableSandbox: true }), context('ask')).verdict, 'ask')
   })
 
+  it('is what the project runs outside from the start, asked to or not: Electron can’t start inside a Mac’s sandbox', () => {
+    const outside = ['node scripts/e2e.ts', 'env -i', 'bunx playwright']
+    // The two lines a lead was refused when its end-to-end run died inside on Chromium's Mach port.
+    for (const line of [
+      'node scripts/e2e.ts e2e/zz-evidence.spec.ts e2e/webReach.spec.ts',
+      'git log --oneline -1 && EV=after env -i HOME="$HOME" PATH="/opt/homebrew/bin:/usr/bin:/bin" EV=after node scripts/e2e.ts e2e/zz-evidence.spec.ts 2>&1 | tail -25',
+      'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15',
+    ])
+      assert.strictEqual(
+        decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict,
+        'allow',
+        line,
+      )
+    // Only by how it starts, word by word: another script, one named to look like it, or one beside it, is still unread.
+    for (const line of [
+      'node scripts/fix.ts',
+      'node scripts/e2e.tsx',
+      "node 'scripts/e2e.ts other.js'",
+      'node "scripts/e2e.ts" && python3 tools/fix.py',
+    ])
+      assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict, 'deny', line)
+    // And it still meets the project's rules: a push to main asks.
+    assert.strictEqual(
+      decideLeaving(command('node scripts/e2e.ts && git push origin main', { dangerouslyDisableSandbox: true }), context('allow'), outside)
+        .verdict,
+      'ask',
+    )
+  })
+
   it('is counted by the kind that kept it', () => {
     const at = context('ask')
     assert.strictEqual(tallyKindOf(command('git push origin main'), at), 'default-branch')
@@ -372,6 +401,25 @@ describe('a lead whose sandbox Althar holds', () => {
           { kind: 'force-push', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
         ],
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('runs the project’s end-to-end tests outside when it asks again, after Electron died inside on a piped run', () =>
+    Effect.gen(function* () {
+      // Claude Code's hold lists what the project runs outside from the start, as it lists its excluded commands.
+      const { requestContext } = yield* held({ ...lead, outside: [...lead.outside, 'node scripts/e2e.ts'] })
+      const permissions = yield* Permissions
+      const piped = 'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15'
+      // Piped, it stays in the sandbox and runs unread, where Electron can't register its Mach service.
+      assert.strictEqual((yield* permissions.decide(requestContext, command(piped))).decision, 'allow')
+      // Asked again outside, it goes: it is what the project runs outside anyway.
+      const retry = command(piped, { dangerouslyDisableSandbox: true })
+      assert.strictEqual((yield* permissions.decide(requestContext, retry)).decision, 'allow')
+      // A file named to look like it is another script, still refused.
+      const lookalike = command("node 'scripts/e2e.ts other.js'", { dangerouslyDisableSandbox: true })
+      assert.strictEqual((yield* permissions.decide(requestContext, lookalike)).decision, 'reject')
+      // Where the project doesn't run it outside, the hold doesn't let it go either.
+      assert.strictEqual((yield* permissions.decide({ ...requestContext, sandbox: lead }, retry)).decision, 'reject')
     }).pipe(Effect.provide(runtime())),
   )
 

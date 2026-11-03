@@ -6,7 +6,7 @@ import type { ModelInfo } from '@althar/ui'
 import { useModels } from '../data/models'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
-import { catalogOf, effortName, infoOf, viaOf } from './models'
+import { catalogOf, effortName, infoOf, nameOf, viaOf } from './models'
 
 /*
  * How every screen names who works (ADR-015): the model, as people know it,
@@ -52,5 +52,19 @@ export const useModelNames = (): NameModel => {
       return { ...info, via: viaOf(agentName, account) }
     },
     [catalog],
+  )
+}
+
+/** The provider within an agent that a model goes through, as the agent names it (`OpenCode Go`); its id where the agent doesn't list the model. */
+export type NameProvider = (agentId: string | null, model: string | null, provider: string) => string
+
+export const useProviderNames = (): NameProvider => {
+  const known = useModels()
+  return useCallback(
+    (agentId, model, provider) => {
+      const offered = known?.find((each) => each.agentId === agentId)?.models.find((each) => each.id === model)
+      return (offered === undefined ? undefined : nameOf('', offered).provider) ?? provider
+    },
+    [known],
   )
 }

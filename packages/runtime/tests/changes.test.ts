@@ -271,7 +271,7 @@ describe('a task that ends in a pull request', () => {
       const projects = yield* Projects
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const [repository] = yield* projects.repositories(project.projectId)
-      assert.deepStrictEqual(repository?.fork, { fork: 'you/api', upstream: 'meridian/api', target: 'fork' })
+      assert.deepInclude(repository?.fork, { fork: 'you/api', upstream: 'meridian/api', target: 'fork', offered: false })
       yield* projects.setRepository({ projectId: project.projectId, repositoryId: repository?.id ?? '', changeTarget: 'upstream' })
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
