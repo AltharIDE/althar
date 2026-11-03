@@ -327,7 +327,7 @@ describe('the always-ask list', () => {
     ['vercel --prod', 'Deploying or publishing always asks.'],
     ['kubectl apply -f prod.yaml', 'Deploying or publishing always asks.'],
     ['terraform apply', 'Deploying or publishing always asks.'],
-    ['npm publish', 'Deploying or publishing always asks.'],
+    ['npm publish', 'Tearing down, deleting or publishing always asks'],
     ['./release.sh', 'Deploying or publishing always asks.'],
     ['release-notes.py', 'Deploying or publishing always asks.'],
     // The folder as this computer takes it: on Windows, on the drive the tests run on.
@@ -346,7 +346,7 @@ describe('the always-ask list', () => {
     ['FOO=1 > out.log git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
     ['sudo > /dev/null git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
     ['bash -lc "> /dev/null git push origin main"', "A push to main always asks: once others have it, it can't be taken back."],
-    ['>/dev/null npm publish', 'Deploying or publishing always asks.'],
+    ['>/dev/null npm publish', 'Tearing down, deleting or publishing always asks'],
     ['> ~/.zshrc echo x', "Writing outside the task's worktree always asks: ~/.zshrc"],
   ])('asks about %s', (command, reason) => {
     const verdict = run(command)
@@ -1558,7 +1558,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
   it('is held by default, as the kinds it is always ask; a kind the person takes off the list under "Allowed" is theirs', () => {
     for (const command of [
       'git branch -D spike',
-      'git branch --delete spike althar/retry',
+      'git branch --delete --force spike althar/retry',
       'git branch -m spike old-spike',
       'git update-ref refs/heads/main 1234abcd',
       'git -C /Users/someone/code/app stash',
@@ -2490,5 +2490,192 @@ describe('project web reads', () => {
       run('curl -q -fsSL https://example.com', { project: { ...project, commands: [{ pattern: 'curl', decision: 'ask' }] } }).verdict,
       'ask',
     )
+  })
+})
+
+describe('the asks and refusals left once the sandbox is the boundary (DEV-185)', () => {
+  const rules = (project: Partial<ProjectRuleSet>, more: Partial<RuleContext> = {}): RuleContext => ({
+    ...context,
+    ...more,
+    project: { ...MVP_RULES, ...project },
+  })
+  const allow = { mode: 'allow' as const }
+  const runs = (command: string) => request({ title: command, rawInput: { command } })
+  const verdictOf = (command: string, at: RuleContext) => decide(runs(command), at).verdict
+  const script = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'status'])\nEOF"
+
+  it('lets an automation’s run go ahead with what it can’t read, where git’s guard stops the push to main it never allows', () => {
+    // An automation's run: everything allowed, and never a push to the default branch (automated.ts).
+    const automated = { ...allow, never: ['default-branch' as const] }
+    const unread = 'git push origin $(git branch --show-current)'
+    for (const command of [unread, 'd=$TMPDIR/x && rm -rf $d', 'git log | xargs echo push'])
+      assert.strictEqual(verdictOf(command, rules(automated, { guarded: true })), 'allow', command)
+    // Where no guard holds (Windows), what it can't read could be the push, so it's refused as before.
+    assert.strictEqual(verdictOf(unread, rules(automated)), 'deny')
+    // What the rules read as the push is refused either way.
+    assert.strictEqual(verdictOf('git push origin HEAD:main', rules(automated, { guarded: true })), 'deny')
+    // A Never of what no guard stops, a deploy or a command, still refuses what it can't read.
+    assert.strictEqual(verdictOf(unread, rules({ ...automated, never: ['default-branch', 'deploy'] }, { guarded: true })), 'deny')
+    assert.strictEqual(
+      verdictOf(unread, rules({ ...automated, commands: [{ pattern: 'make release', decision: 'never' }] }, { guarded: true })),
+      'deny',
+    )
+  })
+
+  it('lets what a lead asks to run outside its sandbox go ahead where Althar can’t read it, with everything allowed', () => {
+    const outside = (command: string) => request({ title: command, rawInput: { command, dangerouslyDisableSandbox: true } })
+    for (const command of [script, 'node scripts/e2e.ts e2e/smoke.spec.ts 2>&1 | tail -15', 'bash shots.sh'])
+      assert.strictEqual(decide(outside(command), rules(allow)).verdict, 'allow', command)
+    // What it reads as what can't be undone still asks.
+    assert.strictEqual(decide(outside('git push origin main'), rules(allow)).verdict, 'ask')
+  })
+
+  it('lets `git branch -d` go, which git refuses for work that isn’t merged; a forced deletion still asks', () => {
+    for (const command of ['git branch -d spike', 'git branch --delete spike', 'git branch -d -r origin/spike'])
+      assert.strictEqual(verdictOf(command, rules({})), 'allow', command)
+    for (const command of ['git branch -D spike', 'git branch -d -f spike', 'git branch --delete --force spike', 'git branch -df spike'])
+      assert.strictEqual(verdictOf(command, rules({})), 'ask', command)
+    // A project that never allows deleting branches still refuses it, everything allowed or not; the task's own goes.
+    for (const mode of ['rules', 'allow'] as const) {
+      assert.strictEqual(verdictOf('git branch -d spike', rules({ mode, never: ['delete-branch'] })), 'deny', mode)
+      assert.strictEqual(verdictOf('git branch -d althar/retry', rules({ mode, never: ['delete-branch'] })), 'allow', mode)
+    }
+  })
+
+  it('reads a line from where the lead’s shell is, where its agent says, not from the worktree’s top', () => {
+    const shell = `${worktree}/packages/ui`
+    // The cards of 31 Oct: a lead in packages/ui restoring a file of its own worktree, and deleting its own log.
+    for (const command of [
+      'git -C ../.. checkout -- packages/ui/src/outputs/ChangeView.tsx',
+      'rm -f ../../sb.log',
+      'cd ../.. && rm -f sb.log',
+    ])
+      assert.strictEqual(verdictOf(command, rules({}, { shell })), 'allow', command)
+    // From the top, the same words reach above the worktree, and ask.
+    assert.strictEqual(verdictOf('git -C ../.. checkout -- packages/ui/src/outputs/ChangeView.tsx', rules({})), 'ask')
+    // From where the shell is, a path that does leave the worktree still asks.
+    assert.strictEqual(verdictOf('rm -rf ../../../other-task', rules({}, { shell })), 'ask')
+    // A folder outside the task's worktree and temp folders isn't believed: the line is read from the top.
+    assert.strictEqual(verdictOf('rm -f ../../sb.log', rules({}, { shell: '/work/meridian/main/packages/ui' })), 'ask')
+  })
+
+  it('refuses a key read from where the shell is as from the top, so neither start can hide one', () => {
+    const shell = `${worktree}/packages/ui`
+    // From the shell, five folders up is /work, this test's home: its .ssh. From the top, it is /.ssh, no one's.
+    const key = 'cat ../../../../../.ssh/id_rsa'
+    assert.strictEqual(verdictOf(key, rules(allow, { home: '/work' })), 'allow')
+    assert.strictEqual(verdictOf(key, rules(allow, { home: '/work', shell })), 'deny')
+    // And a key the top reaches is refused whatever the shell's record says.
+    assert.strictEqual(verdictOf('cat ../../../.ssh/id_rsa', rules(allow, { home: '/work', shell })), 'deny')
+  })
+
+  it('lets a lead pop or drop its own stash entry, one stashed on its branch; another’s, or clearing them all, asks', () => {
+    const stashes = () => ['On althar/retry: althar-wip-1', "WIP on main: 1a2b3c4 the person's", 'WIP on althar/retry: 5d6e7f8 Retry']
+    for (const command of ['git stash pop', 'git stash drop', 'git stash drop stash@{0}', 'git stash pop 2', 'git stash apply stash@{1}'])
+      assert.strictEqual(verdictOf(command, rules({}, { stashes })), 'allow', command)
+    for (const command of [
+      'git stash drop stash@{1}',
+      'git stash pop 1',
+      'git stash drop stash@{3}',
+      'git stash clear',
+      'git stash drop abc123',
+    ])
+      assert.strictEqual(verdictOf(command, rules({}, { stashes })), 'ask', command)
+    // Throwing away what git keeps to recover lost work still asks.
+    assert.strictEqual(verdictOf('git reflog expire --expire=now --all', rules({}, { stashes })), 'ask')
+    // With everything allowed, these go ahead, as before (ADR-067): they ask the person only where the rules do.
+    for (const command of ['git stash drop stash@{1}', 'git stash clear', 'git reflog expire --expire=now --all', 'git gc --prune=now'])
+      assert.strictEqual(verdictOf(command, rules(allow, { stashes })), 'allow', command)
+  })
+
+  it('asks before tearing down, deleting or publishing, even with everything allowed; a deploy goes ahead', () => {
+    for (const command of [
+      'terraform destroy',
+      'terraform apply -destroy',
+      'npx cdk destroy',
+      'pulumi destroy --yes',
+      'kubectl delete deployment api',
+      'helm uninstall api',
+      'fly apps destroy meridian',
+      'npm publish',
+      'bun publish',
+      'cargo publish',
+      'twine upload dist/*',
+      // A dry run turned off is a real one.
+      'npm publish --dry-run=false',
+      'helm uninstall api --dry-run=false',
+      'kubectl delete deployment api --dry-run none',
+      'kubectl delete deployment api --dry-run=none',
+    ]) {
+      const decided = decide(runs(command), rules(allow))
+      assert.strictEqual(decided.verdict, 'ask', command)
+      assert.include((decided as { reason: string }).reason, 'asks even with everything allowed', command)
+    }
+    for (const command of [
+      'wrangler deploy',
+      'vercel --prod',
+      'terraform apply',
+      'npm publish --dry-run',
+      'kubectl apply -f prod.yaml',
+      'kubectl delete deployment api --dry-run=client',
+      'kubectl delete deployment api --dry-run=server',
+      'kubectl delete deployment api --dry-run client',
+      'helm uninstall api --dry-run=true',
+    ])
+      assert.strictEqual(verdictOf(command, rules(allow)), 'allow', command)
+  })
+
+  it('lets `security` read what holds no secret, as a build does to sign; a password, a key or a change is refused', () => {
+    for (const command of [
+      'security find-identity -v -p codesigning',
+      'security find-certificate -c "Developer ID Application" -p',
+      'security list-keychains',
+      'security cms -D -i profile.mobileprovision',
+    ])
+      assert.strictEqual(verdictOf(command, rules({})), 'allow', command)
+    for (const command of [
+      'security find-generic-password -s github.com -w',
+      'security find-internet-password -s github.com',
+      'security dump-keychain',
+      'security export -k login.keychain',
+      'security list-keychains -s ~/x.keychain',
+      'security cms -S -N me -i a',
+      'security -i',
+      'security unlock-keychain',
+    ])
+      assert.strictEqual(verdictOf(command, rules(allow)), 'deny', command)
+  })
+
+  it('lets a reader use awk, seq, `[[ ]]`, a default (`${x:-y}`) and `git branch`’s layout, where its sandbox doesn’t hold it', () => {
+    const reason = (command: string) => {
+      const decided = decideReader(runs(command), { trusted: true })
+      return decided.verdict === 'deny' ? decided.reason : 'allowed'
+    }
+    for (const command of [
+      "git log --oneline | awk '{print $1}'",
+      "awk -F: '$3 > 100 {print $1}' users.txt",
+      "awk '/feat|fix/ {n++} END {print n}' CHANGELOG.md",
+      'for i in $(seq 1 3); do echo $i; done',
+      '[[ -f package.json ]] && echo yes',
+      'echo "${BRANCH:-main}"',
+      "git branch -r --format='%(refname:short)'",
+      "git branch -r --format '%(refname:short)' --sort=-committerdate",
+      'git remote show',
+    ])
+      assert.strictEqual(reason(command), 'allowed', command)
+    for (const [command, said] of [
+      ['awk \'{print > "out.txt"}\' a', '`awk` may only print'],
+      ['awk \'BEGIN { system("rm -rf x") }\'', '`awk` may only print'],
+      ['awk \'{print | "sh"}\' a', '`awk` may only print'],
+      ['awk \'BEGIN { "date" | getline d }\'', '`awk` may only print'],
+      ['awk -f prog.awk a', '`awk -f`'],
+      ['[[ n -eq 1 ]]', '`[[ -eq`'],
+      ['echo "${X:=y}"', 'An expansion'],
+      ['git branch -r --format x newbranch', '`git branch` can change'],
+      // `show` lists for `git remote`; to `git branch` or `git tag` it names one to make.
+      ['git branch show', '`git branch` can change'],
+      ['git tag show', '`git tag`'],
+    ] as const)
+      assert.include(reason(command), said, command)
   })
 })

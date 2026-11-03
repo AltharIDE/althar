@@ -22,6 +22,19 @@
     of its week (8% of week). Paid per use, it is dollars. There is no total,
     nothing per step or round, and no figure for what is left: the plan gauge
     already says that.
+  - **An agent that reaches several providers has a line for each its turns
+    ran on** (OpenCode: `provider/model`), named as the agent names the
+    provider (OpenCode Zen, OpenCode Go), because each is paid its own way.
+    Zen and providers on a key are dollars. Go is its share of the OpenCode
+    account's own week, which only its Go turns draw on. ChatGPT through
+    OpenCode is the plan Codex reads: its share of Codex's week, where Codex
+    is signed in to the one ChatGPT plan on that computer, and Codex's own
+    line shares that week's rise with those turns, so it's never counted
+    twice. A provider whose sign-in Althar can't classify, or hasn't read yet,
+    is never priced as a key.
+  - **A dash says why on hover or focus** where the figure can't be known
+    ("OpenCode Go doesn't report its usage to Althar"), and stays quiet
+    otherwise.
   - **A task's line covers every thread of the task,** its reviews' included,
     across handovers. The coordinator's covers its own conversation since
     this computer's midnight.
@@ -38,7 +51,16 @@
     of that time the turns ran in counts, because the rest may be use outside
     Althar. A week that stands still keeps the reading where it began and its
     latest one, so a task after a quiet stretch has a reading from just
-    before it. The figure reads as an estimate: "~8% of week".
+    before it. Only the plan's own week is kept, never a model's or extra
+    usage's. A week starts again only when its reset time moves on by a day
+    or more, since Claude's sources give the same reset a few milliseconds
+    apart and a rolling window may shift it by hours; where a reset time is
+    unknown, only when its use drops by more than 5 points. A reading whose
+    reset went back by a day or more is another window's, and is left out.
+    Within a week only a rise past its highest reading yet counts, because
+    the sources round its use differently (24, then 23). A task's share is
+    never more than the week says at its last reading. The
+    figure reads as an estimate: "~8% of week".
   - **Dollars are what the agent said,** kept on the session
     (`provider_sessions.reported_cost`). Where it said nothing, Althar prices
     the turns' tokens at the model's list prices, and prices a cache read
@@ -48,4 +70,5 @@
 - **Consequences:** A reading that fails leaves the usage out of the
   snapshot, never the thread. Tasks that ran before migration 0056 have no
   readings of a week, so their share shows as a dash. A plan whose week Althar
-  can't read shows a dash the same way.
+  can't read shows a dash the same way. Until OpenCode's sign-ins are read
+  after Althar starts, its providers other than Zen and Go show a dash too.

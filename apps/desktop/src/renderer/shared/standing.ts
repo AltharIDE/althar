@@ -271,11 +271,13 @@ export const readyWordOf = (
     readonly handedBack?: string | null | undefined
     readonly conflictUnsent?: string | null | undefined
     readonly unshipped?: unknown
+    readonly nothingBuilt?: boolean | undefined
   },
   latest: ChangeSummary | null,
 ): string => {
   const change = task.unshipped == null || latest?.state === 'open' ? latest : null
   if (task.handedBack != null || task.conflictUnsent != null) return readyText.mergeConflict
+  if (task.nothingBuilt === true) return kindWords.nothingBuilt
   if (change === null && task.unshipped != null) return kindWords.unshipped
   if (change?.state === 'open' && isBlocked(standingOf(change))) return readyText.blocked
   if (change?.state === 'open' && pushResolves(standingOf(change))) return readyText.readyOnPush

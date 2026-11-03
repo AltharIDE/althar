@@ -2,8 +2,9 @@ import { execFile } from 'node:child_process'
 
 import type { PathStep, TokenLocation } from './credentialStore'
 import { childEnvironment } from './process'
+import { ASKED_AGAIN } from './signIn'
 import type { AgentDefinition, AgentId } from './registry'
-import { isoSeconds, record, Unrecognized, type UsageWindow, windowKind } from './usage'
+import { isoSeconds, record, Unrecognized, type UsageRead, type UsageWindow, windowKind } from './usage'
 
 /*
  * Where each (agent, provider) pair's plan usage comes from
@@ -18,7 +19,7 @@ import { isoSeconds, record, Unrecognized, type UsageWindow, windowKind } from '
 export type PlainSource =
   | { readonly kind: 'acp' }
   | { readonly kind: 'acp_extension'; readonly via: string }
-  | { readonly kind: 'agent'; readonly channel: 'codex-app-server' }
+  | { readonly kind: 'agent'; readonly channel: 'codex-app-server' | 'opencode-usage-limits' }
 
 /** Where a usage read takes the account's token from. */
 export type TokenSource =
@@ -322,10 +323,14 @@ export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
   },
   {
     agent: 'opencode',
-    provider: 'opencode',
+    provider: 'opencode-go',
     pays: 'plan',
     classification: 'auth_list',
-    sources: [none('OpenCode Go’s usage needs its key from OpenCode’s own database, which Althar doesn’t open.')],
+    // OpenCode's own server reads Go's limits through the account's OpenCode Console sign-in; without one, Go is connected but unread.
+    sources: [
+      { kind: 'agent', channel: 'opencode-usage-limits' },
+      none('OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.'),
+    ],
   },
   {
     agent: 'opencode',
@@ -428,11 +433,29 @@ export interface OpenCodeCredential {
 }
 
 /**
+ * How an OpenCode sign-in is paid for, by its provider and method. OpenCode Go
+ * is a subscription with limits, though its sign-in is a key; OpenCode Zen
+ * (`opencode`, listed as OpenCode Console) is credit spent per use, by key or
+ * by Console sign-in. Elsewhere a `key` method is a key and a `chatgpt…` one
+ * is ChatGPT's plan; any other method is unknown until it has been seen.
+ */
+const openCodePays = (provider: string, method: string): OpenCodeCredential['pays'] =>
+  provider === 'opencode-go'
+    ? 'plan'
+    : provider === 'opencode'
+      ? 'key'
+      : method === 'key'
+        ? 'key'
+        : method.startsWith('chatgpt')
+          ? 'plan'
+          : 'unknown'
+
+/**
  * The sign-ins in `opencode auth list --format json`: `[{id, name,
- * connections: [{type, method, label}]}]` (OpenCode 2.0.29, 15 October 2026).
- * A `key` method is a key and a `chatgpt…` one is ChatGPT's plan; any other
- * method is unknown until it has been seen. null where the output is not that
- * shape: on 1.x it is a count only, which cannot say which provider.
+ * connections: [{type, method, label, status?}]}]` (OpenCode 2.0.29, 15
+ * October 2026; 2.2.5, 3 November 2026), each paid as `openCodePays` says.
+ * null where the output is not that shape: on 1.x it is a count only, which
+ * cannot say which provider.
  */
 export const openCodeCredentials = (output: string): ReadonlyArray<OpenCodeCredential> | null => {
   let parsed: unknown
@@ -448,16 +471,32 @@ export const openCodeCredentials = (output: string): ReadonlyArray<OpenCodeCrede
     if (provider === null || typeof provider.id !== 'string' || !Array.isArray(provider.connections)) return null
     for (const connection of provider.connections) {
       const method = typeof record(connection)?.method === 'string' ? String(record(connection)?.method).toLowerCase() : ''
-      found.push({ provider: provider.id, pays: method === 'key' ? 'key' : method.startsWith('chatgpt') ? 'plan' : 'unknown' })
+      found.push({ provider: provider.id, pays: openCodePays(provider.id, method) })
     }
   }
   return found
 }
 
-/** The providers `opencode auth list --format json` lists with a connection, as it names them (`OpenCode Go`); none for another shape. */
+/** OpenCode's providers the person knows by another name than its listing's: Zen, which 2.x lists as OpenCode Console. */
+const OPENCODE_NAMES: Readonly<Record<string, string>> = { opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }
+
+/** A provider of OpenCode's as the person knows it, where Althar names it: one no longer listed keeps its name. */
+export const openCodeProviderName = (id: string): string | undefined => OPENCODE_NAMES[id]
+
+/**
+ * The providers `opencode auth list --format json` lists with a connection, as the person knows them (`OpenCode Go`,
+ * `OpenCode Zen`), and how each is paid where that is known; none for another shape. One every connection of which
+ * OpenCode says needs signing in again (2.2.5's `status: { status: 'needs_auth' }`) says so.
+ */
 export const openCodeProviders = (
   output: string,
-): ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }> => {
+): ReadonlyArray<{
+  readonly id: string
+  readonly name: string
+  readonly connections: string
+  readonly pays?: 'plan' | 'key'
+  readonly needsSignIn?: true
+}> => {
   const first = output.indexOf('[')
   const last = output.lastIndexOf(']')
   if (first < 0 || last <= first) return []
@@ -478,11 +517,16 @@ export const openCodeProviders = (
         return typeof id === 'string' ? id : ''
       })
       .sort()
+    const method = record(provider.connections[0])?.method
+    const pays = openCodePays(provider.id, typeof method === 'string' ? method.toLowerCase() : '')
+    const needsSignIn = provider.connections.every((one) => record(record(one)?.status)?.status === 'needs_auth')
     return [
       {
         id: provider.id,
-        name: typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id,
+        name: OPENCODE_NAMES[provider.id] ?? (typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id),
         connections: connections.join(','),
+        ...(pays === 'unknown' ? {} : { pays }),
+        ...(needsSignIn ? { needsSignIn: true as const } : {}),
       },
     ]
   })
@@ -543,20 +587,110 @@ export const readOpenCodeCredentials = (
     const inherited = { ...childEnvironment(spec), ...options.home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
     const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
-    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
-      if (error !== null) {
-        // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
-        const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
-        return resolve({
-          kind: 'failed',
-          message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
-        })
-      }
-      const found = openCodeCredentials(stdout)
-      resolve(
-        found === null
-          ? { kind: 'failed', message: `${agent.name} listed its sign-ins in a form Althar does not know.` }
-          : { kind: 'credentials', credentials: found },
-      )
-    })
+    const ask = (tries: number) =>
+      execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
+        if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
+        if (error !== null) {
+          // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
+          const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
+          return resolve({
+            kind: 'failed',
+            message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+          })
+        }
+        const found = openCodeCredentials(stdout)
+        resolve(
+          found === null
+            ? { kind: 'failed', message: `${agent.name} listed its sign-ins in a form Althar does not know.` }
+            : { kind: 'credentials', credentials: found },
+        )
+      })
+    ask(ASKED_AGAIN)
+  })
+
+/* OpenCode Go: its limits, as OpenCode's own server reads them (`opencode api --standalone experimental.usage.limits`). */
+
+/** OpenCode Go's plan, as Plan usage names it. */
+export const OPENCODE_GO = 'OpenCode Go'
+
+/** One of Go's windows: `{status: 'ok' | 'rate-limited', percent, resetsAt}`, the reset in epoch ms (or ISO). Rate-limited is out. */
+const goWindow = (raw: unknown, kind: UsageWindow['kind'], minutes?: number): UsageWindow | null => {
+  if (raw === null || raw === undefined) return null
+  const window = record(raw)
+  const used = numberOf(window?.percent)
+  if (window === null || used === undefined) throw new Unrecognized('a window without a use')
+  const limited = window.status === 'rate-limited' || window.limited === true
+  const resetsAt = isoTime(window.resetsAt)
+  return {
+    kind,
+    ...(minutes === undefined ? {} : { minutes }),
+    usedPercent: limited ? 100 : percent(used),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  }
+}
+
+/**
+ * OpenCode Go's windows from its server's usage limits: `{data: {go?: {rolling, weekly, monthly}}}` (2.2.5, 3 November
+ * 2026), the rolling one five hours, as OpenCode's docs for Go name it (opencode.ai/docs/go). `data: null` is no OpenCode Console sign-in, and no `go` a workspace without Go: no
+ * reading either way, said `none`. Anything else is not an answer Althar knows.
+ */
+export const openCodeGoUsage = (output: string, now: Date): UsageRead => {
+  let parsed: unknown
+  try {
+    const first = output.indexOf('{')
+    parsed = JSON.parse(first < 0 ? output : output.slice(first))
+  } catch {
+    return { kind: 'failed', message: 'OpenCode answered its usage limits in a form Althar does not know.' }
+  }
+  const body = record(parsed)
+  if (body === null || !('data' in body))
+    return { kind: 'failed', message: 'OpenCode answered its usage limits in a form Althar does not know.' }
+  const go = record(record(body.data)?.go)
+  if (go === null) return { kind: 'none' }
+  try {
+    const windows = [goWindow(go.rolling, 'five_hour', 5 * 60), goWindow(go.weekly, 'weekly'), goWindow(go.monthly, 'monthly')].filter(
+      (window): window is UsageWindow => window !== null,
+    )
+    if (windows.length === 0) return { kind: 'none' }
+    return { kind: 'usage', usage: { source: 'agent', plan: OPENCODE_GO, windows, observedAt: now.toISOString() } }
+  } catch (error) {
+    if (error instanceof Unrecognized) return { kind: 'failed', message: 'OpenCode answered Go’s usage in a form Althar does not know.' }
+    throw error
+  }
+}
+
+/**
+ * Asks OpenCode's own server for an account's OpenCode Go limits, in the account's home. It reads the answer; the
+ * sign-in it is read with stays OpenCode's. A command that fails is a fault, in its own last words.
+ */
+export const readOpenCodeGoUsage = (
+  agent: AgentDefinition,
+  options: {
+    readonly node?: string
+    readonly home?: Readonly<Record<string, string>>
+    readonly timeout?: number
+    /** The runtime's clock, which the reading is dated by. */
+    readonly now: () => Date
+  },
+): Promise<UsageRead> =>
+  new Promise((resolve) => {
+    const limits = agent.usageLimits
+    if (limits === undefined) return resolve({ kind: 'none' })
+    const spec = limits(options.node ?? process.execPath)
+    const inherited = { ...childEnvironment(spec), ...options.home }
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
+    const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
+    const ask = (tries: number) =>
+      execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 20_000, env }, (error, stdout, stderr) => {
+        if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
+        if (error !== null) {
+          const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
+          return resolve({
+            kind: 'failed',
+            message: `OpenCode couldn’t read Go’s usage${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+          })
+        }
+        resolve(openCodeGoUsage(String(stdout), options.now()))
+      })
+    ask(ASKED_AGAIN)
   })

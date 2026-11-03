@@ -468,3 +468,41 @@ it.effect('caps streamed downloads even without content-length and preserves bin
     assert.deepEqual([...(yield* binary.bytes('https://api.test/file', 4))], [0, 255, 80])
   }),
 )
+
+describe('what a service lets an account ask of it', () => {
+  const answers = (request: { readonly headers: Readonly<Record<string, string>> }) =>
+    request.headers['if-none-match'] === '"v1"'
+      ? { status: 304 }
+      : {
+          json: { name: 'a' },
+          headers: { etag: '"v1"', 'ratelimit-limit': '2000', 'ratelimit-remaining': '1500', 'ratelimit-reset': '600' },
+        }
+
+  it.effect('counts what the service counts: a 304 is free where the service does not count one, and counted where it does', () =>
+    Effect.gen(function* () {
+      for (const free of [true, false]) {
+        const { fetch } = stubFetch([['GET', 'https://api.test/thing', answers]])
+        const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t'), freeWhenUnchanged: free })
+        yield* http.cached(Thing, 'https://api.test/thing')
+        yield* http.cached(Thing, 'https://api.test/thing')
+        yield* http.cached(Thing, 'https://api.test/thing')
+        assert.strictEqual(http.allowance().counted, free ? 1 : 3)
+      }
+    }),
+  )
+
+  it.effect('reads the allowance from either name services use, and keeps it through an answer that says nothing', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([['GET', 'https://api.test/thing', answers]])
+      const http = makeHttp({ product: 'gitlab', fetch, authorization: Effect.succeed('Bearer t') })
+      assert.deepStrictEqual(http.allowance(), { counted: 0 })
+      yield* http.cached(Thing, 'https://api.test/thing')
+      const allowance = http.allowance()
+      assert.deepStrictEqual([allowance.limit, allowance.remaining], [2000, 1500])
+      assert.isString(allowance.resetAt)
+      // A 304 without the headers keeps what was last said.
+      yield* http.cached(Thing, 'https://api.test/thing')
+      assert.deepStrictEqual([http.allowance().limit, http.allowance().remaining, http.allowance().counted], [2000, 1500, 2])
+    }),
+  )
+})

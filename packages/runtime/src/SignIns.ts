@@ -64,7 +64,10 @@ export class SignIns extends Context.Service<
     providers(
       account: Account,
       check: SignInCheck,
-    ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null }> | undefined>
+    ): Effect.Effect<
+      | ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null; readonly pays?: 'plan' | 'key' }>
+      | undefined
+    >
     /** Each agent as it is found signed in, or signed in, from now on. */
     readonly signedIn: Stream.Stream<SignedIn>
   }
@@ -110,6 +113,8 @@ export class SignIns extends Context.Service<
         })
       /** What an account's sign-in looked like when a refusal was first seen in Settings: another since means it was put right. */
       const refusals = new Map<string, { readonly at: string; readonly connections: string }>()
+      /** Since when the agent itself has said a provider's sign-in must be done again (OpenCode's `needs_auth`). */
+      const needing = new Map<string, string>()
       const providers = (of: Account, check: SignInCheck) =>
         Effect.gen(function* () {
           const spec = agents.list.find((candidate) => candidate.definition.id === of.agentId)?.definition.signIn.providers
@@ -138,10 +143,35 @@ export class SignIns extends Context.Service<
             }
             return seen.connections === connections ? at : null
           }
-          const rows = listed.map((each) => ({ id: each.id, name: each.name, refusedAt: refusedAt(each.id) }))
-          // One refused whose sign-in is gone from the listing is still one to sign in to.
+          // One the agent itself says needs signing in again counts as refused, from when it first said so, until it doesn't.
+          const now = new Date(yield* Clock.currentTimeMillis).toISOString()
+          const needs = (id: string, says: boolean): string | null => {
+            const key = `${of.id}\u0000${id}`
+            if (!says) {
+              needing.delete(key)
+              return null
+            }
+            const since = needing.get(key) ?? now
+            needing.set(key, since)
+            return since
+          }
+          const rows = listed.map((each) => {
+            const needed = needs(each.id, each.needsSignIn === true)
+            return {
+              id: each.id,
+              name: each.name,
+              refusedAt: refusedAt(each.id) ?? needed,
+              ...(each.pays === undefined ? {} : { pays: each.pays }),
+            }
+          })
+          // One refused whose sign-in is gone from the listing is still one to sign in to, by the name the person knows.
           const gone = [...latest.keys()].filter((id) => !listed.some((each) => each.id === id))
-          return [...rows, ...gone.flatMap((id) => (refusedAt(id) === null ? [] : [{ id, name: id, refusedAt: latest.get(id) ?? null }]))]
+          return [
+            ...rows,
+            ...gone.flatMap((id) =>
+              refusedAt(id) === null ? [] : [{ id, name: spec.name?.(id) ?? id, refusedAt: latest.get(id) ?? null }],
+            ),
+          ]
         })
       /** Each of the agent's accounts, checked; none where its accounts can't be read. */
       const checks = (agentId: string, recheck = false) =>

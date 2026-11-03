@@ -3020,16 +3020,20 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     expect(await screen.findByText('Added the retry, and a test.')).toBeTruthy()
-    expect(screen.queryByText('checkout.ts')).toBeNull()
+    expect(screen.queryByText('Edit checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked/ })).toBeTruthy()
     expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
     // The reviewer: its verdict in a sentence, each finding how much it matters, where, and what; then what it said.
     expect(screen.getByText('Needs changes: 3 findings.')).toBeTruthy()
     expect(screen.getByText('The retry never stops.')).toBeTruthy()
-    expect(screen.getByText('src/checkout.ts:12')).toBeTruthy()
+    expect(screen.getByTitle('src/checkout.ts:12').textContent).toBe('checkout.ts:12')
     expect(screen.getByText('README.md')).toBeTruthy()
     expect(screen.getByText('One thing to fix.')).toBeTruthy()
     expect(screen.getByText('Looks good to me.')).toBeTruthy()
+    // A finding opens in the code, where it is now.
+    await userEvent.click(screen.getByRole('button', { name: /The retry never stops\./ }))
+    expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
+    expect(client.getTaskFindings).toHaveBeenCalledWith('t1', expect.any(String))
   })
 
   it('shows earlier items when asked', async () => {

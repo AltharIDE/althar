@@ -1074,6 +1074,15 @@ describe('finished tasks’ folders, through the API', () => {
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
         yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
+        const before = yield* client.GetSettings({})
+        assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3 })
+        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2 })
+        yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
+        const after = yield* client.GetSettings({})
+        assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2 })
+        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
@@ -1882,7 +1891,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Retry',
-          description: '[lead:finish]',
+          description: '[lead:commit] [lead:make-change] [lead:finish]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
         const both = yield* until(
@@ -1906,7 +1915,7 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Retry', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })

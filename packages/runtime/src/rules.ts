@@ -1,6 +1,6 @@
-import { readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { posix, win32 } from 'node:path'
+import { dirname, join, posix, resolve, win32 } from 'node:path'
 
 import { type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
 
@@ -196,6 +196,21 @@ export interface RuleContext {
   readonly home?: string
   /** The project's rules; the MVP's without them. */
   readonly project?: ProjectRuleSet
+  /**
+   * Whether the agent's git runs Althar's guard (pushGuard.ts), which stops a
+   * push to the default branch, a force push and deleting another branch
+   * whatever runs it: a project that never allows only these needn't refuse
+   * what the rules can't read.
+   */
+  readonly guarded?: boolean
+  /**
+   * The folder the agent's shell is in now, where its own record says (a
+   * Claude Code session's transcript): a line is read from there, not from
+   * the worktree's top, which is only a guess where the shell may be.
+   */
+  readonly shell?: string
+  /** A repository's stash entries' messages, `stash@{0}` first: git's own record unless a test gives one. */
+  readonly stashes?: (folder: string) => ReadonlyArray<string>
 }
 
 /** How the system an agent works on reads a path: its path functions, and the person's home folder. */
@@ -237,10 +252,30 @@ const ask = (reason: string, held: boolean): Verdict => ({ verdict: 'ask', reaso
 const CREDENTIALS_REFUSED =
   "Agents don't read the person's credentials or the keychain. Althar reaches the code host for the task; tell the person what's needed."
 
+/**
+ * What of `security` reads no secret, and changes nothing: the identities a
+ * build signs with (`find-identity`), certificates, which are public, which
+ * keychains there are, and decoding a signed file (`cms -D`, a provisioning
+ * profile). Any other subcommand, or any word before it, may read a password
+ * or a key, or change the keychain.
+ */
+const SECURITY_LOOKS = /^(find-identity|find-certificate|list-keychains|show-keychain-info|verify-cert|cms|error|help)$/
+
+/** Whether `security`'s words only look: a subcommand that reads no secret, and none of its options that set or sign. */
+const securityLooks = (args: ReadonlyArray<string>): boolean => {
+  const [subcommand = '', ...rest] = args
+  if (!SECURITY_LOOKS.test(subcommand)) return false
+  // `list-keychains -s` sets the search list; `cms -S` signs with a key from the keychain.
+  if (subcommand === 'list-keychains') return !rest.some((arg) => /^-[a-z]*s/.test(arg))
+  if (subcommand === 'cms') return !rest.some((arg) => /^-[a-zA-Z]*S/.test(arg))
+  return true
+}
+
 /** Why an agent may not run a command that reads credentials: the keychain's `security`, or git's credential helpers. */
 const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
-  if (program === 'security' || program.startsWith('git-credential')) return CREDENTIALS_REFUSED
+  if (program === 'security') return securityLooks(words.slice(1)) ? undefined : CREDENTIALS_REFUSED
+  if (program.startsWith('git-credential')) return CREDENTIALS_REFUSED
   if (program !== 'git') return undefined
   // Git's own options before its command, and their values: `git -C dir -c k=v credential fill`.
   let index = 1
@@ -383,6 +418,16 @@ const secretReason = (request: PermissionRequest, cwd?: string, system: System =
     ? SECRETS_REFUSED
     : undefined
 }
+
+/**
+ * Why a request reads a secret, its paths read from the worktree's top and
+ * from where the agent says its shell is, either of which may be where it
+ * runs: a false or stale record of the shell can't hide a key it reads.
+ */
+const secretOf = (request: PermissionRequest, context: RuleContext, system: System): string | undefined =>
+  [context.worktree, ...(context.shell === undefined ? [] : [context.shell])]
+    .map((cwd) => secretReason(request, cwd, system))
+    .find((reason) => reason !== undefined)
 
 /** A `.env` file, which holds a project's secrets; not one that only shows what goes in it (`.env.example`). */
 const envFile = (path: string) => {
@@ -765,12 +810,14 @@ const redirectsLast = (words: ReadonlyArray<string>, operators: ReadonlySet<numb
 /**
  * Whether the expansion at a `$` can set a variable or work out arithmetic,
  * which can: `$[…]`, `${…}` beyond a plain name (`${X:=.}`, `${a[X=1]}`,
- * zsh's `${(e)X}`), or zsh's subscript `$a[…]`. `$X` and `${X}` only read.
+ * zsh's `${(e)X}`), or zsh's subscript `$a[…]`. `$X`, `${X}`, and `${X:-word}`
+ * or `${X:+word}` with a word of no expansion of its own, only read.
  */
 const evaluates = (text: string, at: number) => {
   const rest = text.slice(at + 1)
   if (rest.startsWith('[')) return true
-  if (rest.startsWith('{')) return !/^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(rest)
+  // A name, or one with a default or an alternative of plain words (`${X:-none}`, `${X:+set}`), only reads: `:=` sets it.
+  if (rest.startsWith('{')) return !/^\{[A-Za-z_][A-Za-z0-9_]*(:?[-+][^$`{}()\\]*)?\}/.test(rest)
   return /^[#=~^+]*[A-Za-z_][A-Za-z0-9_]*\[/.test(rest)
 }
 
@@ -2004,6 +2051,58 @@ const DEPLOYERS: Readonly<Record<string, RegExp>> = {
   poetry: /^publish$/,
 }
 
+/**
+ * What a deploy tool does that can't be undone, by its subcommand: tearing
+ * down what it deployed, deleting it, or publishing a package, whose version
+ * a registry never takes again.
+ */
+const DESTROYERS: Readonly<Record<string, RegExp>> = {
+  cdk: /^destroy$/,
+  terraform: /^destroy$/,
+  tofu: /^destroy$/,
+  pulumi: /^destroy$/,
+  kubectl: /^delete$/,
+  helm: /^(uninstall|delete|del)$/,
+  wrangler: /^delete$/,
+  vercel: /^(remove|rm)$/,
+  netlify: /^sites:delete$/,
+  flyctl: /^destroy$/,
+  fly: /^destroy$/,
+  npm: /^publish$/,
+  bun: /^publish$/,
+  pnpm: /^publish$/,
+  yarn: /^publish$/,
+  cargo: /^publish$/,
+  gem: /^(publish|push)$/,
+  twine: /^upload$/,
+  poetry: /^publish$/,
+}
+
+/** What a dry-run flag may say and still only try: kubectl's `client` and `server`, a boolean's yes. */
+const DRY_RUN_VALUES = /^(client|server|true|1|yes)$/i
+
+/** Whether the words ask for a dry run: the bare flag, or one set to a value that only tries (`--dry-run=client`, `--dry-run server`), not `none` or `false`. */
+const dryRun = (words: ReadonlyArray<string>): boolean =>
+  words.some((word, index) => {
+    const flag = /^--?dry-?run(?:=(.*))?$/.exec(word)
+    if (flag === null) return false
+    if (flag[1] !== undefined) return DRY_RUN_VALUES.test(flag[1])
+    const next = words[index + 1] ?? ''
+    return !/^(none|false|0|no)$/i.test(next)
+  })
+
+/** Whether a command tears down, deletes or publishes, as its program and subcommand say: not a dry run, which does neither. */
+const destroys = (words: ReadonlyArray<string>): boolean => {
+  const [first = '', ...rest] = words
+  const program = first.slice(first.lastIndexOf('/') + 1)
+  if (dryRun(rest)) return false
+  const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
+  if (DESTROYERS[program]?.test(sub) === true) return true
+  // `terraform apply -destroy`, `fly apps destroy`.
+  if ((program === 'terraform' || program === 'tofu') && sub === 'apply' && rest.includes('-destroy')) return true
+  return (program === 'fly' || program === 'flyctl') && sub === 'apps' && next === 'destroy'
+}
+
 /** Task runners whose targets name what they do: `make deploy`, `just publish-docs`. */
 const RUNNERS = ['make', 'just', 'task', 'rake', 'mage']
 
@@ -2310,20 +2409,25 @@ const flagValue = (args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>)
 const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
   const others = (branches: ReadonlyArray<string | undefined>) =>
     branches.filter((branch): branch is string => branch !== undefined && branch !== '' && branch !== context.taskBranch)
-  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>) =>
+  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>, floor: Floor | 'none' = 'irreversible') =>
     others(branches)
       .slice(0, 1)
       .map((branch) =>
         kept(
           `${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`,
           'delete-branch',
-          'irreversible',
+          floor === 'none' ? undefined : floor,
         ),
       )
   const named = git.args.filter((arg) => !arg.startsWith('-'))
   switch (git.subcommand) {
     case 'branch': {
-      if (hasFlag(git.args, '-d', '-D', '--delete')) return branchKept('Deleting the branch', named)
+      // Git refuses `-d` for a branch whose work isn't merged: only a forced deletion can lose commits.
+      if (hasFlag(git.args, '-D') || (hasFlag(git.args, '-d', '--delete') && hasFlag(git.args, '-f', '--force')))
+        return branchKept('Deleting the branch', named)
+      // So it doesn't ask, but a project that never allows deleting branches still refuses it.
+      if (hasFlag(git.args, '-d', '--delete'))
+        return (context.project ?? MVP_RULES).never.includes('delete-branch') ? branchKept('Deleting the branch', named, 'none') : []
       const renames = hasFlag(git.args, '-m', '-M', '--move')
       const copies = hasFlag(git.args, '-c', '-C', '--copy')
       const forced = hasFlag(git.args, '-f', '--force', '-M', '-C')
@@ -2348,9 +2452,8 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
     case 'stash': {
       // Every checkout shares the stash, and an entry may be the person's or another task's: `stash@{0}` is whoever stashed last.
       const how = { clear: "Clearing git's stash", drop: 'Dropping a stash entry', pop: 'Popping a stash entry' }[git.args[0] ?? '']
-      return how === undefined
-        ? []
-        : [kept(`${how} always asks: every checkout of the repository shares the stash, the person's too.`, 'outside', 'floor')]
+      if (how === undefined || ownStash(git, context)) return []
+      return [kept(`${how} always asks: every checkout of the repository shares the stash, the person's too.`, 'outside', 'floor')]
     }
     case 'reflog':
     case 'gc':
@@ -2372,6 +2475,48 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
     default:
       return []
   }
+}
+
+/**
+ * A repository's stash entries' messages, `stash@{0}` first, from git's own
+ * record of them (the stash's reflog in the git folder its worktrees share);
+ * none where it can't be read.
+ */
+const stashesOf = (folder: string): ReadonlyArray<string> => {
+  try {
+    let at = folder
+    while (!existsSync(join(at, '.git'))) {
+      if (dirname(at) === at) return []
+      at = dirname(at)
+    }
+    const dotGit = join(at, '.git')
+    const linked = statSync(dotGit).isFile() ? /^gitdir: (.*)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim() : undefined
+    const own = linked === undefined ? dotGit : resolve(at, linked)
+    const common = existsSync(join(own, 'commondir')) ? resolve(own, readFileSync(join(own, 'commondir'), 'utf8').trim()) : own
+    return readFileSync(join(common, 'logs', 'refs', 'stash'), 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => line.slice(line.indexOf('\t') + 1))
+      .reverse()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Whether a `git stash pop` or `drop` takes an entry the task made itself:
+ * one stashed on its branch, as git names it in the entry (`On
+ * althar/retry: wip`), found by its place (`stash@{2}`, `2`, or the newest
+ * where none is named). Clearing the stash takes every entry, so never.
+ */
+const ownStash = (git: GitCall, context: RuleContext): boolean => {
+  if (context.taskBranch === undefined || git.args[0] === 'clear') return false
+  const named = git.args.slice(1).filter((arg) => !arg.startsWith('-'))
+  if (named.length > 1) return false
+  const place = /^(?:stash@\{(\d+)\}|(\d+))$/.exec(named[0] ?? 'stash@{0}')
+  if (place === null) return false
+  const message = (context.stashes ?? stashesOf)(git.cwd)[Number(place[1] ?? place[2])]
+  return message !== undefined && (message.startsWith(`On ${context.taskBranch}: `) || message.startsWith(`WIP on ${context.taskBranch}: `))
 }
 
 /** What `git checkout` may take that changes no file, beside the branch it switches to and the name `-b`, `-B` or `--orphan` makes. */
@@ -2438,30 +2583,47 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
   const following = followingOf(where, context)
+  const { start, known } = shellOf(where, context)
   for (const line of lines)
-    walkFolders(line, context.worktree, following, (written, folders) => {
-      const kinds: Array<Kept> = []
-      const redirected: Array<Kept> = []
-      const unseenKinds: Array<Kept> = []
-      for (const { at = context.worktree, blind: unseen, guessed } of folders)
-        for (const words of readings(written)) {
-          const found = kindsOf(words, at, where, context, guessed === true)
-          // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
-          const anywhere = unseen ? kindsOf(words, context.worktree, where, context).kinds.map((one) => JSON.stringify(one)) : []
-          const read = unseen
-            ? found.kinds.map((one) => (anywhere.includes(JSON.stringify(one)) ? one : { ...one, blind: true }))
-            : found.kinds
-          kinds.push(...read.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-          redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-          if (unseen) unseenKinds.push(...found.kinds)
-        }
-      const blind = floorOf(unseenKinds)
-      if (blind !== undefined)
-        kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', blind))
-      each.push({ words: written, kinds, redirected })
-    })
+    walkFolders(
+      line,
+      start,
+      following,
+      (written, folders) => {
+        const kinds: Array<Kept> = []
+        const redirected: Array<Kept> = []
+        const unseenKinds: Array<Kept> = []
+        for (const { at = start, blind: unseen, guessed } of folders)
+          for (const words of readings(written)) {
+            const found = kindsOf(words, at, where, context, guessed === true)
+            // Blind only where it is the folder that makes it so: `rm -rf ~/Documents` is that from anywhere.
+            const anywhere = unseen ? kindsOf(words, start, where, context).kinds.map((one) => JSON.stringify(one)) : []
+            const read = unseen
+              ? found.kinds.map((one) => (anywhere.includes(JSON.stringify(one)) ? one : { ...one, blind: true }))
+              : found.kinds
+            kinds.push(...read.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+            redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+            if (unseen) unseenKinds.push(...found.kinds)
+          }
+        const blind = floorOf(unseenKinds)
+        if (blind !== undefined)
+          kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', blind))
+        each.push({ words: written, kinds, redirected })
+      },
+      known,
+    )
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
+
+/**
+ * Where a line starts: the folder the agent's shell is in, where its own
+ * record says and it is the task's or a temp folder, else the worktree's
+ * top, which is only a guess (`Folder`'s `guessed`).
+ */
+const shellOf = (where: Places, context: RuleContext): { readonly start: string; readonly known: boolean } =>
+  context.shell !== undefined && !outside(where, where.real(context.shell))
+    ? { start: where.real(context.shell), known: true }
+    : { start: context.worktree, known: false }
 
 /** How to follow a line's `cd`s from the task's worktree. */
 const followingOf = (where: Places, context: RuleContext): Following => ({
@@ -2524,10 +2686,12 @@ const walkFolders = (
   start: string | undefined,
   following: Following,
   visit: (written: ReadonlyArray<string>, folders: ReadonlyArray<Folder>) => void,
+  /** Whether `start` is where the shell is, as its agent says, rather than a guess. */
+  known = false,
 ): ReadonlyArray<Folder> => {
   const unknown: Folder = { at: following.unknown, blind: true }
   // Where the command before succeeded and where it failed, which `&&` and `||` pick between.
-  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false, guessed: true }]
+  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false, guessed: !known }]
   let failed: ReadonlyArray<Folder> = []
   // Every folder the line has been in, where `cd -` and `popd` go back to.
   let seen: ReadonlyArray<Folder> = ok
@@ -2618,7 +2782,15 @@ const kindsOf = (
     }
     return { kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) }
   }
-  if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
+  if (commandsIn(words).some(destroys))
+    kinds.push(
+      kept(
+        'Tearing down, deleting or publishing always asks: once it is gone or published, it can’t be taken back.',
+        'deploy',
+        'irreversible',
+      ),
+    )
+  else if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
   if (words[0] === 'cd') return done(locate(where, cwd, cdTarget(words) ?? '~'))
   const git = gitCall(words, cwd, where.system.paths)
   if (git !== undefined) {
@@ -3022,7 +3194,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
-  const secret = secretReason(request, context.worktree, system)
+  const secret = secretOf(request, context, system)
   if (secret !== undefined) return { verdict: 'deny', reason: secret }
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const found = keptOf(request, context)
@@ -3031,8 +3203,11 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
   const unclear = found.find((each) => each.rule === 'unclear')
   if (project.mode === 'allow') {
-    // With no one to ask, what the rules can't read can't be let past what is never allowed.
-    const neverAny = project.never.length > 0 || project.commands.some((rule) => rule.decision === 'never')
+    // With no one to ask, what the rules can't read can't be let past what is never allowed: but for what git's guard stops
+    // whatever runs it, where it holds (an automation's run never pushes to the default branch).
+    const neverAny =
+      project.never.some((rule) => context.guarded !== true || !GUARDED.includes(rule)) ||
+      project.commands.some((rule) => rule.decision === 'never')
     if (unclear !== undefined && neverAny)
       return {
         verdict: 'deny',
@@ -3174,26 +3349,12 @@ const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
  * language (`python3 - <<'EOF'`, `node fix.js`, `bun -e '…'`, `bunx tsx
  * fix.ts`), a shell given a file or its input, a program run from a file
  * (`./fix.sh`, `/tmp/fix.sh`) rather than one installed, or what the rules
- * themselves can't tell. What the project runs outside from the start
- * (`known`, by how it starts: `node scripts/e2e.ts`, `env -i`) isn't among
- * them: it runs outside unread whether the agent asks or not, and a line of
- * nothing else has nothing left to read.
+ * themselves can't tell.
  */
-const unreadOf = (command: string, kinds: ReadonlyArray<Kept>, known: ReadonlyArray<string> = []): string | undefined => {
+const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
   const parsed = parseCommandLine(command)
   if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
-  // Word by word, as the shell splits them: `node 'scripts/e2e.ts other.js'` runs another file than `node scripts/e2e.ts`.
-  const starts = known.flatMap((start) => {
-    const { opaque, commands } = parseCommandLine(start)
-    return !opaque && commands.length === 1 && commands[0]!.length > 0 ? [commands[0]!] : []
-  })
-  const isKnown = (words: ReadonlyArray<string>) => {
-    const own = words.slice(words.findIndex((word) => !assignment.test(word)))
-    return starts.some((start) => start.every((word, at) => own[at] === word))
-  }
-  if (parsed.commands.length > 0 && parsed.commands.every(isKnown)) return undefined
   for (const words of parsed.commands) {
-    if (isKnown(words)) continue
     const start = words.findIndex((word) => !assignment.test(word))
     const wrapped = PACKAGE_RUNNERS.test((words[start] ?? '').slice((words[start] ?? '').lastIndexOf('/') + 1))
     const at = wrapped ? words.findIndex((word, index) => index > start && !word.startsWith('-')) : start
@@ -3220,33 +3381,14 @@ const unreadOf = (command: string, kinds: ReadonlyArray<Kept>, known: ReadonlyAr
  * The kinds the boundary itself stops, whatever a command hides: the
  * sandbox a write outside the task's worktree, git's guard a push to the
  * default branch, a force push and deleting another branch (pushGuard.ts).
- * A project that never allows only these needn't read what runs inside.
+ * The guard lets a branch go, or move, where none of its commits is lost:
+ * what can't be undone is stopped, and what a readable line does still meets
+ * the Never. A project that never allows only these needn't read what runs inside.
  */
 const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-push', 'delete-branch']
 
-/**
- * Decides a shell command that leaves the sandbox its session has (ADR-071):
- * as the rules decide any request, but with everything allowed, what they
- * can't read is refused, with how to run it, rather than let through. Outside
- * the sandbox nothing would stop a script changing the person's checkout or
- * another branch, and inside it, it runs without asking. What the project
- * runs outside from the start (`outside`, the hold's), its tests and its
- * build, goes as it said, asked to or not: inside, Electron or a browser it
- * starts can't (Chromium registers a Mach service, which Claude Code's macOS
- * sandbox never allows).
- */
-export const decideLeaving = (request: PermissionRequest, context: RuleContext, outside: ReadonlyArray<string> = []): Verdict => {
-  const verdict = decide(request, context)
-  if (verdict.verdict !== 'allow' || (context.project ?? MVP_RULES).mode !== 'allow') return verdict
-  // Only what the agent asked to run outside: what the project runs outside from the start (its tests, its build) goes as it said.
-  if (request.kind !== 'execute' || field(request.rawInput, 'dangerouslyDisableSandbox') !== true) return verdict
-  const unread = unreadOf(commandOf(request), keptOf(request, context), outside)
-  if (unread === undefined) return verdict
-  return {
-    verdict: 'deny',
-    reason: `${unread} Outside your sandbox nothing would stop it changing another checkout or a branch that isn't the task's, so it's refused. Run it inside your sandbox, where it runs without asking; or, if it has to run outside, as plain commands Althar can read.`,
-  }
-}
+/** What git's guard stops wherever a lead's git runs, inside its sandbox or out, a script's or a loop's (pushGuard.ts). */
+const GUARDED: ReadonlyArray<RuleId> = ['default-branch', 'force-push', 'delete-branch']
 
 /** A git command of a line: what a pass from the person lets past git's guard, and no other (pushGuard.ts). */
 export interface GitRun {
@@ -3258,23 +3400,30 @@ export interface GitRun {
   readonly push?: { readonly remote: string | undefined }
 }
 
-/** The git commands of a line, from the task's worktree, where the agent's shell starts. */
+/** The git commands of a line, from where the agent's shell is, or the task's worktree where that isn't known. */
 export const gitRunsOf = (command: string, context: RuleContext): ReadonlyArray<GitRun> => {
   const where = places(context)
   const runs: Array<GitRun> = []
-  walkFolders(parseCommandLine(command), context.worktree, followingOf(where, context), (written, folders) => {
-    const words = written.filter((word, at) => !written.slice(0, at + 1).every((each) => assignment.test(each)))
-    if (words.length === 0 || words[0]!.slice(words[0]!.lastIndexOf('/') + 1) !== 'git') return
-    // Its redirects, which the parse puts last, are the shell's, not git's.
-    const own = ['git', ...words.slice(1, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0)]
-    const known = folders.length === 1 && folders[0]!.blind !== true ? folders[0]!.at : undefined
-    const call = known === undefined ? undefined : gitCall(own, known, where.system.paths)
-    runs.push({
-      words: own.join(' ').replace(/\s+/g, ' ').trim(),
-      folder: call !== undefined && call.elsewhere.length === 0 ? call.cwd : undefined,
-      ...(call?.subcommand === 'push' ? { push: { remote: pushRemoteOf(call.args) } } : {}),
-    })
-  })
+  const { start, known } = shellOf(where, context)
+  walkFolders(
+    parseCommandLine(command),
+    start,
+    followingOf(where, context),
+    (written, folders) => {
+      const words = written.filter((word, at) => !written.slice(0, at + 1).every((each) => assignment.test(each)))
+      if (words.length === 0 || words[0]!.slice(words[0]!.lastIndexOf('/') + 1) !== 'git') return
+      // Its redirects, which the parse puts last, are the shell's, not git's.
+      const own = ['git', ...words.slice(1, words.findIndex((word, at) => at > 0 && /^(\d*|&)[<>]/.test(word)) >>> 0)]
+      const known = folders.length === 1 && folders[0]!.blind !== true ? folders[0]!.at : undefined
+      const call = known === undefined ? undefined : gitCall(own, known, where.system.paths)
+      runs.push({
+        words: own.join(' ').replace(/\s+/g, ' ').trim(),
+        folder: call !== undefined && call.elsewhere.length === 0 ? call.cwd : undefined,
+        ...(call?.subcommand === 'push' ? { push: { remote: pushRemoteOf(call.args) } } : {}),
+      })
+    },
+    known,
+  )
   return runs
 }
 
@@ -3314,7 +3463,7 @@ export const tallyKindOf = (request: PermissionRequest, context: RuleContext): T
     if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
     if (words.some((each) => hostReason(each) !== undefined)) return 'code-host'
   }
-  if (secretReason(request, context.worktree, system) !== undefined) return 'credentials'
+  if (secretOf(request, context, system) !== undefined) return 'credentials'
   const project = context.project ?? MVP_RULES
   if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
   const found = keptOf(request, context)
@@ -3497,9 +3646,9 @@ interface Flags {
 /**
  * Programs a reader may run. `any` marks those with no flag that writes or
  * runs another program, which may take any flag; the others list theirs. Git,
- * `find`, `sed`, `printf` and `test` are read more closely below.
+ * `find`, `sed`, `awk`, `printf` and `test` are read more closely below.
  */
-const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'env' | 'printf' | 'test'>> = {
+const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'env' | 'printf' | 'test' | 'awk'>> = {
   ls: 'any',
   cat: 'any',
   head: 'any',
@@ -3524,8 +3673,11 @@ const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'e
   nl: 'any',
   true: 'any',
   cd: 'any',
+  seq: 'any',
   test: 'test',
   '[': 'test',
+  '[[': 'test',
+  awk: 'awk',
   rg: {
     short: 'nNiSFwlcoLvHhuUaz0qsx',
     shortWithValue: 'gtTCABmMe',
@@ -3902,6 +4054,38 @@ const printfReason = (args: ReadonlyArray<string>): string | undefined => {
 /** `test` operators that work out their operand as a variable's subscript (`-v`, `-R`) or as arithmetic (zsh's `-t`), which can run a command. */
 const TEST_EVALUATES = new Set(['-v', '-R', '-t'])
 
+/** What `[[` works out as arithmetic besides, which can run a command through a subscript: its numeric comparisons. */
+const DOUBLE_TEST_EVALUATES = new Set([...TEST_EVALUATES, '-eq', '-ne', '-lt', '-le', '-gt', '-ge'])
+
+/**
+ * What in an `awk` program writes or runs a command: `system()`, a pipe to or
+ * from one (`print | "sort"`, `"date" | getline`), `print` or `printf` to a
+ * file, and gawk's `@load` and `@include`. A comparison inside a `print`
+ * (`print ($1 > 2)`) reads as one too, which only refuses more.
+ */
+const AWK_RUNS = /\bsystem\s*\(|\|&|\|\s*getline\b|\bprintf?\b[^;{}\n]*[|>]|@(load|include)\b/
+
+/** `awk`'s flags that only say how it reads: a field separator, a variable set for its program. */
+const AWK_FLAGS = /^(-F.*|-v.*|--)$/
+
+/** Why an `awk` command would write a file or run a command, or nothing where its program only prints what it reads. */
+const awkReason = (args: ReadonlyArray<string>): string | undefined => {
+  let at = 0
+  for (; at < args.length && (args[at] ?? '').startsWith('-'); at += 1) {
+    const flag = args[at] ?? ''
+    if (!AWK_FLAGS.test(flag)) return `\`awk ${flag}\` reads its program from a file or loads more, and this role only reads.`
+    if (flag === '--') {
+      at += 1
+      break
+    }
+    if (flag === '-F' || flag === '-v') at += 1
+  }
+  const program = args[at] ?? ''
+  return AWK_RUNS.test(program.replaceAll('||', ''))
+    ? '`awk` may only print what it reads here: `system()`, a pipe or `print > file` runs a command or writes, and this role only reads.'
+    : undefined
+}
+
 /**
  * Git's options before the subcommand a reader may use: none that set config
  * or run a program. Nor `--git-dir` or `--work-tree`: a repository a pull
@@ -3954,8 +4138,29 @@ const GIT_LIST_FLAGS = new Set([
   '--contains',
   '--merged',
   '--no-merged',
-  'show',
 ])
+
+/** How a listing is laid out, which takes a value: `--format=%(refname:short)`, `--sort -committerdate`. */
+const GIT_LIST_LAYOUT = /^(--format|--sort|--points-at|--column)(=.*)?$/
+
+/**
+ * Whether `git branch`, `tag` or `remote` only lists: every word a flag that
+ * lists, or, for `git branch`, lays out the list, and the values those take.
+ * A trusted reader's `git tag` is read more closely (`gitTagReason`).
+ */
+const onlyLists = (subcommand: string, args: ReadonlyArray<string>): boolean => {
+  const laidOut = subcommand === 'branch'
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    // `show` is a subcommand of `git remote`'s; to `git branch` or `git tag` it is the name of one to make.
+    if (GIT_LIST_FLAGS.has(arg) || (arg === 'show' && subcommand === 'remote')) continue
+    if (!laidOut) return false
+    if (arg === '--no-column' || arg === '-i' || arg === '--ignore-case' || arg === '--omit-empty') continue
+    if (!GIT_LIST_LAYOUT.test(arg)) return false
+    if (!arg.includes('=') && arg !== '--column') index += 1
+  }
+  return true
+}
 
 /**
  * How far a reader is trusted: not at all, as a review's lead; `true`, as the
@@ -4000,7 +4205,7 @@ const gitReason = (words: ReadonlyArray<string>, trusted: Trust): string | undef
   const flag = call.args.find((arg) => GIT_FLAG_WRITES.test(arg))
   if (flag !== undefined) return `\`git ${call.subcommand} ${flag}\` writes a file or runs a program, and this role only reads.`
   if (GIT_LOOKS.has(call.subcommand)) return undefined
-  if (GIT_LISTS.has(call.subcommand) && call.args.every((arg) => GIT_LIST_FLAGS.has(arg))) return undefined
+  if (GIT_LISTS.has(call.subcommand) && onlyLists(call.subcommand, call.args)) return undefined
   if (trusted && call.subcommand === 'tag') return gitTagReason(call.args)
   // Its sandbox keeps a fetch in its copy, from the mirror, whatever runs it: so it may fetch in a loop, as it may on a line of its own.
   if (trusted === 'contained' && call.subcommand === 'fetch') return gitFetchReason(call.args)
@@ -4556,8 +4761,10 @@ const readerWordsReason = (words: ReadonlyArray<string>, trusted: Trust = false)
         return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
       case 'printf':
         return printfReason(args)
+      case 'awk':
+        return awkReason(args)
       case 'test': {
-        const operator = args.find((arg) => TEST_EVALUATES.has(arg))
+        const operator = args.find((arg) => (program === '[[' ? DOUBLE_TEST_EVALUATES : TEST_EVALUATES).has(arg))
         return operator === undefined
           ? undefined
           : `\`${program} ${operator}\` works out its operand as a variable or as arithmetic, which can run a command, and this role only reads.`

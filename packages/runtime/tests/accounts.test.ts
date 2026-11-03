@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
-import { agents } from '@althar/provider-adapters'
+import { agents, type SignInCheck } from '@althar/provider-adapters'
 import { fakeAgent, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -88,19 +88,28 @@ const ranOnCodex = (projectId?: string) =>
     return { projectId: project, taskId: task.taskId, threadId: task.threadId, said: said.join('\n') }
   })
 
-/** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
-const insideOnly = (agentId: string) =>
+/** The fake agents, with one of them changed. */
+const changed = (agentId: string, change: (definition: AgentEntry['definition']) => AgentEntry['definition']) =>
   Layer.effect(
     Agents,
     Effect.gen(function* () {
       const agents = yield* Agents
-      const inside = (entry: AgentEntry): AgentEntry =>
-        entry.definition.id === agentId
-          ? { ...entry, definition: { ...entry.definition, signIn: { ...entry.definition.signIn, login: '' } } }
-          : entry
-      return Agents.of({ list: agents.list.map(inside), get: (id) => Effect.map(agents.get(id), inside) })
+      const one = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId ? { ...entry, definition: change(entry.definition) } : entry
+      return Agents.of({ list: agents.list.map(one), get: (id) => Effect.map(agents.get(id), one) })
     }),
   ).pipe(Layer.provide(fakeAgents()))
+
+/** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
+const insideOnly = (agentId: string) => changed(agentId, (definition) => ({ ...definition, signIn: { ...definition.signIn, login: '' } }))
+
+/** The fake agents, with one at this version, whose versions before 2 sign in with a line of their own, as OpenCode 1.x does. */
+const atVersion = (agentId: string, version: string) =>
+  changed(agentId, (definition) => ({
+    ...definition,
+    version: () => ({ command: 'bun', args: ['-e', `console.log(${JSON.stringify(version)})`] }),
+    signIn: { ...definition.signIn, loginBefore: { major: 2, line: 'old-login' } },
+  }))
 
 describe('accounts', () => {
   it.effect('keep an agent whose sign-in every folder shares to its usual account, and the window offers no other', () =>
@@ -157,6 +166,22 @@ describe('accounts', () => {
           Layer.provideMerge(runtime(':memory:', {}, { onDevice: { reachable: true, where: () => null, run: (spec) => spec } })),
         ),
       ),
+    ),
+  )
+
+  it.effect('gives an older version installed the line of its own, as OpenCode 1.x signs in without --standalone', () =>
+    Effect.gen(function* () {
+      const [claude] = yield* (yield* Accounts).of('claude-code')
+      assert.strictEqual(yield* (yield* Accounts).login(claude?.id ?? ''), 'old-login')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: atVersion('claude-code', '1.4.2') }))))),
+  )
+
+  it.effect('gives the current line to the version it was written for, and to one that doesn’t say', () =>
+    Effect.gen(function* () {
+      const [claude] = yield* (yield* Accounts).of('claude-code')
+      assert.include(yield* (yield* Accounts).login(claude?.id ?? ''), 'fake-login claude-code')
+    }).pipe(
+      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: atVersion('claude-code', 'unknown') })))),
     ),
   )
 
@@ -486,7 +511,9 @@ describe('accounts', () => {
             requestedAt: endedAt,
           })}`
         })
-      const listed = [{ id: 'opencode-go', name: 'OpenCode Go', connections: 'key' }]
+      const listed: ReadonlyArray<NonNullable<SignInCheck['providers']>[number]> = [
+        { id: 'opencode-go', name: 'OpenCode Go', connections: 'key' },
+      ]
       const check = (providers = listed) => ({ status: 'signed_in' as const, paidBy: 'key' as const, providers })
       // Nothing refused yet: the provider is there, with nothing to say.
       assert.deepStrictEqual(yield* signIns.providers(account, check()), [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: null }])
@@ -507,6 +534,13 @@ describe('accounts', () => {
       assert.deepStrictEqual(yield* signIns.providers(account, check([])), [
         { id: 'opencode-go', name: 'opencode-go', refusedAt: '2026-11-02T21:30:00.000Z' },
       ])
+      // The agent itself says the provider needs signing in again (OpenCode's needs_auth): refused, from when it first said so.
+      const needing = check([{ ...listed[0]!, connections: 'key, oauth', needsSignIn: true as const }])
+      const [first] = (yield* signIns.providers(account, needing)) ?? []
+      assert.isNotNull(first?.refusedAt)
+      assert.strictEqual(((yield* signIns.providers(account, needing)) ?? [])[0]?.refusedAt, first?.refusedAt)
+      // Signed in again, it no longer says so: put right.
+      assert.isNull(((yield* signIns.providers(account, check([{ ...listed[0]!, connections: 'key, oauth' }]))) ?? [])[0]?.refusedAt)
       // An agent with one sign-in, not one per provider, says nothing of providers.
       const [codex] = yield* accounts.of('codex')
       if (codex === undefined) return assert.fail('Codex has its usual account')
@@ -604,7 +638,7 @@ describe('accounts', () => {
       // Codex's last launch, its second account's session, is in that account's home, with whose work it is beside it.
       // Beside what git's guard adds to a lead's (pushGuard.ts).
       const launched = Object.entries(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}).filter(
-        ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
+        ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|GUARD_REPOSITORIES|GUARD_REMOTES|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
       )
       assert.deepStrictEqual(Object.fromEntries(launched), {
         FAKE_HOME: workFolder,

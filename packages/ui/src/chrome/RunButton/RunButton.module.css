@@ -1,34 +1,184 @@
-/* The default running: its dot, then its name and where it answers. */
-.live {
+/* The button: Run, and after it, short, how many failed or run. It never grows past that, so the title beside it keeps its room. */
+.button {
+  flex: none;
+}
+.said {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+.status.bad {
+  color: var(--danger);
 }
 
-/* The button may shrink, and its main half with it, so what it says is cut short and the title beside it keeps its room. */
-.split.split {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-}
-.split > button:first-child {
-  min-width: 0;
-  max-width: 100%;
-}
-/* The button wraps what it says in a span: a flex one that may shrink, so the text inside can be cut. */
-.split > button:first-child > span {
+/* The list: its lines scroll, its field and its foot stay. */
+.list {
   display: flex;
-  min-width: 0;
+  flex-direction: column;
+  max-height: min(600px, 72vh);
 }
-.live {
-  min-width: 0;
+/* A long one keeps one height as it is found in. */
+.long {
+  height: min(540px, 70vh);
 }
-.text {
-  display: inline-block;
+.scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.long .scroll {
+  flex: 1 1 auto;
+}
+.lines {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+}
+.field {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 9px;
+  height: 42px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.field input {
+  flex: 1;
   min-width: 0;
-  vertical-align: bottom;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.field input::placeholder {
+  color: var(--t-3);
+}
+.quietGlyph {
+  flex: none;
+  color: var(--t-3);
+}
+.none {
+  margin: 0;
+  padding: 12px 10px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.ways {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* One line: glyph, name, state, since, actions; why a fetch failed under it. Its height is its state's, never the pointer's. */
+.row {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 36px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.row:hover {
+  background: var(--hover-faint);
+}
+.row.at {
+  background: var(--hover-paper);
+}
+.failedRow:has(.why) {
+  padding-bottom: 6px;
+}
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.hollow {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line-3);
+}
+.name {
   max-width: 24ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.rest .name {
+  font-weight: 400;
+  color: var(--t-2);
+}
+.state {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+.since {
+  font-size: 11.5px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.why {
+  grid-column: 2 / 6;
+  min-width: 0;
+  margin-top: -6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.quiet {
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.bad {
+  color: var(--danger);
+  white-space: nowrap;
+}
+.url {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.command {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
 }

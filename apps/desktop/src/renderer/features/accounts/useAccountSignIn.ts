@@ -76,12 +76,29 @@ interface Flow extends SigningIn {
 /** Signed in, as the agent says: one that can't tell (OpenCode with no sign-in yet, or a check that failed) isn't. */
 const signedIn = (account: AccountStatus) => account.signIn === 'signed_in'
 
-/** A signed-in account, to name: what pays for it, when the agent says. */
-const naming = (account: AccountStatus): AccountSignInStep => ({
-  kind: 'named',
-  name: account.name,
-  ...(account.paidBy === 'plan' ? { paid: accountsText.plan } : account.paidBy === 'key' ? { paid: accountsText.key } : {}),
-})
+/** How a sign-in is paid for, as the account's line says it. */
+const paidWords = (pays: 'plan' | 'key') => (pays === 'plan' ? accountsText.plan : accountsText.key)
+
+/**
+ * A signed-in account, to name: what pays for it, when the agent says; for an agent with a sign-in per provider (OpenCode),
+ * each provider it can place, as Settings says them (OpenCode Go on a plan), not the account's one word.
+ */
+const naming = (account: AccountStatus): AccountSignInStep => {
+  const placed = (account.providers ?? []).flatMap((provider) =>
+    provider.pays === undefined ? [] : [`${provider.name} ${paidWords(provider.pays)}`],
+  )
+  return {
+    kind: 'named',
+    name: account.name,
+    ...(placed.length > 0
+      ? { paid: placed.join(' · ') }
+      : account.providers !== undefined
+        ? {}
+        : account.paidBy === 'plan' || account.paidBy === 'key'
+          ? { paid: paidWords(account.paidBy) }
+          : {}),
+  }
+}
 
 /** Terminal opening for the agent's sign-in, until the runtime says it has. */
 const opening: AccountSignInStep = { kind: 'terminal', line: '', opened: true }

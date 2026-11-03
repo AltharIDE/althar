@@ -137,6 +137,68 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('merges in the way asked, says whether a branch has a merge queue, and enters and leaves it at the head read', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) => {
+            const query = JSON.stringify(request.body)
+            if (query.includes('mergeQueue(branch')) return { json: { data: { repository: { mergeQueue: { id: 'MQ_1' } } } } }
+            if (query.includes('enqueuePullRequest'))
+              return { json: { data: { enqueuePullRequest: { mergeQueueEntry: { position: 1 } } } } }
+            if (query.includes('dequeuePullRequest')) return { json: { data: { dequeuePullRequest: { mergeQueueEntry: { id: 'E' } } } } }
+            return {
+              json: {
+                data: { repository: { pullRequest: { isMergeQueueEnabled: true, isInMergeQueue: false, timelineItems: { nodes: [] } } } },
+              },
+            }
+          },
+        ],
+      ])
+      const open = yield* host.change(repository, 12)
+      yield* host.merge(repository, open, { method: 'merge' })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { merge_method: 'merge', sha: 'abc' })
+      // GitHub's own auto-merge isn't how Althar merges.
+      assert.strictEqual((yield* Effect.flip(host.merge(repository, open, { auto: true }))).reason, 'rejected')
+      assert.deepStrictEqual(yield* host.mergeWays(repository, 'main'), { queue: 'merge_queue', autoMerge: false, server: null })
+      assert.deepStrictEqual(variablesOf(sent.at(-1)), { owner: 'meridian', name: 'api', branch: 'main' })
+      assert.deepInclude(yield* host.enqueue(repository, open), { state: 'open', queued: true })
+      assert.deepStrictEqual(variablesOf(sent.at(-1)), { id: 'PR_1', head: 'abc' })
+      // Not in it, as GitHub says, it is left as it is; nothing is dequeued.
+      assert.deepInclude(yield* host.leaveQueue(repository, open), { queued: false })
+      assert.isFalse(sent.some((request) => (JSON.stringify(request.body) ?? '').includes('dequeuePullRequest')))
+      // A branch without one, and a server that can't say, have none.
+      const none = github([['POST', `${API}/graphql`, { json: { data: { repository: { mergeQueue: null } } } }]])
+      assert.isNull((yield* none.host.mergeWays(repository, 'main')).queue)
+      const server = github([['POST', `${API}/graphql`, { json: { errors: [{ message: "Field 'mergeQueue' doesn't exist" }] } }]])
+      assert.isNull((yield* server.host.mergeWays(repository, 'main')).queue)
+    }),
+  )
+
+  it.effect('reads a branch’s head, whether a pull request has a commit, and whether a head is the merge its update made', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/branches/release/1.0`, { json: { commit: { sha: 'tip' } } }],
+        ['GET', `${REPO}/compare/tip...abc`, { json: { behind_by: 0, ahead_by: 2 } }],
+        ['GET', `${REPO}/compare/newer...abc`, { json: { behind_by: 3, ahead_by: 2 } }],
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['GET', `${REPO}/commits/made`, { json: { parents: [{ sha: 'abc' }, { sha: 'tip' }] } }],
+        ['GET', `${REPO}/commits/theirs`, { json: { parents: [{ sha: 'made' }] } }],
+      ])
+      assert.strictEqual(yield* host.branchHead(repository, 'release/1.0'), 'tip')
+      const open = yield* host.change(repository, 12)
+      assert.isTrue(yield* host.contains(repository, open, 'tip'))
+      assert.isFalse(yield* host.contains(repository, open, 'newer'))
+      // Update-branch lands in the background: the head read later is its own only where it is a merge whose first parent is the head it had.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'theirs' }, 'abc'))
+    }),
+  )
+
   it.effect('puts a pull request in its branch’s merge queue where GitHub refuses a merge for one, and reads it there when asked', () =>
     Effect.gen(function* () {
       const queue = (pull: Record<string, unknown> = {}) => ({
@@ -1823,6 +1885,41 @@ describe('GitHub opening a closed pull request again', () => {
         ['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }],
       ])
       assert.deepInclude(yield* Effect.flip(refusing.host.reopenChange(repository, closed)), { reason: 'forbidden', status: 403 })
+    }),
+  )
+})
+
+describe('GitHub’s open pull requests, for following them', () => {
+  const LIST = `${REPO}/pulls?state=open&sort=updated&direction=desc&per_page=100`
+  const quiet = (request: Sent) =>
+    request.headers['if-none-match'] === '"v1"'
+      ? { status: 304, headers: { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4990' } }
+      : {
+          json: [
+            pull({
+              draft: false,
+              head: { ref: 'fix', sha: 'abc', repo: { full_name: 'stranger/api' } },
+              base: { ref: 'main', repo: { full_name: 'meridian/api' } },
+            }),
+          ],
+          headers: { etag: '"v1"', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4991', 'x-ratelimit-reset': '1790000000' },
+        }
+
+  it.effect('lists them by ETag, with the fork each comes from, and a 304 is not counted', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['GET', LIST, quiet]])
+      const first = yield* host.openChanges!(repository)
+      assert.deepStrictEqual(
+        first.map((one) => [one.number, one.headSha, one.forkOwner, one.checks]),
+        [[12, 'abc', 'stranger', null]],
+      )
+      assert.strictEqual(host.allowance!().counted, 1)
+      assert.deepStrictEqual([host.allowance!().limit, host.allowance!().remaining], [5000, 4991])
+      // Asked again, GitHub answers 304 for nothing: the list is the same, and nothing is counted.
+      assert.strictEqual((yield* host.openChanges!(repository)).length, 1)
+      assert.strictEqual(sent[1]?.headers['if-none-match'], '"v1"')
+      assert.strictEqual(host.allowance!().counted, 1)
+      assert.strictEqual(host.allowance!().remaining, 4990)
     }),
   )
 })

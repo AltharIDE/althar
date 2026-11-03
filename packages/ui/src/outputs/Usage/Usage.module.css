@@ -139,3 +139,20 @@ ul.lines {
     transition: none;
   }
 }
+
+/* A "—" that says why: a dotted underline, as text with more to it on hover. */
+.figure[data-why] {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: default;
+  text-decoration: underline dotted var(--t-3);
+  text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.figure[data-why]:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+}

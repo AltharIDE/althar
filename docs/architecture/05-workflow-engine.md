@@ -714,7 +714,7 @@ changes code. Later steps, such as review, receive its result.
 
 **Review and settling loop, within a bound.** After a review, the lead settles
 the findings. If settling changed code, verification and review run again, up
-to a bound (3 rounds by default). Past the bound, the task is Stuck, with the
+to a bound (3 rounds unless Settings' Plans and reviews say 1, 2 or 5). Past the bound, the task is Stuck, with the
 findings still open.
 
 **A later review round builds on the earlier ones.** The reviewer in round 2
