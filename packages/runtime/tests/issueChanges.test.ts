@@ -546,12 +546,12 @@ describe('changes to issues', () => {
           /^Filed the issue “Refund receipts” on Linear, in Meridian, as MER-1: /,
         )
         assert.match(yield* callTool(lead, 'change_issue', { issue: 'MER-1', priority: 'low' }), /^Proposed MER-1: priority to Low\./)
-        // One the person named to it, in its thread.
+        // One the person named to it, in its thread: past any the lead's brief takes as it starts meanwhile.
         yield* sql`INSERT INTO user_inputs ${sql.insert({
           id: yield* newId(Ids.userInput),
           projectId,
           threadId: task.threadId,
-          sequence: 1,
+          sequence: 1000,
           commandId: `cmd_${'a'.repeat(32)}`,
           disposition: 'after_current',
           body: 'While you are there, MER-240 needs the same fix.',
