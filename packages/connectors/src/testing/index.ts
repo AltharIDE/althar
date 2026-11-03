@@ -1,2 +1,3 @@
 export { type FakeCheck, type FakeControls, type FakeService, type FakeServiceOptions, makeFakeService } from './FakeService'
 export { byToken, routed } from './byToken'
+export { type FakeGate, type FakeReleaseControls, RELEASING } from './fakeReleases'

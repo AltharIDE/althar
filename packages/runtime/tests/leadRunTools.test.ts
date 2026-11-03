@@ -204,7 +204,7 @@ describe('run_project and stop_project, for a lead', () => {
       const ended = yield* callTool(lead, 'run_project', {})
       assert.match(
         ended,
-        /in your worktree ended at once, with exit code 1\. Its last lines:\n\nError: Cannot find module vite\n\nFix what stopped it/,
+        /in your worktree ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nError: Cannot find module vite\n\nFix what stopped it/,
       )
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'run_project', {}), 'This tool is for a task’s lead.')
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'stop_project', {}), 'This tool is for a task’s lead.')

@@ -17,7 +17,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
@@ -38,7 +38,9 @@ import {
   replyOnPullRequest,
   reopenPullRequest,
   rerunChecks,
+  updateBranch,
 } from './coordinatorPullRequests'
+import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
@@ -113,6 +115,7 @@ type Store =
   | Runs
   | Connections
   | Automations
+  | RuntimeConfig
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -1107,6 +1110,9 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          const sql = yield* SqlClient.SqlClient
+          const [held] = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
@@ -1115,6 +1121,8 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
           })
+          if (held !== undefined)
+            return `Changed ${task.slug}'s plan. It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -1675,6 +1683,12 @@ export class Coordinator extends Context.Service<
           (access, input) => reopenPullRequest(access.projectId, input),
         ),
         tool(
+          'update_branch',
+          "Brings a pull request's branch up to date with the branch it goes into, by its link or number: merges that branch into it. A merge commit, never a rebase and never a forced push, so it can be undone. GitHub does it with its update-branch; GitLab and Bitbucket (Cloud and Data Center) by Althar's merge in a copy of its own, pushed plainly. Any of the project's pull requests, an outside author's included, where Althar's account may push to its branch; where it may not, nothing is done and it says so: asking the author is a reply, which waits for the person's word. A conflict stops and names the files; you don't settle it, a task's lead or the author does. A branch pushed to since you read it is left as it is. Use it when a pull request is behind and that holds up its merge or its checks.",
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => updateBranch(access.projectId, input),
+        ),
+        tool(
           'reply_on_pull_request',
           "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. For a pull request Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it waits for the person's word and is refused here. A change to the code is a task, not a reply.",
           {
@@ -1688,6 +1702,7 @@ export class Coordinator extends Context.Service<
               return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
             }),
         ),
+        ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
           'list_models',
@@ -1697,7 +1712,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
           {
             type: 'object',
             properties: {
