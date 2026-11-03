@@ -38,6 +38,13 @@ finish-args:
   # The person's own agents and editors, found and run where they are
   # installed (Codex among them: flatpak/codex-host.sh); nothing else.
   - --talk-name=org.freedesktop.Flatpak
+  # The person's own skills, read-only: Claude Code runs in here and can't reach
+  # them otherwise, and Althar reads what the agents out on the device can see.
+  # Only these folders of the home, each where it is outside (ADR-027).
+  - --filesystem=~/.claude/skills:ro
+  - --filesystem=~/.codex/skills:ro
+  - --filesystem=~/.agents/skills:ro
+  - --filesystem=~/.config/opencode/skills:ro
 
 modules:
   - name: althar

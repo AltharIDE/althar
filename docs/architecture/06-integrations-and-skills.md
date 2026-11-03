@@ -1059,6 +1059,39 @@ instructions; referenced files are loaded progressively. Althar can add a
 manifest sidecar for provenance and compatibility without forking the content
 format.
 
+### What passes through today
+
+Althar manages no skills yet: each agent finds the person's own and the
+repository's where it always does, and a task's thread says what its lead's
+agent could see and what it loaded (`provider-adapters/src/skills.ts`).
+Everything below it in this section is the model for later, not what runs.
+
+Where each finds them, read from the real agents on 3 November 2026
+(`bun run test:agents`, `tests/agents/skills.test.ts`, no model call):
+
+| Agent | The person's | The repository's | Not read |
+| --- | --- | --- | --- |
+| Claude Code 0.3.316 | its home's `skills`: `~/.claude/skills`, linked into a home Althar makes | `.claude/skills` | `~/.agents/skills`, `.agents/skills` |
+| Codex 0.165.0 | `~/.agents/skills` (Codex 0.95 on; not 0.92), and its home's `skills`: `~/.codex/skills`, linked likewise | `.agents/skills` | `~/.claude/skills`, `.claude/skills` |
+| OpenCode 2.2.5, 1.19.5 | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | `.opencode/skills`, `.claude/skills`, `.agents/skills` | |
+
+Each agent's own folders are its own business, so nothing is copied across to
+what it doesn't read. In a Flatpak ([ADR-027](../decisions/027-what-the-flatpak-reaches.md)):
+Codex and a person's own OpenCode run out on the device, with the device's home,
+and read those same folders there. Claude Code and a copy of OpenCode Althar
+downloaded run inside: the four folders are in the sandbox read-only at the same
+paths, so Claude Code's home (`claude-usual` under the profile) links them. A
+downloaded OpenCode takes its config home from the sandbox, so it doesn't read
+`~/.config/opencode/skills`.
+
+What each says:
+
+| Agent | What it could see | A skill loaded |
+| --- | --- | --- |
+| Claude Code | says, each skill's file among its commands | says, on the `Skill` tool's call |
+| Codex | says, likewise | can't: its model reads the file. A read of a `SKILL.md` it listed shows as that, a read, and a `$name` the person typed shows nothing |
+| OpenCode | can't: its commands name them without saying which are skills (1.x), or don't list them (2.x). Althar reads the folders above | says, on its `skill` tool's call |
+
 ### Skill is not workflow, tool, or connector
 
 - A **skill** explains how to perform a class of work and may package resources.

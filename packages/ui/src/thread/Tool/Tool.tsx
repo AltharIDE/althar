@@ -56,6 +56,8 @@ function glyphOf(kind: ToolKind): IconName {
       return 'answer'
     case ToolKind.Push:
       return 'up'
+    case ToolKind.Skill:
+      return 'knowledge'
     case ToolKind.Other:
       return 'tool'
     default:

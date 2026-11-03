@@ -9,6 +9,7 @@ import {
   Relayed,
   Round,
   shotName,
+  SkillsSeen,
   Thinking,
   ThreadDivider,
   WorkLine,
@@ -325,6 +326,8 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
             {block.text}
           </ThreadDivider>
         )
+      case 'skills':
+        return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
       case 'verdict':
         return (
           <Round key={block.id} model={named(block.result.agentId)} at={block.at} part="Review" data-item={block.id}>

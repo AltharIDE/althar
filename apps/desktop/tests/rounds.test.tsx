@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Evidence, Picture, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 
+import { ToolKind, ToolState } from '@althar/ui'
+
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { countsOf, nowOf, type Round, type RoundBlock, roundsOf, shorter, withoutShotList } from '../src/renderer/shared/rounds'
@@ -290,8 +292,49 @@ describe('a task’s thread in rounds', () => {
     expect(roundOf(blocks)).toMatchObject({ agentId: 'claude-code', report: { result: { summary: 'Settled.' } } })
   })
 
+  it('says what a lead could see in a line before its round, which stays one round', () => {
+    const blocks = read([
+      items.says('On it.'),
+      items.notice({
+        source: 'runtime',
+        role: 'skills',
+        title: 'Codex could see a skill',
+        skills: [{ name: 'mine', path: '/h/mine/SKILL.md', from: 'person' }],
+      }),
+      items.tool(),
+      items.step({ step: 'implement', summary: 'Done.', agentId: 'codex' }),
+    ])
+    expect(blocks.map((block) => block.kind)).toEqual(['skills', 'round'])
+    expect(blocks[0]).toMatchObject({ title: 'Codex could see a skill', skills: [{ name: 'mine' }] })
+  })
+
   it('counts work in the words a person uses, and says what it is on shortly', () => {
     expect(countsOf([])).toBe('')
+    const skillStep = (id: string, toolKind: ToolKind, names: ReadonlyArray<string>, reported: boolean, state = ToolState.Done) =>
+      ({
+        kind: 'tool',
+        id,
+        toolKind,
+        verb: '',
+        target: id,
+        state,
+        command: null,
+        ran: null,
+        exit: null,
+        touches: [],
+        pictures: [],
+        files: [],
+        skills: { names, reported },
+      }) as const
+    expect(
+      countsOf([
+        skillStep('a', ToolKind.Skill, ['mine'], true),
+        skillStep('b', ToolKind.Skill, ['mine'], true),
+        skillStep('c', ToolKind.Skill, ['stopped'], true, ToolState.Failed),
+        skillStep('d', ToolKind.Skill, ['read-one'], false),
+        skillStep('e', ToolKind.Run, ['read-two'], false),
+      ]),
+    ).toBe('loaded 1 skill, read 2 skills, ran 1 command')
     const long = nowOf(`**Now** the ${'long '.repeat(40)}part:`)
     expect(long.length).toBeLessThanOrEqual(110)
     expect(long.endsWith('…')).toBe(true)

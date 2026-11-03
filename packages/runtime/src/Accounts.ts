@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
@@ -433,6 +433,14 @@ const link = (definition: AgentDefinition, home: string) => {
       symlinkSync(join(usual, name), join(home, name))
     } catch {
       // There already, as the home's own or linked before.
+      // A `skills` folder of the home's own, as Claude Code makes for what it syncs, would keep the person's out: they go in it, one by one. OpenCode's shared folders are other tools' data.
+      if (name === 'skills' && definition.id !== 'opencode' && isOwnFolder(join(home, name)))
+        for (const skill of listing(join(usual, name)))
+          try {
+            symlinkSync(join(usual, name, skill.name), join(home, name, skill.name))
+          } catch {
+            // There already.
+          }
     }
   }
 }
@@ -443,6 +451,15 @@ const listing = (path: string) => {
     return readdirSync(path, { withFileTypes: true })
   } catch {
     return []
+  }
+}
+
+/** A folder itself, not a link to one. */
+const isOwnFolder = (path: string) => {
+  try {
+    return lstatSync(path).isDirectory()
+  } catch {
+    return false
   }
 }
 

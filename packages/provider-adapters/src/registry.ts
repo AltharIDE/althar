@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
-import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
+import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
 import { openCodeProviders } from './usageSources'
 
@@ -308,6 +308,11 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /**
+   * Where it finds skills, for an agent that doesn't say what it could see
+   * (`skills.ts`): the folders it reads, as it reads them from here.
+   */
+  readonly skillFolders?: (at: StartingAt) => ReadonlyArray<string>
   /** Per-session process config, applied after own-tool removal and review hardening. */
   readonly sessionEnv?: (own: Readonly<Record<string, string>>, options: SessionOptions) => Readonly<Record<string, string>>
   /**
@@ -1109,6 +1114,26 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
+    /*
+     * As OpenCode 1.19.5 and 2.2.5 read them, a skill in each seen in what it
+     * offers its model; `~/.opencode/skills` only 1.x reads, so it isn't said.
+     */
+    skillFolders: ({ env, homeDir, cwd }) => {
+      const config = join(env.XDG_CONFIG_HOME || join(homeDir, '.config'), 'opencode')
+      return [
+        ...(env.OPENCODE_CONFIG_DIR ? [join(env.OPENCODE_CONFIG_DIR, 'skills'), join(env.OPENCODE_CONFIG_DIR, 'skill')] : []),
+        join(config, 'skills'),
+        join(config, 'skill'),
+        join(homeDir, '.claude', 'skills'),
+        join(homeDir, '.agents', 'skills'),
+        ...upToRepository(cwd).flatMap((folder) => [
+          join(folder, '.opencode', 'skills'),
+          join(folder, '.opencode', 'skill'),
+          join(folder, '.claude', 'skills'),
+          join(folder, '.agents', 'skills'),
+        ]),
+      ]
+    },
     reviewing: { outside: true, env: openCodeReviewing },
     sessionEnv: (own, options) => {
       if (options.web === undefined && options.offline !== true) return {}

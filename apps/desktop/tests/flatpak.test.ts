@@ -31,4 +31,22 @@ describe('the Flatpak manifest', () => {
     // The portal is reachable through the default portal proxy and needs no explicit bus permission.
     expect(finish).not.toMatch(/^\s*-\s+--talk-name=org\.freedesktop\.portal\.Secret/m)
   })
+
+  it("reaches the person's skill folders read-only, and nothing else of the home", () => {
+    const finish = manifest.slice(manifest.indexOf('finish-args:'), manifest.indexOf('modules:'))
+    expect([...finish.matchAll(/^\s*-\s+--filesystem=(.+)$/gm)].map((grant) => grant[1])).toEqual([
+      '~/.claude/skills:ro',
+      '~/.codex/skills:ro',
+      '~/.agents/skills:ro',
+      '~/.config/opencode/skills:ro',
+    ])
+  })
+
+  it("runs Codex out on the device in the person's own home, where it finds ~/.agents/skills itself", () => {
+    const bridge = readFileSync(join(import.meta.dirname, '..', 'flatpak', 'codex-host.sh'), 'utf8')
+    expect(bridge).toContain('--env="HOME=${home:-')
+    expect(bridge).toContain('--clear-env')
+    // The account's home, by name: $CODEX_HOME/skills is how it finds the ones in ~/.codex/skills.
+    expect(bridge).toMatch(/for name in CODEX_HOME /)
+  })
 })

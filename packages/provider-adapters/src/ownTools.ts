@@ -35,7 +35,7 @@ const read = (path: string) => {
  * first with a `.git`), the root first, as both agents look for a project's
  * config; outside a repository, up to the top.
  */
-const upToRepository = (cwd: string): ReadonlyArray<string> => {
+export const upToRepository = (cwd: string): ReadonlyArray<string> => {
   const folders: string[] = []
   for (let folder = cwd; ; folder = dirname(folder)) {
     folders.push(folder)
