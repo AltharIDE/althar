@@ -73,10 +73,18 @@ export const AccountStatus = Schema.Struct({
   adoptedFrom: Schema.NullOr(Schema.String),
   /**
    * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
-   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   * a turn on it was refused since, when; how it is paid for where that is known (OpenCode Go a plan, Zen per use). Not given
+   * where the agent has one sign-in for everything.
    */
   providers: Schema.optional(
-    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        refusedAt: Schema.NullOr(Schema.String),
+        pays: Schema.optional(Schema.Literals(['plan', 'key'])),
+      }),
+    ),
   ),
 })
 export type AccountStatus = typeof AccountStatus.Type
@@ -1443,6 +1451,8 @@ export const Finding = Schema.Struct({
   file: Schema.NullOr(Schema.String),
   line: Schema.NullOr(Schema.Number),
   claim: Schema.String,
+  /** The finding in a line, as its reviewer titled it; absent from a review before reviewers gave one. */
+  title: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type Finding = typeof Finding.Type
 
@@ -2289,7 +2299,9 @@ export type ContextUse = typeof ContextUse.Type
 /**
  * What a task, or the coordinator's day, used of one account its agents ran
  * on (ADR-084): on a plan, the share of its week; paid per use, the dollars.
- * No total across accounts: a share of a week and dollars don't add up.
+ * No total across accounts: a share of a week and dollars don't add up. An
+ * agent that reaches several providers, each paid its own way (OpenCode), has
+ * one for each provider its turns ran on.
  */
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
@@ -2310,6 +2322,10 @@ export const AccountUse = Schema.Struct({
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,
+  /** The provider within the agent these turns ran on, by id (OpenCode's `opencode`, Zen); absent for an agent with one. */
+  provider: Schema.optional(Schema.String),
+  /** Why there is no figure, where it can't be known: said on the figure, as its place stays quiet. */
+  why: Schema.optional(Schema.String),
 })
 export type AccountUse = typeof AccountUse.Type
 
@@ -2570,6 +2586,54 @@ export const DiffLine = Schema.Union([
   }),
 ])
 export type DiffLine = typeof DiffLine.Type
+
+/**
+ * Something a review of a task found, as it stands: what the reviewer said,
+ * in which review, and what the lead did about it. `at` is where it points
+ * in the task's change as it is now, its line carried past what changed
+ * since the review read it; null where it points at no file of the change's
+ * repositories (a picture, a check), or at one gone since.
+ */
+export const TaskFinding = Schema.Struct({
+  id: Schema.String,
+  /** The review that found it, by its attempt: what a review's report names. */
+  review: Schema.String,
+  /** The review round that found it, from 0. */
+  round: Schema.Number,
+  severity: Finding.fields.severity,
+  /** The finding in a line, as its reviewer titled it; null from a reviewer that gave none. */
+  title: Schema.NullOr(Schema.String),
+  claim: Schema.String,
+  /** Where the reviewer said, as it read the change. */
+  file: Schema.NullOr(Schema.String),
+  line: Schema.NullOr(Schema.Number),
+  at: Schema.NullOr(
+    Schema.Struct({
+      /** As the task's Changes view names it: with its repository's slug first, for a task of several. */
+      path: Schema.String,
+      /** Its line in the file now, from 1; null where the reviewer named the file alone. */
+      line: Schema.NullOr(Schema.Number),
+      /** The task changed the file since the review read it, the line it points at among what changed. */
+      changed: Schema.Boolean,
+      /** The task's change leaves the file as it was: it is in the change only because the finding names it. */
+      untouched: Schema.Boolean,
+    }),
+  ),
+  state: Schema.Literals(['open', 'fixed', 'set_aside']),
+  /** The lead's words on it: what changed, for one fixed; why it stays, for one set aside. */
+  reason: Schema.NullOr(Schema.String),
+  /** The commit the lead said fixed it. */
+  commit: Schema.NullOr(Schema.String),
+})
+export type TaskFinding = typeof TaskFinding.Type
+
+/**
+ * What the reviews of one of a task's runs found, oldest review first, each
+ * review's in the reviewer's order; read from the store and git when asked
+ * for. `review` is the review asked about, where one was and is known.
+ */
+export const TaskFindings = Schema.Struct({ findings: Schema.Array(TaskFinding), review: Schema.NullOr(Schema.String) })
+export type TaskFindings = typeof TaskFindings.Type
 
 /** One file's diff, read from git when asked for, never kept: its lines, cut short past a limit and saying so. */
 export const FileDiff = Schema.Struct({
@@ -3193,6 +3257,7 @@ const socketCalls = new Set<string>([
   'FindCode',
   'ReadCode',
   'GetFileDiff',
+  'GetTaskFindings',
   'GetBoard',
   'GetOlderSettled',
   'GetHome',
@@ -3348,7 +3413,18 @@ export const Api = RpcGroup.make(
     ThreadSnapshot,
   ),
   /** One file a task changed, as a diff from its base to its worktree. */
-  call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
+  /**
+   * One file a task changed, as a diff from its base to its worktree; with
+   * `untouched`, a file it left as it was, every line of it unchanged, as a
+   * review's finding may name one.
+   */
+  call('GetFileDiff', { taskId: Schema.String, path: Schema.String, untouched: Schema.optional(Schema.Boolean) }, FileDiff),
+  /**
+   * What the reviews of a task's run found, each where it is in the change
+   * now and what became of it: the run of the review whose report is
+   * `review`, a thread item; without it, the latest run that found anything.
+   */
+  call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */

@@ -365,5 +365,83 @@ That receipt is failed and permits retry after another fresh read. Every other
 A lost answer or `{ pending: true, answer }` stays uncertain. Only a read proving it done confirms it; only `absent`, positive
 proof it neither happened nor remains in flight, permits another attempt.
 A confirmed receipt repairs an interrupted completion and its chat line
-without acting again. Host-specific reads and acting tools are later parts
-of ADR-081; this foundation is shared by every host and agent.
+without acting again. This foundation is shared by every host and agent; the
+first acting tool on it is the merge, below.
+
+## Merging on the person's word
+
+`merge_pull_request` (`MergeLine.ts`) merges any of the project's pull
+requests, in any of its repositories, at the head the coordinator read and
+in a way the repository allows. Every merge is an errand kept from the
+person's message, with one step, `merge`, so "merge it once it's green" and
+"merge it" are the same call:
+
+- **The host's own queue** (GitHub's merge queue on the branch, Bitbucket
+  Cloud's, GitLab's merge trains): the step puts it there at its head, and
+  it is done once a read shows it merged. There is no slot of Althar's.
+  Bitbucket Cloud's merge call is what puts one in its queue, and takes no
+  head, so the head is read just before. A queue that sends one back for a conflict hands it to the task's lead
+  rather than putting it in again.
+- **Everywhere else, Althar's line:** one slot for each repository and
+  branch, in the order the person asked; their "merge it now" (`now`) goes
+  first and waits only for a merge already in flight. The step that holds
+  the slot is brought up to date with the branch's head, by a merge, and
+  waits for green there; then it merges, with auto-merge as its merge where
+  the host has it (GitLab, Data Center from 8.15). It holds the slot until a
+  read shows the merge landed; the next starts from the branch's new head.
+  A step whose checks fail, whose merge conflicts, or that Althar can't
+  bring up to date (a protected branch, an account that may not push), steps
+  out of line until they pass or its head or the branch moves; a conflict or
+  a refused push is said to the task's lead.
+  A merge the host refuses (a review it needs, a merge check) pauses its
+  errand, said so, and the next goes ahead. A branch is brought up to date
+  three times at most, someone else writing to the target in between, then
+  its errand pauses for the person.
+- **Althar's sweep** (every 30 seconds, and at once after a merge call) does
+  only what can be undone: it brings the slot's branch up to date by a merge,
+  the connectors' `updateBranch` that `update_branch` uses too (GitHub's
+  update-branch; elsewhere a merge in a copy of Althar's own, pushed plainly,
+  never forced; where it can't, a fork the account may not push to, a push
+  or the host's own update refused,
+  the step steps out of line and it is said, once, to the lead too; a host
+  that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
+  queue, or settling one that landed, closed or moved, it wakes the
+  coordinator with news naming the errand and step, and the coordinator's
+  turn takes it through `Errands.execute`, which reads again before it acts.
+- **Who moved a head:** the very head Althar's update made, as read back
+  after it, or one the task's lead pushed, carries the errand on; anyone
+  else's push ends it, even one on top of Althar's update, as the person
+  asked to merge what they saw.
+- **A branch it merged into** is watched for an hour after: a failed check at
+  its head is said in the chat and heard as news, "Main is red", which is how
+  a write by someone else between the last read and a merge landing shows.
+- **What it keeps:** the errands, and the line's own notes (what each step
+  did, what it said) as observations of subject `merge_line`, so a restart
+  keeps the line. What each server supports is read when first used, kept
+  for an hour, and read again once a call is refused.
+- `leave_queue`, under the project's lock, pauses a pull request's errand in
+  Althar's line, takes it out of the host's queue or train (Bitbucket
+  Cloud's too), and turns its auto-merge off: it can be undone, so it needs
+  no word. Where the host won't, it says so, with the link.
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant C as Coordinator
+  participant L as Merge line
+  participant H as Host
+  P->>C: "Merge #12 and #14 once they're green"
+  C->>L: merge_pull_request(#12, head, message)
+  L->>L: keep errand, read: first in line, green, up to date
+  L->>H: merge (or auto-merge, or enqueue)
+  C->>L: merge_pull_request(#14, head, message)
+  L-->>C: 2nd in line, behind #12
+  H-->>L: sweep reads #12 merged, main moved
+  L->>C: news: errand #12, step merge
+  C->>L: merge_pull_request(errand, step): done
+  L->>H: sweep brings #14 up to date (a merge)
+  H-->>L: green at the new head
+  L->>C: news: errand #14, step merge
+  C->>L: merge_pull_request(errand, step)
+  L->>H: merge #14 at the head that went green
+```

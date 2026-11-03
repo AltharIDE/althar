@@ -4,6 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { firstRunning, type PlanAccount, type PlanAgent, type PlanWindow, SAY_UNDER, usageTone } from './plan'
 import s from './PlanPeek.module.css'
@@ -35,6 +36,8 @@ export interface PlanPeekText {
   share: (percent: number) => string
   shareOut: string
   until: (at: string) => string
+  /** The button beside an agent a sign-in stops. */
+  signIn: string
   /** The agents with no reading, by name. */
   /** "Copilot, Junie and Vibe". */
   list: (names: readonly string[]) => string
@@ -56,6 +59,7 @@ export const planPeekText: PlanPeekText = {
   share: (n) => `${n}%`,
   shareOut: 'out',
   until: (at) => `until ${at}`,
+  signIn: 'Sign in again',
   list: (names) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`),
 }
 
@@ -65,7 +69,9 @@ export const levelOf = (agents: readonly PlanAgent[], t: PlanPeekText = planPeek
   if (first === undefined) {
     const unread = agents.find((agent) => agent.unread !== undefined)
     if (unread !== undefined) return t.level.unread(unread.name)
-    return agents[0] === undefined ? t.level.nothing : t.level.stopped(agents[0].name)
+    // One connected can run, though its usage isn't read: nothing read yet, unless one is stopped.
+    const stopped = agents.find((agent) => agent.stopped !== undefined)
+    return stopped === undefined ? t.level.nothing : t.level.stopped(stopped.name)
   }
   if (first.left > 50) return t.level.plenty
   if (first.left === 0) return t.level.out(first.name)
@@ -120,12 +126,14 @@ function Account({ account, t }: { account: PlanAccount; t: PlanPeekText }) {
   )
 }
 
-function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
+function AgentRow({ agent, t, onSignIn }: { agent: PlanAgent; t: PlanPeekText; onSignIn?: (agentId: string) => void }) {
   const [open, setOpen] = useState(false)
   const detail = useId()
-  const instead = agent.stopped ?? agent.unread
+  // A sign-in that stops it is the button beside it, which says so: nothing in place of the figure then.
+  const signIn = agent.signIn === true && onSignIn !== undefined
+  const instead = agent.stopped ?? agent.unread ?? agent.connected
   return (
-    <li>
+    <li className={signIn ? s.withAction : undefined}>
       <button
         type="button"
         className={s.agent}
@@ -145,11 +153,16 @@ function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
             <Bar left={agent.left} className={s.agentBar} />
             <span className={s.agentOf}>{ofWords(agent, t)}</span>
           </>
-        ) : (
+        ) : signIn ? null : (
           // Its saved numbers or their age are in the detail, each account saying why it runs nothing or wasn't read again.
           <span className={s.agentLeft}>{instead}</span>
         )}
       </button>
+      {signIn && (
+        <ActionButton tone="strong" size="small" flush="end" className={s.action} onClick={() => onSignIn(agent.id)}>
+          {t.signIn}
+        </ActionButton>
+      )}
       <div id={detail} className={s.detail} hidden={!open}>
         {open && agent.accounts.map((account) => <Account key={account.id} account={account} t={t} />)}
       </div>
@@ -163,11 +176,13 @@ export type PlanPeekProps = RootProps<
     /** Least room first. */
     agents: readonly PlanAgent[]
     headingLevel?: HeadingLevel
+    /** Puts right the sign-in that stops an agent (`signIn`), by its id. */
+    onSignIn?: (agentId: string) => void
     text?: Partial<PlanPeekText>
   }
 >
 
-export function PlanPeek({ agents, headingLevel = 2, text, className, ...rest }: PlanPeekProps) {
+export function PlanPeek({ agents, headingLevel = 2, onSignIn, text, className, ...rest }: PlanPeekProps) {
   const t = { ...planPeekText, ...text }
   return (
     <div className={cx(s.peek, className)} {...rest}>
@@ -180,7 +195,7 @@ export function PlanPeek({ agents, headingLevel = 2, text, className, ...rest }:
       {agents.length > 0 && (
         <ul className={s.agents}>
           {agents.map((agent) => (
-            <AgentRow key={agent.id} agent={agent} t={t} />
+            <AgentRow key={agent.id} agent={agent} t={t} {...(onSignIn === undefined ? {} : { onSignIn })} />
           ))}
         </ul>
       )}

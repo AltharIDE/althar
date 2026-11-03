@@ -2,7 +2,7 @@ import type { AccountUse, SessionSummary } from '@althar/contracts'
 import { ContextRing, UsageLines } from '@althar/ui'
 import { useEffect, useState } from 'react'
 
-import type { NameModel } from './modelNames'
+import { type NameModel, type NameProvider, useProviderNames } from './modelNames'
 import { usageLines } from './usage'
 
 /*
@@ -18,8 +18,8 @@ import { usageLines } from './usage'
 const thousands = (tokens: number) => Math.round(tokens / 100) / 10
 
 /** The ring's usage, where the conversation used any account. */
-const usageOf = (usage: MeterUsage | undefined, named: NameModel) => {
-  const lines = usageLines(usage?.usage, named)
+const usageOf = (usage: MeterUsage | undefined, named: NameModel, nameProvider: NameProvider) => {
+  const lines = usageLines(usage?.usage, named, nameProvider)
   return usage === undefined || lines.length === 0 ? {} : { usage: <UsageLines lines={lines} heading={usage.heading} /> }
 }
 
@@ -54,6 +54,7 @@ function ContextMeter({
   readonly onCompact: (() => Promise<void>) | undefined
   readonly usage: MeterUsage | undefined
 }) {
+  const nameProvider = useProviderNames()
   const used = session.context?.used ?? 0
   const size = session.context?.size ?? 0
   // How full it was when the person asked: compacting until the agent says otherwise, or for two minutes at most.
@@ -79,7 +80,7 @@ function ContextMeter({
       total={thousands(size)}
       model={named(session.agentId, session.model, session.account)}
       {...compact}
-      {...usageOf(usage, named)}
+      {...usageOf(usage, named, nameProvider)}
     />
   )
 }

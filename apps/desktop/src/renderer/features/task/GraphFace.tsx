@@ -38,13 +38,15 @@ export interface GraphFaceProps {
   permissions: (calls: ReadonlyArray<AttentionRequest>) => ReactNode
   /** Goes to an item of the conversation by its id; with none, to the conversation as it is. */
   onShow: (itemId: string | undefined) => void
+  /** Opens a review's findings in the code, by its report: a review card that found something opens there, not in a popover. */
+  onReview?: (review: string) => void
   /** What went wrong with the last thing done in the window, an answer given here among them; and its dismissal. */
   error?: string | null
   onDismissError?: () => void
   className?: string
 }
 
-export function GraphFace({ graph, stuck, permissions, onShow, error = null, onDismissError, className }: GraphFaceProps) {
+export function GraphFace({ graph, stuck, permissions, onShow, onReview, error = null, onDismissError, className }: GraphFaceProps) {
   const [open, setOpen] = useState<string | null>(null)
   const failure = error === null ? null : <Failure error={error} {...(onDismissError === undefined ? {} : { onDismiss: onDismissError })} />
   // Where a step's popover is open, it says so there, by what was answered; else on the face.
@@ -56,7 +58,20 @@ export function GraphFace({ graph, stuck, permissions, onShow, error = null, onD
         rounds={graph.rounds}
         steps={graph.steps}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(id) => {
+          // A review that found something opens in the code, each finding under its line; one waiting on the person still opens its call.
+          const facts = id === null ? undefined : graph.facts.get(id)
+          const report = facts?.report
+          if (
+            onReview !== undefined &&
+            facts?.step.key === 'review' &&
+            facts.calls.length === 0 &&
+            report != null &&
+            report.content.findings.length > 0
+          )
+            onReview(report.id)
+          else setOpen(id)
+        }}
         onRound={(id) => onShow(graph.saidAt.get(id))}
         detail={(id) => {
           const facts = graph.facts.get(id)

@@ -453,10 +453,17 @@ describe('handing the coordinator to a fresh session', () => {
       )
       assert.notInclude(recent, '[person] Message 3\n')
       assert.include(recent, '[person] Message 5\n[you] echo: Message 5')
-      // The older ones are read through the tools, as far back as they go.
-      const own = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', {})
+      // The older ones are read through the tools, as far back as they go: a page at a time, each saying where the one before it starts.
+      const latest = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', {})
+      assert.include(latest, '[person] Last one. [context:85]')
+      let own = latest
+      for (let page = latest; ;) {
+        const before = /^\(The (\d+) earliest items are left out: read_thread with before \1 reads back from there\.\)\n/.exec(page)?.[1]
+        if (before === undefined) break
+        page = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', { before: Number(before) })
+        own = `${page}\n${own}`
+      }
       assert.include(own, '[person] Message 1\n[you] echo: ')
-      assert.include(own, '[person] Last one. [context:85]')
       // Read back past its start, there is nothing more.
       assert.strictEqual(yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', { before: 0 }), 'Nothing comes before that.')
     }).pipe(Effect.provide(withQueries())),

@@ -7,6 +7,7 @@ import { Installs, isInstalled } from './Installs'
 import { Limits } from './Limits'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
+import { onPlanProvider } from './usableModels'
 
 /*
  * How much room each model has where work on it would start, for the
@@ -39,7 +40,9 @@ export const modelRooms = (projectId?: string) =>
         const starts = yield* limits.pick({ agentId, model: named, ...(projectId === undefined ? {} : { projectId }) }).pipe(Effect.option)
         if (Option.isNone(starts)) continue
         const account = yield* signIns.account(starts.value)
-        if (account.status === 'signed_out' || account.paidBy !== 'plan') continue
+        // On a plan: the account's, or the plan the model's provider is (OpenCode Go).
+        if (account.status === 'signed_out') continue
+        if (account.paidBy !== 'plan' && !onPlanProvider(entry.definition, entry.definition.signIn.providers?.of(model.id))) continue
         const room = yield* limits.room(starts.value.id, named)
         if (Option.isNone(room)) continue
         rooms.push({
