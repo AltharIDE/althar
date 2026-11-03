@@ -8,6 +8,7 @@
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
   [ADR-078](078-project-leads-can-read-the-web.md)
+- **Amended:** 2026-11-03 ([ADR-086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)): stopping, holding, restarting and settling a task all go on the person's word, not only discarding, and ask on a card otherwise.
 - **Owner:** Repository maintainers
 - **Context:** A separate Claude Code session, with `gh` signed in, gets the
   person's changes into main and releases them (DEV-180):
@@ -780,6 +781,11 @@ comes:
   was lost, such as one that timed out, is read back before it is tried
   again, and its receipt stays pending until then, so a restart or a lost
   answer doesn't do anything twice.
+- **The same ask can come again and need doing again:** a rerun waits on
+  its approval anew, or someone deletes a tag the person then asks for
+  again. What was done before is answered from its receipt only where the
+  host still says it is done; otherwise it is done again, on a receipt of
+  its own.
 - **The target branch changes while an errand waits:** it ends and says so,
   since the ask was for that branch.
 - **Someone acts on the host meanwhile,** the person included (merges it,

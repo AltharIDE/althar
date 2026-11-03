@@ -218,6 +218,27 @@ describe('the person’s word through the tool boundary', () => {
       assert.isTrue(items.some((i) => i.content.includes('Errand done')))
     }).pipe(Effect.provide(runtime())),
   )
+  it.live('reads the turn and its errands through their tools, and refuses arguments that do not match', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const message = yield* s.say()
+      // The person's own message from this live turn, and the errands this thread has: none yet, then the one kept.
+      assert.include(yield* callTool(s.access, 'read_turn', {}), message)
+      assert.strictEqual(yield* callTool(s.access, 'read_errands', {}), '[]')
+      // A tool's arguments that don't match its input settle as a refusal, not as the tool running with holes in it.
+      assert.match(yield* callTool(s.access, 'keep_errand', { message }), /do not match the tool’s input/)
+      assert.match(yield* callTool(s.access, 'pause_errand', { reason: 'Wait.' }), /do not match the tool’s input/)
+      const id = yield* s.errands.keep(s.access, message, [s.step])
+      assert.include(yield* callTool(s.access, 'read_errands', {}), id)
+      // Without a reason, a pause says what an objection means: paused, resumed and called off on fresh word, each names
+      // what it did.
+      assert.match(yield* callTool(s.access, 'pause_errand', { errand: id }), /^Paused the errand/)
+      const fresh = yield* s.say({ kind: 'window' }, 'Go ahead now')
+      assert.match(yield* callTool(s.access, 'resume_errand', { errand: id, message: fresh }), /^Resumed the errand/)
+      assert.match(yield* callTool(s.access, 'cancel_errand', { errand: id, message: fresh }), /^Called off the errand/)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('a person’s objection pauses even during a fresh read, and only fresh word resumes', () =>
     Effect.gen(function* () {
       const s = yield* setup()

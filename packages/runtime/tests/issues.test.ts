@@ -451,6 +451,66 @@ describe('an issue', () => {
   })
 })
 
+describe('issues read and found by an agent', () => {
+  it.live('are searched by words, state and a run of keys, and a tracker that couldn’t be searched is said, not taken for none', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    tracker.addIssue({ ref: 'MER-233', title: 'Webhooks retry forever', assigned: false, status: { name: 'Done', category: 'done' } })
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'coordinator-session', taskId: null }
+      const find = (asked: Record<string, unknown>) => callTool(coordinator, 'find_issues', asked)
+      // Nothing asked, the person's open issues, as before.
+      assert.match(yield* find({}), /^- MER-231: Rate-limit refunds like charges \(Todo\)/)
+      assert.notInclude(yield* find({}), 'MER-232')
+      // Asked for more, everyone's.
+      assert.match(yield* find({ text: 'someone' }), /^- MER-232: Someone else’s \(Todo\)/)
+      assert.match(yield* find({ state: 'closed' }), /^- MER-233: Webhooks retry forever \(Done\)/)
+      assert.strictEqual(yield* find({ text: 'nothing like it' }), 'No issues found.')
+      const range = yield* find({ keys: 'MER-231..MER-234', state: 'all' })
+      assert.deepStrictEqual(
+        range.split('\n').map((line) => line.slice(2, 9)),
+        // In the order of their keys; MER-234, which isn't there, left out.
+        ['MER-231', 'MER-232', 'MER-233'],
+      )
+      assert.match(yield* find({ keys: 'MER-1..MER-900' }), /isn’t a run of keys/)
+      tracker.failNext('find', 'forbidden')
+      assert.strictEqual(yield* find({ text: 'refunds' }), 'Couldn’t search Linear: The fake find failed (forbidden).')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
+  it.live('are read with who has them, their labels and latest comments; one that couldn’t be read says so', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'coordinator-session', taskId: null }
+      const issue = yield* tracker.issue('MER-231')
+      yield* tracker.comment(issue, 'Seen on staging too.')
+      yield* tracker.update(issue, {
+        labels: { add: [{ id: 'label-bug', name: 'bug' }], remove: [] },
+        milestone: { id: 'm', name: 'Beta' },
+      })
+      const read = yield* callTool(coordinator, 'read_issue', { issue: 'MER-231' })
+      assert.include(read, 'Assigned to You; labels bug; milestone Beta.')
+      assert.include(read, 'Refunds skip the limiter.')
+      assert.match(read, /Its latest comments, oldest first:\n- You, \d{4}-\d{2}-\d{2}: Seen on staging too\./)
+      // A tracker that fails to answer isn't said to lack the issue.
+      tracker.failNext('issue', 'rate_limited')
+      assert.strictEqual(
+        yield* callTool(coordinator, 'read_issue', { issue: 'MER-231' }),
+        'Reading MER-231 failed: The fake issue failed (rate_limited). Try again, or tell the person.',
+      )
+      assert.strictEqual(
+        yield* callTool(coordinator, 'read_issue', { issue: 'MER-999' }),
+        'Althar can’t read MER-999: no connected tracker has it.',
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+})
+
 describe('a link on a connection that is only one side of its service', () => {
   /** GitHub, its connections made only as a code host, or only as a tracker. */
   const onlyAs = (service: FakeService, side: 'host' | 'tracker') =>

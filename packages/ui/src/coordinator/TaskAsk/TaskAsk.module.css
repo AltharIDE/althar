@@ -1,0 +1,12 @@
+.why {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+
+/* The title reads as part of the question: its size and colour, a link only on hover. */
+.title {
+  font: inherit;
+  font-weight: 650;
+  color: inherit;
+}

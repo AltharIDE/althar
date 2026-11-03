@@ -18,6 +18,7 @@ import {
   modKey,
   DictationTray,
   Issue,
+  IssuePart,
   LinkButton,
   type ModelInfo,
   TaskFace,
@@ -120,6 +121,8 @@ export const text = {
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
+  /** Whose usage the composer's ring says, under the context. */
+  usageHeading: 'This task so far',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in. Sign one in from Settings.',
   /** Another agent's model, picked: nothing happens until the person says something. */
@@ -858,7 +861,7 @@ export function TaskView({
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
-        meter={contextMeter(session, named, model.compact)}
+        meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&
@@ -1052,6 +1055,14 @@ export function TaskView({
                     : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
                   {...(issue.container === null ? {} : { meta: issue.container })}
                 />
+                {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
+                {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
+                  <IssuePart
+                    id={issue.key}
+                    partOf={snapshot.task.issuePartOf === true}
+                    onChange={(partOf) => void model.setIssuePart(partOf)}
+                  />
+                )}
               </div>
             )}
             {snapshot.earlier && (
@@ -1094,6 +1105,7 @@ export function TaskView({
                       onFile: (draftId) => void model.fileIssueDraft(draftId),
                       onChange: model.changeIssueDraft,
                       onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                      onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
                     }}
                   />
                 )}
@@ -1104,6 +1116,7 @@ export function TaskView({
                     actions={{
                       onApply: (changesId) => void model.applyIssueChanges(changesId),
                       onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                      onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
                     }}
                   />
                 )}

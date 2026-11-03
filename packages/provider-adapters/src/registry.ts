@@ -865,11 +865,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * `fetch` ignores without it, so a Node tool's download (Electron's
      * build, through `@electron/get`) fails inside the sandbox even to a host
      * it allows. Where no proxy is named it changes nothing.
+     *
+     * `CLAUDE_CODE_DISABLE_AUTO_MEMORY`: Claude Code's auto memory writes
+     * notes into the person's own `~/.claude/projects/<main checkout>/memory`,
+     * where their own sessions in that repository, and later leads, would
+     * read them. Althar keeps a project's notes and handovers itself.
      */
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
-      env: { NODE_USE_ENV_PROXY: '1' },
+      env: { NODE_USE_ENV_PROXY: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },

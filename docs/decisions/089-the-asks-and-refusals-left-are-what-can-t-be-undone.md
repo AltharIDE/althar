@@ -1,4 +1,4 @@
-# ADR-086: The asks and refusals left once the sandbox is the boundary are what can't be undone
+# ADR-089: The asks and refusals left once the sandbox is the boundary are what can't be undone
 
 - **Status:** Accepted
 - **Date:** 2026-11-03

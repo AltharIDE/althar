@@ -1074,6 +1074,15 @@ describe('finished tasks’ folders, through the API', () => {
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
         yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
+        const before = yield* client.GetSettings({})
+        assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3 })
+        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2 })
+        yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
+        const after = yield* client.GetSettings({})
+        assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2 })
+        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
@@ -1163,7 +1172,6 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
-          changeIssues: false,
           // A repository with no packages, on no host: only what every lead runs outside its sandbox.
           sandbox: {
             commands: ['ps', 'env -i'],

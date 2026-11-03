@@ -1,4 +1,4 @@
-import { type ChangeQuery, ConnectorFailed, type ListedChange, type ListedState } from '@althar/connectors'
+import { type ChangeQuery, type CodeHost, ConnectorFailed, type ListedChange, type ListedState } from '@althar/connectors'
 import { Clock, Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -120,45 +120,31 @@ export const failureWords = (error: ConnectorFailed, noun: string): string => {
   return `The host didn’t answer as it should: ${error.message}`
 }
 
+/** A repository of a project to read pull requests from, and the connection that reaches it. */
+export interface Place {
+  readonly host: CodeHost
+  readonly connectionId: string
+  readonly path: ReadonlyArray<string>
+  readonly name: string
+}
+
 /**
- * The pull requests in each of a project's repositories, newest change
- * first, as text: a heading for each repository, a line for each, and what
- * stopped any repository being listed.
+ * Where a project's pull requests are: each repository bound to it that is
+ * on a code host Althar is connected to, and before it the one a fork sends
+ * its pull requests to; and, for a repository that can't be read, why, in
+ * words for the person. `bindings` is how many repositories the project has.
  */
-export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
+export const placesOf = (projectId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const connections = yield* Connections
-    const query: ChangeQuery = {
-      state: asked.state ?? 'open',
-      limit: LISTED,
-      ...(asked.author === undefined || asked.author.trim() === '' ? {} : { author: asked.author.trim().replace(/^@/, '') }),
-      ...(asked.text === undefined || asked.text.trim() === '' ? {} : { text: asked.text.trim() }),
-      ...(asked.reviewRequested === true ? { reviewRequested: true } : {}),
-      ...(asked.draft === undefined ? {} : { draft: asked.draft }),
-    }
     const instance = yield* Instance
     const bindings = yield* sql<{ name: string; remotes: string; path: string | null; changeTarget: string | null }>`
       SELECT b.display_name AS name, b.remote_fingerprints AS remotes, l.path, b.change_target FROM repository_bindings b
       LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
-    if (bindings.length === 0) return 'The project has no repositories.'
-    // What Althar holds of the project's pull requests, by their links: the ones it opened, and the ones its tasks review.
-    const links = yield* sql<{ kind: 'change' | 'review'; url: string; slug: string; state: string; attached: number | null }>`
-      SELECT x.kind, x.url, k.slug, k.state, json_extract(x.snapshot, '$.attached') AS attached FROM external_links x
-      JOIN tasks k ON k.id = x.task_id
-      WHERE x.project_id = ${projectId} AND x.kind IN ('change', 'review') ORDER BY x.created_at DESC`
-    const held = new Map<string, Array<Held>>()
-    for (const link of links) {
-      const key = link.url.toLowerCase()
-      held.set(key, [
-        ...(held.get(key) ?? []),
-        { kind: link.kind, slug: link.slug, open: link.state === 'open' || link.state === 'draft', attached: link.attached === 1 },
-      ])
-    }
-    const now = yield* Clock.currentTimeMillis
     // Each repository to list: a binding's own, and before it the one a fork sends its pull requests to; or why it can't be.
-    const places = (yield* Effect.forEach(bindings, (binding) =>
+    const places: ReadonlyArray<string | Place> = (yield* Effect.forEach(bindings, (binding) =>
       Effect.gen(function* () {
         const remotes = Option.getOrElse(
           Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes),
@@ -177,9 +163,44 @@ export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
                 Effect.orElseSucceed(() => null),
               )
         const paths = fork === null ? [found.path] : [fork.upstream.path, found.path]
-        return paths.map((path) => ({ host: found.host, path, name: binding.name }))
+        return paths.map((path) => ({ host: found.host, connectionId: found.connectionId, path, name: binding.name }))
       }),
     )).flat()
+    return { bindings: bindings.length, places }
+  })
+
+/**
+ * The pull requests in each of a project's repositories, newest change
+ * first, as text: a heading for each repository, a line for each, and what
+ * stopped any repository being listed.
+ */
+export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const query: ChangeQuery = {
+      state: asked.state ?? 'open',
+      limit: LISTED,
+      ...(asked.author === undefined || asked.author.trim() === '' ? {} : { author: asked.author.trim().replace(/^@/, '') }),
+      ...(asked.text === undefined || asked.text.trim() === '' ? {} : { text: asked.text.trim() }),
+      ...(asked.reviewRequested === true ? { reviewRequested: true } : {}),
+      ...(asked.draft === undefined ? {} : { draft: asked.draft }),
+    }
+    const { bindings, places } = yield* placesOf(projectId)
+    if (bindings === 0) return 'The project has no repositories.'
+    // What Althar holds of the project's pull requests, by their links: the ones it opened, and the ones its tasks review.
+    const links = yield* sql<{ kind: 'change' | 'review'; url: string; slug: string; state: string; attached: number | null }>`
+      SELECT x.kind, x.url, k.slug, k.state, json_extract(x.snapshot, '$.attached') AS attached FROM external_links x
+      JOIN tasks k ON k.id = x.task_id
+      WHERE x.project_id = ${projectId} AND x.kind IN ('change', 'review') ORDER BY x.created_at DESC`
+    const held = new Map<string, Array<Held>>()
+    for (const link of links) {
+      const key = link.url.toLowerCase()
+      held.set(key, [
+        ...(held.get(key) ?? []),
+        { kind: link.kind, slug: link.slug, open: link.state === 'open' || link.state === 'draft', attached: link.attached === 1 },
+      ])
+    }
+    const now = yield* Clock.currentTimeMillis
     // Several, a number alone doesn't say which: each says its repository, and its link.
     const several = places.length > 1
     const sections = yield* Effect.forEach(
@@ -190,7 +211,7 @@ export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
           : Effect.gen(function* () {
               const { host, path } = place
               const noun = host.words.noun
-              const where = bindings.length > 1 ? `${place.name} (${path.join('/')})` : path.join('/')
+              const where = bindings > 1 ? `${place.name} (${path.join('/')})` : path.join('/')
               const listed = yield* host.repository(path).pipe(
                 Effect.flatMap((repository) => host.listChanges(repository, query)),
                 Effect.map((list) => ({ list })),

@@ -218,7 +218,7 @@ describe('allow everything on a task (ADR-043)', () => {
       assert.strictEqual(decision?.outcome, 'reject')
       assert.include(decision?.reason ?? '', 'spelled out')
       // Where the project never allows only what git's guard stops, whatever runs it, the lead's session says the guard holds, and
-      // what Althar can't read goes ahead (ADR-086); where no guard holds (Windows), it is refused as before.
+      // what Althar can't read goes ahead (ADR-089); where no guard holds (Windows), it is refused as before.
       yield* policies.set(project.projectId as ProjectId, { never: ['delete-branch'] }, instance.personId)
       yield* say(created.threadId, `${scenarios.run}echo $(echo deploy)`)
       yield* ended(created.threadId, 2)

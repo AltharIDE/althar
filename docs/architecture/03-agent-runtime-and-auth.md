@@ -1005,7 +1005,7 @@ git's stored passwords where the words show it, whose service a Mac's
 sandbox still reaches (ADR-071's trade-off). What crosses meets the rules
 as any request does: with everything allowed, what Althar can't read goes
 ahead, and only what they read as irreversible asks
-([ADR-086](../decisions/086-the-asks-and-refusals-left-are-what-can-t-be-undone.md)).
+([ADR-089](../decisions/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md)).
 A lead's line is read from the folder its shell is in, where its agent
 records it (Claude Code's transcript, `shellFolder`), not from the
 worktree's top. Where nothing holds a session (Windows, a Flatpak,

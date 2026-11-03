@@ -1,4 +1,5 @@
 import { Errands } from './Errands'
+import { makeFollowing } from './Follow'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
@@ -992,7 +993,7 @@ export class Changes extends Context.Service<
        */
       const bodyFor = (
         threadId: string,
-        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null,
+        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string } | null = null,
@@ -1371,8 +1372,9 @@ export class Changes extends Context.Service<
             url: string
             ref: string
             connectionId: string | null
+            partOf: number
           }>`
-            SELECT id, product, key, url, ref, connection_id FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
+            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
           // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
           const sameHost =
             issueLink !== undefined &&
@@ -1388,7 +1390,7 @@ export class Changes extends Context.Service<
           })
           const body = yield* bodyFor(
             task.threadId,
-            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
+            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost, partOf: issueLink.partOf === 1 },
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
@@ -5614,6 +5616,8 @@ export class Changes extends Context.Service<
       const wake = yield* Queue.sliding<string | null>(16)
       const wakeNow = (taskId: string | null) => void Queue.offerUnsafe(wake, taskId)
 
+      /** Every open pull request in the project's repositories, for news: asked in these same turns, as much as the hosts' allowances let. */
+      const following = makeFollowing({ every, due: listenDue })
       const listenOnce = (only: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -5641,6 +5645,7 @@ export class Changes extends Context.Service<
             for (const id of polledAt.keys()) if (!links.has(id)) polledAt.delete(id)
             for (const id of waitUntil.keys()) if (!links.has(id)) waitUntil.delete(id)
             for (const id of newsAt.keys()) if (!tasks.has(id)) newsAt.delete(id)
+            yield* following.tick.pipe(contained('Changes.follow', () => undefined))
           }
         })
 

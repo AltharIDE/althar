@@ -139,3 +139,26 @@ a.issue:hover .pixels {
 .still {
   cursor: auto;
 }
+
+/* under a task's issue: whether the task does all of it or only part */
+.part {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 2px 0;
+}
+.partWords {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.partLabel {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.partNote {
+  font-size: 12px;
+  color: var(--t-3);
+}

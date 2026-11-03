@@ -78,7 +78,9 @@ test('asks the person a question on the home, keeps it across a restart, and car
       .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
-    await expect(page.getByText('told=Which database should the cache use? SQLite')).toBeVisible()
+    // The words it was told, where the work that led to its report keeps them: they may share a line with what Althar
+    // said after them, and the same words may show in more than one line there.
+    await expect(page.getByText(/^told=Which database should the cache use\? SQLite/).first()).toBeVisible()
   } finally {
     await electronApp.close()
   }
