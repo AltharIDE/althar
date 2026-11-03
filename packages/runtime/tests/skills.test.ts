@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -72,6 +72,22 @@ describe('what a lead could see', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('knows the repository by its real path too, as an agent may say a skill under it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const real = realpathSync(mkdtempSync(join(tmpdir(), 'althar-skills-real-')))
+      const linked = join(mkdtempSync(join(tmpdir(), 'althar-skills-link-')), 'worktree')
+      symlinkSync(real, linked)
+      yield* recorder({ ...where, folders: [linked] }).record({
+        _tag: 'SkillsSeen',
+        skills: [{ name: 'ours', path: join(real, '.agents/skills/ours/SKILL.md') }],
+      })
+      assert.deepInclude((yield* lines(where.threadId))[0], {
+        skills: [{ name: 'ours', path: join(real, '.agents/skills/ours/SKILL.md'), from: 'repository' }],
+      })
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('stays quiet where it could see none, and a later session that could see the same', () =>
     Effect.gen(function* () {
       const where = yield* place
@@ -104,7 +120,7 @@ describe('what a lead could see', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('reads the folders of an agent that says nothing itself, for its lead, not a review', () =>
+  it.live('reads the folders of an agent that says nothing itself', () =>
     Effect.gen(function* () {
       const folder = mkdtempSync(join(tmpdir(), 'althar-skills-'))
       mkdirSync(join(folder, 'found'))

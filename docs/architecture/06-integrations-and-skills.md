@@ -1072,7 +1072,7 @@ Where each finds them, read from the real agents on 3 November 2026
 | Agent | The person's | The repository's | Not read |
 | --- | --- | --- | --- |
 | Claude Code 0.3.316 | its home's `skills`: `~/.claude/skills`, linked into a home Althar makes | `.claude/skills` | `~/.agents/skills`, `.agents/skills` |
-| Codex 0.165.0 | `~/.agents/skills` (Codex 0.95 on; not 0.92), and its home's `skills`: `~/.codex/skills`, linked likewise | `.agents/skills` | `~/.claude/skills`, `.claude/skills` |
+| Codex 0.165.0 | `~/.agents/skills` (from Codex 0.95), and its home's `skills`: `~/.codex/skills`, linked likewise | `.agents/skills` (from Codex 0.94) | `~/.claude/skills`, `.claude/skills` |
 | OpenCode 2.2.5, 1.19.5 | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | `.opencode/skills`, `.claude/skills`, `.agents/skills` | |
 
 Each agent's own folders are its own business, so nothing is copied across to
@@ -1082,7 +1082,9 @@ and read those same folders there. Claude Code and a copy of OpenCode Althar
 downloaded run inside: the four folders are in the sandbox read-only at the same
 paths, so Claude Code's home (`claude-usual` under the profile) links them. A
 downloaded OpenCode takes its config home from the sandbox, so it doesn't read
-`~/.config/opencode/skills`.
+`~/.config/opencode/skills`. Codex older than those reads only its home's
+`skills`, but only a Flatpak runs the person's own, and the adapter can't open a
+session on one as old as 0.92 anyway.
 
 What each says:
 

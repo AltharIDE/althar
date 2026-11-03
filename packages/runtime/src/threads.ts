@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
@@ -133,6 +134,16 @@ export const toolItem = (sessionId: string, toolCallId: string) =>
 /** Whether a path is inside a folder: the folder itself isn't. */
 const inside = (path: string, folder: string) => path.startsWith(`${folder}/`) || path.startsWith(`${folder}\\`)
 
+/** The folders an agent works in, each also as its real path, which is how an agent may say one under it (`/home` a link to `/var/home`). */
+const spelledBoth = (folders: ReadonlyArray<string> = []) =>
+  folders.flatMap((folder) => {
+    try {
+      return [folder, realpathSync(folder)]
+    } catch {
+      return [folder]
+    }
+  })
+
 /** The line the thread last said what a lead could see in: its session too, as a later session's may say the same. */
 const skillsLine = (threadId: string) =>
   Effect.gen(function* () {
@@ -157,10 +168,11 @@ interface ShownSkill extends SeenSkill {
  */
 const sawSkills = (place: ItemPlace & { readonly lead: string }, skills: ReadonlyArray<SeenSkill>) =>
   Effect.gen(function* () {
+    const worksIn = spelledBoth(place.folders)
     const shown: ReadonlyArray<ShownSkill> = skills
       .map((skill) => ({
         ...skill,
-        from: (place.folders ?? []).some((folder) => inside(skill.path, folder)) ? ('repository' as const) : ('person' as const),
+        from: worksIn.some((folder) => inside(skill.path, folder)) ? ('repository' as const) : ('person' as const),
       }))
       .toSorted((a, b) => a.name.localeCompare(b.name))
     const last = yield* skillsLine(place.threadId)
@@ -198,7 +210,7 @@ const skillsRead = (place: ItemPlace, content: Readonly<Record<string, unknown>>
     return (line?.content.skills ?? []).flatMap((skill) => {
       const spellings = [
         skill.path,
-        ...(place.folders ?? []).flatMap((folder) => (inside(skill.path, folder) ? [relative(folder, skill.path)] : [])),
+        ...spelledBoth(place.folders).flatMap((folder) => (inside(skill.path, folder) ? [relative(folder, skill.path)] : [])),
       ]
       return paths.some((path) => spellings.includes(path)) || printing.some((part) => spellings.some((one) => part.includes(one)))
         ? [skill.name]
