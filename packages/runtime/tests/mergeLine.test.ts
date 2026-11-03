@@ -29,7 +29,12 @@ import { callTool, fakeConnectors, HOST, hosted, runtime } from './support'
  */
 
 /** A fake host whose pull requests' checks, and its branches', a test sets by commit: passed unless said. */
-const host = (options: { readonly product?: 'github' | 'gitlab' | 'bitbucket_cloud' | 'bitbucket_dc' } = {}) => {
+const host = (
+  options: {
+    readonly product?: 'github' | 'gitlab' | 'bitbucket_cloud' | 'bitbucket_dc'
+    readonly conflictsOf?: (number: number) => boolean | undefined
+  } = {},
+) => {
   const checks = new Map<string, CheckState>()
   const service = makeFakeService({
     ...options,
@@ -220,16 +225,22 @@ describe('the coordinator’s merge line', () => {
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
       const access = yield* opened(working)
+      service.landLater()
       const number = pull('Retry refunds')
       const message = yield* turn(access, 'person')
-      assert.match(
-        yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }),
-        /Merged PR #1 at head-1 into main, by squash/,
-      )
-      const elsewhere = service.writeTo('main')
-      checks.set(elsewhere, 'failed')
+      assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /lands it later/)
+      // In the gap, between Althar's last read and the merge landing, someone else writes to main.
+      service.writeTo('main')
+      service.mergeByHand(number)
+      const landed = service.branchHeadOf('main')
+      checks.set(landed, 'failed')
       yield* sweep(access)
-      assert.isTrue((yield* lines(access)).some((title) => title.includes(`meridian/api’s main is red at ${elsewhere}: post-merge failed`)))
+      // The sweep that reads it landed watches main from then on.
+      yield* sweep(access)
+      // The merge went at the head the person saw, untested with the write beside it: main going red is heard.
+      assert.deepStrictEqual(service.merged.at(-1)?.head, `head-${number}`)
+      assert.deepStrictEqual(service.updated, [])
+      assert.isTrue((yield* lines(access)).some((title) => title.includes(`meridian/api’s main is red at ${landed}: post-merge failed`)))
       assert.include((yield* news(access)).at(-1), 'Main is red')
       // Heard once for a head.
       yield* sweep(access)
@@ -238,7 +249,7 @@ describe('the coordinator’s merge line', () => {
   })
 
   it.live(
-    'someone else writing to the branch while it holds the slot: brought up to date again three times, then it waits for the person',
+    'someone else writing to the branch while it holds the slot: brought up to date three times at most, then it waits for the person',
     () => {
       const { service, pull } = host()
       const { working } = hosted(['meridian', 'api'])
@@ -248,23 +259,82 @@ describe('the coordinator’s merge line', () => {
         service.writeTo('main')
         const message = yield* turn(access, 'person')
         assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /behind main at other-1/)
-        for (let round = 1; round <= 4; round++) {
+        for (let round = 1; round <= 3; round++) {
           yield* sweep(access)
           assert.strictEqual(service.updated.length, round)
           service.writeTo('main')
         }
         yield* sweep(access)
-        assert.strictEqual(service.updated.length, 4)
+        assert.strictEqual(service.updated.length, 3)
         assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'paused')
         assert.isTrue(
           (yield* lines(access)).some((title) =>
-            /brought up to date 4 times, and main moved on each time: someone else keeps writing/.test(title),
+            /brought up to date 3 times, and main moved on each time: someone else keeps writing/.test(title),
           ),
         )
         assert.deepStrictEqual(service.merged, [])
       }).pipe(Effect.provide(layer(service)))
     },
   )
+
+  it.live('a push by someone else just after Althar brought it up to date isn’t taken for Althar’s, and ends the errand', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      assert.deepStrictEqual(service.updated, [number])
+      // Before the next sweep reads it, someone pushes on top of Althar's update.
+      const theirs = service.pushTo(number)
+      yield* sweep(access)
+      const errand = (yield* errandsOf(access)).get(number)?.id ?? ''
+      assert.include((yield* news(access)).at(-1), `errand "${errand}"`)
+      assert.include(yield* takeStep(access, errand), `Someone else pushed to PR #1 (it is at ${theirs.slice(0, 12)}`)
+      assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'cancelled')
+      assert.deepStrictEqual(service.merged, [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a merge the host refuses gives the slot up, its errand waiting for the person, and the next goes ahead', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      const message = yield* turn(access, 'person')
+      service.failNext('merge', 'rejected', undefined, 405)
+      assert.match(
+        yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message }),
+        /GitHub refused to merge PR #1: .*It is out of Althar’s line for main, so the next goes ahead/,
+      )
+      assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'paused')
+      // Not behind the refused one: it merges at once.
+      assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Merged PR #2/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('one that conflicts steps out of line and is said to its lead; the next goes ahead', () => {
+    const clashing = new Set<number>()
+    const { service, pull } = host({ conflictsOf: (number) => clashing.has(number) })
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      clashing.add(first)
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message }), /conflicts with main/)
+      yield* sweep(access)
+      assert.match((yield* news(access)).at(-1) ?? '', /PR #1 conflicts with main: its task’s lead settles it.*message_lead/)
+      assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Merged PR #2/)
+      assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'open')
+    }).pipe(Effect.provide(layer(service)))
+  })
 
   it.live('a restart keeps the line', () => {
     const { service, checks, pull } = host()
@@ -362,6 +432,61 @@ describe('the coordinator merging through the host’s own queue', () => {
       )
       assert.deepStrictEqual(service.merged.at(-1)?.how, 'auto')
       assert.match(yield* callTool(access, 'leave_queue', { pull_request: `#${first}` }), /Turned auto-merge off for MR !1/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a queue that sends one back for a conflict hands it to its lead, rather than putting it in again', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      service.mergeQueue()
+      const number = pull('Retry refunds')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      service.dequeue(number, 'conflict')
+      yield* sweep(access)
+      assert.match((yield* news(access)).at(-1) ?? '', /main’s merge queue sent it back.*message_lead/)
+      assert.strictEqual(service.merged.length, 1)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('Bitbucket Cloud’s merge queue: once green, the person adds it on its site; leave_queue takes it out through the API', () => {
+    const { service, pull } = host({ product: 'bitbucket_cloud' })
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      service.mergeQueue()
+      const number = pull('Retry refunds')
+      const message = yield* turn(access, 'person')
+      assert.match(
+        yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }),
+        /takes it only from Bitbucket’s site: the person adds it with Add to merge queue on https:\/\/\S+\/pull\/1\./,
+      )
+      yield* sweep(access)
+      assert.match((yield* news(access)).at(-1) ?? '', /Add to merge queue/)
+      assert.deepStrictEqual(service.merged, [])
+      service.enqueueByHand(number)
+      assert.match(yield* callTool(access, 'leave_queue', { pull_request: `#${number}` }), /Took PR #1 out of main’s merge queue/)
+      assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'paused')
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('GitLab, behind main: Althar merges main in from here, and where it can’t push, asks for the merge in a line', () => {
+    const { service, pull } = host({ product: 'gitlab' })
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /behind main at other-1/)
+      yield* sweep(access)
+      assert.match(
+        (yield* news(access)).at(-1) ?? '',
+        /MR !1 must have main’s other-1 merged in before it merges, and Althar can’t merge it in: GitLab gives Althar no way to push to it\. .*message_lead/,
+      )
+      assert.deepStrictEqual(service.merged, [])
     }).pipe(Effect.provide(layer(service)))
   })
 

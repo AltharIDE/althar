@@ -196,8 +196,9 @@ What isn't alike, as read on 31 October 2026:
 | Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
 | Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
 | Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
-| A merge queue | GitHub without one on the branch, GitLab without merge trains, Bitbucket Cloud and Data Center | GitHub's and GitLab's are the project's settings; Bitbucket Cloud's queue can't be entered or left through its API, and Data Center has none | Althar's merge line stands in, one merge at a time into each branch (ADR-081, task 5), with auto-merge as its merge on GitLab and on Data Center from 8.15 |
-| Bringing a branch up to date | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's own is a rebase, and the Bitbuckets have none | ADR-081, task 6: Althar's merge, pushed. Until then the merge line asks for the merge in a line |
+| A merge queue | GitHub without one on the branch, GitLab without merge trains, Bitbucket Cloud without one, and Data Center | GitHub's and GitLab's are the project's settings, and Data Center has none | Althar's merge line stands in, one merge at a time into each branch (ADR-081, task 5), with auto-merge as its merge on GitLab and on Data Center from 8.15 |
+| Entering the merge queue | Bitbucket Cloud | Its API reads and leaves its queue, but can't add to it | The merge line says when one is green, and links its pull request, where the person presses Add to merge queue |
+| Bringing a branch up to date | GitLab, Bitbucket Cloud and Data Center | GitLab's own is a rebase, and the Bitbuckets have none | The merge line merges the target in, in the project's repository on this computer, and pushes plainly (`branchUpdate.ts`); ADR-081's task 6 brings `update_branch` for it, forks included |
 | Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
 | A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-081, task 8, publishing as each host does |
 | Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
@@ -385,15 +386,18 @@ request that names the issue links it.
   head Althar last read is merged, in the way asked or the first the
   repository allows.
 - **How a branch merges** is the host's to say (`mergeWays`): GitHub's merge
-  queue on the branch, GitLab's merge trains (Premium's
-  `merge_trains_enabled`), and auto-merge: GitLab's on every tier (both
+  queue on the branch, Bitbucket Cloud's (its `merge-queues` in use, not
+  `INACTIVE`, entered only on its site: `addedOnSite`), GitLab's merge trains
+  (Premium's `merge_trains_enabled`), and auto-merge: GitLab's on every tier (both
   `auto_merge` and the older `merge_when_pipeline_succeeds` are sent), Data
   Center's from 8.15 by its `application-properties`. `enqueue` and
   `leaveQueue` enter and leave the queue or train at the head read, and
   `leaveQueue` turns auto-merge off. `branchHead` and `contains` say whether a
   branch has its target's head: GitHub's compare, GitLab's and Bitbucket
   Cloud's merge base, Data Center's commits between. `updateBranch`, GitHub's
-  update-branch, a merge, is the only one so far (ADR-081, task 6).
+  update-branch, a merge, is the only one so far (ADR-081, task 6): it reads
+  back the head it made, a merge whose first parent is the head it had, so
+  nobody else's push is taken for Althar's.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
 

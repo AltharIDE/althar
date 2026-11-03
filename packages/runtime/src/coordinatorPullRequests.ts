@@ -49,12 +49,12 @@ export const hostedOf = (projectId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const connections = yield* Connections
-    const bindings = yield* sql<{ name: string; remotes: string }>`
-      SELECT display_name AS name, remote_fingerprints AS remotes FROM repository_bindings
+    const bindings = yield* sql<{ id: string; name: string; remotes: string }>`
+      SELECT id, display_name AS name, remote_fingerprints AS remotes FROM repository_bindings
       WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at, rowid`
     const found = yield* Effect.forEach(bindings, (binding) =>
       Effect.map(connections.hostOf(Option.getOrElse(decodeRemotes(binding.remotes), () => [])), (host) =>
-        host === null ? [] : [{ ...host, name: binding.name }],
+        host === null ? [] : [{ ...host, name: binding.name, bindingId: binding.id }],
       ),
     )
     return { bindings, hosted: found.flat() }

@@ -370,7 +370,11 @@ person's message, with one step, `merge`, so "merge it once it's green" and
 
 - **The host's own queue** (GitHub's merge queue on the branch, GitLab's
   merge trains): the step puts it there at its head, and it is done once a
-  read shows it merged. There is no slot of Althar's.
+  read shows it merged. There is no slot of Althar's. Bitbucket Cloud's
+  queue takes a pull request only from its site: once it is green the
+  coordinator hears so, with the link, and tells the person to add it there.
+  A queue that sends one back for a conflict hands it to the task's lead
+  rather than putting it in again.
 - **Everywhere else, Althar's line:** one slot for each repository and
   branch, in the order the person asked; their "merge it now" (`now`) goes
   first and waits only for a merge already in flight. The step that holds
@@ -378,18 +382,24 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   waits for green there; then it merges, with auto-merge as its merge where
   the host has it (GitLab, Data Center from 8.15). It holds the slot until a
   read shows the merge landed; the next starts from the branch's new head.
-  A step whose checks fail steps out of line until they pass. Someone else
-  writing to the branch while a step holds the slot brings it up to date
-  again, three times at most, then pauses its errand for the person.
+  A step whose checks fail, or whose merge conflicts, steps out of line
+  until they pass or its head moves; a conflict is said to the task's lead.
+  A merge the host refuses (a review it needs, a merge check) pauses its
+  errand, said so, and the next goes ahead. A branch is brought up to date
+  three times at most, someone else writing to the target in between, then
+  its errand pauses for the person.
 - **Althar's sweep** (every 30 seconds, and at once after a merge call) does
-  only what can be undone: it brings the slot's branch up to date (GitHub's
-  update-branch; elsewhere it asks, in a line, for main to be merged in,
-  until ADR-081's task 6). For each step that can't be undone, a merge or a
+  only what can be undone: it brings the slot's branch up to date by a merge
+  (GitHub's update-branch; elsewhere Althar's own, made in the project's
+  repository on this computer and pushed plainly, never forced, by
+  `branchUpdate.ts` until ADR-081's task 6 brings `update_branch`; where it
+  can't, a fork or no way to push, it asks in a line). For each step that can't be undone, a merge or a
   queue, or settling one that landed, closed or moved, it wakes the
   coordinator with news naming the errand and step, and the coordinator's
   turn takes it through `Errands.execute`, which reads again before it acts.
-- **Who moved a head:** a head Althar's update made, or one the task's lead
-  pushed, carries the errand on; anyone else's push ends it, as the person
+- **Who moved a head:** the very head Althar's update made, as read back
+  after it, or one the task's lead pushed, carries the errand on; anyone
+  else's push ends it, even one on top of Althar's update, as the person
   asked to merge what they saw.
 - **A branch it merged into** is watched for an hour after: a failed check at
   its head is said in the chat and heard as news, "Main is red", which is how
@@ -398,10 +408,10 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   did, what it said) as observations of subject `merge_line`, so a restart
   keeps the line. What each server supports is read when first used, kept
   for an hour, and read again once a call is refused.
-- `leave_queue` takes a pull request out of the host's queue or train, turns
-  its auto-merge off, and pauses its errand in Althar's line: it can be
-  undone, so it needs no word. Bitbucket Cloud's own queue is left on its
-  site.
+- `leave_queue`, under the project's lock, pauses a pull request's errand in
+  Althar's line, takes it out of the host's queue or train (Bitbucket
+  Cloud's too), and turns its auto-merge off: it can be undone, so it needs
+  no word. Where the host won't, it says so, with the link.
 
 ```mermaid
 sequenceDiagram
