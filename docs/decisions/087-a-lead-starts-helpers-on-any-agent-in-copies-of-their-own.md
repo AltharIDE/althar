@@ -104,17 +104,17 @@
     place to its work, with Stop beside what the lead left running; its
     result opens the lead's next round; its usage counts in the task's, by
     model ([In the thread](#in-the-thread)).
-  - **Claude Code's own subagents keep working,** and stop holding the lead's
-    turn: Althar declares that it takes subagents as child sessions, so a
-    turn ends at its answer and their work shows nested under the call that
-    started them ([Agents' own subagents](#agents-own-subagents)).
+  - **Each agent's own helpers in the background are switched off,** and its
+    in-turn ones kept where it allows: Claude Code's, OpenCode's and Kimi's
+    within the turn stay; Codex, Copilot, Grok, Vibe and Antigravity lose
+    theirs, which can't be split ([Agents' own subagents](#agents-own-subagents)).
   - **A helper is the first kind of wait DEV-176 builds on**
     ([One mechanism with DEV-176](#one-mechanism-with-dev-176)): the lead's
     turn ends, holding no place; Althar keeps what it waits for; and what
     comes back is queued and starts the lead's next turn.
   - **The build is eight tasks** ([Build](#build)); [Out of scope](#out-of-scope)
-    says what isn't in them, and [Open for the person](#open-for-the-person)
-    the calls still theirs.
+    says what isn't in them, and [Settled with the person](#settled-with-the-person)
+    the calls they made.
 - **Alternatives considered:**
   - **Each agent's own helpers, wired through.** Claude Code's Agent tool,
     Codex's `spawn_agent`, OpenCode's `subagent`: each runs only its own
@@ -205,6 +205,9 @@
   - Leads hit the limits (four, ten, fifty, an hour) often, or never start
     helpers, or start them for what their own subagents would do cheaper.
   - Writing helpers' commits conflict more often than they are taken.
+  - An agent's switch changes or goes (OpenCode's 2.x line has none), or one
+    brings its own background result back as a turn (Codex's
+    `wake_on_agent_messages`).
   - The person asks to talk to a helper, or to start one themselves.
 
 Paths below are in `packages/runtime/src`, or in `packages/` where they start
@@ -509,8 +512,9 @@ sequenceDiagram
   on another agent. A helper counts once toward the three when its retries
   run out, however many tries it took; a try that a retry recovers doesn't
   count.
-- **One level.** A helper has no `start_helper`. Its agent's own subagents
-  work inside it, as the agent has them.
+- **One level.** A helper has no `start_helper`. Its agent's own in-turn
+  subagents work inside it where the agent keeps them, and its background
+  ones are off, as for a lead.
 - **An hour at most,** counted while it is at work, after which it is stopped
   and its result says so, with what it had said. Claude Code has no total
   limit on a background agent, and people asked for one (#94013); OpenCode's
@@ -571,29 +575,52 @@ Words, without narrating:
 
 ## Agents' own subagents
 
-- **Claude Code's keep working as Claude Code has them,** and so do any other
-  agent's: inside its node (docs/architecture/05). Althar doesn't take the
-  Agent tool away.
-- **They stop holding the lead's turn.** Althar declares ACP's `subagents`
-  client capability and JetBrains AIR's `backgroundSubagents`, so
-  claude-agent-acp ends a turn at its answer rather than at its last
-  subagent's (#1262), and reports each subagent as a child session with its
-  state. ACP's SDK at 1.5.1 doesn't know `subagent_update`, so the connection
-  takes it off the stream first, as it takes AIR's async tasks
-  (`provider-adapters/src/background.ts`). The turn Claude Code then starts
-  with their results is recorded as Althar records any turn of its own today
-  (ADR-022); the lead counts as at work while one of its subagents is; and a
-  lead whose turn ends while one works isn't stuck, as with a helper.
-- **Their work shows nested under the call that started them,** with the
-  kit's `SubAgents`, which nothing draws today.
-- **The lead's brief says which to use:** its own subagents for quick work on
-  its own model within a turn; `start_helper` for another model or agent, or
-  for work the person should see and be able to stop, or that should outlive
-  its turn, its session or a restart.
-- **Codex's and OpenCode's are theirs too,** inside the lead's node. Neither
-  brings a background result back to an idle lead over ACP (Codex never
-  wakes one; OpenCode's wake isn't streamed after the prompt), so a lead on
-  either is told to use `start_helper` for work in the background.
+Every agent Althar runs has helpers of its own, and over ACP their background
+ones break: they hold the lead's turn (Claude Code, Copilot), lose their
+result (Codex, OpenCode, Mistral Vibe, Kimi), or start turns Althar didn't
+ask for (Grok)
+([research](../research/background-helpers.md#each-agent-althar-runs-and-its-own-helpers-over-acp)).
+In-turn ones work: the lead waits, and the result comes back in its turn.
+
+- **Althar switches each agent's background helpers off,** at launch, and
+  keeps its in-turn ones where the agent allows that. Where it can only
+  switch off all of them, it does, and `start_helper` is a lead's only
+  helper in the background:
+
+  | Agent | Switch | Kept |
+  | --- | --- | --- |
+  | Claude Code | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | `Agent` within the turn |
+  | OpenCode | `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false` | `task` within the turn |
+  | Kimi Code | `TaskList`, `TaskOutput`, `TaskStop` in `[tools] disabled` | `Agent` within the turn |
+  | Codex | `features.multi_agent = false` | none; its children never block |
+  | Copilot | `--excluded-tools task` | none; one tool runs both ways |
+  | Grok | `GROK_SUBAGENTS=0` | none |
+  | Mistral Vibe | `VIBE_ENABLE_SUBAGENTS=false` | none; its children never block |
+  | Antigravity | `_meta.agy.disabledTools: ["start_subagent"]` | none; all are background |
+  | Qwen Code | none: left on | its own, whose results come back as turns of its own over ACP |
+  | Junie | none found | its own; the brief asks for `waitForResult` |
+
+- **Why off rather than made to work:** a background helper of the agent's
+  own takes no place, keeps none of the limits, can't be stopped from the
+  thread, works in the lead's folder, and can't be another agent's model.
+  `start_helper` does all of that, the same on every agent. The two agents
+  that bring a result back (Qwen, and Claude Code with ACP's `subagents`
+  capability declared) would still be outside all of that.
+- **What it costs.** Claude Code loses detached shell commands too (one that
+  times out stops rather than moving to the background); a dev server goes
+  through `run_project`, as the lead's brief says. Kimi's background shell
+  commands go with its background helpers. On Codex, Copilot, Grok, Vibe and
+  Antigravity a quick look-around goes through `start_helper`, in a copy, or
+  the lead does it itself.
+- **The lead's brief says which to use** where in-turn helpers stay: its own
+  for quick work on its own model within the turn; `start_helper` for
+  another model or agent, work the person should see and be able to stop,
+  or work that should outlive the turn.
+- **Where a switch changes or goes,** the agents' contract suite says so
+  (task 8): a lead whose own helper outlives its turn fails it. OpenCode's
+  2.x line has no switch yet, Codex's `wake_on_agent_messages` may make its
+  children wake a parent, and Qwen's and Junie's are left as they are until
+  then.
 
 ## One mechanism with DEV-176
 
@@ -622,18 +649,18 @@ with another package's folder.
 
 | # | Task | Scope | Size | After |
 | ---: | --- | --- | :---: | --- |
-| 1 | A lead waiting on its own work isn't stuck | The step's watch (`Runs.ts:1478-1626`) counts a helper at work, and once task 7 lands its agent's own subagent, as another turn to come: no reminder, never stuck. `finish_step` refuses while a helper is at work, naming each. The handover brief (`handover.ts`) lists the helpers at work. Shared with DEV-176, whose waits it takes next. Tests: a turn that ends with a helper at work is neither reminded nor stuck, and one that ends without is, as now | S | – |
+| 1 | A lead waiting on its own work isn't stuck | The step's watch (`Runs.ts:1478-1626`) counts a helper at work as another turn to come: no reminder, never stuck. `finish_step` refuses while a helper is at work, naming each. The handover brief (`handover.ts`) lists the helpers at work. Shared with DEV-176, whose waits it takes next. Tests: a turn that ends with a helper at work is neither reminded nor stuck, and one that ends without is, as now | S | – |
 | 2 | Leads get list_models | The coordinator's `list_models` served to leads too, the same list; the lead's brief says how to pick a helper's model, as the coordinator's says for a step's. Tests: a model the person switched off isn't listed to a lead | S | – |
 | 3 | Helper sessions in copies of their own | A `helper` role beside `task`, `coordinator` and `reviewer`, for the context, the tools and the rules; a thread for each helper on its task. Its copy: the round's snapshot (`reviewCopy.ts`, made general) under `<project>/.helpers/<task>/<n>/`. Its mode and rules the lead's, with its copy as its folder; Claude Code's sandbox held to the copy (`sessionMeta`, `holds`), Codex's `workspace-write` there; Althar's push guard refusing every push; its tools (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`, `screenshot`, `install_dependencies` in its copy); no questions; its asks under its name. Places keyed by helper (`Busy.ts`), four of a task's at once, ten at work or waiting, fifty in its life, an agent refused after three of its helpers fail to start, the lead first. The hour, stalls (`Stalls.ts`), usage limits, a failing service tried again on the step's schedule (ADR-060: `Connectivity.ts`'s pauses of 15 s, 1 min and 4 min, not `Failures.backoff`'s defaults), then ended, and restarts as [above](#places-and-limits); stopped with its task (`LeftBehind.settled`, ADR-068) and gone with its folder (ADR-056). A clause in the agents' contract suite: a helper can't write its lead's folder, on every agent (ADR-082) | L | 1 |
 | 4 | Leads start helpers and hear their results as turns | `start_helper` and `stop_helper` ([The tools](#the-tools)): the answer, the refusals, the model's way as a step's (plan, `accounts.only`, `PlanOnly`, nearly out), the lead's own model and effort without one; a helper that failed for good reported at once with the models the lead may use now. The result kept on the helper's thread and as a file under `.althar/` in the lead's folder, then queued as quiet news after the turn under way, batched, delivered once, starting a lead that stopped (`startLast`); the person's Stop as a line in the lead's next turn. The helper's brief, and the lead's lines on when to start one. Tests, DEV-181's done-when: a Claude Code lead with a Codex helper and a Codex lead with a Claude Code helper, each only reading, the person talking to the lead meanwhile and the result coming as a new turn; an OpenCode helper whose service fails, tried again, then reported, and the lead starting it on Haiku at medium effort, on the agents' fakes in CI and once on real accounts before the release | L | 2, 3 |
 | 5 | Helpers in the thread, with Stop | The row where the lead started it (the kit's `SubAgents`, grown: the model's mark and name, how long, the brief, opening in place to the helper's work), helpers in the Running list with Stop (ADR-022), the result's "From …" block (as `Relayed`), asks under the helper's name, the Graph face's lanes (ADR-054), the task's usage by model. Stories with plays for each state; an end-to-end spec: start a helper, see it, stop it | M | 4 |
 | 6 | Helpers that write: a commit for the lead to take | `writes`: the helper's changes committed on its snapshot, kept on `refs/althar/helpers/<task>/<n>`, never pushed, named in the result with how to bring them in; gone when its task settles. Tests: the lead takes it with `git cherry-pick --no-commit`; one that conflicts with the lead's work since is left for the lead to settle | M | 4 |
-| 7 | Claude Code's own subagents stop holding its turn | Althar declares ACP's `subagents` client capability and AIR's `backgroundSubagents` (`provider-adapters/src/AgentConnection.ts:722`), so claude-agent-acp ends a lead's turn at its answer and reports its subagents as child sessions, and codex-acp its own; `subagent_update` taken off the stream before the SDK, as `background.ts` takes async tasks. Their state counts the lead as at work (`stillBusy`) and, with task 1, not stuck; their calls nest under the call that started them (the kit's `SubAgents`); the turn Claude Code starts with their results is recorded as now (ADR-022). The lead's brief says when its own subagents serve and when `start_helper` does. Tests on recorded adapter output: a turn that starts a background subagent ends at its answer, and the follow-up is recorded | M | 1 |
+| 7 | Agents' own background helpers switched off | Each agent's switch from [Agents' own subagents](#agents-own-subagents) at its launch (`provider-adapters/src/registry.ts`: the environment, `CODEX_CONFIG`, Copilot's arguments, Kimi's config under `KIMI_CODE_HOME`, Antigravity's `_meta.agy` on `session/new`), for leads, helpers and reviewers alike; the person's own settings never turn one back on. The lead's brief: which helpers it has, and `run_project` for a dev server. Tests: each agent's launch has its switch; on Claude Code's recorded output, an `Agent` call with `run_in_background` runs within the turn | S | –
 | 8 | Helpers proven on every agent | Task 3's contract clause and task 4's turn, on each agent's fake in CI and on real accounts before the release, as the agents' contract suite runs (doc 03): each agent as a lead starting a helper, and as a helper, with a gap said where one can't be (`registry.ts`), never silent | M | 4 |
 
 In order:
-1. **First, side by side:** 1 and 2.
-2. **Then, side by side:** 3 and 7.
+1. **First, side by side:** 1, 2 and 7.
+2. **Then:** 3.
 3. **Then:** 4.
 4. **Then, side by side:** 5, 6 and 8.
 
@@ -676,7 +703,9 @@ On 2026-11-02 the person settled what the research left open:
    again by Althar; if it keeps failing, the lead hears and picks another
    ("Haiku on medium").
 
-## Open for the person
+On 2026-11-03 they settled the last:
 
-1. **Claude Code's own subagents:** stop holding the lead's turn, by
-   declaring the capabilities (proposed), or leave them as they are.
+6. **Agents' own helpers:** their background ones switched off on every agent
+   where Althar can, in-turn ones kept where the agent allows; on Codex and
+   OpenCode, `start_helper` for work in the background.
+

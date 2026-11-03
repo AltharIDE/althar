@@ -760,6 +760,132 @@ v0.12.0 (October 2025); "parallel subagents" were announced in April 2026
   subagent runs: "the turn stays active until it finishes"
   ([changelog](https://docs.devin.ai/cli/changelog/stable)).
 
+### Each agent Althar runs, and its own helpers over ACP
+
+Read on 2026-11-03 from each agent's source at a pinned tag, its binary where
+it is closed, and its docs; none of it was run against a live session. The
+question for each: do its own helpers run in the background, what happens to
+them inside an ACP client, and can Althar switch the background ones off while
+keeping those that answer within the turn.
+
+| Agent (version read) | Own helpers | By default | Over ACP | Switch Althar can pass |
+| --- | --- | --- | --- | --- |
+| Claude Code 2.1.312 (claude-agent-acp 0.99.1) | `Agent`, `run_in_background` | background since 2.1.198 | **turn held open** | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`: background off, in-turn kept |
+| Codex 0.165.0 (codex-acp 2.5.0) | `spawn_agent`, `wait_agent` | never blocks | an idle parent never woken | `features.multi_agent = false`: all off |
+| OpenCode 1.19.5 | `task`, `background` | in-turn | a background result never streamed | `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false`: background off, in-turn kept |
+| Copilot CLI 1.0.105 | `task`, `mode: "background"`, sidekicks | the model picks | **turn held open; the next prompt kills them** | `--excluded-tools task`: all off |
+| Junie 3893.6 | `spawn_subagent`, `waitForResult` | background | not verified | none found |
+| Grok Build 1.0.70 | `spawn_subagent` | background | wakes the parent with turns Althar didn't ask for | `GROK_SUBAGENTS=0`: all off |
+| Kimi Code 2.4.1 | `Agent`, `run_in_background` | in-turn | wakes the parent, but **that turn never reaches the client** | `TaskList`, `TaskOutput`, `TaskStop` disabled: background off, in-turn kept |
+| Mistral Vibe 3.0.4 | `agents.spawn`, `wait` | never blocks | a late result waits for the person's next message | `VIBE_ENABLE_SUBAGENTS=false`: all off |
+| Qwen Code 0.26.6 | `agent`, `run_in_background` | background | **wakes the parent with a turn of its own, streamed** | none built in |
+| Antigravity ACP server 1.3.0 | `start_subagent` | always background | the helper's text isn't streamed | `_meta.agy.disabledTools: ["start_subagent"]`: all off |
+
+Only three of the ten keep in-turn helpers with the background ones off:
+Claude Code, OpenCode and Kimi. One, Qwen Code, brings a background result
+back over ACP as a turn of its own. The others hold the turn, lose the result
+or never send it.
+
+- **Claude Code.** `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` came in 2.1.4
+  ([changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)):
+  set to `1`, it "remove[s] the `run_in_background` parameter from the Bash,
+  PowerShell, and subagent tools" and turns off Ctrl+B and auto-backgrounding
+  ([env vars](https://code.claude.com/docs/en/env-vars)). The Agent tool
+  stays, and "Claude waits for subagents to finish before it continues"
+  ([sub-agents](https://code.claude.com/docs/en/sub-agents)); in the 2.1.312
+  binary, `shouldRunAsync` is false whenever background tasks are disabled,
+  even for an agent defined with `background: true`. The adapter merges the
+  process's environment and `_meta.claudeCode.options.env` into Claude Code's.
+  What it costs: no detached shell command (a dev server goes through
+  Althar's `run_project`), and a command that times out stops rather than
+  moving to the background. The Monitor tool and MCP tasks still run in the
+  background; whether they hold the ACP turn wasn't checked. A narrower flag,
+  `backgroundAgentLaunchDisabled`, that would keep Bash's background, is set
+  only inside `claude mcp serve`.
+- **Codex.** Children never block: `spawn_agent` "returns the spawned agent
+  id" at once, and the parent only hears in its turn by calling `wait_agent`
+  ([`multi_agents_spec.rs`](https://github.com/openai/codex/blob/rust-v0.165.0/codex-rs/core/src/tools/handlers/multi_agents_spec.rs)).
+  `features.multi_agent` (stable, on by default,
+  [`features/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.165.0/codex-rs/features/src/lib.rs))
+  or `agents.enabled` takes every subagent tool away; nothing narrower exists.
+  `wake_on_agent_messages`, which would wake an idle parent, is under
+  development and off in 0.165.0. Althar passes it in the config codex-acp
+  merges into each session.
+- **OpenCode.** On the 1.x line the task tool refuses `background: true`, and
+  drops it from the schema the model sees, unless
+  `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS` is on, which
+  `OPENCODE_EXPERIMENTAL=true` also turns on; set to `false`, it wins
+  ([`task.ts`](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/tool/task.ts)).
+  The 2.x line (`packages/core` 2.2.5, 2026-10-30) always offers `background`
+  on its `subagent` tool, with no switch found.
+- **GitHub Copilot CLI.** `task` runs a helper in the turn or with
+  `mode: "background"`, with `read_agent`, `write_agent` and `list_agents`
+  ([command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)).
+  Over ACP, "prompt #1 stays open while the background agent runs", and the
+  next `session/prompt` aborts the session and every background helper with
+  it ([#4555](https://github.com/github/copilot-cli/issues/4555), open);
+  an async shell holds the prompt the same way
+  ([#5293](https://github.com/github/copilot-cli/issues/5293)), and parallel
+  helpers' text arrives with nothing saying whose
+  ([#4106](https://github.com/github/copilot-cli/issues/4106)).
+  `--excluded-tools`, honoured over ACP since 1.0.60
+  ([changelog](https://github.com/github/copilot-cli/blob/main/changelog.md)),
+  takes `task` away whole; `subagents.disabledSubagents` only names agents.
+  Sidekick agents, a `sidekick:` block in an agent file, "run automatically in
+  the background", and Althar shares the person's `agents` folder.
+- **Junie.** Read from the 3893.6 jar
+  ([releases](https://github.com/JetBrains/junie/releases)); the docs only say
+  a subagent "runs it as a subtask"
+  ([subagents](https://junie.jetbrains.com/docs/junie-cli-subagents.html)).
+  `spawn_subagent`'s `waitForResult` "defaults to false (background)", and the
+  child "runs concurrently; you will be notified when it finishes"; a child
+  may work in a worktree (`useWorktree`). Internal `subagents_enabled` and
+  `subagents_mode` properties exist, with no way found to set them from
+  outside. What a background child does to an ACP turn wasn't verified.
+- **Grok Build.** xAI's closed CLI (`@xai-official/grok` 1.0.70, 2026-10-23),
+  read from the strings in its binary: "background is true by default … You
+  get a notification … in a new turn after your turn ends", and a waiting call
+  "stops waiting after 10 minutes". Its own terminal app speaks ACP to
+  `grok agent stdio` and handles a "background wake turn", so Althar would get
+  turns it didn't ask for. `GROK_SUBAGENTS=0`, `--no-subagents` or
+  `subagents.enabled` takes them all away. It also reads Claude Code's,
+  Cursor's and Codex's agent files.
+- **Kimi Code.** In
+  [`agentTool.ts`](https://github.com/MoonshotAI/kimi-code/tree/2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7),
+  `run_in_background` (default false) is allowed only while `TaskList`,
+  `TaskOutput` and `TaskStop` are all on, so disabling them in
+  `[tools] disabled` of `$KIMI_CODE_HOME/config.toml`
+  ([config](https://github.com/MoonshotAI/kimi-code/blob/2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7/docs/en/configuration/config-files.md))
+  refuses background helpers and keeps in-turn ones, and probably background
+  shell commands too. An idle session runs a turn when a helper's notice is
+  waiting, but `acp-server/src/session.ts` drops every event of a turn no
+  prompt started, so that turn's words and edits never reach the client.
+- **Mistral Vibe.** Since 3.0 the spawn tool "does not block", and "a result
+  that arrives after your final answer, does not wake you. It will reach you
+  only in your next turn"
+  ([`default_prompts.json`](https://github.com/mistralai/mistral-vibe/blob/v3.0.4/harness/core/src/core/prompt/default_prompts.json),
+  v3.0.4, 2026-10-30). `enable_subagents`, default true, is read from the
+  `VIBE_` environment prefix.
+- **Qwen Code.** Not Gemini CLI's `invoke_agent` but a Claude Code–like
+  `agent` tool, whose helpers have run in the background by default since
+  [#7048](https://github.com/QwenLM/qwen-code/pull/7048) (2026-07-18). Over
+  ACP, an idle session whose helper finishes runs the turn itself, sending
+  `session/update` with `_meta.source: "background_notification"` and ending
+  with `_qwencode/end_turn`
+  ([`Session.ts`](https://github.com/QwenLM/qwen-code/blob/042c023b7beb4ad2a9ef95b2906b3564e3f23089/packages/cli/src/acp-integration/session/Session.ts),
+  [sub-agents](https://github.com/QwenLM/qwen-code/blob/042c023b7beb4ad2a9ef95b2906b3564e3f23089/docs/users/features/sub-agents.md)).
+  The default is `run_in_background ?? definition.background ?? true`, with
+  no setting over it; a `PreToolUse` hook rewriting the input might force
+  in-turn, untested.
+- **Antigravity.** "Subagents run asynchronously in the background", up to
+  ten levels deep, in a worktree or the shared folder
+  ([subagents](https://antigravity.google/docs/subagents/)). The ACP server
+  filters a session's tools by `_meta.agy.disabledTools` since 1.2.1
+  (2026-09-23, [changelog](https://antigravity.google/docs/changelog/)), and
+  1.3.0 enables subagents unless `start_subagent` is among them; "only the
+  ROOT trajectory's text is the user-facing answer". Whether a running helper
+  holds the turn wasn't verified.
+
 ## Orchestrators like Althar
 
 The question for each: can one agent session start another, perhaps another
@@ -1424,8 +1550,9 @@ the result as a turn of its own, the same on every agent, after the turn
 under way and batched; a helper works in a copy of its own and brings
 writing back on purpose; it never has more than its lead; it starts from a
 brief, and hands back its last message, kept before it is sent; and it is
-capped in number, depth and time. It also stops Claude Code's own background
-subagents holding the lead's turn.
+capped in number, depth and time. It switches off each agent's own background
+helpers where it can, keeping those that answer within the turn where the
+agent allows it ([Each agent Althar runs](#each-agent-althar-runs-and-its-own-helpers-over-acp)).
 
 ### Not found
 
@@ -1437,5 +1564,7 @@ subagents holding the lead's turn.
   Conductor; Devin's ("depends on your plan").
 - Whether OpenCode, Gemini CLI, Cursor, Cline or Devin show their own
   subagents to an ACP client as child sessions.
+- What Junie's and Antigravity's background helpers do to an ACP turn, and
+  how Junie's can be switched off.
 - Reddit, which the research couldn't reach; Hacker News threads were read
   where they turned up.
