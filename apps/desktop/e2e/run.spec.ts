@@ -9,7 +9,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
 
 /*
- * The project run with no agent, in a real window (ADR-023, ADR-089): from
+ * The project run with no agent, in a real window (ADR-023, ADR-090): from
  * the project's front, Run opens its list, on the default branch picked
  * beside it, and a copy of it runs its dev script; its card in the
  * coordinator's thread says where it answers, Run says it runs, and the card
@@ -115,7 +115,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     await list.getByRole('button', { name: 'Run Storybook' }).click()
     await expect(list.getByRole('button', { name: 'Stop Storybook' })).toBeVisible()
     await expect(list.getByRole('button', { name: 'Stop npm run dev' })).toBeVisible()
-    await expect(list.getByRole('button', { name: /^localhost:\d+$/ })).toHaveCount(2, { timeout: 30_000 })
+    await expect(list.getByRole('button', { name: /^localhost:\d+$/ })).toHaveCount(2)
     await expect(page.getByRole('button', { name: /^Run\s*2 running$/ })).toBeVisible()
     await shoot(page, 'run-many')
     await page.keyboard.press('Escape')
