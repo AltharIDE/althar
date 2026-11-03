@@ -18,7 +18,7 @@
 -- node_type: deterministic_action, agent, integration, human_decision, condition, bounded_map, join, verification, compensation, subworkflow, bounded_loop
 -- node_state: pending, ready, running, succeeded, failed, skipped, cancelled, uncertain
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
--- hold_reason: usage_limit, agent_unavailable, machine_busy
+-- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
 -- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
@@ -33,7 +33,7 @@
 -- process_state: launching, running, exited, killed, unknown
 -- tool_kind: read, edit, delete, move, search, execute, think, fetch, switch_mode, other
 -- permission_request_state: open, decided, cancelled
--- attention_kind: permission, question, stuck, plan, graph_patch, usage_limit, review_disagreement
+-- attention_kind: permission, question, stuck, plan, graph_patch, usage_limit, review_disagreement, checkout
 -- attention_state: open, answered, expired, withdrawn
 -- finding_severity: blocking, major, minor, nit
 -- finding_state: open, fixed, set_aside, dismissed

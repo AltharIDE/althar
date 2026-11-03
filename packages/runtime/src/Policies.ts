@@ -1,5 +1,5 @@
 import { commandStartOf, hostOf } from '@althar/contracts'
-import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -96,6 +96,12 @@ export const ProjectRules = Schema.Struct({
    * without it. Comments and links apply at once either way.
    */
   changeIssues: Schema.optional(Schema.Boolean),
+  /**
+   * Where new tasks start (ADR-086): in a worktree of their own, or Local, in
+   * each repository's own checkout here, one task at a time. The coordinator
+   * chooses per task. A worktree without it.
+   */
+  worksIn: Schema.optional(WorksIn),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -191,6 +197,9 @@ export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ??
 
 /** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
 export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
+
+/** Where a revision's rules start new tasks (ADR-086): in a worktree of their own unless the person chose Local. */
+export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true

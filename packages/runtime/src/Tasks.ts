@@ -35,6 +35,8 @@ import { indexTask } from './Search'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
+import { reopenedSpot, spotsOf } from './local'
+import { RuntimeConfig } from './Config'
 import { Setups } from './Setups'
 
 /*
@@ -163,7 +165,18 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes | LeftBehind
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Ledger
+  | Crypto.Crypto
+  | Sessions
+  | Runs
+  | Plans
+  | Setups
+  | Changes
+  | LeftBehind
+  | RuntimeConfig
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -495,6 +508,8 @@ export class Tasks extends Context.Service<
             )
             restored = true
           }
+          // Local, its checkout gone back as it was settled: it carries on in a worktree of its own, on its branch (ADR-086).
+          for (const spot of yield* spotsOf(input.taskId)) yield* reopenedSpot(spot)
           const reopened = yield* sql.withTransaction(
             Effect.gen(function* () {
               // Read again where it is written: reopened meanwhile, the lifecycle refuses it.

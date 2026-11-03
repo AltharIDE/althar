@@ -56,6 +56,52 @@ export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const UsageLimit = Schema.Literals(['move', 'wait', 'ask'])
 export type UsageLimit = typeof UsageLimit.Type
 
+/**
+ * Where a task works (ADR-086): a worktree of its own, or Local, in each of
+ * its repositories' own checkout on this device, where the person works, one
+ * task at a time.
+ */
+export const WorksIn = Schema.Literals(['worktree', 'checkout'])
+export type WorksIn = typeof WorksIn.Type
+
+/** Another task, by its id and title: one that works in a checkout another waits for. */
+export const OtherTask = Schema.Struct({ taskId: Schema.String, title: Schema.String })
+export type OtherTask = typeof OtherTask.Type
+
+/**
+ * What a Local task waits for before it starts (ADR-086): a checkout another
+ * task works in (`taken`, by that task), or the person committing what isn't
+ * committed in it, as they chose (`changes`).
+ */
+export const CheckoutWait = Schema.Union([
+  Schema.Struct({ why: Schema.Literal('taken'), by: OtherTask }),
+  Schema.Struct({ why: Schema.Literal('changes'), repository: Schema.String }),
+])
+export type CheckoutWait = typeof CheckoutWait.Type
+
+/**
+ * What Althar asks before a Local task takes a repository's checkout
+ * (ADR-086): it has changes not committed (`changes`, which files), or is
+ * on a branch of the person's own (`branch`), which it never switches
+ * without asking. `base` is the branch tasks start from.
+ */
+export const CheckoutAsk = Schema.Struct({
+  repository: Schema.String,
+  holdup: Schema.Literals(['changes', 'branch']),
+  files: Schema.Array(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  base: Schema.String,
+})
+export type CheckoutAsk = typeof CheckoutAsk.Type
+
+/**
+ * The person's answer to a checkout's ask: wait until its changes are
+ * committed, start in a worktree instead, check out the task's branch from
+ * the branch it is on, or start the task from that branch.
+ */
+export const CheckoutAnswer = Schema.Literals(['wait', 'worktree', 'switch', 'from_branch'])
+export type CheckoutAnswer = typeof CheckoutAnswer.Type
+
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
@@ -694,6 +740,8 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+  /** Where new tasks start: a worktree of their own, or Local, in each repository's checkout here (ADR-086). */
+  worksIn: WorksIn,
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
   resolveConflicts: Schema.Boolean,
   /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-072). */
@@ -1757,6 +1805,12 @@ export const TaskCard = Schema.Struct({
        * only. Absent where any may.
        */
       agents: Schema.optional(Schema.Array(Schema.String)),
+      /** Where it works (ADR-086); absent for a worktree, as a review's. */
+      worksIn: Schema.optional(WorksIn),
+      /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
+      worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
+      /** The task working Local now, which it would wait for there; null where Local is free. */
+      localTaken: Schema.optional(Schema.NullOr(OtherTask)),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
@@ -1789,6 +1843,10 @@ export const TaskCard = Schema.Struct({
   leadEffort: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
+  /** It works Local, in its repositories' own checkouts here (ADR-086); absent for a worktree. */
+  local: Schema.optional(Schema.Boolean),
+  /** Started Local, it waits before any agent works on it: for another task's checkout, or the person's commit (ADR-086). */
+  waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
   /** The step is held for the connection: absent or null otherwise (ADR-060). */
@@ -2363,7 +2421,7 @@ export type StuckStep = typeof StuckStep.Type
 /** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['permission', 'stuck', 'question']),
+  kind: Schema.Literals(['permission', 'stuck', 'question', 'checkout']),
   /** What the agent wants to do, as it put it. */
   title: Schema.String,
   /** Why it waits for the person: the rule that keeps it for them. */
@@ -2375,6 +2433,8 @@ export const AttentionRequest = Schema.Struct({
   held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
+  /** For a Local task's checkout: what Althar asks before it takes it (ADR-086). */
+  checkout: Schema.optional(CheckoutAsk),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
   question: Schema.optional(
     Schema.Struct({
@@ -2561,6 +2621,10 @@ export const ThreadSnapshot = Schema.Struct({
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
+    /** It works Local, its folder the repository's own checkout here (ADR-086); absent for a worktree. */
+    local: Schema.optional(Schema.Boolean),
+    /** Started Local, what it waits for before its lead starts, as its card says. */
+    waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
     /**
      * Its folder, where it isn't on this computer as it should be: removed once
      * the task finished (ADR-056), or coming back, from its branch, and
@@ -3308,7 +3372,13 @@ export const Api = RpcGroup.make(
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',
-    { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
+    {
+      planId: Schema.String,
+      steps: Schema.Array(PlanStep),
+      end: Schema.optional(Schema.NullOr(TaskEnd)),
+      /** Where it works (ADR-086), until its first step starts; the plan's as it was without it. */
+      worksIn: Schema.optional(WorksIn),
+    },
     Schema.Void,
   ),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -3572,6 +3642,8 @@ export const Api = RpcGroup.make(
   ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
+  /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-086). */
+  command('AnswerCheckout', { attentionId: Schema.String, answer: CheckoutAnswer }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',
@@ -3687,6 +3759,8 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      /** Where new tasks start; tasks under way stay where they are. */
+      worksIn: Schema.optional(WorksIn),
       /** Turned on, the project's tasks that already conflict are resolved now, not at their next conflict. */
       resolveConflicts: Schema.optional(Schema.Boolean),
       /** Turned on, what each open task's lead committed and left waiting goes up now, not at its next turn's end. */

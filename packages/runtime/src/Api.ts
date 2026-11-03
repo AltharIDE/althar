@@ -62,6 +62,7 @@ import {
   Policies,
   type ProjectRules,
   resolvesConflicts,
+  worksInOf,
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
@@ -429,6 +430,7 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        worksIn: worksInOf(rules),
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
@@ -1147,7 +1149,8 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangePlan: ({ commandId, planId, steps, end, worksIn }) =>
+        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,
@@ -1193,6 +1196,15 @@ export const handlers = Api.toLayer(
                 sender,
               })
             }),
+          ),
+        ),
+      AnswerCheckout: ({ commandId, attentionId, answer }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('attention.answer_checkout', { attentionId, answer }, commandId), (said) =>
+              runs.answerCheckout({ envelope: said, attentionId, answer }),
+            ),
           ),
         ),
       HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {

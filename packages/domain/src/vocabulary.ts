@@ -183,8 +183,11 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at once. */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])
+/**
+ * Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at
+ * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-086).
+ */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -195,6 +198,7 @@ export const AttentionKind = Schema.Literals([
   'graph_patch',
   'usage_limit',
   'review_disagreement',
+  'checkout',
 ])
 export type AttentionKind = typeof AttentionKind.Type
 

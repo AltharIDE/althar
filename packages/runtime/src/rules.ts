@@ -172,6 +172,13 @@ export interface RuleContext {
   readonly worktree: string
   /** The task's worktrees, one per repository, where it may write; just `worktree` unless the task has several. */
   readonly worktrees?: ReadonlyArray<string>
+  /**
+   * Those of `worktrees` that are the person's own checkouts, as a Local
+   * task's are (ADR-086): git there that would throw away what isn't
+   * committed always asks, as in another checkout, since some of it may be
+   * the person's.
+   */
+  readonly shared?: ReadonlyArray<string>
   /** The branch pushes to which always ask. */
   readonly defaultBranch: string
   /** Every repository's default branch, where the task has several repositories. */
@@ -1618,6 +1625,8 @@ interface Places {
   readonly names: (path: string) => ReadonlyArray<string>
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
+  /** The person's own checkouts among them (`RuleContext`'s `shared`). */
+  readonly shared: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
   /** The folder `$TMPDIR` names in the agent's commands, where the rules know it (`RuleContext`'s `temp`). */
   readonly temp: string | undefined
@@ -1661,6 +1670,7 @@ const places = (context: RuleContext): Places => {
     names,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
+    shared: (context.shared ?? []).map(real),
     scratch: temp === undefined ? scratch : [...scratch, temp],
     temp,
   }
@@ -2646,6 +2656,21 @@ const kindsOf = (
         kinds.push(
           kept(
             `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
+            'outside',
+            'irreversible',
+          ),
+        )
+    }
+    // A Local task's folder is the person's own checkout (ADR-086): what isn't committed there may be theirs, so throwing it
+    // away asks there too.
+    const shared =
+      elsewhere === undefined ? repository.find((path) => where.shared.some((root) => within(where.system, root, path))) : undefined
+    if (shared !== undefined) {
+      const isPath = (name: string) => where.exists(where.system.paths.resolve(shared, name))
+      if (discards(git, isPath))
+        kinds.push(
+          kept(
+            `\`git ${git.subcommand}\` in your checkout always asks: it could throw away your own uncommitted work: ${shared}`,
             'outside',
             'irreversible',
           ),

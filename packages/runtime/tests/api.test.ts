@@ -1153,6 +1153,7 @@ describe('project rules, through the API', () => {
           alwaysAllow: [],
           commands: [],
           end: null,
+          worksIn: 'worktree',
           resolveConflicts: false,
           pushCommits: true,
           postScreenshots: false,
