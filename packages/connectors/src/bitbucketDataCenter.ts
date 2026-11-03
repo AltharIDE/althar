@@ -4,6 +4,7 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { type Http, makeHttp } from './http'
+import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
 import type {
   Account,
   Activity,
@@ -482,6 +483,13 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false, reopen: true, rerun: false },
+    ...makeBitbucketDataCenterReleases({
+      http,
+      base,
+      rest,
+      builds: (sha) => all(BuildAnswer, `${rest}/build-status/latest/commits/${encodeURIComponent(sha)}`),
+      buildState,
+    }),
     account,
     repository: (path) =>
       Effect.gen(function* () {

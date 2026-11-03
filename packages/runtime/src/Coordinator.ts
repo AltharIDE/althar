@@ -17,7 +17,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
@@ -39,6 +39,7 @@ import {
   reopenPullRequest,
   rerunChecks,
 } from './coordinatorPullRequests'
+import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
@@ -113,6 +114,7 @@ type Store =
   | Runs
   | Connections
   | Automations
+  | RuntimeConfig
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -1107,6 +1109,9 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          const sql = yield* SqlClient.SqlClient
+          const [held] = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
@@ -1115,6 +1120,8 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
           })
+          if (held !== undefined)
+            return `Changed ${task.slug}'s plan. It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -1688,6 +1695,7 @@ export class Coordinator extends Context.Service<
               return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
             }),
         ),
+        ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
           'list_models',
@@ -1697,7 +1705,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
           {
             type: 'object',
             properties: {

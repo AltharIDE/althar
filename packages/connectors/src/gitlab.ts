@@ -6,6 +6,7 @@ import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
+import { makeGitLabReleases } from './gitlabReleases'
 import { tail } from './github'
 import type {
   Account,
@@ -697,6 +698,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
 
   return {
     product,
+    ...makeGitLabReleases({ http, project, mayNot }),
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
     capabilities: {
       drafts: true,
