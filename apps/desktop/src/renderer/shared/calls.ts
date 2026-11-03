@@ -11,7 +11,7 @@ export const kindWords = {
   stuck: 'Stuck',
   /** A question an agent asks the person. */
   question: 'Question',
-  /** What Althar asks before a Local task takes the person's checkout (ADR-090). */
+  /** What Althar asks before a Local task takes the person's checkout (ADR-091). */
   checkout: 'Local',
   /** A call for a step a usage limit stopped, which the person moves on or holds for the reset. */
   limit: 'Out of usage',

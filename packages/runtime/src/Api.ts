@@ -744,7 +744,7 @@ export const handlers = Api.toLayer(
           api(
             Effect.gen(function* () {
               const said = yield* envelope('project.remove', { projectId }, commandId)
-              // A checkout its tasks hold stays theirs until all of them has stopped, counted from before it is removed; then it goes back (ADR-090).
+              // A checkout its tasks hold stays theirs until all of them has stopped, counted from before it is removed; then it goes back (ADR-091).
               const local = yield* localTasksIn(projectId).pipe(Effect.provideContext(folderStore))
               const removing = Effect.gen(function* () {
                 const threads = yield* projects.remove(projectId, said.commandId)

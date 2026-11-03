@@ -24,7 +24,7 @@ import { callTool, notices, repository, runtime, until } from './support'
 import type { ToolAccess } from '../src/ToolServer'
 
 /*
- * Local tasks (ADR-090): a task that works in the person's own checkout
+ * Local tasks (ADR-091): a task that works in the person's own checkout
  * rather than a worktree of its own. It takes the checkout as its first step
  * begins, on a branch of its own; one task holds it at a time; Althar asks
  * before it switches a checkout with uncommitted changes or on a branch of

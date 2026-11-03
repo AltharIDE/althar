@@ -92,7 +92,7 @@ const groupOf = (task: BoardTask): Group | null => {
 
 /**
  * When a paused task can go on: a usage limit's reset, the soonest first; the connection, whenever it is back, after them;
- * last, one started Local that waits for its checkout, under a divider of its own (ADR-090).
+ * last, one started Local that waits for its checkout, under a divider of its own (ADR-091).
  */
 const backAt = (task: BoardTask) => `${task.waitsForCheckout == null ? 0 : 1}${task.waits?.until ?? '￿'}`
 

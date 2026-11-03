@@ -57,7 +57,7 @@ export const UsageLimit = Schema.Literals(['move', 'wait', 'ask'])
 export type UsageLimit = typeof UsageLimit.Type
 
 /**
- * Where a task works (ADR-090): a worktree of its own, or Local, in each of
+ * Where a task works (ADR-091): a worktree of its own, or Local, in each of
  * its repositories' own checkout on this device, where the person works, one
  * task at a time.
  */
@@ -69,7 +69,7 @@ export const OtherTask = Schema.Struct({ taskId: Schema.String, title: Schema.St
 export type OtherTask = typeof OtherTask.Type
 
 /**
- * What a Local task waits for before it starts (ADR-090): a checkout another
+ * What a Local task waits for before it starts (ADR-091): a checkout another
  * task works in (`taken`, by that task), or the person committing what isn't
  * committed in it, as they chose (`changes`).
  */
@@ -81,7 +81,7 @@ export type CheckoutWait = typeof CheckoutWait.Type
 
 /**
  * What Althar asks before a Local task takes a repository's checkout
- * (ADR-090): it has changes not committed (`changes`, which files), or is
+ * (ADR-091): it has changes not committed (`changes`, which files), or is
  * on a branch of the person's own (`branch`), which it never switches
  * without asking. `base` is the branch tasks start from.
  */
@@ -793,7 +793,7 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
-  /** Where new tasks start: a worktree of their own, or Local, in each repository's checkout here (ADR-090). */
+  /** Where new tasks start: a worktree of their own, or Local, in each repository's checkout here (ADR-091). */
   worksIn: WorksIn,
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
   resolveConflicts: Schema.Boolean,
@@ -1861,7 +1861,7 @@ export const TaskCard = Schema.Struct({
        * only. Absent where any may.
        */
       agents: Schema.optional(Schema.Array(Schema.String)),
-      /** Where it works (ADR-090); absent for a worktree, as a review's. */
+      /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
       /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
@@ -1901,9 +1901,9 @@ export const TaskCard = Schema.Struct({
   leadEffort: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
-  /** It works Local, in its repositories' own checkouts here (ADR-090); absent for a worktree. */
+  /** It works Local, in its repositories' own checkouts here (ADR-091); absent for a worktree. */
   local: Schema.optional(Schema.Boolean),
-  /** Started Local, it waits before any agent works on it: for another task's checkout, or the person's commit (ADR-090). */
+  /** Started Local, it waits before any agent works on it: for another task's checkout, or the person's commit (ADR-091). */
   waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
@@ -2579,7 +2579,7 @@ export const AttentionRequest = Schema.Struct({
   held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
-  /** For a Local task's checkout: what Althar asks before it takes it (ADR-090). */
+  /** For a Local task's checkout: what Althar asks before it takes it (ADR-091). */
   checkout: Schema.optional(CheckoutAsk),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
   question: Schema.optional(
@@ -2817,7 +2817,7 @@ export const ThreadSnapshot = Schema.Struct({
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
-    /** It works Local, its folder the repository's own checkout here (ADR-090); absent for a worktree. */
+    /** It works Local, its folder the repository's own checkout here (ADR-091); absent for a worktree. */
     local: Schema.optional(Schema.Boolean),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
@@ -3590,7 +3590,7 @@ export const Api = RpcGroup.make(
       planId: Schema.String,
       steps: Schema.Array(PlanStep),
       end: Schema.optional(Schema.NullOr(TaskEnd)),
-      /** Where it works (ADR-090), until its first step starts; the plan's as it was without it. */
+      /** Where it works (ADR-091), until its first step starts; the plan's as it was without it. */
       worksIn: Schema.optional(WorksIn),
     },
     Schema.Void,
@@ -3889,7 +3889,7 @@ export const Api = RpcGroup.make(
   ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
-  /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-090). */
+  /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091). */
   command('AnswerCheckout', { attentionId: Schema.String, answer: CheckoutAnswer }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(

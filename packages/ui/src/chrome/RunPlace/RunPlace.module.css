@@ -1,0 +1,160 @@
+/* The chip beside Run: where it runs, as a branch switcher says it. */
+.chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 240px;
+}
+.chip > span {
+  display: flex;
+  min-width: 0;
+}
+.chipLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The picker: a field, then the places, scrolled; its height stays as it is typed in. */
+.picker {
+  display: flex;
+  flex-direction: column;
+  height: min(460px, 66vh);
+}
+.field {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 42px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.field input::placeholder {
+  color: var(--t-3);
+}
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+.label {
+  padding: 10px 10px 4px;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* One place: checked where Run runs; its name, and quieter, what it is; what runs there, at its end. */
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px 8px 6px;
+  border-radius: 8px;
+  cursor: default;
+}
+.row[aria-selected='true'] {
+  background: var(--hover-paper);
+}
+.row[aria-selected='true'] .meta,
+.row[aria-selected='true'] .number {
+  color: var(--t-2);
+}
+.row:active {
+  background: var(--pressed-paper);
+}
+.check {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 14px;
+  margin-top: 2px;
+  color: var(--t-2);
+}
+.glyph {
+  flex: none;
+  margin-top: 2px;
+  color: var(--t-3);
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+.number {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.there {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.bad {
+  color: var(--danger);
+}
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 10px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.note {
+  flex: none;
+  margin: 0;
+  padding: 9px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-2);
+}

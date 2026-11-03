@@ -64,7 +64,7 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
   }
 
   // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
-  // A Local task's checkout waiting to be taken is the person's, and waits on (ADR-090).
+  // A Local task's checkout waiting to be taken is the person's, and waits on (ADR-091).
   // A review's copy starts where its pull request's change does, as its review keeps it, not at the head it holds.
   const preparing = yield* sql<{
     id: string

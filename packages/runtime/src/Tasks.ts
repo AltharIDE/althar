@@ -381,7 +381,7 @@ export class Tasks extends Context.Service<
           yield* changes.leaveOut(input)
         })
 
-      // Counted as stopping from before it settles until LeftBehind has it: a Local task's checkout stays its own meanwhile (ADR-090).
+      // Counted as stopping from before it settles until LeftBehind has it: a Local task's checkout stays its own meanwhile (ADR-091).
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         leftBehind.stoppingWhile(input.taskId, abandoning(input))
 
@@ -512,7 +512,7 @@ export class Tasks extends Context.Service<
             )
             restored = true
           }
-          // Local, its checkout gone back as it was settled: it carries on in a worktree of its own, on its branch (ADR-090).
+          // Local, its checkout gone back as it was settled: it carries on in a worktree of its own, on its branch (ADR-091).
           for (const spot of yield* spotsOf(input.taskId)) yield* reopenedSpot(spot)
           const reopened = yield* sql.withTransaction(
             Effect.gen(function* () {

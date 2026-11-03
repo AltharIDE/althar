@@ -22,7 +22,7 @@ import { useServices } from '../../data/services'
 
 /** A rule the settings switch in place. */
 export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues'
-/** A rule set from General: one of its switches, or where new tasks start (ADR-090). */
+/** A rule set from General: one of its switches, or where new tasks start (ADR-091). */
 export type GeneralRule = RuleSwitch | 'worksIn'
 
 export interface ProjectSettingsModel {
@@ -57,7 +57,7 @@ export interface ProjectSettingsModel {
   readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
-  /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-090). */
+  /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
   readonly setWorksIn: (worksIn: WorksIn) => void
   /** Which rule didn't hold, and why. */
   readonly ruleFailed: { readonly rule: GeneralRule; readonly message: string } | null

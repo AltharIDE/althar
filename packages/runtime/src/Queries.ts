@@ -321,7 +321,7 @@ const number = (value: unknown, key: string): number | null => {
 const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
   Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
-/** What a checkout's ask says at a glance, as a card's headline: on another branch, or with changes not committed (ADR-090). */
+/** What a checkout's ask says at a glance, as a card's headline: on another branch, or with changes not committed (ADR-091). */
 const checkoutTitle = (payload: unknown) =>
   text(payload, 'holdup') === 'branch'
     ? `${text(payload, 'repository') || 'Local'} is on another branch`
@@ -361,7 +361,7 @@ const callOf = (request: {
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
-    // What Althar asks before a Local task takes a checkout (ADR-090).
+    // What Althar asks before a Local task takes a checkout (ADR-091).
     ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
       onNone: () => ({}),
       onSome: (checkout) => ({ checkout }),
@@ -1990,7 +1990,7 @@ export class Queries extends Context.Service<
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
               -- A turn of its lead or reviewer that waits for a place.
               (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
-              -- Whether it works Local, in its repositories' own checkouts here (ADR-090).
+              -- Whether it works Local, in its repositories' own checkouts here (ADR-091).
               (SELECT count(*) FROM workspaces lw WHERE lw.task_id = k.id AND lw.device_id = ${instance.deviceId} AND lw.kind = 'checkout')
                 AS local,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
@@ -2047,7 +2047,7 @@ export class Queries extends Context.Service<
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
           // has worked on it, whatever its kind, it is in its project's line.
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
-          // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-090).
+          // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-091).
           const waitsForCheckout = task.heldFor === 'checkout' ? checkoutWaitOf(task.held) : null
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
@@ -2232,7 +2232,7 @@ export class Queries extends Context.Service<
                             .map((entry) => entry.definition.id),
                         }
                       : {
-                          // Where it works (ADR-090), why where the coordinator said, and who works Local now, while it can change.
+                          // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
                           worksInWhy: text(parameters, 'worksInWhy') || null,
                           ...(task.planState === 'proposed' || (yield* planWaits(taskId))

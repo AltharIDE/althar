@@ -71,8 +71,8 @@ export interface ProjectModel {
   readonly compact: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
-  /** Runs a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for the picker to say. */
-  readonly runBranch: (ref: RunRef) => Promise<void>
+  /** Runs one on a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for its line to say. */
+  readonly runRef: (runnableId: string, ref: RunRef) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -362,9 +362,9 @@ export const useProject = (projectId: string): ProjectModel => {
           ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
           : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref),
       ),
-    runBranch: async (ref) => {
+    runRef: async (runnableId, ref) => {
       try {
-        await client.runProject(projectId, null, threadId, undefined, ref)
+        await client.runProject(projectId, null, threadId, runnableId, ref)
       } finally {
         await readHead()
       }

@@ -1,7 +1,7 @@
 import type { CheckoutWait } from '@althar/contracts'
 
 /*
- * How a task working Local is said (ADR-090): in the person's own checkout,
+ * How a task working Local is said (ADR-091): in the person's own checkout,
  * one task at a time, rather than in a worktree of its own.
  */
 export const localText = {

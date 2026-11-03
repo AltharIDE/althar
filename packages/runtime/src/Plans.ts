@@ -47,7 +47,7 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
-      /** Where it works (ADR-090), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
+      /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
     }): Effect.Effect<string, unknown>
@@ -70,7 +70,7 @@ export class Plans extends Context.Service<
       steps: ReadonlyArray<PlanStep>,
       actorId: ActorId,
       end?: TaskEnd | null,
-      /** Where it works, until its first step starts (ADR-090); as it was without it. */
+      /** Where it works, until its first step starts (ADR-091); as it was without it. */
       worksIn?: WorksIn,
     ): Effect.Effect<void, unknown>
   }
@@ -328,7 +328,7 @@ export class Plans extends Context.Service<
               )
               if (done) {
                 yield* touchCard(plan.taskId)
-                // Moved between a worktree and its checkout as it waits: placed again now (ADR-090).
+                // Moved between a worktree and its checkout as it waits: placed again now (ADR-091).
                 if (worksIn !== undefined) yield* runs.checkoutsMoved
               }
             }),

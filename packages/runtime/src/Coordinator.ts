@@ -119,7 +119,7 @@ type Store =
   | Automations
   | RuntimeConfig
 
-/* Where a task works, as the coordinator says it (ADR-090): Local, in the person's own checkout, or a worktree; and why. */
+/* Where a task works, as the coordinator says it (ADR-091): Local, in the person's own checkout, or a worktree; and why. */
 const Where = {
   works_in: Schema.optional(Schema.Literals(['local', 'worktree'])),
   works_in_why: Schema.optional(Schema.String),
@@ -569,7 +569,7 @@ export class Coordinator extends Context.Service<
           return `Dropped ${id}.`
         })
 
-      /** Where a task works, as the coordinator said it, else as the project starts its tasks (ADR-090). */
+      /** Where a task works, as the coordinator said it, else as the project starts its tasks (ADR-091). */
       const worksInFor = (projectId: string, asked: 'local' | 'worktree' | undefined) =>
         Effect.gen(function* () {
           if (asked !== undefined) return asked === 'local' ? ('checkout' as const) : ('worktree' as const)
@@ -638,7 +638,7 @@ export class Coordinator extends Context.Service<
               // Sent with no words, its images and files are still what they asked for.
               ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
-              // Where it works: as the coordinator said, else the project's default (ADR-090).
+              // Where it works: as the coordinator said, else the project's default (ADR-091).
               worksIn: yield* worksInFor(access.projectId, asked),
             })
             .pipe(
@@ -1149,7 +1149,7 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
-          // Where it works: as said now, else as it was drafted, else the project's default (ADR-090).
+          // Where it works: as said now, else as it was drafted, else the project's default (ADR-091).
           const drafted = (yield* worksLocal(task.id)) ? 'local' : undefined
           const worksIn = yield* worksInFor(access.projectId, proposed.works_in ?? drafted)
           const sql = yield* SqlClient.SqlClient

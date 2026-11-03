@@ -174,7 +174,7 @@ export interface RuleContext {
   readonly worktrees?: ReadonlyArray<string>
   /**
    * Those of `worktrees` that are the person's own checkouts, as a Local
-   * task's are (ADR-090): git there that would throw away what isn't
+   * task's are (ADR-091): git there that would throw away what isn't
    * committed always asks, as in another checkout, since some of it may be
    * the person's.
    */
@@ -2833,7 +2833,7 @@ const kindsOf = (
           ),
         )
     }
-    // A Local task's folder is the person's own checkout (ADR-090): what isn't committed there may be theirs, so throwing it
+    // A Local task's folder is the person's own checkout (ADR-091): what isn't committed there may be theirs, so throwing it
     // away asks there too.
     const shared =
       elsewhere === undefined ? repository.find((path) => where.shared.some((root) => within(where.system, root, path))) : undefined

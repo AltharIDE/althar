@@ -380,7 +380,7 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
   })
 
-  it('starts new tasks in a worktree until the person chooses Local, saying what each gives up (ADR-090)', async () => {
+  it('starts new tasks in a worktree until the person chooses Local, saying what each gives up (ADR-091)', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))

@@ -87,7 +87,7 @@ export const ChangeRunning: Story = {
 }
 /** A follow-up on a change whose pull request is open: the pull request, and its checks so far. */
 export const ChangeRunningWithItsPullRequest: Story = { args: CHANGE_RUNNING_PR }
-/** In the person's own checkout, Local (ADR-090): said with its kind's word, nothing else about it changes. */
+/** In the person's own checkout, Local (ADR-091): said with its kind's word, nothing else about it changes. */
 export const ChangeRunningLocal: Story = {
   args: { ...CHANGE_RUNNING, local: true },
   play: async ({ canvasElement }) => {

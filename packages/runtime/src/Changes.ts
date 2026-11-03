@@ -4165,7 +4165,7 @@ export class Changes extends Context.Service<
             return yield* touchCard(taskId)
           }
           // Its agents, what they left running and its runs stop, in the background: the merge never waits on them.
-          // Counted as stopping from before it is done, so a checkout it holds stays its own until they have (ADR-090).
+          // Counted as stopping from before it is done, so a checkout it holds stays its own until they have (ADR-091).
           yield* leftBehind.stoppingWhile(
             taskId,
             Effect.andThen(

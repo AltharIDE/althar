@@ -1466,7 +1466,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
     assert.strictEqual(verdictOf('git push --force origin main', { mode: 'allow', never: ['force-push'] }), 'deny')
   })
 
-  it('asks with everything allowed before git throws away what isn’t committed in a Local task’s folder, the person’s own checkout (ADR-090)', () => {
+  it('asks with everything allowed before git throws away what isn’t committed in a Local task’s folder, the person’s own checkout (ADR-091)', () => {
     const allow = { mode: 'allow' as const }
     const local = { ...rules(allow), shared: [worktree] }
     const discarding = ['git reset --hard', 'git stash', 'git clean -fd', 'git checkout -- .', 'git restore src/app.ts']

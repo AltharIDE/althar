@@ -76,7 +76,7 @@ export const text = {
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
-  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-090). */
+  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-091). */
   forLocal: localText.word,
   planned: 'Planned',
   /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
@@ -211,7 +211,7 @@ const kindOf = (task: Pick<BoardTask, 'kind'>): TaskKind => {
 export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | undefined =>
   (task.local === true ? boardCardText.local(boardCardText.kind[kindOf(task)]) : boardCardText.kind[kindOf(task)]) || undefined
 
-/** In the person's own checkout, as its kind's word says (ADR-090). */
+/** In the person's own checkout, as its kind's word says (ADR-091). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
@@ -720,7 +720,7 @@ export function BoardView({
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
-  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-090).
+  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-091).
   const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
   const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
   const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
@@ -733,7 +733,7 @@ export function BoardView({
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
-    // Not one that waits for its checkout: nothing of it has begun (ADR-090).
+    // Not one that waits for its checkout: nothing of it has begun (ADR-091).
     const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
     const reason =
       index < continuing

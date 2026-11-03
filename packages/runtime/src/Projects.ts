@@ -360,7 +360,7 @@ export class Projects extends Context.Service<
       /** The key of the issue it comes from, which its branch carries, so the tracker's own Git integration finds it. */
       readonly issueKey?: string
       /**
-       * Where it works (ADR-090): Local, its repositories' own checkouts here,
+       * Where it works (ADR-091): Local, its repositories' own checkouts here,
        * taken as its plan starts, so none is made now; else a worktree of its
        * own, as before.
        */
@@ -695,7 +695,7 @@ export class Projects extends Context.Service<
               // Planned by the rule, else Althar's own until the repository's docs are read.
               const branch = branchFor(rule, { key: input.issueKey ?? null, slug })
               // A worktree for each repository it changes, side by side in the task's folder (ADR-006); Local, its checkout,
-              // waiting to be taken (ADR-090).
+              // waiting to be taken (ADR-091).
               const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
                 yield* sql`INSERT INTO task_repository_requirements ${sql.insert({

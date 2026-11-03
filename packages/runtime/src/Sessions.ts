@@ -160,7 +160,7 @@ interface TaskRepository {
   readonly defaultBranch: string
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   readonly within: string | null
-  /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-090); 0 for a worktree. */
+  /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-091); 0 for a worktree. */
   readonly local: number
 }
 
@@ -261,7 +261,7 @@ const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readon
 }
 
 /**
- * What a Local task's lead is told of its folder (ADR-090): the person's
+ * What a Local task's lead is told of its folder (ADR-091): the person's
  * own checkout, which they may edit while it works, so it commits only its
  * own files and never moves the checkout or throws anything there away.
  */
@@ -2182,7 +2182,7 @@ export class Sessions extends Context.Service<
                     context: {
                       worktree: thread.cwd,
                       worktrees: thread.repositories.map((repository) => repository.worktree),
-                      // Local, the person's own checkouts: what isn't committed there is theirs too (ADR-090).
+                      // Local, the person's own checkouts: what isn't committed there is theirs too (ADR-091).
                       shared: thread.repositories.filter((repository) => repository.local === 1).map((repository) => repository.worktree),
                       defaultBranch: thread.defaultBranch,
                       // A fork's task bound for the repository it came from has that repository's default too.
@@ -3006,7 +3006,7 @@ export class Sessions extends Context.Service<
             thread.repositories.length === 1 && first !== undefined
               ? `its scratch folder, ${scratchOf(first.worktree)}`
               : `each worktree's scratch folder, .althar/scratch`
-          // Local, its folders are the person's own checkouts (ADR-090).
+          // Local, its folders are the person's own checkouts (ADR-091).
           const local = thread.repositories.some((repository) => repository.local === 1)
           const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
           return [
@@ -3170,7 +3170,7 @@ export class Sessions extends Context.Service<
         ]
       }
 
-      /** Where the project starts its tasks (ADR-090); in a worktree where its rules can't be read. */
+      /** Where the project starts its tasks (ADR-091); in a worktree where its rules can't be read. */
       const projectWorksIn = (projectId: ProjectId) =>
         policies.current(projectId).pipe(
           Effect.map((policy) => worksInOf(policy.rules)),

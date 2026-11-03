@@ -8,7 +8,7 @@ import { branchExists, commitOf, currentBranch, git, uncommittedFiles } from './
 
 /*
  * A Local task works in its repository's own checkout, where the person works
- * (ADR-090). Althar reads it before it takes it, and never switches it while
+ * (ADR-091). Althar reads it before it takes it, and never switches it while
  * it has changes not committed: no stash, reset or clean, ever. What it does
  * to it is two switches: to the task's branch, made at the start it planned,
  * as the task takes it, and back to the branch it was on, as the task is

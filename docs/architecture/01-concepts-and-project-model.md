@@ -273,7 +273,7 @@ It never:
 
 A task may work **Local** instead, in each of its repositories' own clone
 here, where the person works, as a project's default or the coordinator's
-choice for a task ([ADR-090](../decisions/090-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
+choice for a task ([ADR-091](../decisions/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
 That relaxes the first rule, and only it: as its first step begins, a Local
 task makes its branch where it starts and checks it out, one task at a time,
 and once it is settled the checkout goes back to the branch it was on. It

@@ -181,7 +181,7 @@ export const PlanParameters = Schema.Struct({
    */
   reads: Schema.optional(Schema.Boolean),
   /**
-   * Where it works (ADR-090): a worktree of its own, or Local, in its
+   * Where it works (ADR-091): a worktree of its own, or Local, in its
    * repositories' own checkouts here, taken as its first step begins. A
    * worktree without it, as before.
    */
@@ -495,7 +495,7 @@ interface Waiting {
 }
 
 /**
- * What a Local task's first step held for its checkout keeps (ADR-090): as
+ * What a Local task's first step held for its checkout keeps (ADR-091): as
  * one waiting for a place, since when it waits; the person's answers to what
  * Althar asked, each for the one checkout it was about, as it was then
  * (local.ts), which hold until it starts; and what it waits for now.
@@ -536,7 +536,7 @@ const waitingOf = (output: string | null, now: string): Waiting => {
 /**
  * Whether the task's run waits before its first step: its one attempt,
  * Implement, held for a place among the agents at work here, to start, or,
- * Local, for its checkout (ADR-090).
+ * Local, for its checkout (ADR-091).
  */
 export const planWaits = (taskId: string) =>
   Effect.gen(function* () {
@@ -648,7 +648,7 @@ export class Runs extends Context.Service<
      * counted from where the task started. Whether one opened.
      */
     madeRound(taskId: string, sessionId: string): Effect.Effect<boolean, unknown>
-    /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-090); its task is placed again at once. */
+    /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091); its task is placed again at once. */
     answerCheckout(input: {
       readonly envelope: CommandEnvelope
       readonly attentionId: string
@@ -668,7 +668,7 @@ export class Runs extends Context.Service<
       /**
        * Tasks with something still at work here: an agent, in a turn or idle,
        * or a settling not done stopping what they ran. A settled Local task's
-       * checkout stays its own until it has none (ADR-090).
+       * checkout stays its own until it has none (ADR-091).
        */
       const notYetStopped = Effect.gen(function* () {
         const live = (yield* sessions.onTasks).map((session) => session.taskId)
@@ -2980,7 +2980,7 @@ export class Runs extends Context.Service<
           yield* Effect.forkIn(provide(look), scope)
         })
 
-      /* ---- Local tasks (ADR-090): a plan's first step takes its checkouts, or waits for them ---- */
+      /* ---- Local tasks (ADR-091): a plan's first step takes its checkouts, or waits for them ---- */
 
       /** Settled tasks' checkouts Althar said stay on their branch, by workspace: said once a launch. */
       const toldStays = new Set<string>()
@@ -3353,13 +3353,13 @@ export class Runs extends Context.Service<
             yield* touchCard(plan.taskId)
             return 'waiting' as const
           }
-          // Local, held for its checkout, it waits as one with no place does (ADR-090).
+          // Local, held for its checkout, it waits as one with no place does (ADR-091).
           return (yield* startFirst(current, admitted.attemptId)) ? ('running' as const) : ('waiting' as const)
         })
 
       /**
        * A plan's first step under way: its lead, as the plan says, on it. A lead that can't start leaves Implement needing the
-       * person, who can hand it to another agent. False where it is held for its checkout instead (ADR-090).
+       * person, who can hand it to another agent. False where it is held for its checkout instead (ADR-091).
        */
       const startFirst = (current: RunRow, attemptId: string) =>
         Effect.gen(function* () {
@@ -5521,7 +5521,7 @@ export class Runs extends Context.Service<
             })
             // Its first step starts on the lead the plan now names, as admitted.
             const steps = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(parameters)
-            // Moved to a worktree, what was asked about its checkout no longer stands (ADR-090).
+            // Moved to a worktree, what was asked about its checkout no longer stands (ADR-091).
             if ((steps.worksIn ?? 'worktree') === 'worktree') {
               const open = yield* sql<{ id: string }>`
                 SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'checkout' AND state = 'open'`

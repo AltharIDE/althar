@@ -9,7 +9,7 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 
 /*
  * What a project is, and how its tasks work: its name and the ink its mark
- * is drawn in, changed in place; then where new tasks start (ADR-090), and
+ * is drawn in, changed in place; then where new tasks start (ADR-091), and
  * the switches every task follows, each with one line on when it acts. One
  * that didn't hold says why under it. Allowing everything and what agents may
  * do without asking are rules, so they are with the rules.

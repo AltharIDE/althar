@@ -154,7 +154,7 @@ export interface TaskModel {
   /** Answers a step that needs the person. */
   /** Whether it went through: a stuck step whose answer didn't is answerable again. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
-  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-090). */
+  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>

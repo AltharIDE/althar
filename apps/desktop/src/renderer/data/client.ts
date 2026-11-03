@@ -329,7 +329,7 @@ export interface Client {
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-090). */
+  /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
@@ -534,7 +534,7 @@ export interface Client {
   readonly getRunnableRefs: (projectId: string, text?: string) => Promise<ReadonlyArray<OfferedRefs>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
-  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-090). */
+  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (input: { readonly attentionId: string; readonly answer: CheckoutAnswer }) => Promise<void>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (input: {

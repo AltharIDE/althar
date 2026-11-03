@@ -327,7 +327,7 @@ export const runtime = (
     /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
     readonly leftFirst?: Duration.Duration
     readonly leftEvery?: Duration.Duration
-    /** How often what waits for a checkout is looked at again (ADR-090): every 100 milliseconds unless a test says. */
+    /** How often what waits for a checkout is looked at again (ADR-091): every 100 milliseconds unless a test says. */
     readonly localEvery?: Duration.Duration
   } = {},
 ) =>
