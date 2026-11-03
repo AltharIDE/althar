@@ -133,4 +133,22 @@ describe('a file a tool wrote whole', () => {
       assert.deepStrictEqual(yield* handedByTool(place, [], { file_path: '', content: '# A\n' }, 'edit'), { pictures: [], files: [] })
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('is not handed back where it was written outside the folders the agent works in, as its own memory is', () =>
+    Effect.gen(function* () {
+      const folder = mkdtempSync(join(tmpdir(), 'handed-in-'))
+      const home = mkdtempSync(join(tmpdir(), 'handed-home-'))
+      const place = placeIn(folder)
+      const memory = join(home, '.claude', 'projects', '-app', 'memory', 'note.md')
+      const outside = yield* handedByTool(place, [], { file_path: memory, content: '# Note\n' }, 'edit')
+      assert.deepStrictEqual(outside, { pictures: [], files: [] })
+      const created = yield* handedByTool(place, [{ _tag: 'Diff', path: memory, created: true } as never], undefined, 'edit')
+      assert.deepStrictEqual(created, { pictures: [], files: [] })
+      const inFolder = yield* handedByTool(place, [], { file_path: join(folder, 'docs', 'a.md'), content: '# A\n' }, 'edit')
+      assert.deepStrictEqual(
+        inFolder.files.map((file) => file.how),
+        ['wrote'],
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
 })
