@@ -357,5 +357,70 @@ That receipt is failed and permits retry after another fresh read. Every other
 A lost answer or `{ pending: true, answer }` stays uncertain. Only a read proving it done confirms it; only `absent`, positive
 proof it neither happened nor remains in flight, permits another attempt.
 A confirmed receipt repairs an interrupted completion and its chat line
-without acting again. Host-specific reads and acting tools are later parts
-of ADR-081; this foundation is shared by every host and agent.
+without acting again. This foundation is shared by every host and agent; the
+first acting tool on it is the merge, below.
+
+## Merging on the person's word
+
+`merge_pull_request` (`MergeLine.ts`) merges any of the project's pull
+requests, in any of its repositories, at the head the coordinator read and
+in a way the repository allows. Every merge is an errand kept from the
+person's message, with one step, `merge`, so "merge it once it's green" and
+"merge it" are the same call:
+
+- **The host's own queue** (GitHub's merge queue on the branch, GitLab's
+  merge trains): the step puts it there at its head, and it is done once a
+  read shows it merged. There is no slot of Althar's.
+- **Everywhere else, Althar's line:** one slot for each repository and
+  branch, in the order the person asked; their "merge it now" (`now`) goes
+  first and waits only for a merge already in flight. The step that holds
+  the slot is brought up to date with the branch's head, by a merge, and
+  waits for green there; then it merges, with auto-merge as its merge where
+  the host has it (GitLab, Data Center from 8.15). It holds the slot until a
+  read shows the merge landed; the next starts from the branch's new head.
+  A step whose checks fail steps out of line until they pass. Someone else
+  writing to the branch while a step holds the slot brings it up to date
+  again, three times at most, then pauses its errand for the person.
+- **Althar's sweep** (every 30 seconds, and at once after a merge call) does
+  only what can be undone: it brings the slot's branch up to date (GitHub's
+  update-branch; elsewhere it asks, in a line, for main to be merged in,
+  until ADR-081's task 6). For each step that can't be undone, a merge or a
+  queue, or settling one that landed, closed or moved, it wakes the
+  coordinator with news naming the errand and step, and the coordinator's
+  turn takes it through `Errands.execute`, which reads again before it acts.
+- **Who moved a head:** a head Althar's update made, or one the task's lead
+  pushed, carries the errand on; anyone else's push ends it, as the person
+  asked to merge what they saw.
+- **A branch it merged into** is watched for an hour after: a failed check at
+  its head is said in the chat and heard as news, "Main is red", which is how
+  a write by someone else between the last read and a merge landing shows.
+- **What it keeps:** the errands, and the line's own notes (what each step
+  did, what it said) as observations of subject `merge_line`, so a restart
+  keeps the line. What each server supports is read when first used, kept
+  for an hour, and read again once a call is refused.
+- `leave_queue` takes a pull request out of the host's queue or train, turns
+  its auto-merge off, and pauses its errand in Althar's line: it can be
+  undone, so it needs no word. Bitbucket Cloud's own queue is left on its
+  site.
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant C as Coordinator
+  participant L as Merge line
+  participant H as Host
+  P->>C: "Merge #12 and #14 once they're green"
+  C->>L: merge_pull_request(#12, head, message)
+  L->>L: keep errand, read: first in line, green, up to date
+  L->>H: merge (or auto-merge, or enqueue)
+  C->>L: merge_pull_request(#14, head, message)
+  L-->>C: 2nd in line, behind #12
+  H-->>L: sweep reads #12 merged, main moved
+  L->>C: news: errand #12, step merge
+  C->>L: merge_pull_request(errand, step): done
+  L->>H: sweep brings #14 up to date (a merge)
+  H-->>L: green at the new head
+  L->>C: news: errand #14, step merge
+  C->>L: merge_pull_request(errand, step)
+  L->>H: merge #14 at the head that went green
+```

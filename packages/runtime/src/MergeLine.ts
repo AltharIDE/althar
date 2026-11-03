@@ -286,10 +286,18 @@ export class MergeLine extends Context.Service<
             ways: way,
             ...(base === undefined ? {} : { base }),
           })
+          // Who moved its head since the person saw it: Althar bringing it up to date, its lead, or someone else.
+          const by =
+            change.headSha === entry.head || change.headSha === null ? undefined : yield* pushedBy(projectId, entry, change.headSha)
+          const moved = by === undefined ? {} : { pushedBy: by }
           if (change.state === 'merged') {
             yield* note(projectId, lineOf(entry), 'landed', `landed:${place.number}`, { number: place.number })
+            if (by === 'other') {
+              const reason = `${name} was merged on ${hostName(host)} at ${short(change.headSha)}, a head someone else pushed, not the one the person saw.`
+              return said({ state: 'ended', ...at, reason }, 'settle', reason)
+            }
             const answer = `${name} is merged into ${entry.branch}.`
-            return said({ state: 'done', ...at, answer }, 'settle', answer)
+            return said({ state: 'done', ...at, ...moved, answer }, 'settle', answer)
           }
           if (change.state === 'closed') {
             const reason = `${name} was closed on ${hostName(host)}, so it isn’t merged.`
@@ -299,13 +307,10 @@ export class MergeLine extends Context.Service<
             const reason = `${name} goes into ${change.target} now, not ${entry.branch}, which the person asked for.`
             return said({ state: 'ended', ...at, reason }, 'settle', reason)
           }
-          const by =
-            change.headSha === entry.head || change.headSha === null ? undefined : yield* pushedBy(projectId, entry, change.headSha)
           if (by === 'other') {
             const reason = `Someone else pushed to ${name} (it is at ${short(change.headSha)} now), so it isn’t merged unseen.`
             return said({ state: 'ended', ...at, pushedBy: 'other', reason }, 'settle', reason)
           }
-          const moved = by === undefined ? {} : { pushedBy: by }
           if (change.draft) {
             const reason = `${name} went back to a draft after the person asked.`
             return said({ state: 'objection', ...at, ...moved, reason }, 'settle', reason)
@@ -569,7 +574,11 @@ export class MergeLine extends Context.Service<
         step: Schema.optional(Schema.String),
       })
 
+      // Under the project's lock, as the sweep is: the line moves one step at a time.
       const mergeTool = (input: unknown, access: ToolAccess) =>
+        locks.withLock(access.projectId, mergeNow(input, access)).pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
+
+      const mergeNow = (input: unknown, access: ToolAccess) =>
         Effect.gen(function* () {
           const asked = yield* Schema.decodeUnknownEffect(MergeAsked)(input).pipe(
             Effect.mapError((error) => refused(`Althar couldn't read that: ${error.message}`)),
@@ -591,6 +600,10 @@ export class MergeLine extends Context.Service<
           if (change.state === 'merged') return `${name} is merged already.`
           if (change.state === 'closed')
             return yield* refused(`${name} is closed, so it can’t be merged. reopen_pull_request opens it again.`)
+          if (change.draft)
+            return yield* refused(
+              `${name} is a draft, so it can’t be merged: mark_ready marks one of Althar’s own ready, or the person marks it on ${hostName(host)}.`,
+            )
           if (asked.head === undefined)
             return yield* refused(
               `Name the head you read, so what is merged is what the person saw: ${name} is at ${change.headSha ?? 'no commit'} now.`,
@@ -637,7 +650,7 @@ export class MergeLine extends Context.Service<
           const entry = (yield* provide(entriesOf(access.projectId))).find((one) => one.errandId === errandId)
           if (entry === undefined) return `That merge is settled already: read_errands shows what is still open.`
           return yield* step(access, entry)
-        }).pipe(Effect.mapError(asRefused), Effect.ensuring(Queue.offer(poke, true)))
+        })
 
       const leaveTool = (input: unknown, access: ToolAccess) =>
         Effect.gen(function* () {
@@ -817,7 +830,13 @@ export class MergeLine extends Context.Service<
               const take = (entry: Entry, why: string) =>
                 Effect.gen(function* () {
                   if (
-                    yield* note(projectId, stepOf(entry), 'woken', `woken:${createHash('sha256').update(why).digest('hex').slice(0, 16)}`)
+                    yield* note(
+                      projectId,
+                      stepOf(entry),
+                      'woken',
+                      // Said again each hour it isn't taken: a coordinator that couldn't start then may have missed it.
+                      `woken:${createHash('sha256').update(why).digest('hex').slice(0, 16)}:${Math.floor((yield* Clock.currentTimeMillis) / Duration.toMillis(Duration.hours(1)))}`,
+                    )
                   )
                     wakeOf(entry.threadId).push(
                       `- Errand ${entry.errandId}, step ${STEP}: ${why} Take it now: merge_pull_request with errand "${entry.errandId}" and step "${STEP}".`,
@@ -833,7 +852,7 @@ export class MergeLine extends Context.Service<
                 ),
                 (rows) => rows.map((row) => row.subject),
               )
-              for (const key of [...new Set([...lines, ...watched])]) {
+              for (const key of new Set([...lines, ...watched])) {
                 const coordinatorAt = yield* coordinatorThread(projectId)
                 yield* redWatch(projectId, key, coordinatorAt === undefined ? [] : wakeOf(coordinatorAt)).pipe(
                   Effect.catchCause((cause) => Effect.logWarning('Could not read a merged branch’s checks', cause)),
@@ -859,9 +878,12 @@ export class MergeLine extends Context.Service<
                   }
                   const queued = seen.ways.queue !== null
                   states.set(entry.errandId, seen.why)
-                  yield* note(projectId, stepOf(entry), 'standing', `${seen.next === 'red' ? 'red' : 'in'}:${seen.change.headSha}`, {
-                    state: seen.next === 'red' ? 'red' : 'in',
-                  })
+                  // Noted as it changes: red at a head, back in once green, and red again on a rerun that fails.
+                  const standing = seen.next === 'red' ? 'red' : 'in'
+                  if ((yield* latest(stepOf(entry), 'standing'))?.state !== standing)
+                    yield* note(projectId, stepOf(entry), 'standing', `${standing}:${seen.change.headSha}:${yield* timestamp}`, {
+                      state: standing,
+                    })
                   switch (seen.next) {
                     case 'settle':
                       yield* take(entry, `${seen.fresh.answer ?? seen.fresh.reason ?? seen.why}`)
@@ -887,7 +909,7 @@ export class MergeLine extends Context.Service<
                       break
                   }
                 }
-                if (here.length > 0 && !here.some((entry) => entry.request.repository === '')) {
+                if (here.length > 0) {
                   const [first] = here
                   const words = summary(here, states, first?.branch ?? '', first?.request.repository ?? '')
                   const thread = first?.threadId

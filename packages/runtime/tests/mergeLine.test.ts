@@ -164,6 +164,11 @@ describe('the coordinator’s merge line', () => {
         method: 'squash',
         head: `head-${second}+merge-${first}`,
       })
+      // At the head Althar's update made, not the one the person saw, it is still done once a read shows it merged.
+      service.mergeByHand(second)
+      yield* sweep(access)
+      assert.match(yield* takeStep(access, b), /is merged into main/)
+      assert.strictEqual((yield* errandsOf(access)).get(second)?.state, 'done')
       // The line shows in the chat, as it changes.
       assert.isTrue(
         (yield* lines(access)).some((title) => /main of meridian\/api, Althar’s merge line: 1\. #1 .*· 2\. #2 waiting/.test(title)),
