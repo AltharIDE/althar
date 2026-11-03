@@ -39,9 +39,9 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     // Its server is running before the next task is asked for: a task started before that would take the place itself
     // and leave only two waiting, whatever the test then counted. The place holder shows only over a task that waits,
-    // so the task's own thread says the server is up, as its running command does.
+    // so the task's own thread says it ran the command that keeps the place.
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByRole('button', { name: /^Running npm run dev/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /ran 1 command/ })).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     // Each waits before the next is asked for, so a plan left counting down is caught where it happens rather than as a
     // row in the wrong place later.
