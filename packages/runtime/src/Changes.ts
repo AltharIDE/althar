@@ -3606,8 +3606,11 @@ export class Changes extends Context.Service<
        * what was said since the cursor. Whether anything happened on it, so
        * a quiet one is asked less often.
        */
-      const poll = (link: LinkRow, how: { readonly force: boolean; readonly fresh: boolean } = { force: false, fresh: false }) =>
+      const poll = (asked: LinkRow, how: { readonly force: boolean; readonly fresh: boolean } = { force: false, fresh: false }) =>
         Effect.gen(function* () {
+          // As kept now, not as when it was asked for: a poll that waited on the task's lock behind a merge, or another poll, starts
+          // from what they saved, so a host's read that lags behind its merge doesn't open it again.
+          const link = (yield* linksOf(asked.taskId)).find((candidate) => candidate.id === asked.id) ?? asked
           if (link.connectionId === null) return false
           const adapters = yield* connections.adapters(link.connectionId)
           const host = adapters.host
