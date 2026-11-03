@@ -27,7 +27,12 @@ export interface ModelFact {
   readonly coding: number | null
   readonly agentic: number | null
   /** Dollars per million tokens, in and out, where it is sold per use. */
-  readonly price: { readonly input: number; readonly output: number } | null
+  readonly price: {
+    readonly input: number
+    readonly output: number
+    /** A token read from the provider's cache, where the list says. */
+    readonly cacheRead?: number
+  } | null
   /** How many tokens it holds. */
   readonly context: number | null
 }
@@ -60,12 +65,16 @@ export const factsIn = (body: unknown): ReadonlyMap<string, ModelFact> => {
     const pricing = field(model, 'pricing')
     const input = number(field(pricing, 'prompt'))
     const output = number(field(pricing, 'completion'))
+    const cacheRead = number(field(pricing, 'input_cache_read'))
     const fact: ModelFact = {
       slug,
       intelligence: number(field(scores, 'intelligence_index')),
       coding: number(field(scores, 'coding_index')),
       agentic: number(field(scores, 'agentic_index')),
-      price: input === null || output === null || (input === 0 && output === 0) ? null : { input: input * 1e6, output: output * 1e6 },
+      price:
+        input === null || output === null || (input === 0 && output === 0)
+          ? null
+          : { input: input * 1e6, output: output * 1e6, ...(cacheRead === null ? {} : { cacheRead: cacheRead * 1e6 }) },
       context: number(field(model, 'context_length')),
     }
     // The maker's own listing wins over a reseller's of the same model, by having scores.
