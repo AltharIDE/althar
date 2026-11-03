@@ -112,7 +112,12 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const id = flow.again ?? flow.made
       const account = accountsOf(flow.agentId).find((one) => one.id === id)
       if (account !== undefined && signedIn(account)) setFlow(flow.again === null ? { ...flow, step: naming(account) } : null)
-      else if (account !== undefined && step.notYet !== true) setFlow({ ...flow, step: { ...step, notYet: true } })
+      else if (account !== undefined) {
+        // An agent that answered something Althar couldn't read isn't "not signed in yet": it says so.
+        const unclear = account.signIn === 'unknown'
+        if (step.notYet !== true || (step.unclear === true) !== unclear)
+          setFlow({ ...flow, step: { ...step, notYet: true, ...(unclear ? { unclear } : { unclear: undefined }) } })
+      }
     }
   }
 
@@ -315,7 +320,14 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const mine = token.current
       terminal(id, mine).catch((failure: unknown) => moveTo({ kind: 'failed', said: messageOf(failure) }, mine))
     },
-    check: () => void start.recheck(),
+    check: () => {
+      // It shows it is checking, so a read that finds the same answer still visibly happened.
+      const mine = token.current
+      const set = (checking: boolean) =>
+        setFlow((now) => (now?.step.kind !== 'terminal' || mine !== token.current ? now : { ...now, step: { ...now.step, checking } }))
+      set(true)
+      void start.recheck().finally(() => set(false))
+    },
     paste: (code) => {
       if (flow?.flowId != null) void client.pasteAccountSignInCode(flow.flowId, code).catch(() => undefined)
     },

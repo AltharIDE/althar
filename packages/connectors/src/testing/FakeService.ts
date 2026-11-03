@@ -132,6 +132,8 @@ const PROJECTS = ['Q4 launch', 'Payments v2']
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
   addRepository(path: ReadonlyArray<string>, defaultBranch?: string): Repository
+  /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
+  letPush(path: ReadonlyArray<string>, can: boolean): void
   addIssue(issue: {
     readonly ref: string
     readonly key?: string
@@ -202,6 +204,8 @@ export interface FakeControls {
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
   /** The fork a change came from, by its path; null for one from the repository's own branch. */
   forkOf(number: number): string | null
+  /** The fork a pull request's branch is on is gone, as the host says of it from now on. */
+  loseFork(number: number): void
   /**
    * Someone opens a change on one of the fake's repositories, as Althar
    * reviews one it didn't open: its author one of the repository's people
@@ -826,6 +830,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       repositories.set(path.join('/').toLowerCase(), repository)
       return repository
     },
+    letPush: (path, can) => {
+      const key = path.join('/').toLowerCase()
+      const found = repositories.get(key)
+      if (found !== undefined) repositories.set(key, { ...found, canPush: can })
+    },
     addIssue: (input) => {
       const container = input.ref.includes('#') ? (input.ref.split('#')[0] ?? null) : (input.ref.split('-')[0] ?? null)
       const issue: Issue = {
@@ -940,6 +949,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
     forkOf: (number) => forks.get(number) ?? null,
+    loseFork: (number) => {
+      forks.set(number, '')
+    },
     addPullRequest: (input) => {
       const repository = repositories.get(input.path.join('/').toLowerCase())
       if (repository === undefined) throw new Error(`No repository ${input.path.join('/')}`)

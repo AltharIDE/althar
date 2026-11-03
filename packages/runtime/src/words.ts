@@ -32,6 +32,15 @@ const text = (error: unknown, key: string): string => {
 }
 
 /** The last line of an agent's error output, which usually says why. */
+/** What git said without the advice it ends a remote it couldn't read with, whose last line says nothing alone. */
+const saidByGit = (stderr: string): string =>
+  lastLine(
+    stderr.replace(
+      /(fatal: )?Could not read from remote repository\.\s*(Please make sure you have the correct access rights\s*and the repository exists\.\s*)?/i,
+      '',
+    ),
+  )
+
 const lastLine = (output: string): string =>
   output
     .split('\n')
@@ -61,6 +70,12 @@ const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${w
 const olderOpenCode = /no such column: project_id/
 const olderOpenCodeWords =
   'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.'
+
+/** An agent that no longer has the session Althar sent to, as its process died: what it said ("Resource not found") stays its detail. */
+export const lostWords = (agent: string) => `${agent} had lost this conversation.`
+
+/** The same, where Althar started the agent afresh on the thread for it. */
+export const startedAfreshWords = (agent: string) => `${agent} had lost this conversation. Started it afresh.`
 
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
@@ -96,6 +111,8 @@ export const agentSaid = (error: unknown): string | undefined => {
         }
         case 'context_full':
           return "The agent's context is full."
+        case 'session_lost':
+          return lostWords('The agent')
         default:
           return sentence(text(error, 'message'))
       }
@@ -228,7 +245,7 @@ export const words = (
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
         const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
-        const said = lastLine(text(error, 'stderr'))
+        const said = saidByGit(text(error, 'stderr'))
         if (said !== '') return sentence(`${command} didn't work: ${said}`)
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
@@ -253,6 +270,12 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
+        if (why === 'fork_gone')
+          return `${remote}’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.`
+        if (why === 'unplaced')
+          return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
+        if (why === 'no_push_address')
+          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
         const host = text(error, 'host')
@@ -562,6 +585,7 @@ const projectRefused = {
   last_repository: 'A project needs a repository. Add another first.',
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork.",
+  no_upstream_access: "You can't push to the repository it was forked from yet. Its owners can give you access.",
   id_taken: "Couldn't make the project. Close the tab and start again.",
   bad_setup: 'Name each file from the repository’s root, inside it and not in .git, and give at most 20 commands.',
 } as const satisfies Record<ProjectRefused['reason'], string>

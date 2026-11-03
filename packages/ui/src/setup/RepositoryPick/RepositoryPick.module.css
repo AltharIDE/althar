@@ -1,16 +1,74 @@
-/* The repositories to tick: a row each, the whole row its checkbox, and Add a folder under them. */
+/* A folder chosen from anywhere, the field that finds one, and the repositories found to tick under it. */
+.pick {
+  display: grid;
+  gap: 12px;
+}
+.choose {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.note {
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* As a Field is drawn, with the search mark inside its start. */
+.find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-3);
+  cursor: text;
+  transition: box-shadow var(--fast) var(--ease);
+}
+.find:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.find:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.find:has(input:disabled) {
+  background: var(--n-2);
+  cursor: default;
+}
+.find input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.find input::placeholder {
+  color: var(--t-3);
+}
+/* the field's own clear button is the system's, drawn differently on each: Escape clears it */
+.find input::-webkit-search-cancel-button {
+  display: none;
+}
+
 .quiet {
   margin: 0;
-  padding: 10px 0;
+  padding: 10px 8px;
   font-size: 12.5px;
   color: var(--t-3);
 }
-.pick {
+.list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.pick li + li .repo {
+.list li + li .repo {
   box-shadow: inset 0 1px 0 var(--line);
 }
 .repo {
@@ -25,12 +83,11 @@
   cursor: default;
   transition: background var(--fast) var(--ease);
 }
-.pick li + li .repo:hover,
+.list li + li .repo:hover,
 .repo:hover {
   background: var(--n-3);
   box-shadow: none;
 }
-.repo:focus-visible,
 .repo:has(:focus-visible) {
   outline: 1.5px solid var(--signal);
   outline-offset: -1.5px;
@@ -59,17 +116,10 @@
   display: grid;
   place-items: center;
 }
-.tickAdd {
-  color: var(--t-3);
-}
 .repoName {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--t-1);
-}
-.add .repoName {
-  font-weight: 500;
-  color: var(--t-2);
 }
 .repoWhere {
   overflow: hidden;
@@ -77,10 +127,6 @@
   color: var(--t-3);
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.add .repoWhere {
-  font-family: inherit;
-  font-size: 12px;
 }
 .repoFacts {
   font-size: 12px;
