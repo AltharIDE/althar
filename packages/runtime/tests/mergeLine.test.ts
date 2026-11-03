@@ -560,6 +560,48 @@ describe('the coordinator merging through the host’s own queue', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  it.live('GitHub refuses to update a branch: it steps out of line, said to its lead once, and the next goes ahead', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      service.writeTo('main')
+      const second = pull('Cap retries')
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message }), /behind main at other-1/)
+      // As for a fork whose author doesn't allow edits by maintainers.
+      service.failNext('updateBranch', 'forbidden', undefined, 403)
+      yield* sweep(access)
+      yield* sweep(access)
+      assert.deepStrictEqual(service.updated, [])
+      const said = (yield* news(access)).filter((body) => body.includes('can’t merge it in'))
+      assert.strictEqual(said.length, 1)
+      assert.match(said[0] ?? '', /GitHub won’t let Althar’s account update its branch .*message_lead/)
+      assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Merged PR #2/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('GitHub doesn’t answer an update: said once without the lead, and tried again later', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      service.failNext('updateBranch', 'unreachable', undefined, 502)
+      yield* sweep(access)
+      yield* sweep(access)
+      const said = (yield* news(access)).filter((body) => body.includes('can’t merge it in'))
+      assert.strictEqual(said.length, 1)
+      assert.include(said[0], 'Althar tries again in a few minutes')
+      assert.notInclude(said[0], 'message_lead')
+      assert.deepStrictEqual(service.updated, [])
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   it.live('GitLab, behind main, where Althar can’t push: it steps out of line, said to its lead once, and the next goes ahead', () => {
     const { service, pull } = host({ product: 'gitlab' })
     const { working } = hosted(['meridian', 'api'])

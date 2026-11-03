@@ -165,7 +165,8 @@ const ActivityAnswer = Schema.Struct({
 })
 type ActivityAnswer = typeof ActivityAnswer.Type
 
-/** A merge queue set on a branch, and whether it takes pull requests: only an ACTIVE one does; PAUSED, DRAINING or SUSPENDED refuse them, INACTIVE needs none. */
+/** A merge queue set on a branch, and whether it takes pull requests: ACTIVE and PAUSED (which holds landing) do; DRAINING and SUSPENDED refuse them, INACTIVE needs none. */
+const SHUT = new Set(['INACTIVE', 'DRAINING', 'SUSPENDED'])
 const MergeQueues = Schema.Struct({ values: Schema.Array(Schema.Struct({ uuid: Schema.String, state: Schema.String })) })
 /** A pull request in a queue, as it stands there: REMOVING once it is being taken out. */
 const Queued = Schema.Struct({ status: Schema.optional(Schema.String) })
@@ -331,7 +332,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
    */
   const queueOn = (repository: Repository, branch: string) =>
     http.json(MergeQueues, 'GET', `${repo(repository.path)}/merge-queues?target_branch=${encodeURIComponent(branch)}`).pipe(
-      Effect.map((answer) => answer.values.find((queue) => queue.state === 'ACTIVE')?.uuid ?? null),
+      Effect.map((answer) => answer.values.find((queue) => !SHUT.has(queue.state))?.uuid ?? null),
       Effect.catchIf(
         (error) => error.reason === 'not_found' || error.reason === 'forbidden',
         () => Effect.succeed(null),

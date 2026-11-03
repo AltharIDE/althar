@@ -107,6 +107,27 @@ interface Look {
   readonly ways: MergeWays
   /** The target's head it read, where it read one. */
   readonly base?: string
+  /** For one Althar can't bring up to date: the reason passes, as a host that didn't answer, so Althar tries again itself. */
+  readonly passing?: boolean
+}
+
+/** Why the host's own update of a branch was refused, in a few words, and whether it passes: one that didn't answer, or was busy. */
+const updateRefused = (host: CodeHost, failed: ConnectorFailed): readonly [string, boolean] => {
+  const said = failed.message === '' ? '' : `: ${failed.message}`
+  switch (failed.reason) {
+    case 'forbidden':
+      return [
+        `${hostName(host)} won’t let Althar’s account update its branch (a fork that doesn’t allow edits by maintainers, or a protected branch)${said}`,
+        false,
+      ]
+    case 'rejected':
+    case 'not_found':
+      return [`${hostName(host)} refused to update its branch${said}`, false]
+    case 'unauthorized':
+      return [`${hostName(host)} refused Althar’s sign-in`, true]
+    default:
+      return [`${hostName(host)} didn’t answer${said}`, true]
+  }
 }
 
 const short = (sha: string | null | undefined) => (sha == null ? 'no commit' : sha.slice(0, 12))
@@ -451,18 +472,23 @@ export class MergeLine extends Context.Service<
             stuck.head === change.headSha &&
             stuck.base === base &&
             (stuck.passing !== true || (yield* Clock.currentTimeMillis) - Date.parse(String(stuck.at)) < Duration.toMillis(CHECKS_APPEAR))
-          )
-            return said(
-              {
-                state: 'waiting',
-                ...at,
-                ...moved,
-                reason: `${name} must have ${entry.branch}’s ${short(base)} merged in before it merges, and Althar can’t merge it in: ${String(stuck.reason)}. Its task’s lead merges it in, never by a rebase, or the person.${stuck.passing === true ? ' Althar tries again in a few minutes.' : ''} It steps out of line meanwhile.`,
-              },
-              'stuck',
-              `can’t be brought up to date at ${short(base)}`,
-              base,
-            )
+          ) {
+            const passing = stuck.passing === true
+            return {
+              ...said(
+                {
+                  state: 'waiting',
+                  ...at,
+                  ...moved,
+                  reason: `${name} must have ${entry.branch}’s ${short(base)} merged in before it merges, and Althar can’t merge it in${passing ? ' just now' : ''}: ${String(stuck.reason)}. ${passing ? 'Althar tries again in a few minutes.' : 'Its task’s lead merges it in, never by a rebase, or the person.'} It steps out of line meanwhile.`,
+                },
+                'stuck',
+                `can’t be brought up to date at ${short(base)}`,
+                base,
+              ),
+              ...(passing ? { passing } : {}),
+            }
+          }
           if (!(yield* viaHost(host.contains(repository, change, base))))
             return said(
               {
@@ -882,19 +908,6 @@ export class MergeLine extends Context.Service<
               base: seen.base,
               to,
             })
-          if (seen.host.updateBranch !== undefined) {
-            // One that hadn't landed when read back is given a while, not asked for again.
-            const last = updates.at(-1)
-            if (
-              last?.to === null &&
-              last.from === seen.change.headSha &&
-              last.base === seen.base &&
-              (yield* Clock.currentTimeMillis) - Date.parse(String(last.at)) < Duration.toMillis(CHECKS_APPEAR)
-            )
-              return
-            yield* updated(yield* viaHost(seen.host.updateBranch(seen.repository, seen.change)))
-            return
-          }
           // Noted for the next read, which steps it out of line and says so once, as a conflict.
           const ask = (why: string, passing = false) =>
             Effect.gen(function* () {
@@ -905,6 +918,24 @@ export class MergeLine extends Context.Service<
                 passing,
               })
             })
+          if (seen.host.updateBranch !== undefined) {
+            // One that hadn't landed when read back is given a while, not asked for again.
+            const last = updates.at(-1)
+            if (
+              last?.to === null &&
+              last.from === seen.change.headSha &&
+              last.base === seen.base &&
+              (yield* Clock.currentTimeMillis) - Date.parse(String(last.at)) < Duration.toMillis(CHECKS_APPEAR)
+            )
+              return
+            // A refusal is the host's own, as a push refused: only a head that moved is read again.
+            return yield* seen.host.updateBranch(seen.repository, seen.change).pipe(
+              Effect.flatMap(updated),
+              Effect.catchTag('ConnectorFailed', (failed) =>
+                failed.status === 422 && /expected head/i.test(failed.message) ? Effect.void : ask(...updateRefused(seen.host, failed)),
+              ),
+            )
+          }
           const place = yield* placeAt(projectId, entry.request.repository, entry.request.number)
           const folder = yield* folderOf(place.bindingId)
           if (folder === undefined) return yield* ask('the repository isn’t on this computer')
@@ -1035,10 +1066,10 @@ export class MergeLine extends Context.Service<
                       break
                     case 'conflict':
                     case 'stuck':
-                      // The lead's or the person's to do: said once for each head, and the slot left to the next.
+                      // The lead's or the person's to do, or a passing one Althar tries again: said once for each head, and the slot left to the next.
                       if (yield* note(projectId, stepOf(entry), 'said', `${seen.next}:${seen.change.headSha}:${seen.base ?? ''}`))
                         wakeOf(entry.threadId).push(
-                          `- ${seen.fresh.reason ?? seen.why} Errand ${entry.errandId} waits meanwhile: say so to the person in a line, and to its task’s lead (message_lead).`,
+                          `- ${seen.fresh.reason ?? seen.why} Errand ${entry.errandId} waits meanwhile: say so to the person in a line${seen.passing === true ? '' : ', and to its task’s lead (message_lead)'}.`,
                         )
                       break
                     case 'update':

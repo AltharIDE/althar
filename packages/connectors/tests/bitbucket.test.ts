@@ -530,7 +530,19 @@ describe('Bitbucket Cloud as a code host', () => {
             },
           },
         ],
-        ['GET', `${QUEUES}?target_branch=develop`, { json: { values: [{ uuid: '{q2}', name: 'Dev', state: 'PAUSED' }] } }],
+        [
+          'GET',
+          `${QUEUES}?target_branch=develop`,
+          {
+            json: {
+              values: [
+                { uuid: '{q2}', name: 'Dev', state: 'DRAINING' },
+                { uuid: '{q3}', name: 'Dev', state: 'SUSPENDED' },
+              ],
+            },
+          },
+        ],
+        ['GET', `${QUEUES}?target_branch=hold`, { json: { values: [{ uuid: '{q4}', name: 'Hold', state: 'PAUSED' }] } }],
         ['GET', `${QUEUES}?target_branch=release`, { status: 403, json: { type: 'error', error: { message: 'Forbidden' } } }],
         ['GET', `${ACE}/refs/branches/master`, { json: { name: 'master' } }],
         [
@@ -552,8 +564,9 @@ describe('Bitbucket Cloud as a code host', () => {
         ],
       ])
       assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: 'merge_queue', autoMerge: false, server: null })
-      // Only an ACTIVE queue takes pull requests; a paused one, or a workspace that won't say, is none.
+      // A draining or suspended queue takes none, nor does a workspace that won't say; a paused one takes them and holds landing.
       assert.strictEqual((yield* host.mergeWays(ace, 'develop')).queue, null)
+      assert.strictEqual((yield* host.mergeWays(ace, 'hold')).queue, 'merge_queue')
       assert.strictEqual((yield* host.mergeWays(ace, 'release')).queue, null)
       const seen = yield* host.change(ace, 552, { queue: true })
       assert.isFalse(seen.queued)

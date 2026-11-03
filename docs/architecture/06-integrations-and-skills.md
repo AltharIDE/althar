@@ -385,9 +385,9 @@ request that names the issue links it.
   head Althar last read is merged, in the way asked or the first the
   repository allows.
 - **How a branch merges** is the host's to say (`mergeWays`): GitHub's merge
-  queue on the branch, Bitbucket Cloud's (an `ACTIVE` one of its
-  `merge-queues`, entered by its merge call, which on such a branch queues
-  it; a workspace that won't say has none), GitLab's merge trains
+  queue on the branch, Bitbucket Cloud's (one of its `merge-queues`
+  not `INACTIVE`, `DRAINING` or `SUSPENDED`, entered by its merge call,
+  which on such a branch queues it; a workspace that won't say has none), GitLab's merge trains
   (Premium's `merge_trains_enabled`), and auto-merge: GitLab's on every tier (both
   `auto_merge` and the older `merge_when_pipeline_succeeds` are sent), Data
   Center's from 8.15 by its `application-properties`. `enqueue` and

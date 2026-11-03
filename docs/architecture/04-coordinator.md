@@ -394,8 +394,9 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   (GitHub's update-branch; elsewhere Althar's own, made in the project's
   repository on this computer and pushed plainly, never forced, by
   `branchUpdate.ts` until ADR-081's task 6 brings `update_branch`; where it
-  can't, a fork, no way to push or a push refused, the step steps out of
-  line and it is said, once). For each step that can't be undone, a merge or a
+  can't, a fork, no way to push, a push or the host's own update refused,
+  the step steps out of line and it is said, once, to the lead too; a host
+  that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
   queue, or settling one that landed, closed or moved, it wakes the
   coordinator with news naming the errand and step, and the coordinator's
   turn takes it through `Errands.execute`, which reads again before it acts.
