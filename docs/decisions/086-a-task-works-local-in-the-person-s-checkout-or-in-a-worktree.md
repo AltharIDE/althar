@@ -22,48 +22,64 @@
     **Local**, each repository's own clone on this device, where the person
     works (`workspaces.kind = 'checkout'`). Worktree stays the default.
   - **The project has a default, and the coordinator chooses per task.**
-    The project's General settings say where new tasks start (`works_in`
-    in `project_settings`). `draft_task`, `propose_plan` and `start_task`
-    take `works_in` (`local` or `worktree`) with a line of why, defaulting to
-    the project's; the coordinator is told which checkouts are taken and
-    which have uncommitted changes, and is asked to plan a task in a worktree
-    when Local is taken, saying so. The plan card shows the choice beside its
-    team, and the person can change it until the task starts.
+    The project's General settings say where new tasks start (New tasks
+    start in: Local or Worktree, one of its rules, `worksIn`). `draft_task`,
+    `propose_plan` and `start_task` take `works_in` (`local` or `worktree`)
+    and `works_in_why`, defaulting to the project's; a plan keeps both. The
+    coordinator is told the project's default, and its tools say who works
+    Local now; it is asked to plan in a worktree while Local is taken, saying
+    why, unless the task can wait. The plan card shows the choice beside its
+    title, with the coordinator's why or who works Local now, and the person
+    can change it until the task's first step starts.
   - **One task holds a repository's checkout at a time,** from when its work
-    starts until the person settles it. A task planned Local while another
-    holds it waits, and its card says for which task; it starts as soon as
-    the checkout goes back. A planned task doesn't hold it: a draft takes it
-    only when its plan starts.
+    starts until it is settled and the checkout has gone back. A task
+    started Local while another holds it waits, its first step held
+    (`hold_reason = 'checkout'`), Up next, after that task; it starts as soon
+    as the checkout goes back, looked at again every few seconds. A draft
+    doesn't hold it: nothing is made for it until its plan starts, and a
+    worktree made for a draft that then starts Local goes, unused. A task
+    never holds one checkout while it waits for another.
   - **Althar never switches a checkout with uncommitted changes, and never
     stashes, resets or cleans it.** Taking a checkout, Althar reads it first.
     Clean, on its default branch or with no branch it would leave behind, it
     makes the task's branch at the start it planned and checks it out,
-    remembering the branch it was on (`returns_to`). With uncommitted
-    changes, it asks the person: wait until they are committed, or work in a
-    worktree. On a branch of the person's own, it asks: check out the task's
-    branch, start the task from that branch, or work in a worktree.
+    remembering the branch it was on (`returns_to`), and says so in the
+    task's thread. With uncommitted changes, it asks the person (a `checkout`
+    call, in the task's thread and Needs you): wait until they are
+    committed, or start in a worktree. On a branch of the person's own, it
+    asks: check out the task's branch from where tasks start, start the task
+    from that branch, or start in a worktree.
   - **The checkout goes back when the task is settled.** Settled done or
     abandoned, the checkout is switched back to the branch it was on, if it
-    is clean and still on the task's branch. With uncommitted changes it
-    stays, says so in the task's thread, and goes back once they are
-    committed, read again as the next task asks for it. A checkout the
-    person switched themselves is left where they put it.
+    is clean and still on the task's branch, and not while an agent of the
+    task is still in a turn. With uncommitted changes it stays, says so in
+    the task's thread, and goes back once they are committed. A checkout the
+    person switched themselves is left where they put it. A settled task
+    opened again whose checkout went back carries on in a worktree of its
+    own, on its branch.
   - **A quick task in the checkout has its branch from the start,** made
     when it takes the checkout, so the person's branch never gets its
     commits. It stays a quick task (ADR-035): its branch stays on this Mac.
   - **The person may edit in it while a task works there.** The lead is told
-    the folder is the person's own: commit only its own files, never switch
-    branch, stash, reset or clean. The task's card reads "Change · Local",
-    and its composer names Local beside the lead's model.
+    the folder is the person's own: commit only its own files, by name,
+    never switch branch, stash, reset, restore or clean. Git that would throw
+    away what isn't committed there (`reset --hard`, `stash`, `clean -f`,
+    `checkout -- .`, `restore`) asks, even with everything allowed, as in
+    another checkout (ADR-067). The task's card reads "Change · Local", and
+    its composer names Local beside the lead's model.
   - **Nothing of Althar's housekeeping touches a checkout.** Folder cleanup
     (ADR-056) never removes it or holds it back, nothing is brought back,
-    and the recorded setup (ADR-080) doesn't run there: the person's own
-    environment is already set up. Run (ADR-044) runs in it.
+    restart repair leaves it waiting, and the recorded setup (ADR-080)
+    doesn't run there: the person's own environment is already set up. Run
+    (ADR-044) runs in it. A quick task's scratch folder, which git ignores,
+    is made in it, as in a worktree.
   - **Where the choice is made, it says what it gives up:** one task at a
     time, beside the person's own edits.
   - **Handoff comes later:** moving a running task between Local and a
     worktree, as Codex does, keeps its branch and its session; it is
-    designed (a Hand off button in the task's bar) but not built.
+    designed (a Hand off button in the task's bar) but not built. What a
+    reopened task does already, moving to a worktree on its branch, is its
+    first half.
 - **Alternatives considered:**
   - **The checkout as a place on the board,** with a card of its own for who
     is in it and who is next, and the choice made in the repositories' map:

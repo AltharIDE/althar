@@ -7,13 +7,17 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { giveBackSpot, place, spotsOf } from '../src/local'
+import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { notices, repository, runtime, until } from './support'
+import { callTool, notices, repository, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
 
 /*
  * Local tasks (ADR-086): a task that works in the person's own checkout
@@ -30,6 +34,9 @@ const git = (cwd: string, ...args: Array<string>) =>
     .trim()
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+/** Plans that wait to be started, rather than starting on their own as the test goes on. */
+const planning = () =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { localEvery: Duration.hours(1), countdown: Duration.hours(1) })))
 /** As above, with what waits for a checkout looked at only when something wakes it: the test gives checkouts back itself. */
 const byHand = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { localEvery: Duration.hours(1) })))
 
@@ -309,5 +316,60 @@ describe('a Local plan', () => {
       const moved = yield* until(cardOf(projectId, task.taskId), (one) => one?.plan?.worksIn === 'worktree', 'its plan says so')
       assert.isUndefined(moved?.local)
     }).pipe(Effect.provide(withQueries()))
+  })
+})
+
+describe('the coordinator planning where a task works', () => {
+  it.live('drafts and plans Local as asked, else as the project starts tasks, and says who works there now', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const sql = yield* SqlClient.SqlClient
+      const kindOf = (slug: string) =>
+        Effect.map(
+          sql<{ kind: string | null }>`SELECT w.kind FROM workspaces w JOIN tasks k ON k.id = w.task_id WHERE k.slug = ${slug}`,
+          ([row]) => row?.kind ?? null,
+        )
+      const planOf = (slug: string) =>
+        Effect.map(
+          sql<{ parameters: string }>`
+            SELECT p.parameters FROM task_plans p JOIN tasks k ON k.id = p.task_id WHERE k.slug = ${slug} AND p.state = 'proposed'`,
+          ([row]) => JSON.parse(row?.parameters ?? '{}') as { worksIn?: string; worksInWhy?: string },
+        )
+
+      // A worktree, as projects start tasks unless the person chose otherwise.
+      yield* callTool(access, 'draft_task', { title: 'Tidy the README' })
+      assert.strictEqual(yield* kindOf('tidy-the-readme'), null)
+      // Local, as the coordinator said; its plan stays so without saying it again.
+      yield* callTool(access, 'draft_task', { title: 'Fix the login', works_in: 'local' })
+      assert.strictEqual(yield* kindOf('fix-the-login'), 'checkout')
+      assert.match(
+        yield* callTool(access, 'propose_plan', { task: 'fix-the-login', lead: { agent: 'codex' } }),
+        /^Planned fix-the-login\. It works Local, in the person’s checkout\./,
+      )
+      assert.strictEqual((yield* planOf('fix-the-login')).worksIn, 'checkout')
+
+      // The person starts new tasks Local: a task drafted with nothing said works there.
+      const actor = (yield* Instance).personId
+      yield* (yield* Policies).set(projectId, { worksIn: 'checkout' }, actor)
+      yield* callTool(access, 'draft_task', { title: 'Dark mode' })
+      assert.strictEqual(yield* kindOf('dark-mode'), 'checkout')
+
+      // Another task works Local: planning Local says it waits for it; a worktree with why says why on its card.
+      yield* place((yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'fix-the-login'`)[0]?.id ?? '', 'checkout')
+      assert.match(
+        yield* callTool(access, 'propose_plan', { task: 'dark-mode', lead: { agent: 'codex' } }),
+        /It works Local, so it waits for Fix the login, which works there now/,
+      )
+      yield* callTool(access, 'propose_plan', {
+        task: 'dark-mode',
+        lead: { agent: 'codex' },
+        works_in: 'worktree',
+        works_in_why: 'Fix the login is in your checkout',
+      })
+      assert.deepInclude(yield* planOf('dark-mode'), { worksIn: 'worktree', worksInWhy: 'Fix the login is in your checkout' })
+    }).pipe(Effect.provide(planning()))
   })
 })

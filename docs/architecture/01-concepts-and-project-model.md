@@ -254,8 +254,9 @@ project again.
 
 ### Existing working copies
 
-An existing clone is an input source, not the default execution workspace.
-Althar prepares a Git worktree per task in a folder it owns,
+An existing clone is an input source, not the default execution workspace,
+unless a task works Local (below). Althar prepares a Git worktree per task in
+a folder it owns,
 `~/Althar/<project>/<task>/<repository>` by default, with a root that can
 be changed per project ([ADR-006](../decisions/006-worktree-per-task.md)).
 Opening the task's folder in an editor shows all its repositories together.
@@ -269,6 +270,17 @@ It never:
   else ([ADR-056](../decisions/056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md));
 - rewrites remotes;
 - initializes Git without a separate explicit action.
+
+A task may work **Local** instead, in each of its repositories' own clone
+here, where the person works, as a project's default or the coordinator's
+choice for a task ([ADR-086](../decisions/086-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
+That relaxes the first rule, and only it: as its first step begins, a Local
+task makes its branch where it starts and checks it out, one task at a time,
+and once it is settled the checkout goes back to the branch it was on. It
+still never switches a checkout with changes not committed, or one on a
+branch of the person's own, without asking them; never stashes, resets or
+cleans; and never removes the checkout or sets it up. Git that would throw
+away what isn't committed there asks, even with everything allowed.
 
 Each new worktree is set up before its lead starts, by Althar itself and
 outside any agent's sandbox: the setup kept for its repository, else the

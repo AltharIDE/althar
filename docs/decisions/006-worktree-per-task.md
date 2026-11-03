@@ -5,6 +5,9 @@
 - **Amended:** 2026-10-21: a finished task's folder goes after a wait that
   suits how it ended, its branch kept, and comes back when the task needs it
   ([ADR-056](056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md)).
+  2026-11-03: a task may work Local instead, in the person's own checkout,
+  one task at a time, as the project's default or the coordinator's choice
+  ([ADR-086](086-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
 - **Owner:** Repository maintainers
 - **Context:** Althar must not change the user's checkout. A task's steps
   work on the same code, and a switch to another agent keeps it.
