@@ -271,6 +271,16 @@ describe('a lead asking Althar to fetch', () => {
       assert.strictEqual(git(yield* worktreeOf(task.taskId), 'rev-parse', 'origin/feature/find-a-pro'), latest)
       assert.include(yield* callTool(lead, 'fetch_from_remote', { branch: 'nope' }), 'origin has no branch called nope')
       assert.include(yield* callTool(lead, 'fetch_from_remote', { pull_request: 7 }), 'refs/althar/pull/7')
+      // A tag, as origin has it; one it hasn't, or a name that isn't one, said.
+      git(other, 'tag', 'v1.2.0')
+      git(other, 'push', '-q', 'origin', 'v1.2.0')
+      assert.include(yield* callTool(lead, 'fetch_from_remote', { tag: 'v1.2.0' }), latest.slice(0, 12))
+      assert.include(yield* callTool(lead, 'fetch_from_remote', { tag: 'v9.9.9' }), "couldn't fetch the tag v9.9.9")
+      assert.include(yield* callTool(lead, 'fetch_from_remote', { tag: 'bad..name' }), "isn't a tag's name")
+      assert.include(
+        yield* callTool(lead, 'fetch_from_remote', { tag: 'v1.2.0', branch: 'main' }),
+        'Give one of branch, tag or pull_request.',
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 

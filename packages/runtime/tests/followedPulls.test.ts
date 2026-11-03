@@ -418,3 +418,35 @@ describe('following every open pull request, for news', () => {
     }).pipe(Effect.provide(quiet(github)))
   })
 })
+
+describe('following a repository whose host fails', () => {
+  it.live('ends a round the host failed quietly, and leaves a connection it rate limited until it says', () => {
+    const github = makeFakeService({ checksFor: () => [{ name: 'build', state: 'passed' }] })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Ours', author: 'ada', member: true, headSha: HEAD })
+    const lists = () => github.calls.filter((call) => call === 'listChanges').length
+    return Effect.gen(function* () {
+      yield* project(github)
+      // Any other failure: the round ends there, and the tick with it, quietly.
+      github.failNext('listChanges', 'unreachable')
+      const following = follower()
+      yield* following.tick
+      assert.strictEqual(lists(), 1)
+      // An answer that isn't one is read again the same way, and logged.
+      github.failNext('listChanges', 'invalid_response')
+      const again = follower()
+      yield* again.tick
+      const before = lists()
+      // Rate limited until a time it says: nothing on that connection is read before it.
+      const limited = follower()
+      github.failNext('listChanges', 'rate_limited', new Date(Date.now() + 3_600_000).toISOString())
+      yield* limited.tick
+      assert.strictEqual(lists(), before + 1)
+      for (let i = 0; i < 3; i++) {
+        yield* pause
+        yield* limited.tick
+      }
+      assert.strictEqual(lists(), before + 1)
+    }).pipe(Effect.provide(quiet(github)))
+  })
+})
