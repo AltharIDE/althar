@@ -60,6 +60,7 @@
 -- automation_paused_by: person, itself
 -- automation_occurrence_cause: schedule, now
 -- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
+-- works_in: worktree, checkout
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -306,7 +307,7 @@ CREATE TABLE workspaces (
   state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kind TEXT NOT NULL DEFAULT 'worktree' CHECK (kind IN ('worktree', 'checkout')), returns_to TEXT, returned_at TEXT CHECK (returned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kind TEXT REFERENCES vocab_works_in (word), returns_to TEXT, returned_at TEXT CHECK (returned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (task_id, binding_id, device_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
@@ -1315,7 +1316,7 @@ CREATE TABLE "projects" (
   tracker_connection_id TEXT REFERENCES connections (id),
   tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL),
   tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))
-, works_in TEXT NOT NULL DEFAULT 'worktree' CHECK (works_in IN ('worktree', 'checkout'))) STRICT;
+) STRICT;
 
 CREATE TABLE pull_request_pictures (
   link_id TEXT PRIMARY KEY NOT NULL,
