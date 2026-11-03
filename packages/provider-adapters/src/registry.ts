@@ -157,8 +157,10 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
-    /** Run when `status` read nothing (an older version that rejects its flags); read the same way. */
+    /** Run when `statusRejected` says an older version rejected `status`'s flags, and for nothing else; read the same way. */
     readonly statusFallback?: (node: string) => LaunchSpec
+    /** Whether what `status` printed is an older version rejecting its flags. */
+    readonly statusRejected?: (output: string, exitCode: number | null) => boolean
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -1051,8 +1053,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     signIn: {
       // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
       status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
-      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead.
+      // 1.x rejects --standalone and --format json, and prints a count line instead. On 2.x this would ask the service every account shares, so only a rejection comes here.
       statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      // Its help on stderr and exit 1, no line that names the flag (seen 3 November 2026, 1.18.31 and 1.19.5).
+      statusRejected: (output, exitCode) => exitCode !== 0 && output.includes('show help'),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
         const first = output.indexOf('[')
