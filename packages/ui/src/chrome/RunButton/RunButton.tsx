@@ -1,21 +1,30 @@
+import { type KeyboardEvent, type ReactNode, useState } from 'react'
+
+import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
+import { cx } from '../../lib/cx'
+import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
-import { Menu, MenuCheckboxItem, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
-import { SplitButton } from '../../primitives/SplitButton/SplitButton'
+import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { Popover } from '../../primitives/Popover/Popover'
+import { Spinner } from '../../primitives/Spinner/Spinner'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './RunButton.module.css'
 
 /*
- * What a project runs, from the top of its screen or a task's bar (ADR-044):
- * one press runs its default, the first of the list, as the one Run button
- * did; while that runs, the button says where it answers and opens it. The
- * chevron lists everything it runs, those running first, checked, each with
- * where it answers or how it last ended, and the rest with what it runs,
- * where, and who said how; picking one starts or stops it, and the menu stays
- * open, so several start at once. After them, running a branch or a pull
- * request, where the consumer offers it (ADR-066), adding something more to
- * run, and the whole list to change. With nothing known to run, the button
- * offers the ways to say what runs.
+ * What a project runs, from the top of its screen or a task's bar (ADR-070):
+ * the button always says Run, and after it, short, how many failed, or how
+ * many run, or that one is on its way. A press only opens the list: nothing
+ * runs until it is picked there, the most common included, which is first in
+ * the person's order. Each line keeps its state in place: Run; starting or
+ * fetching; where it answers, with Stop; or what went wrong, with its way out.
+ * What runs comes first, in an order fixed as the list opens, so nothing moves
+ * under the pointer. A long list opens on a field to find in: the arrows
+ * move, Enter runs, opens or tries again. Adding something to run and the
+ * whole list sit at its foot. With nothing known to run, it offers the ways
+ * to say what runs.
  */
 
 /** Who said how something runs: worked out from its repository, or kept by the person, the coordinator or another agent. */
@@ -24,18 +33,24 @@ export type RunFrom = 'repository' | 'person' | 'coordinator' | 'agent'
 /** The ways to add something to run. */
 export type AddWay = 'type' | 'scripts' | 'ask'
 
-/** Its run here, as it stands. */
+/** Its run where the button runs, as it stands. */
 export interface RunTargetRun {
-  /** starting: before it says where it answers, or that it runs; ended: by itself, or stopped. */
-  state: 'starting' | 'running' | 'ended'
+  /**
+   * fetching: Althar fetches the branch or pull request it runs on; unfetched:
+   * it couldn't; starting: before it says where it answers, or that it runs;
+   * ended: by itself, or stopped.
+   */
+  state: 'fetching' | 'unfetched' | 'starting' | 'running' | 'ended'
   /** Where it answers: localhost:5290. */
   url?: string
-  /** How long it has run, or when it ended: 12m, 3m ago. */
+  /** How long it has run, or when it ended or failed: 12m, 3m ago. */
   since?: string
   /** How it ended by itself: its exit code, null where unknown. */
   code?: number | null
   /** It was stopped, not ended by itself. */
   stopped?: boolean
+  /** Why it couldn't be fetched, in the runtime's words. */
+  why?: string
 }
 
 /** One of what the project runs, as the button lists it. */
@@ -45,41 +60,39 @@ export interface RunTarget {
   name?: string
   /** What it runs: `bun --filter @althar/ui storybook`. */
   command: string
-  /** Where it runs from here, in a word: main, this task. */
-  where: string
   from: RunFrom
   /** Its run here; none where it hasn't run, or the run was cleared. */
   run?: RunTargetRun
-  /** It runs somewhere else now, seen from here: on main, at its address. */
-  elsewhere?: { where: string; url?: string }
 }
 
 export interface RunButtonText {
-  /** The main half, running the default. */
-  run: (label: string) => string
-  starting: (label: string) => string
-  /** The chevron's name. */
-  more: string
-  /** The menu's name. */
+  run: string
+  /** The list's name. */
   label: string
-  running: string
-  resting: string
-  /** The heading over everything, while nothing runs. */
-  all: string
-  default: string
-  startingHint: string
-  from: Record<RunFrom, string>
+  /** A line's own actions. */
+  start: string
+  stop: string
+  again: string
+  retry: string
+  clear: string
+  open: (url: string) => string
+  starting: string
+  fetching: string
+  up: string
   finished: (since: string) => string
-  failed: (code: number | null, since: string) => string
   stopped: (since: string) => string
-  elsewhere: (where: string, url?: string) => string
-  /** Running a branch or a pull request, in a copy of its own. */
-  branch: string
+  exited: (code: number | null) => string
+  unfetched: string
+  /** After Run: how many run, how many failed, one on its way. */
+  live: (n: number) => string
+  failed: (n: number) => string
+  coming: string
+  find: string
+  none: (words: string) => string
+  from: Record<RunFrom, string>
   add: string
   edit: string
-  note: string
   /** With nothing known to run. */
-  empty: string
   emptyLabel: string
   emptyNote: string
   ask: string
@@ -90,30 +103,34 @@ export interface RunButtonText {
 }
 
 export const runButtonText: RunButtonText = {
-  run: (label) => `Run ${label}`,
-  starting: (label) => `Starting ${label}…`,
-  more: 'Everything to run',
+  run: 'Run',
   label: 'What it runs',
-  running: 'Running',
-  resting: 'Not running',
-  all: 'Run',
-  default: 'Default',
-  startingHint: 'Starting…',
+  start: 'Run',
+  stop: 'Stop',
+  again: 'Run again',
+  retry: 'Try again',
+  clear: 'Clear',
+  open: (url) => `Open ${url}`,
+  starting: 'Starting…',
+  fetching: 'Fetching…',
+  up: 'Running',
+  finished: (since) => `Finished ${since}`,
+  stopped: (since) => `Stopped ${since}`,
+  exited: (code) => (code === null ? 'Ended' : `Exited ${code}`),
+  unfetched: 'Couldn’t fetch',
+  live: (n) => (n === 1 ? '1 running' : `${n} running`),
+  failed: (n) => (n === 1 ? '1 failed' : `${n} failed`),
+  coming: 'Starting',
+  find: 'Find something to run',
+  none: (words) => `Nothing to run matches “${words}”`,
   from: {
     repository: 'Worked out from the repository',
     person: 'Added by you',
     coordinator: 'Added by the coordinator',
     agent: 'Kept by an agent',
   },
-  finished: (since) => `Finished ${since}`,
-  failed: (code, since) => `Failed ${since}${code === null ? '' : ` · exit ${code}`}`,
-  stopped: (since) => `Stopped ${since}`,
-  elsewhere: (where, url) => `Running ${where}${url === undefined ? '' : ` at ${url}`}`,
-  branch: 'Run a branch or pull request…',
-  add: 'Add something to run…',
-  edit: 'Edit the list…',
-  note: 'Checked ones are running. Pick one to start or stop it.',
-  empty: 'Run',
+  add: 'Add something to run',
+  edit: 'Edit the list',
   emptyLabel: 'Something to run',
   emptyNote: 'Althar runs it itself, with no agent, and shows where it answers.',
   ask: 'Ask the coordinator to work it out',
@@ -124,28 +141,31 @@ export const runButtonText: RunButtonText = {
 }
 
 export interface RunButtonProps {
-  /** What the project runs from here, in its order: the first is its default. */
+  /** What the project runs from here, in its order: the first is the most common. */
   targets: readonly RunTarget[]
-  /** Runs one here. */
+  /** Runs one here, or again, or tries its fetch again. */
   onRun: (id: string) => void
   /** Stops its run here. */
   onStop: (id: string) => void
   /** Opens where its run answers, in the person's browser. */
   onOpen: (id: string) => void
+  /** Clears what went wrong with its last run; without it, a failure stays until it runs again. */
+  onClear?: (id: string) => void
   /** Adds something to run, one of three ways. */
   onAdd: (way: AddWay) => void
   /** Opens the whole list, to order, edit and remove. */
   onEdit: () => void
-  /** Opens the picker of the remote's branches and pull requests, to run one; without it, the list doesn't offer it. */
-  onRunBranch?: () => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   text?: Partial<RunButtonText>
 }
 
-/** Cut for a menu row, which has room; the button's own text is cut by its width, in the CSS. */
+/** Cut for a line, which has room; the button's own text is short. */
 const LONGEST = 80
+
+/** A list long enough to want finding in. */
+export const LONG = 8
 
 /** Setup a one-line command does on the way, not what it runs: export, unset, cd, NAME=value on its own. */
 const setup = (part: string) => /^(export|unset|cd|set|source|\.)\s/.test(part) || /^[A-Za-z_]\w*=\S*$/.test(part)
@@ -201,16 +221,32 @@ export function shortCommand(command: string): string {
 /** What the list calls it: its name, else its command in a few words. */
 export const labelOf = (target: RunTarget) => target.name ?? shortCommand(target.command)
 
-/** What the idle button says after Run: its name, else (not where the repository's own way runs, which is just Run) its command in a few words. */
-export const buttonLabelOf = (target: RunTarget) => target.name ?? (target.from === 'repository' ? undefined : shortCommand(target.command))
+/** It ended by itself, not well: a failure, until it runs again or is cleared. */
+const crashed = (run: RunTargetRun) => run.state === 'ended' && run.stopped !== true && run.code !== 0
 
-const live = (target: RunTarget) => target.run !== undefined && target.run.state !== 'ended'
+/** Its run went wrong: it couldn't be fetched, or it ended by itself, not well. */
+export const failedRun = (run: RunTargetRun | undefined) => run !== undefined && (run.state === 'unfetched' || crashed(run))
 
-/** How its last run ended, in a few words: Failed 8m ago · exit 1. */
-const endedOf = (run: RunTargetRun, t: RunButtonText) => {
-  const since = run.since ?? ''
-  if (run.stopped === true) return t.stopped(since)
-  return run.code === 0 ? t.finished(since) : t.failed(run.code ?? null, since)
+/** On its way: fetching or starting. */
+const coming = (run: RunTargetRun | undefined) => run?.state === 'fetching' || run?.state === 'starting'
+
+/** It runs, or is on its way: listed first. */
+const busy = (target: RunTarget) => target.run !== undefined && (target.run.state !== 'ended' || crashed(target.run))
+
+/** What the button says after Run, problems first: how many failed; how many run; or that one is on its way. */
+export const statusOf = (targets: readonly RunTarget[]) => {
+  const failed = targets.filter((target) => failedRun(target.run)).length
+  const live = targets.filter((target) => target.run?.state === 'running').length
+  const on = targets.some((target) => coming(target.run))
+  return { failed, live, coming: on }
+}
+
+/** What Enter does to a line: runs it, or again; opens where it answers; or tries its fetch again. Nothing while it is on its way. */
+const primary = (target: RunTarget): 'run' | 'open' | null => {
+  const run = target.run
+  if (run === undefined || run.state === 'ended' || run.state === 'unfetched') return 'run'
+  if (run.state === 'running' && run.url !== undefined) return 'open'
+  return null
 }
 
 export function RunButton({
@@ -218,9 +254,9 @@ export function RunButton({
   onRun,
   onStop,
   onOpen,
+  onClear,
   onAdd,
   onEdit,
-  onRunBranch,
   open,
   defaultOpen,
   onOpenChange,
@@ -228,22 +264,9 @@ export function RunButton({
 }: RunButtonProps) {
   const t = { ...runButtonText, ...text }
   const [opened, setOpened] = useControlled(open, defaultOpen ?? false, onOpenChange)
-  const ways = (
-    <>
-      <MenuItem icon="agents" description={t.askAbout} onSelect={() => onAdd('ask')}>
-        {t.ask}
-      </MenuItem>
-      <MenuItem icon="list" description={t.scriptsAbout} onSelect={() => onAdd('scripts')}>
-        {t.scripts}
-      </MenuItem>
-      <MenuItem icon="terminal" onSelect={() => onAdd('type')}>
-        {t.type}
-      </MenuItem>
-    </>
-  )
+  const status = statusOf(targets)
 
-  const [first] = targets
-  if (first === undefined)
+  if (targets.length === 0)
     return (
       <Menu
         label={t.emptyLabel}
@@ -253,93 +276,309 @@ export function RunButton({
         onOpenChange={setOpened}
         note={t.emptyNote}
         trigger={
-          <Button size="small" variant="quiet" icon="terminal" trailingIcon="chevronD">
-            {t.empty}
+          <Button size="small" icon="play" trailingIcon="chevronD" className={s.button}>
+            {t.run}
           </Button>
         }
       >
-        {ways}
+        <MenuItem icon="agents" description={t.askAbout} onSelect={() => onAdd('ask')}>
+          {t.ask}
+        </MenuItem>
+        <MenuItem icon="list" description={t.scriptsAbout} onSelect={() => onAdd('scripts')}>
+          {t.scripts}
+        </MenuItem>
+        <MenuItem icon="terminal" onSelect={() => onAdd('type')}>
+          {t.type}
+        </MenuItem>
       </Menu>
     )
 
-  const item = (target: RunTarget) => {
-    const run = target.run
-    const on = live(target)
-    const hint =
-      run?.state === 'starting' ? t.startingHint : on && run?.url !== undefined ? run.url : target === first && !on ? t.default : undefined
-    const about = [
-      target.name === undefined && labelOf(target) === target.command ? null : target.command,
-      target.where,
-      run?.state === 'ended' ? endedOf(run, t) : null,
-      on && run?.since !== undefined ? run.since : null,
-      target.elsewhere === undefined ? null : t.elsewhere(target.elsewhere.where, target.elsewhere.url),
-      run === undefined && target.elsewhere === undefined ? t.from[target.from] : null,
-    ]
-      .filter((part) => part !== null)
-      .join(' · ')
-    return (
-      <MenuCheckboxItem
-        key={target.id}
-        checked={on}
-        onCheckedChange={() => (on ? onStop(target.id) : onRun(target.id))}
-        keepOpen
-        {...(hint === undefined ? {} : { hint })}
-        description={about}
-      >
-        {labelOf(target)}
-      </MenuCheckboxItem>
-    )
-  }
-  const running = targets.filter(live)
-  const resting = targets.filter((target) => !live(target))
-
-  // The main half: runs the default; while it runs, says where it answers and opens it, or, with no address, opens the list.
-  // Whatever it says is cut with an ellipsis, so it never crowds the title beside it; the full command is its tooltip.
-  const run = first.run
-  // Once it runs it says what runs, so it is not mistaken for the Running pill, even where it was just Run.
-  const label = buttonLabelOf(first)
-  const what = labelOf(first)
-  const cut = (words: string) => <span className={s.text}>{words}</span>
-  const main =
-    run?.state === 'starting'
-      ? { children: cut(t.starting(what)), busy: true }
-      : run?.state === 'running'
-        ? {
-            children: (
-              <span className={s.live}>
-                <LiveDot />
-                {cut([what, run.url].filter((part) => part !== undefined).join(' · '))}
-              </span>
-            ),
-            onClick: () => (run.url === undefined ? setOpened(true) : onOpen(first.id)),
-          }
-        : { children: cut(label === undefined ? t.empty : t.run(label)), icon: 'terminal' as const, onClick: () => onRun(first.id) }
+  // After Run, short, a failure first; each says the whole of it to a screen reader and on hover.
+  const after =
+    status.failed > 0 ? (
+      <span className={cx(s.status, s.bad)} title={t.failed(status.failed)}>
+        <Icon name="close" size={9} />
+        <span aria-hidden="true">{status.failed}</span>
+        <VisuallyHidden>{t.failed(status.failed)}</VisuallyHidden>
+      </span>
+    ) : status.live > 0 ? (
+      <span className={s.status} title={t.live(status.live)}>
+        <LiveDot />
+        <span aria-hidden="true">{status.live}</span>
+        <VisuallyHidden>{t.live(status.live)}</VisuallyHidden>
+        {status.coming && <Spinner size="small" />}
+      </span>
+    ) : status.coming ? (
+      <span className={s.status} title={t.coming}>
+        <Spinner size="small" />
+        <VisuallyHidden>{t.coming}</VisuallyHidden>
+      </span>
+    ) : null
 
   return (
-    <SplitButton
-      size="small"
-      className={s.split}
-      moreLabel={t.more}
-      title={first.command}
-      {...main}
-      menu={(trigger) => (
-        <Menu label={t.label} align="end" width={440} open={opened} onOpenChange={setOpened} trigger={trigger} note={t.note}>
-          {running.length > 0 && <MenuGroup label={t.running}>{running.map(item)}</MenuGroup>}
-          {resting.length > 0 && <MenuGroup label={running.length > 0 ? t.resting : t.all}>{resting.map(item)}</MenuGroup>}
-          <MenuSeparator />
-          {onRunBranch !== undefined && (
-            <MenuItem icon="branch" onSelect={onRunBranch}>
-              {t.branch}
-            </MenuItem>
-          )}
-          <MenuItem icon="plus" onSelect={() => onAdd('type')}>
-            {t.add}
-          </MenuItem>
-          <MenuItem icon="list" onSelect={onEdit}>
-            {t.edit}
-          </MenuItem>
-        </Menu>
-      )}
-    />
+    <Popover
+      label={t.label}
+      placement="below"
+      align="end"
+      width={480}
+      padded={false}
+      open={opened}
+      onOpenChange={setOpened}
+      trigger={
+        <Button size="small" icon="play" trailingIcon="chevronD" className={s.button}>
+          <span className={s.said}>
+            {t.run}
+            {after}
+          </span>
+        </Button>
+      }
+    >
+      <RunList
+        targets={targets}
+        t={t}
+        onRun={onRun}
+        onStop={onStop}
+        onOpen={onOpen}
+        {...(onClear === undefined ? {} : { onClear })}
+        onAdd={() => {
+          setOpened(false)
+          onAdd('type')
+        }}
+        onEdit={() => {
+          setOpened(false)
+          onEdit()
+        }}
+      />
+    </Popover>
   )
+}
+
+/** The open list: mounted as it opens, so its order is fixed then. */
+function RunList({
+  targets,
+  t,
+  onRun,
+  onStop,
+  onOpen,
+  onClear,
+  onAdd,
+  onEdit,
+}: {
+  targets: readonly RunTarget[]
+  t: RunButtonText
+  onRun: (id: string) => void
+  onStop: (id: string) => void
+  onOpen: (id: string) => void
+  onClear?: (id: string) => void
+  onAdd: () => void
+  onEdit: () => void
+}) {
+  const [order] = useState(() => [...targets.filter(busy), ...targets.filter((target) => !busy(target))].map((target) => target.id))
+  const long = targets.length > LONG
+  const [words, setWords] = useState('')
+  const [at, setAt] = useState(0)
+  const typed = words.trim().toLowerCase()
+  const place = (target: RunTarget) => {
+    const n = order.indexOf(target.id)
+    // One added while it is open goes last.
+    return n === -1 ? order.length : n
+  }
+  const shown = [...targets]
+    .sort((one, other) => place(one) - place(other))
+    .filter((target) => typed === '' || `${target.name ?? ''} ${target.command}`.toLowerCase().includes(typed))
+  const point = Math.min(at, Math.max(shown.length - 1, 0))
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'ArrowDown') setAt(Math.min(point + 1, shown.length - 1))
+    else if (event.key === 'ArrowUp') setAt(Math.max(point - 1, 0))
+    else if (event.key === 'Enter') {
+      const target = shown[point]
+      const act = target === undefined ? null : primary(target)
+      if (target !== undefined && act === 'run') onRun(target.id)
+      if (target !== undefined && act === 'open') onOpen(target.id)
+    } else return
+    event.preventDefault()
+  }
+
+  return (
+    <div className={cx(s.list, long && s.long)}>
+      {long && (
+        <div className={s.field}>
+          <Icon name="search" size={13} className={s.quietGlyph} />
+          <input
+            // A long list opens on its field, the first the popover focuses: you arrive typing.
+            value={words}
+            placeholder={t.find}
+            aria-label={t.find}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(event) => {
+              setWords(event.target.value)
+              setAt(0)
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </div>
+      )}
+      <div className={s.scroll}>
+        <div className={s.lines}>
+          {shown.map((target, n) => (
+            <Line
+              key={target.id}
+              target={target}
+              t={t}
+              at={long && n === point}
+              {...(long ? { onPoint: () => setAt(n) } : {})}
+              onRun={() => onRun(target.id)}
+              onStop={() => onStop(target.id)}
+              onOpen={() => onOpen(target.id)}
+              {...(onClear === undefined ? {} : { onClear: () => onClear(target.id) })}
+            />
+          ))}
+          {shown.length === 0 && <p className={s.none}>{t.none(words.trim())}</p>}
+        </div>
+      </div>
+      <div className={s.ways}>
+        <ActionButton size="small" icon="plus" onClick={onAdd}>
+          {t.add}
+        </ActionButton>
+        <ActionButton size="small" icon="list" onClick={onEdit}>
+          {t.edit}
+        </ActionButton>
+      </div>
+    </div>
+  )
+}
+
+/** One thing it runs: Run; on its way; where it answers, how long, and Stop; or what went wrong and its way out. Its height is its state's, never the pointer's. */
+function Line({
+  target,
+  t,
+  at,
+  onPoint,
+  onRun,
+  onStop,
+  onOpen,
+  onClear,
+}: {
+  target: RunTarget
+  t: RunButtonText
+  at: boolean
+  onPoint?: () => void
+  onRun: () => void
+  onStop: () => void
+  onOpen: () => void
+  onClear?: () => void
+}) {
+  const name = labelOf(target)
+  const run = target.run
+  const clear =
+    onClear === undefined ? null : (
+      <ActionButton size="small" icon="close" aria-label={`${t.clear} ${name}`} title={t.clear} onClick={onClear} />
+    )
+  const row = (parts: {
+    glyph: ReactNode
+    state?: ReactNode
+    since?: string
+    acts?: ReactNode
+    why?: ReactNode
+    rest?: boolean
+    failed?: boolean
+  }) => (
+    <div className={cx(s.row, parts.rest === true && s.rest, parts.failed === true && s.failedRow, at && s.at)} onMouseMove={onPoint}>
+      <span className={s.glyph}>{parts.glyph}</span>
+      <span className={s.name} title={target.command}>
+        {name}
+      </span>
+      <span className={s.state}>{parts.state}</span>
+      <span className={s.since}>{parts.since}</span>
+      <span className={s.acts}>{parts.acts}</span>
+      {parts.why !== undefined && <span className={s.why}>{parts.why}</span>}
+    </div>
+  )
+
+  if (run?.state === 'unfetched')
+    return row({
+      failed: true,
+      glyph: <Icon name="offline" size={12} className={s.bad} />,
+      state: <span className={s.bad}>{t.unfetched}</span>,
+      ...(run.since === undefined ? {} : { since: run.since }),
+      acts: (
+        <>
+          <ActionButton size="small" onClick={onRun}>
+            {t.retry}
+          </ActionButton>
+          {clear}
+        </>
+      ),
+      ...(run.why === undefined ? {} : { why: <span title={run.why}>{run.why}</span> }),
+    })
+  if (run?.state === 'fetching' || run?.state === 'starting')
+    return row({
+      glyph: <Spinner size="small" />,
+      state: <span className={s.quiet}>{run.state === 'fetching' ? t.fetching : t.starting}</span>,
+      // A fetch can't be stopped; a start can.
+      ...(run.state === 'starting'
+        ? {
+            acts: (
+              <ActionButton size="small" aria-label={`${t.stop} ${name}`} onClick={onStop}>
+                {t.stop}
+              </ActionButton>
+            ),
+          }
+        : {}),
+    })
+  if (run?.state === 'running')
+    return row({
+      glyph: <LiveDot />,
+      state:
+        run.url === undefined ? (
+          <span className={s.quiet}>{t.up}</span>
+        ) : (
+          <LinkButton className={s.url} title={t.open(run.url)} onClick={onOpen}>
+            {run.url}
+            <Icon name="external" size={10} />
+          </LinkButton>
+        ),
+      ...(run.since === undefined ? {} : { since: run.since }),
+      acts: (
+        <ActionButton size="small" aria-label={`${t.stop} ${name}`} onClick={onStop}>
+          {t.stop}
+        </ActionButton>
+      ),
+    })
+  if (run !== undefined && crashed(run))
+    return row({
+      failed: true,
+      glyph: <Icon name="close" size={11} className={s.bad} />,
+      state: <span className={s.bad}>{t.exited(run.code ?? null)}</span>,
+      ...(run.since === undefined ? {} : { since: run.since }),
+      acts: (
+        <>
+          <ActionButton size="small" icon="play" onClick={onRun}>
+            {t.again}
+          </ActionButton>
+          {clear}
+        </>
+      ),
+    })
+  return row({
+    rest: true,
+    glyph: <span className={s.hollow} />,
+    state:
+      run?.state === 'ended' ? (
+        <span className={s.quiet}>{run.stopped === true ? t.stopped(run.since ?? '') : t.finished(run.since ?? '')}</span>
+      ) : target.name !== undefined ? (
+        <code className={s.command}>{shortCommand(target.command)}</code>
+      ) : labelOf(target) === target.command.trim() ? undefined : (
+        // Unnamed, its name is its command, cut: the whole of it beside, so two that end the same read apart.
+        <code className={s.command}>{target.command}</code>
+      ),
+    acts: (
+      <ActionButton size="small" icon="play" aria-label={`${t.start} ${name}`} onClick={onRun}>
+        {t.start}
+      </ActionButton>
+    ),
+  })
 }

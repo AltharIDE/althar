@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended:** 2026-11-03: Run's one press opens its list rather than running the default, and what runs is said in it, not over the composer
+  ([ADR-070](070-run-opens-its-list-and-runs-where-it-is-picked.md)).
 - **Owner:** Repository maintainers
 - **Context:** ADR-023 gave each repository one way to run, worked out or
   kept, behind one Run button: `bun run dev`, and nothing else. A project has

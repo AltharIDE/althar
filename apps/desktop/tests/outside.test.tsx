@@ -755,7 +755,7 @@ function Task() {
 }
 
 describe('running what a task built, with no agent', () => {
-  it('runs it from the task’s bar, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
+  it('runs it from the task’s bar, which says what runs of the task; the chip over the composer keeps what its lead left running', async () => {
     const thread = snapshot()
     const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
     const { client, emit } = fakeClient({
@@ -767,7 +767,13 @@ describe('running what a task built, with no agent', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
+    // In a task, there is nowhere to pick: it runs in its worktree.
+    expect(screen.queryByRole('button', { name: 'main' })).toBeNull()
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: 'Run bun run dev' }),
+    )
     expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
+    await userEvent.keyboard('{Escape}')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {
       id: 'proc_1',
@@ -783,15 +789,16 @@ describe('running what a task built, with no agent', () => {
       emit({ _tag: 'Launches', projectId: 'p1', launches: [launch, { ...launch, id: 'proc_2', taskId: 't9', command: 'make serve' }] }),
     )
     act(() => emit({ _tag: 'Launches', projectId: 'p9', launches: [{ ...launch, id: 'proc_3', command: 'cargo run' }] }))
-    // One chip over the composer counts what runs here, the run and what the lead left.
-    const chip = await screen.findByRole('button', { name: '2 running' })
-    await userEvent.click(chip)
-    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
-    expect(list.queryByText('make serve')).toBeNull()
-    expect(list.queryByText('cargo run')).toBeNull()
-    // Each stops its own way: Althar's run, and what the lead left running.
-    await userEvent.click(list.getByRole('button', { name: 'Stop bun run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run\s*1 running$/ }))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: 'Stop bun run dev' }),
+    )
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    await userEvent.keyboard('{Escape}')
+    // The chip over the composer has only what the lead left running, stopped its own way.
+    await userEvent.click(await screen.findByRole('button', { name: 'bun dev, localhost:5173' }))
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
+    expect(list.queryByText('bun run dev')).toBeNull()
     await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
     expect(client.stopBackground).toHaveBeenCalledWith('th1', 'bg-1')
   })

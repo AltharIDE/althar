@@ -87,7 +87,7 @@ function WithSettings() {
 }
 
 describe('running the project, with no agent', () => {
-  it('runs its default branch from the project’s front, shows it over the coordinator’s composer, and stops and clears it there', async () => {
+  it('runs on its default branch from the project’s front, picks a task’s worktree beside Run, and stops and clears each there', async () => {
     const { client, emit } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
       getCoordinator: vi.fn(async () =>
@@ -97,10 +97,15 @@ describe('running the project, with no agent', () => {
       ),
     })
     withServices(<WithSettings />, client)
-    // Once the conversation is read, its front offers what the project runs.
+    // Once the conversation is read, its front offers what the project runs, on the default branch.
     await screen.findByText(/^Ask the coordinator about/)
+    expect(screen.getByRole('button', { name: 'main' })).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: 'Run npm run dev' }),
+    )
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
+    await userEvent.keyboard('{Escape}')
     const launch = {
       id: 'proc_1',
       taskId: null,
@@ -111,7 +116,7 @@ describe('running the project, with no agent', () => {
       startedAt: '2026-10-10T09:00:00.000Z',
       ended: null,
     }
-    // Every run in the project shows here, a task's too, each saying where it runs.
+    // Run says what runs where it runs; the switcher, what runs at each place, a task's too.
     act(() =>
       emit({
         _tag: 'Launches',
@@ -119,20 +124,45 @@ describe('running the project, with no agent', () => {
         launches: [launch, { ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', command: 'bun run dev' }],
       }),
     )
-    const pill = await screen.findByRole('button', { name: /^Running/ })
-    await waitFor(() => expect(pill.textContent).toContain('2 processes'))
-    await userEvent.click(pill)
-    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
-    expect(list.getByText(/^main/)).toBeTruthy()
-    expect(list.getByText(/^Fix the login timeout/)).toBeTruthy()
-    await userEvent.click(list.getByRole('button', { name: 'Stop npm run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run\s*1 running$/ }))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: 'Stop npm run dev' }),
+    )
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
     await userEvent.keyboard('{Escape}')
-    // One that ended by itself says how, and clears.
-    act(() => emit({ _tag: 'Launches', projectId: 'p1', launches: [{ ...launch, ended: { at: '2026-10-10T09:01:00.000Z', code: 1 } }] }))
-    await userEvent.click(await screen.findByRole('button', { name: /^Ran/ }))
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Ran' })).getByRole('button', { name: 'Clear npm run dev' }))
-    expect(client.clearLaunch).toHaveBeenCalledWith('proc_1')
+    // Stopped, it is gone; the task's runs on.
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [{ ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', command: 'bun run dev' }],
+      }),
+    )
+    await screen.findByRole('button', { name: /^Run$/ })
+    await userEvent.click(screen.getByRole('button', { name: 'main' }))
+    const places = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    await userEvent.click(await places.findByRole('option', { name: /^Fix the login timeout/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run\s*1 running$/ }))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: 'Stop npm run dev' }),
+    )
+    expect(client.stopLaunch).toHaveBeenLastCalledWith('proc_2')
+    await userEvent.keyboard('{Escape}')
+    // One that ended by itself, there, says how, and clears.
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [
+          { ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', ended: { at: '2026-10-10T09:01:00.000Z', code: 1 } },
+        ],
+      }),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: /^Run\s*1 failed$/ }))
+    const list = within(await screen.findByRole('dialog', { name: 'What it runs' }))
+    expect(list.getByText('Exited 1')).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Clear npm run dev' }))
+    expect(client.clearLaunch).toHaveBeenCalledWith('proc_2')
   })
 
   it('leaves each run’s card in the coordinator’s thread: open the one that is up, stop it, run again a task’s that ended', async () => {

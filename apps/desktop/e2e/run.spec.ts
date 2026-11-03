@@ -3,20 +3,37 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
 
 /*
- * The project run with no agent, in a real window (ADR-023): from the
- * project's front, a copy of the default branch runs its dev script; its card
- * in the coordinator's thread says where it answers, the pill over the
- * composer has it with where it runs, and the card stops it and runs it
- * again. Then more to run (ADR-044): Storybook, picked from its package.json,
- * runs beside it from the Run button's list, and, dragged to the top of the
- * whole list, becomes the default.
+ * The project run with no agent, in a real window (ADR-023, ADR-070): from
+ * the project's front, Run opens its list, on the default branch picked
+ * beside it, and a copy of it runs its dev script; its card in the
+ * coordinator's thread says where it answers, Run says it runs, and the card
+ * stops it and runs it again. Then more to run (ADR-044): Storybook, picked
+ * from its package.json, runs beside it from Run's list, and, dragged to the
+ * top of the whole list, comes first.
  */
+
+/** Run's button, whatever it says after Run. */
+const RUN = /^Run(\s*\d+ (running|failed))?$/
+
+/** Run, its place and its open list, at 1×. */
+const shoot = async (page: Page, name: string) => {
+  const list = await page.getByRole('dialog', { name: 'What it runs' }).boundingBox()
+  const run = await page.getByRole('button', { name: 'main' }).boundingBox()
+  if (list === null || run === null) throw new Error('Run’s list is not open.')
+  const x = Math.min(list.x, run.x) - 8
+  await page.screenshot({
+    path: `test-results/${name}.png`,
+    animations: 'disabled',
+    scale: 'css',
+    clip: { x, y: run.y - 8, width: list.x + list.width + 8 - x, height: list.y + list.height + 8 - (run.y - 8) },
+  })
+}
 
 /** A dev server on a free port that says where it answers, as Vite does. */
 const SERVER = `require('node:http').createServer((_, res) => res.end('meridian')).listen(0, function () {
@@ -46,12 +63,14 @@ test('runs the default branch from the project’s front, leaves its card in the
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    // What it runs, under the Run button's chevron: its repository's own way, the default.
-    await page.getByRole('button', { name: 'Everything to run' }).click()
-    await expect(page.getByRole('menu', { name: 'What it runs' }).getByRole('menuitemcheckbox', { name: 'npm run dev' })).toBeVisible()
-    await page.screenshot({ path: 'test-results/run-button.png', animations: 'disabled' })
-    await page.keyboard.press('Escape')
+    // What it runs, in the list Run opens, on the default branch picked beside it: nothing runs at the press.
+    await expect(page.getByRole('button', { name: 'main' })).toBeVisible()
     await page.getByRole('button', { name: 'Run', exact: true }).click()
+    const list = page.getByRole('dialog', { name: 'What it runs' })
+    await expect(list.getByRole('button', { name: 'Run npm run dev' })).toBeVisible()
+    await shoot(page, 'run-button')
+    await list.getByRole('button', { name: 'Run npm run dev' }).click()
+    await page.keyboard.press('Escape')
 
     // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })
@@ -59,14 +78,14 @@ test('runs the default branch from the project’s front, leaves its card in the
     await expect(open).toBeVisible({ timeout: 30_000 })
     const address = (await open.getAttribute('aria-label'))?.replace('Open ', '') ?? ''
     expect(await (await fetch(`http://${address}`)).text()).toBe('meridian')
-    // The pill over the composer has it too, with where it runs.
-    const running = page.getByRole('button', { name: /^Running/ })
-    await expect(running).toContainText(address)
+    // Run says it runs, and its list where it answers; nothing over the composer.
+    await expect(page.getByRole('button', { name: /^Run\s*1 running$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Running/ })).toHaveCount(0)
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/run-card.png', animations: 'disabled' })
-    await running.click()
-    await expect(page.getByRole('dialog', { name: 'Running' }).getByText(/^main/)).toBeVisible()
-    await page.screenshot({ path: 'test-results/run-pill.png', animations: 'disabled' })
+    await page.getByRole('button', { name: /^Run\s*1 running$/ }).click()
+    await expect(list.getByRole('button', { name: address })).toBeVisible()
+    await shoot(page, 'run-list-running')
     await page.keyboard.press('Escape')
 
     // Stopped from its card, it says so and runs again; the new run leaves a card of its own.
@@ -86,26 +105,26 @@ test('runs the default branch from the project’s front, leaves its card in the
     })
 
     // More to run: Storybook, picked from package.json, runs beside it, each answering where it says.
-    await page.getByRole('button', { name: 'Everything to run' }).click()
-    await page.getByRole('menuitem', { name: 'Add something to run…' }).click()
+    await page.getByRole('button', { name: RUN }).click()
+    await list.getByRole('button', { name: 'Add something to run' }).click()
     const add = page.getByRole('dialog', { name: 'Add something to run' })
     await add.getByRole('radio', { name: 'From package.json' }).click()
     await add.getByRole('checkbox', { name: /npm run storybook/ }).click()
     await page.screenshot({ path: 'test-results/run-add.png', animations: 'disabled' })
     await add.getByRole('button', { name: 'Add' }).click()
     await expect(add).toBeHidden()
-    await page.getByRole('button', { name: 'Everything to run' }).click()
-    const list = page.getByRole('menu', { name: 'What it runs' })
-    await list.getByRole('menuitemcheckbox', { name: 'Storybook' }).click()
-    await expect(list.getByRole('menuitemcheckbox', { name: 'Storybook' })).toHaveAttribute('aria-checked', 'true')
-    await expect(list.getByRole('menuitemcheckbox', { name: 'npm run dev' })).toHaveAttribute('aria-checked', 'true')
-    await expect(list.getByText(/^localhost:\d+$/)).toHaveCount(2, { timeout: 30_000 })
-    await page.screenshot({ path: 'test-results/run-many.png', animations: 'disabled' })
+    await page.getByRole('button', { name: RUN }).click()
+    await list.getByRole('button', { name: 'Run Storybook' }).click()
+    await expect(list.getByRole('button', { name: 'Stop Storybook' })).toBeVisible()
+    await expect(list.getByRole('button', { name: 'Stop npm run dev' })).toBeVisible()
+    await expect(list.getByRole('button', { name: /^localhost:\d+$/ })).toHaveCount(2, { timeout: 30_000 })
+    await expect(page.getByRole('button', { name: /^Run\s*2 running$/ })).toBeVisible()
+    await shoot(page, 'run-many')
     await page.keyboard.press('Escape')
 
-    // The whole list: Storybook dragged by its grip to the top, the default now; the Run button runs it at a press.
-    await page.getByRole('button', { name: 'Everything to run' }).click()
-    await page.getByRole('menuitem', { name: 'Edit the list…' }).click()
+    // The whole list: Storybook dragged by its grip to the top, first in Run's list now.
+    await page.getByRole('button', { name: RUN }).click()
+    await list.getByRole('button', { name: 'Edit the list' }).click()
     const whole = page.getByRole('dialog', { name: 'What meridian runs' })
     const grip = await whole.getByRole('button', { name: 'Drag to move Storybook' }).boundingBox()
     const top = await whole.getByRole('listitem').first().boundingBox()
@@ -120,7 +139,8 @@ test('runs the default branch from the project’s front, leaves its card in the
     await expect(first.getByText('Default', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/run-list.png', animations: 'disabled' })
     await whole.getByRole('button', { name: 'Done' }).click()
-    await expect(page.getByRole('button', { name: /^Storybook · localhost:\d+$/ })).toBeVisible()
+    await page.getByRole('button', { name: RUN }).click()
+    await expect(list.locator('[title^="npm run"]').first()).toHaveText('Storybook')
   } finally {
     await electronApp.close()
   }

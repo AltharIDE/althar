@@ -10,7 +10,7 @@ import { HEADING } from './sections'
 
 /*
  * What a project runs with no agent (ADR-044), in the person's order, the
- * first what one press of Run starts: reordered, made the default, changed
+ * first at the top of Run's list and what an agent runs by default: reordered, made the default, changed
  * and removed in place, and added to in the same dialogs as from Run. Then
  * where its tasks' work goes: their worktrees on this computer, how their
  * branches are named (a folder and a pattern set as code) and what a task

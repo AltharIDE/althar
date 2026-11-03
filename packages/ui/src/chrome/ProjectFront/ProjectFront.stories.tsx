@@ -30,8 +30,8 @@ const NEEDS: WorkNeed[] = [
 
 /* What it runs: its repository's own way, and Storybook beside it. */
 const RUNS: RunTarget[] = [
-  { id: 'dev', command: 'bun run dev', where: 'main', from: 'repository' },
-  { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', where: 'main', from: 'person' },
+  { id: 'dev', command: 'bun run dev', from: 'repository' },
+  { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', from: 'person' },
 ]
 
 const meta = {
@@ -141,7 +141,7 @@ export const Crowded: Story = {
     ],
     run: (
       <RunButton
-        targets={[{ id: 'api', command: 'pnpm --filter api dev', where: 'main', from: 'repository' }]}
+        targets={[{ id: 'api', command: 'pnpm --filter api dev', from: 'repository' }]}
         onRun={fn()}
         onStop={fn()}
         onOpen={fn()}
@@ -164,7 +164,6 @@ export const LongRunCommand: Story = {
             id: 'long',
             command:
               'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox',
-            where: 'main',
             from: 'agent',
           },
         ]}
