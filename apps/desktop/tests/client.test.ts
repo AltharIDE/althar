@@ -267,6 +267,7 @@ describe('the client', () => {
           PauseAutomation: () => Effect.die('unused'),
           RunAutomationNow: () => Effect.die('unused'),
           DeleteAutomation: () => Effect.die('unused'),
+          AnswerTaskAsk: () => Effect.die('unused'),
           UndoAutomationChange: () => Effect.die('unused'),
           SetAutomationPostsReviews: () => Effect.die('unused'),
           SetAutomationsPaused: () => Effect.die('unused'),

@@ -38,6 +38,7 @@ import {
   FieldAnswer,
   type OutputText,
   PushRequestItem,
+  TaskAskItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
@@ -409,6 +410,7 @@ const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
+const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -663,6 +665,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodePushRequest(content), {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
+      })
+    // The coordinator asking the person to move a task on, written whole as it is asked and answered.
+    case 'task_ask':
+      return Option.match(decodeTaskAsk(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'task_ask', content: asked }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
