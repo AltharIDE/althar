@@ -1,11 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { type RunTarget, RunButton, buttonLabelOf, labelOf, shortCommand } from '../src/chrome/RunButton/RunButton'
+import { type RunTarget, RunButton, labelOf, shortCommand } from '../src/chrome/RunButton/RunButton'
 
 const LONG =
   'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox'
-const target = (more: Partial<RunTarget>): RunTarget => ({ id: 'one', command: 'bun run dev', where: 'main', from: 'agent', ...more })
+const target = (more: Partial<RunTarget>): RunTarget => ({ id: 'one', command: 'bun run dev', from: 'agent', ...more })
 
 const handlers = { onRun: vi.fn(), onStop: vi.fn(), onOpen: vi.fn(), onAdd: vi.fn(), onEdit: vi.fn() }
 
@@ -13,7 +13,6 @@ describe('the label of what runs', () => {
   it('is its name where it has one', () => {
     const named = target({ name: 'Storybook', command: LONG })
     expect(labelOf(named)).toBe('Storybook')
-    expect(buttonLabelOf(named)).toBe('Storybook')
   })
 
   it('is the last meaningful command of a chain, whole, not cut to its runner', () => {
@@ -35,42 +34,21 @@ describe('the label of what runs', () => {
     expect(shortCommand('cd web && npm start || true; echo done')).toBe('echo done')
   })
 
-  it('reads the same for two commands that end the same, so the list keeps the whole command', () => {
+  it('reads apart for two commands that end the same: the list says each whole', () => {
     const a = target({ id: 'a', command: 'cd apps/a && bun run dev' })
     const b = target({ id: 'b', command: 'cd apps/b && bun run dev' })
     expect(labelOf(a)).toBe(labelOf(b))
     render(<RunButton targets={[a, b]} defaultOpen {...handlers} />)
-    expect(screen.getByText(/^cd apps\/a && bun run dev/)).toBeInTheDocument()
-    expect(screen.getByText(/^cd apps\/b && bun run dev/)).toBeInTheDocument()
+    expect(screen.getByText('cd apps/a && bun run dev', { selector: 'code' })).toBeInTheDocument()
+    expect(screen.getByText('cd apps/b && bun run dev', { selector: 'code' })).toBeInTheDocument()
+    cleanup()
+    render(<RunButton targets={[target({ command: 'bun run dev' })]} defaultOpen {...handlers} />)
+    expect(screen.queryByText('bun run dev', { selector: 'code' })).toBeNull()
   })
 
-  it('is just Run for a repository’s own way, and the short command otherwise', () => {
-    expect(buttonLabelOf(target({ from: 'repository', command: LONG }))).toBeUndefined()
-    expect(buttonLabelOf(target({ command: LONG }))).toBe('zypak-wrapper electron apps/desktop --no-sandbox')
-    expect(labelOf(target({ from: 'repository', command: 'bun run dev' }))).toBe('bun run dev')
-  })
-})
-
-describe('the Run button', () => {
-  it('says the short form and keeps the whole command as its tooltip', () => {
-    render(<RunButton targets={[target({ command: LONG })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'Run zypak-wrapper electron apps/desktop --no-sandbox' })).toHaveAttribute('title', LONG)
-  })
-
-  it('says only Run for a repository’s own way', () => {
-    render(<RunButton targets={[target({ from: 'repository', command: LONG })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'Run' })).toHaveAttribute('title', LONG)
-  })
-
-  it('says the same short form while starting and running', () => {
-    const { rerender } = render(<RunButton targets={[target({ command: LONG, run: { state: 'starting' } })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'Starting zypak-wrapper electron apps/desktop --no-sandbox…' })).toBeInTheDocument()
-    rerender(<RunButton targets={[target({ command: LONG, run: { state: 'running', url: 'localhost:1' } })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'zypak-wrapper electron apps/desktop --no-sandbox · localhost:1' })).toBeInTheDocument()
-    // The repository's own way is just Run at rest, but says what runs once it does, apart from the Running pill.
-    rerender(<RunButton targets={[target({ from: 'repository', command: 'bun run dev', run: { state: 'starting' } })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'Starting bun run dev…' })).toBeInTheDocument()
-    rerender(<RunButton targets={[target({ from: 'repository', command: 'bun run dev', run: { state: 'running' } })]} {...handlers} />)
-    expect(screen.getByRole('button', { name: 'bun run dev' })).toBeInTheDocument()
+  it('is the short command where it has no name, the whole command its tooltip', () => {
+    expect(labelOf(target({ command: LONG }))).toBe('zypak-wrapper electron apps/desktop --no-sandbox')
+    render(<RunButton targets={[target({ command: LONG })]} defaultOpen {...handlers} />)
+    expect(screen.getByText('zypak-wrapper electron apps/desktop --no-sandbox', { selector: '[title]' })).toHaveAttribute('title', LONG)
   })
 })
