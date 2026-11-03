@@ -2,6 +2,7 @@ import type { Effect } from 'effect'
 import { Schema } from 'effect'
 
 import { ConnectorFailed } from './errors'
+import type { Allowance } from './http'
 import type { HostReleases } from './releases'
 
 /*
@@ -381,6 +382,16 @@ export interface CodeHost extends HostReleases {
    * connection lacks one; as `rejected` (`noListing`) where the host can't.
    */
   listChanges(repository: Repository, query: ChangeQuery): Effect.Effect<ChangeList, ConnectorFailed>
+  /**
+   * The repository's open changes, for following them: each one's number,
+   * head and whether it comes from a fork, without caring for the rest.
+   * Asked conditionally where the host has ETags, so an unchanged list
+   * costs nothing; a host without leaves it to `listChanges`. At most a
+   * hundred, newest change first.
+   */
+  openChanges?(repository: Repository): Effect.Effect<ReadonlyArray<ListedChange>, ConnectorFailed>
+  /** What the host has let this connection ask of it so far, and says of its allowance; absent where nothing measures it. */
+  allowance?(): Allowance
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * Merges a change, because the person said to: never on an agent's word.

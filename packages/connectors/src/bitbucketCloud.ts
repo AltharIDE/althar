@@ -512,6 +512,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           )
       }),
     listChanges,
+    allowance: () => http.allowance(),
     change: (repository, number) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
