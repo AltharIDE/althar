@@ -2535,6 +2535,11 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       assert.strictEqual(verdictOf(command, rules({})), 'allow', command)
     for (const command of ['git branch -D spike', 'git branch -d -f spike', 'git branch --delete --force spike', 'git branch -df spike'])
       assert.strictEqual(verdictOf(command, rules({})), 'ask', command)
+    // A project that never allows deleting branches still refuses it, everything allowed or not; the task's own goes.
+    for (const mode of ['rules', 'allow'] as const) {
+      assert.strictEqual(verdictOf('git branch -d spike', rules({ mode, never: ['delete-branch'] })), 'deny', mode)
+      assert.strictEqual(verdictOf('git branch -d althar/retry', rules({ mode, never: ['delete-branch'] })), 'allow', mode)
+    }
   })
 
   it('reads a line from where the lead’s shell is, where its agent says, not from the worktree’s top', () => {
@@ -2554,6 +2559,16 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
     assert.strictEqual(verdictOf('rm -f ../../sb.log', rules({}, { shell: '/work/meridian/main/packages/ui' })), 'ask')
   })
 
+  it('refuses a key read from where the shell is as from the top, so neither start can hide one', () => {
+    const shell = `${worktree}/packages/ui`
+    // From the shell, five folders up is /work, this test's home: its .ssh. From the top, it is /.ssh, no one's.
+    const key = 'cat ../../../../../.ssh/id_rsa'
+    assert.strictEqual(verdictOf(key, rules(allow, { home: '/work' })), 'allow')
+    assert.strictEqual(verdictOf(key, rules(allow, { home: '/work', shell })), 'deny')
+    // And a key the top reaches is refused whatever the shell's record says.
+    assert.strictEqual(verdictOf('cat ../../../.ssh/id_rsa', rules(allow, { home: '/work', shell })), 'deny')
+  })
+
   it('lets a lead pop or drop its own stash entry, one stashed on its branch; another’s, or clearing them all, asks', () => {
     const stashes = () => ['On althar/retry: althar-wip-1', "WIP on main: 1a2b3c4 the person's", 'WIP on althar/retry: 5d6e7f8 Retry']
     for (const command of ['git stash pop', 'git stash drop', 'git stash drop stash@{0}', 'git stash pop 2', 'git stash apply stash@{1}'])
@@ -2568,6 +2583,9 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       assert.strictEqual(verdictOf(command, rules({}, { stashes })), 'ask', command)
     // Throwing away what git keeps to recover lost work still asks.
     assert.strictEqual(verdictOf('git reflog expire --expire=now --all', rules({}, { stashes })), 'ask')
+    // With everything allowed, these go ahead, as before (ADR-067): they ask the person only where the rules do.
+    for (const command of ['git stash drop stash@{1}', 'git stash clear', 'git reflog expire --expire=now --all', 'git gc --prune=now'])
+      assert.strictEqual(verdictOf(command, rules(allow, { stashes })), 'allow', command)
   })
 
   it('asks before tearing down, deleting or publishing, even with everything allowed; a deploy goes ahead', () => {
@@ -2588,7 +2606,15 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       assert.strictEqual(decided.verdict, 'ask', command)
       assert.include((decided as { reason: string }).reason, 'asks even with everything allowed', command)
     }
-    for (const command of ['wrangler deploy', 'vercel --prod', 'terraform apply', 'npm publish --dry-run', 'kubectl apply -f prod.yaml'])
+    for (const command of [
+      'wrangler deploy',
+      'vercel --prod',
+      'terraform apply',
+      'npm publish --dry-run',
+      'kubectl apply -f prod.yaml',
+      'kubectl delete deployment api --dry-run=client',
+      'kubectl delete deployment api --dry-run=server',
+    ])
       assert.strictEqual(verdictOf(command, rules(allow)), 'allow', command)
   })
 
@@ -2627,6 +2653,7 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       'echo "${BRANCH:-main}"',
       "git branch -r --format='%(refname:short)'",
       "git branch -r --format '%(refname:short)' --sort=-committerdate",
+      'git remote show',
     ])
       assert.strictEqual(reason(command), 'allowed', command)
     for (const [command, said] of [
@@ -2638,6 +2665,9 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       ['[[ n -eq 1 ]]', '`[[ -eq`'],
       ['echo "${X:=y}"', 'An expansion'],
       ['git branch -r --format x newbranch', '`git branch` can change'],
+      // `show` lists for `git remote`; to `git branch` or `git tag` it names one to make.
+      ['git branch show', '`git branch` can change'],
+      ['git tag show', '`git tag`'],
     ] as const)
       assert.include(reason(command), said, command)
   })

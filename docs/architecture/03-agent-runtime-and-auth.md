@@ -1017,7 +1017,11 @@ words for a pass (`guardHolds`), takes its hooks from a folder of Althar's, by t
 (`core.hooksPath`, `pushGuard.ts`): `pre-push` stops a push to a default
 branch, a push over commits the remote has that this one doesn't, and
 deleting a branch that isn't the task's; `reference-transaction` stops
-deleting such a branch here, or moving one so it loses commits. It says
+deleting such a branch here, or moving one, where its commits are on no
+other ref. The hooks act only in the task's own repositories
+(`ALTHAR_GUARD_REPOSITORIES`, by the git folder their worktrees share) and
+on pushes to their remotes, so a scratch repository a lead makes in its
+temp folder is its own. It says
 what it stopped and to run it plainly outside the sandbox, so Althar asks;
 once the person allows a request the rules read as one of these, the
 session has a two-minute pass naming those git commands, with the

@@ -419,6 +419,16 @@ const secretReason = (request: PermissionRequest, cwd?: string, system: System =
     : undefined
 }
 
+/**
+ * Why a request reads a secret, its paths read from the worktree's top and
+ * from where the agent says its shell is, either of which may be where it
+ * runs: a false or stale record of the shell can't hide a key it reads.
+ */
+const secretOf = (request: PermissionRequest, context: RuleContext, system: System): string | undefined =>
+  [context.worktree, ...(context.shell === undefined ? [] : [context.shell])]
+    .map((cwd) => secretReason(request, cwd, system))
+    .find((reason) => reason !== undefined)
+
 /** A `.env` file, which holds a project's secrets; not one that only shows what goes in it (`.env.example`). */
 const envFile = (path: string) => {
   const name = path.split(/[/\\]/).at(-1) ?? ''
@@ -2072,7 +2082,7 @@ const DESTROYERS: Readonly<Record<string, RegExp>> = {
 const destroys = (words: ReadonlyArray<string>): boolean => {
   const [first = '', ...rest] = words
   const program = first.slice(first.lastIndexOf('/') + 1)
-  if (rest.some((word) => /^--?dry-?run$/.test(word))) return false
+  if (rest.some((word) => /^--?dry-?run(=.*)?$/.test(word) && word !== '--dry-run=none')) return false
   const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
   if (DESTROYERS[program]?.test(sub) === true) return true
   // `terraform apply -destroy`, `fly apps destroy`.
@@ -2386,15 +2396,11 @@ const flagValue = (args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>)
 const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
   const others = (branches: ReadonlyArray<string | undefined>) =>
     branches.filter((branch): branch is string => branch !== undefined && branch !== '' && branch !== context.taskBranch)
-  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>) =>
+  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>, floor: Floor | undefined = 'irreversible') =>
     others(branches)
       .slice(0, 1)
       .map((branch) =>
-        kept(
-          `${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`,
-          'delete-branch',
-          'irreversible',
-        ),
+        kept(`${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`, 'delete-branch', floor),
       )
   const named = git.args.filter((arg) => !arg.startsWith('-'))
   switch (git.subcommand) {
@@ -2402,7 +2408,9 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
       // Git refuses `-d` for a branch whose work isn't merged: only a forced deletion can lose commits.
       if (hasFlag(git.args, '-D') || (hasFlag(git.args, '-d', '--delete') && hasFlag(git.args, '-f', '--force')))
         return branchKept('Deleting the branch', named)
-      if (hasFlag(git.args, '-d', '--delete')) return []
+      // So it doesn't ask, but a project that never allows deleting branches still refuses it.
+      if (hasFlag(git.args, '-d', '--delete'))
+        return (context.project ?? MVP_RULES).never.includes('delete-branch') ? branchKept('Deleting the branch', named, undefined) : []
       const renames = hasFlag(git.args, '-m', '-M', '--move')
       const copies = hasFlag(git.args, '-c', '-C', '--copy')
       const forced = hasFlag(git.args, '-f', '--force', '-M', '-C')
@@ -3169,7 +3177,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
-  const secret = secretReason(request, context.worktree, system)
+  const secret = secretOf(request, context, system)
   if (secret !== undefined) return { verdict: 'deny', reason: secret }
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const found = keptOf(request, context)
@@ -3356,7 +3364,9 @@ const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefin
  * The kinds the boundary itself stops, whatever a command hides: the
  * sandbox a write outside the task's worktree, git's guard a push to the
  * default branch, a force push and deleting another branch (pushGuard.ts).
- * A project that never allows only these needn't read what runs inside.
+ * The guard lets a branch go, or move, where none of its commits is lost:
+ * what can't be undone is stopped, and what a readable line does still meets
+ * the Never. A project that never allows only these needn't read what runs inside.
  */
 const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-push', 'delete-branch']
 
@@ -3436,7 +3446,7 @@ export const tallyKindOf = (request: PermissionRequest, context: RuleContext): T
     if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
     if (words.some((each) => hostReason(each) !== undefined)) return 'code-host'
   }
-  if (secretReason(request, context.worktree, system) !== undefined) return 'credentials'
+  if (secretOf(request, context, system) !== undefined) return 'credentials'
   const project = context.project ?? MVP_RULES
   if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
   const found = keptOf(request, context)
@@ -4111,7 +4121,6 @@ const GIT_LIST_FLAGS = new Set([
   '--contains',
   '--merged',
   '--no-merged',
-  'show',
 ])
 
 /** How a listing is laid out, which takes a value: `--format=%(refname:short)`, `--sort -committerdate`. */
@@ -4122,10 +4131,12 @@ const GIT_LIST_LAYOUT = /^(--format|--sort|--points-at|--column)(=.*)?$/
  * lists, or, for `git branch`, lays out the list, and the values those take.
  * A trusted reader's `git tag` is read more closely (`gitTagReason`).
  */
-const onlyLists = (args: ReadonlyArray<string>, laidOut: boolean): boolean => {
+const onlyLists = (subcommand: string, args: ReadonlyArray<string>): boolean => {
+  const laidOut = subcommand === 'branch'
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? ''
-    if (GIT_LIST_FLAGS.has(arg)) continue
+    // `show` is a subcommand of `git remote`'s; to `git branch` or `git tag` it is the name of one to make.
+    if (GIT_LIST_FLAGS.has(arg) || (arg === 'show' && subcommand === 'remote')) continue
     if (!laidOut) return false
     if (arg === '--no-column' || arg === '-i' || arg === '--ignore-case' || arg === '--omit-empty') continue
     if (!GIT_LIST_LAYOUT.test(arg)) return false
@@ -4177,7 +4188,7 @@ const gitReason = (words: ReadonlyArray<string>, trusted: Trust): string | undef
   const flag = call.args.find((arg) => GIT_FLAG_WRITES.test(arg))
   if (flag !== undefined) return `\`git ${call.subcommand} ${flag}\` writes a file or runs a program, and this role only reads.`
   if (GIT_LOOKS.has(call.subcommand)) return undefined
-  if (GIT_LISTS.has(call.subcommand) && onlyLists(call.args, call.subcommand === 'branch')) return undefined
+  if (GIT_LISTS.has(call.subcommand) && onlyLists(call.subcommand, call.args)) return undefined
   if (trusted && call.subcommand === 'tag') return gitTagReason(call.args)
   // Its sandbox keeps a fetch in its copy, from the mirror, whatever runs it: so it may fetch in a loop, as it may on a line of its own.
   if (trusted === 'contained' && call.subcommand === 'fetch') return gitFetchReason(call.args)

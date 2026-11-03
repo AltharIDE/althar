@@ -31,7 +31,12 @@
     the guard stops (a push to the default branch, a force push, deleting
     another branch) no longer refuses what it can't read. A Never of a
     deploy or a named command still does, and so does every Never where no
-    guard holds.
+    guard holds. The guard lets go a deletion or a move that loses no
+    commits, so under a person's Never of deleting branches an unread line
+    could delete a merged branch, which is recreated from where its commits
+    are. Reading every such line instead would bring back ADR-071's
+    refusals inside the sandbox for each project with that Never, the kind
+    of refusal agents work around.
   - **What a lead asks to run outside goes ahead unread, with everything
     allowed** (`decideLeaving` removed). ADR-071 refused it, saying to run it
     inside or as plain commands. Leads worked around that refusal, and on
@@ -53,7 +58,9 @@
     `git branch`'s `--format`, `--sort`, `--points-at` and `--column`.
   - **`git branch -d` goes.** Git refuses it for a branch whose work isn't
     merged. Only `-D`, or `-d` with `--force`, can lose commits, and those
-    ask.
+    ask. "Ask me" on deleting branches now covers only those. A project
+    that never allows deleting branches still refuses `-d` of another
+    branch.
   - **A line is read from where the lead's shell is.** Most cards for
     deleting outside the worktree, and all 7 for "another checkout", were
     relative paths read from the worktree's top when the lead had `cd`'d
@@ -63,16 +70,18 @@
     rules start the line there (`RuleContext.shell`). They believe it only
     where it is in the task's worktree or a temp folder. Otherwise, and for
     agents that keep no such record, the line is read from the top, as
-    before.
+    before. A key or sign-in a path names is refused read from either
+    folder, so the record can't hide one.
   - **A lead may pop or drop its own stash entry.** Git names an entry by
     the branch it was stashed on (`On althar/retry: …`, `WIP on
     althar/retry: …`). An entry on the task's branch, picked by its place
     (`stash@{n}`, `n`, or the newest where none is named), goes. Another's,
     one named by a hash, and `git stash clear` still ask, since every
-    checkout shares the stash. The issue's "tagged as the brief tells it"
+    checkout shares the stash, except with everything allowed, where
+    ADR-067 already let every stash operation go. The issue's "tagged as the brief tells it"
     became the branch name git already writes, so no brief needs to say
     anything. **Turned down:** `git reflog expire` and `git gc --prune`
-    still ask. They throw away what git keeps to recover lost work, for
+    still ask (with everything allowed they go, as ADR-067 had them). They throw away what git keeps to recover lost work, for
     every checkout, and nothing marks what is the task's.
   - **`push_to_pull_request` hands the lead the steps** where someone pushed
     to the branch elsewhere: call `fetch_from_remote` with the pull request,
@@ -89,7 +98,8 @@
     `kubectl delete`, `helm uninstall`, `wrangler delete`, `vercel remove`,
     `netlify sites:delete`, and publishing a package (`npm`, `bun`, `pnpm`,
     `yarn`, `cargo`, `gem`, `twine`, `poetry`), whose version a registry
-    never takes again. A dry run doesn't ask. A deploy still goes ahead
+    never takes again. A dry run (`--dry-run`, `--dry-run=client`) doesn't
+    ask. A deploy still goes ahead
     with everything allowed, as ADR-067 decided: the next deploy replaces
     it. Being irreversible, these go to the person without the coordinator's
     judgment.
@@ -115,7 +125,12 @@
 - **Trade-off:** reading the shell's folder from the transcript trusts a
   file the agent's own process writes. A lead that wrote a false `cwd`
   there could have a relative path read from another folder of its worktree
-  or temp folder, never from beyond them. With everything allowed, a script
+  or temp folder, never from beyond them. A stale record does the same: a
+  `cwd` still deeper than the shell after a `cd ..` reads a path that
+  leaves the worktree as one inside it, a missed ask, not only an extra
+  one. Claude Code writes the record with each entry; whether it does
+  before the next permission request after a `cd` hasn't been tried with a
+  live lead. With everything allowed, a script
   run outside unread can write anywhere the person's account can, as ADR-071
   already left open for what the project runs outside from the start.
 - **Revisit when:** a lead loses work through a crossing that went ahead
