@@ -6167,13 +6167,15 @@ export class Changes extends Context.Service<
           )
           const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
           const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+          // Commits from elsewhere come in as the default branch does: fetched by Althar, merged, never rebased over.
+          const bringIn = `Call fetch_from_remote with pull_request ${now.number}, merge what it says it got into your branch (never rebase, nor force a push), then call push_to_pull_request again.`
           if (ahead.kind === 'behind')
             return yield* new ToolRefused({
-              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. Tell the person.`,
+              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. ${bringIn}`,
             })
           if (ahead.kind === 'unknown')
             return yield* new ToolRefused({
-              message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. Tell the person.`,
+              message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. ${bringIn}`,
             })
           if (ahead.kind === 'rewritten')
             return yield* new ToolRefused({
