@@ -1,5 +1,6 @@
 import {
   type ChosenField,
+  type Choice,
   ConnectorFailed,
   fieldsOf,
   type Issue,
@@ -126,7 +127,28 @@ export interface Proposed {
   readonly already: ReadonlyArray<string>
 }
 
-const decodeEntries = (changes: string) => JSON.parse(changes) as ReadonlyArray<Entry>
+/**
+ * An entry as this version reads it. One kept before DEV-182 has no
+ * `assignees`: its assignee was the one person put on in place of the
+ * others, and on GitHub and GitLab its project was the issue's milestone.
+ */
+const current = (entry: Entry): Entry => {
+  if (entry.assignees !== undefined) return entry
+  const old = entry.change as Omit<IssueChange, 'assignee'> & { readonly assignee?: Choice | null }
+  const host = entry.product === 'github' || entry.product === 'gitlab'
+  const { project, assignee, ...rest } = old
+  return {
+    ...entry,
+    assignees: entry.product === 'linear' || entry.product === 'jira_cloud' || entry.product === 'jira_dc' ? 'one' : 'many',
+    change: {
+      ...rest,
+      ...(project === undefined ? {} : host ? { milestone: project } : { project }),
+      ...(assignee === undefined ? {} : { assignee: assignee === null ? null : { add: [assignee], remove: [] } }),
+    },
+  }
+}
+
+const decodeEntries = (changes: string) => (JSON.parse(changes) as ReadonlyArray<Entry>).map(current)
 
 /** What a card's note links to and whose task it is, where a pull request moved its issue. */
 const whyOf = (entries: ReadonlyArray<Entry>) => {

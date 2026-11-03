@@ -296,6 +296,63 @@ describe('changes to issues', () => {
     }).pipe(Effect.provide(withQueries({ github })))
   })
 
+  it.live('take a Linear milestone only from the project it goes in, never moving it to another', () => {
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { access } = yield* project()
+      const said = yield* callTool(access, 'change_issues', {
+        changes: [{ issue: 'MER-231', project: 'Payments v2', milestone: 'Beta' }],
+        at_once: true,
+      })
+      assert.include(said, 'MER-231: no milestone called “Beta” in its project. It has: Design')
+      assert.deepStrictEqual(
+        tracker.issueChanges.map((one) => one.change.milestone),
+        [undefined],
+      )
+    }).pipe(Effect.provide(withQueries({ linear: tracker })))
+  })
+
+  it.live('apply and discard a card kept before every field: its one assignee is added, a code host’s project is its milestone', () => {
+    const github = makeFakeService({ product: 'github' })
+    github.addRepository(['meridian', 'api'])
+    github.addIssue({ ref: 'meridian/api#12', title: 'Docs are stale' })
+    github.addIssue({ ref: 'meridian/api#13', title: 'Logs are noisy' })
+    return Effect.gen(function* () {
+      yield* connect('github')
+      const { threadId, access } = yield* project()
+      const changes = yield* IssueChanges
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const propose = (issue: string) =>
+        callTool(access, 'change_issues', { changes: [{ issue: `https://github.com/meridian/api/issues/${issue}`, title: 'Renamed' }] })
+      yield* propose('12')
+      yield* propose('13')
+      // As an earlier version kept them: an assignee in place of the others, a milestone said as project, no assignees kind.
+      const rows = yield* sql<{ id: string; changes: string }>`SELECT id, changes FROM issue_changes ORDER BY created_at, id`
+      for (const row of rows) {
+        const old = (JSON.parse(row.changes) as ReadonlyArray<Record<string, unknown>>).map((entry) => ({
+          ...entry,
+          assignees: undefined,
+          change: { assignee: { id: 'user-sam', name: 'Sam Rivera' }, project: { id: 'milestone-beta', name: 'Beta' } },
+        }))
+        yield* sql`UPDATE issue_changes SET changes = ${JSON.stringify(old)} WHERE id = ${row.id}`
+      }
+      const [first, second] = yield* cardsIn(threadId)
+      const applied = yield* changes.apply(first?.changesId ?? '', instance.personId)
+      assert.strictEqual(applied.state, 'applied')
+      assert.deepStrictEqual(applied.issues[0]?.changes, [
+        { field: 'assignees', add: ['Sam Rivera'], remove: [] },
+        { field: 'milestone', to: 'Beta' },
+      ])
+      const issue = yield* github.issue('meridian/api#12')
+      assert.deepStrictEqual([issue.assignees.map((person) => person.login), issue.milestone?.name], [['you', 'sam'], 'Beta'])
+      yield* changes.discard(second?.changesId ?? '', instance.personId)
+      const [discarded] = yield* sql<{ state: string }>`SELECT state FROM issue_changes WHERE id = ${second?.changesId ?? ''}`
+      assert.strictEqual(discarded?.state, 'discarded')
+    }).pipe(Effect.provide(withQueries({ github })))
+  })
+
   it.live('apply at once, as a line, where the agent says so by the person’s note; and a comment always does', () => {
     const tracker = linear()
     return Effect.gen(function* () {

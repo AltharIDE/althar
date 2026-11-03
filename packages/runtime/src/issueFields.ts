@@ -327,12 +327,13 @@ export const readFields = (at: FieldsAt, wanted: Wanted): Effect.Effect<Read> =>
                       : project === undefined
                         ? issue?.project?.id
                         : undefined
+                  // Never another project's: that would move the issue there, or be refused beside the project named.
                   const narrowed =
                     inProject === undefined ? all : all.filter((choice) => choice.in === undefined || choice.in === inProject)
-                  const chosen = choiceNamed(narrowed.length === 0 ? all : narrowed, typed) ?? choiceNamed(all, typed)
+                  const chosen = choiceNamed(narrowed, typed)
                   if (chosen === undefined)
                     return yield* Effect.fail(
-                      `no milestone called “${typed.trim()}”. It has: ${listed(narrowed.map((choice) => choice.name))}`,
+                      `no milestone called “${typed.trim()}”${narrowed.length < all.length ? ' in its project' : ''}. It has: ${listed(narrowed.map((choice) => choice.name))}`,
                     )
                   return issue?.milestone != null && same(issue.milestone.name, chosen.name)
                     ? { already: `milestone ${chosen.name}` }
