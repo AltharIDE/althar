@@ -2962,7 +2962,7 @@ describe('a task', () => {
     // A finding opens in the code, where it is now.
     await userEvent.click(screen.getByRole('button', { name: /The retry never stops\./ }))
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
-    expect(client.getTaskFindings).toHaveBeenCalledWith('t1')
+    expect(client.getTaskFindings).toHaveBeenCalledWith('t1', expect.any(String))
   })
 
   it('shows earlier items when asked', async () => {

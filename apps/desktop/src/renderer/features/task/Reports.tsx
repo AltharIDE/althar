@@ -18,10 +18,11 @@ export const reportText = {
 }
 
 /**
- * Opens the task's Changes view on a review's finding, by the review's round
- * and where the finding is in its list: where a task's change can be shown.
+ * Opens the task's Changes view on a review's finding, by the review's
+ * report (its item in the thread) and where the finding is in its list:
+ * where a task's change can be shown.
  */
-export const OpenFinding = createContext<((round: number, index?: number) => void) | null>(null)
+export const OpenFinding = createContext<((review: string, index?: number) => void) | null>(null)
 
 /** A review's report: its verdict and each finding in a line, opening it in the code; then what the reviewer said. */
 export function ReviewReport({ id, result }: { id: string; result: StepResult }) {
@@ -37,7 +38,7 @@ export function ReviewReport({ id, result }: { id: string; result: StepResult })
           ...(finding.title === undefined ? {} : { title: finding.title }),
           claim: finding.claim,
         }))}
-        {...(open === null ? {} : { onOpen: (index: number) => open(result.round, index) })}
+        {...(open === null ? {} : { onOpen: (index: number) => open(id, index) })}
       />
       {result.summary !== '' && <Markdown source={result.summary} />}
     </>

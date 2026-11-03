@@ -2425,6 +2425,8 @@ export type DiffLine = typeof DiffLine.Type
  */
 export const TaskFinding = Schema.Struct({
   id: Schema.String,
+  /** The review that found it, by its attempt: what a review's report names. */
+  review: Schema.String,
   /** The review round that found it, from 0. */
   round: Schema.Number,
   severity: Finding.fields.severity,
@@ -2454,8 +2456,12 @@ export const TaskFinding = Schema.Struct({
 })
 export type TaskFinding = typeof TaskFinding.Type
 
-/** What the reviews of a task's latest run that found anything found, oldest review first, each review's in the reviewer's order; read from the store and git when asked for. */
-export const TaskFindings = Schema.Struct({ findings: Schema.Array(TaskFinding) })
+/**
+ * What the reviews of one of a task's runs found, oldest review first, each
+ * review's in the reviewer's order; read from the store and git when asked
+ * for. `review` is the review asked about, where one was and is known.
+ */
+export const TaskFindings = Schema.Struct({ findings: Schema.Array(TaskFinding), review: Schema.NullOr(Schema.String) })
 export type TaskFindings = typeof TaskFindings.Type
 
 /** One file's diff, read from git when asked for, never kept: its lines, cut short past a limit and saying so. */
@@ -3231,8 +3237,12 @@ export const Api = RpcGroup.make(
    * review's finding may name one.
    */
   call('GetFileDiff', { taskId: Schema.String, path: Schema.String, untouched: Schema.optional(Schema.Boolean) }, FileDiff),
-  /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
-  call('GetTaskFindings', { taskId: Schema.String }, TaskFindings),
+  /**
+   * What the reviews of a task's run found, each where it is in the change
+   * now and what became of it: the run of the review whose report is
+   * `review`, a thread item; without it, the latest run that found anything.
+   */
+  call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */

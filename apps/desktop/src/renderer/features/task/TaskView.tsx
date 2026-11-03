@@ -417,8 +417,10 @@ export function TaskView({
   const changes = useChanges(
     model.snapshot?.task.id ?? null,
     (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null,
-    // What the reviews found is placed again as the change moves.
-    files.map((file) => `${file.path}:${file.add}:${file.del}`).join('\n'),
+    // What the reviews found is placed and read again as the change moves, and as a review or its settling reports.
+    [...files.map((file) => `${file.path}:${file.add}:${file.del}`), ...(model.snapshot?.reports ?? []).map((report) => report.id)].join(
+      '\n',
+    ),
   )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes

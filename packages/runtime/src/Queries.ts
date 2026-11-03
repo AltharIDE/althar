@@ -734,7 +734,7 @@ export class Queries extends Context.Service<
     /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, as a finding may name. */
     fileDiff(taskId: string, path: string, untouched?: boolean): Effect.Effect<FileDiff, unknown>
     /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
-    findings(taskId: string): Effect.Effect<TaskFindings, unknown>
+    findings(taskId: string, review?: string): Effect.Effect<TaskFindings, unknown>
     /** Where a thread's agent works, for the code it names: its task's worktrees here, or the project's repositories at their default branches. */
     codeRoots(threadId: string): Effect.Effect<CodeRoots, SqlError.SqlError | NotFound>
     /** What the names in a thread's messages name there, each message as it was when said where it is an item of the thread. */
@@ -1430,7 +1430,7 @@ export class Queries extends Context.Service<
         })
 
       /** What a task's reviews found, placed in its worktrees here as they are now. */
-      const findingsOf = (taskId: string) =>
+      const findingsOf = (taskId: string, review?: string) =>
         Effect.gen(function* () {
           const worktrees = (yield* worktreesOf(taskId)).filter((worktree) => worktree.baseCommit !== null && existsSync(worktree.path))
           const placed = yield* Effect.forEach(
@@ -1448,7 +1448,7 @@ export class Queries extends Context.Service<
               }),
             { concurrency: 'unbounded' },
           )
-          return yield* taskFindingsOf(taskId, placed)
+          return yield* taskFindingsOf(taskId, placed, review)
         })
 
       /** Where a folder really is, as an agent may write it: its links followed. */
@@ -2988,7 +2988,7 @@ export class Queries extends Context.Service<
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path, untouched) => run(diffOf(taskId, path, untouched)),
-        findings: (taskId) => run(findingsOf(taskId)),
+        findings: (taskId, review) => run(findingsOf(taskId, review)),
         codeRoots: (threadId) => run(codeRoots(threadId)),
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>

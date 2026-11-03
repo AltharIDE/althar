@@ -30,8 +30,8 @@ export interface ChangesModel {
   /** The finding you're on. */
   readonly finding: string | null
   readonly goToFinding: (id: string) => void
-  /** Opens on a review's findings: its worst first, or with `index`, that one, in the reviewer's order. */
-  readonly showFindings: (round: number, index?: number) => void
+  /** Opens on a review's findings, by its report: its worst first, or with `index`, that one, in the reviewer's order. */
+  readonly showFindings: (review: string, index?: number) => void
 }
 
 const KINDS: Readonly<Record<ApiDiffLine['kind'], DiffLineKind>> = {
@@ -57,16 +57,19 @@ export const viewedFinding = (finding: TaskFinding): ViewedFinding => ({
   line: finding.at?.line ?? null,
 })
 
-/** Which of a review's findings to open on: that one in the reviewer's order, else its worst. */
-export const findingFor = (findings: ReadonlyArray<TaskFinding>, round: number, index?: number): TaskFinding | undefined => {
-  const its = findings.filter((finding) => finding.round === round)
+/** Which of a review's findings to open on, the review by its attempt: that one in the reviewer's order, else its worst. */
+export const findingFor = (findings: ReadonlyArray<TaskFinding>, review: string | null, index?: number): TaskFinding | undefined => {
+  const its = findings.filter((finding) => finding.review === review)
   if (index !== undefined && its[index] !== undefined) return its[index]
   return worstFirst(its.map((finding) => ({ ...finding, weight: finding.severity })))[0]
 }
 
 /**
- * `moved` says the change moved, so what was found is placed again: the
- * files' paths and sizes, say.
+ * `moved` says the change or its reviews moved, so what was found is read
+ * and placed again, and the file you're on read again with it: the files'
+ * paths and sizes, and the reports, say. A file's diff shows only once
+ * what was found is read for the same moment, so no note sits on lines it
+ * wasn't placed in.
  */
 export const useChanges = (taskId: string | null, first: string | null, moved = ''): ChangesModel => {
   const { client } = useServices()
@@ -75,37 +78,44 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
   const [attempt, setAttempt] = useState(0)
   /* The last diff read, by the file and attempt it was read for: until the one you're on arrives, it is loading. */
   const [read, setRead] = useState<{ readonly key: string; readonly view: FileView } | null>(null)
-  /* What the reviews found, by the task it was read for; and the review to open on, once it is read. */
-  const [found, setFound] = useState<{ readonly taskId: string; readonly findings: ReadonlyArray<TaskFinding> } | null>(null)
+  /* What the reviews found, by the task and moment it was read for, and the review asked about; and the finding to open on, once it is read. */
+  const [found, setFound] = useState<{
+    readonly taskId: string
+    readonly moved: string
+    readonly review: string | null
+    readonly findings: ReadonlyArray<TaskFinding>
+  } | null>(null)
   const [finding, setFinding] = useState<string | null>(null)
-  const [wanted, setWanted] = useState<{ readonly round: number; readonly index?: number } | null>(null)
+  // The review opened on, by its report: its run's findings are the ones shown until the view opens another way.
+  const [asked, setAsked] = useState<string | undefined>(undefined)
+  const [wanted, setWanted] = useState<{ readonly index?: number } | null>(null)
   const findings = found?.taskId === taskId ? found.findings : []
   const path = selected ?? first
   // A file the change left alone that a finding names is read whole, every line unchanged.
   const untouched = [...new Set(findings.flatMap((one) => (one.at?.untouched === true ? [one.at.path] : [])))]
   const whole = path !== null && untouched.includes(path)
-  const key = `${taskId ?? ''}:${path ?? ''}:${whole}:${attempt}`
+  const key = `${taskId ?? ''}:${path ?? ''}:${whole}:${attempt}:${moved}`
 
   useEffect(() => {
     if (!open || taskId === null) return
     let current = true
-    client.getTaskFindings(taskId).then(
+    client.getTaskFindings(taskId, asked).then(
       (answer) => {
-        if (current) setFound({ taskId, findings: answer.findings })
+        if (current) setFound({ taskId, moved, review: answer.review, findings: answer.findings })
       },
       // Without them, the change shows as it would without a review.
       () => {
-        if (current) setFound({ taskId, findings: [] })
+        if (current) setFound({ taskId, moved, review: null, findings: [] })
       },
     )
     return () => {
       current = false
     }
-  }, [client, open, taskId, moved])
+  }, [client, open, taskId, moved, asked])
 
   // Opened on a review: once what it found is read, its finding, in its file.
   if (wanted !== null && found !== null && found.taskId === taskId) {
-    const target = findingFor(found.findings, wanted.round, wanted.index)
+    const target = findingFor(found.findings, found.review, wanted.index)
     setWanted(null)
     if (target !== undefined) {
       setFinding(target.id)
@@ -135,9 +145,10 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
   return {
     open,
     selected: path,
-    view: read?.key === key ? read.view : { state: 'loading' },
+    view: read?.key === key && (found === null || found.moved === moved) ? read.view : { state: 'loading' },
     show: useCallback((at?: string) => {
       if (at !== undefined) setSelected(at)
+      setAsked(undefined)
       setOpen(true)
     }, []),
     select: setSelected,
@@ -147,10 +158,11 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
     untouched,
     finding,
     goToFinding: setFinding,
-    showFindings: useCallback((round: number, index?: number) => {
+    showFindings: useCallback((review: string, index?: number) => {
       // Read afresh, so it opens on where the finding is now.
       setFound(null)
-      setWanted(index === undefined ? { round } : { round, index })
+      setAsked(review)
+      setWanted(index === undefined ? {} : { index })
       setOpen(true)
     }, []),
   }

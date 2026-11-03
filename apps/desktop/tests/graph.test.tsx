@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +8,7 @@ import { GraphNodeState, type ModelInfo } from '@althar/ui'
 import { REQUEST, taskGraphOf } from '../src/renderer/features/task/graph'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, fakeClient, items, snapshot } from './fixtures'
+import { change, changed, fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -308,49 +308,75 @@ describe('a task’s Graph face', () => {
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-item="item_review"]')))
   })
 
-  it('opens a review that found something in the code, at its worst finding, under its line', async () => {
+  it('opens a review that found something in the code, at its worst finding, under its line, and follows its settling', async () => {
     const user = userEvent.setup()
-    const placed = (id: string, severity: TaskFinding['severity'], path: string | null, title: string): TaskFinding => ({
+    // Once settled, the lead's two lines above it moved it, and it is fixed.
+    let settled = false
+    const placed = (
+      id: string,
+      severity: TaskFinding['severity'],
+      path: string | null,
+      title: string,
+      review = 'natt_review',
+    ): TaskFinding => ({
       id,
+      review,
       round: 0,
       severity,
       title,
       claim: `${title}, at length.`,
       file: path,
       line: path === null ? null : 12,
-      at: path === null ? null : { path, line: 14, changed: false, untouched: path === 'src/caller.ts' },
-      state: 'open',
-      reason: null,
+      at: path === null ? null : { path, line: settled ? 16 : 14, changed: false, untouched: path === 'src/caller.ts' },
+      state: settled && path !== null ? 'fixed' : 'open',
+      reason: settled && path !== null ? 'The caller stops after three.' : null,
       commit: null,
     })
     const getTaskFindings = vi.fn(async () => ({
       findings: [
         placed('find_1', 'minor', null, 'No picture of the retry'),
         placed('find_2', 'blocking', 'src/caller.ts', 'The caller still retries forever'),
+        // A later review's, worse, in the same run: the card opens its own review's.
+        placed('find_3', 'blocking', 'src/caller.ts', 'A later review found this', 'natt_later'),
       ],
+      review: 'natt_review',
     }))
     const getFileDiff = vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 0, del: 0, binary: false, uncommitted: false },
       lines: Array.from({ length: 20 }, (_, i) => ({ kind: 'context' as const, old: i + 1, new: i + 1, text: `line ${i + 1}` })),
       truncated: false,
     }))
-    const { client } = fakeClient({ getThread: vi.fn(async () => graphSnapshot()), getTaskFindings, getFileDiff })
+    let now = graphSnapshot()
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => now), getTaskFindings, getFileDiff })
     withServices(<Task />, client)
     await user.click(await screen.findByRole('radio', { name: /Graph/ }))
     const graph = await screen.findByRole('region', { name: 'The task’s steps' })
     await user.click(within(graph).getByRole('button', { name: /Review 1/ }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
+    expect(getTaskFindings).toHaveBeenLastCalledWith('t1', 'item_review')
     expect(screen.queryByRole('dialog', { name: 'Review 1' })).toBeNull()
     // The worst first: in a file the change left alone, read whole, the note under the line it is about now.
     const note = await within(view).findByRole('article', { current: true })
     expect(note.textContent).toContain('The caller still retries forever')
     expect(getFileDiff).toHaveBeenLastCalledWith('t1', 'src/caller.ts', true)
     expect(note.parentElement?.previousElementSibling?.textContent).toContain('line 14')
-    expect(within(view).getByText('2 open')).toBeTruthy()
+    expect(within(view).getByText('3 open')).toBeTruthy()
     // ] goes to the next, about no file.
-    await user.keyboard(']')
+    await user.keyboard(']]')
     expect(await within(view).findByRole('region', { name: 'Not in the code' })).toBeTruthy()
     expect(within(view).getByRole('article', { current: true }).textContent).toContain('No picture of the retry')
+    await user.keyboard('[[[[')
+    // The lead settles it while the view is open: what was found is read again, with the file, the note on its new line.
+    const reads = getFileDiff.mock.calls.length
+    settled = true
+    const settling = { ...report({ step: 'settle', round: 0, summary: 'Stopped the caller.' }, 20), id: 'item_settle' }
+    now = graphSnapshot({ reports: [...graphSnapshot().reports, settling] })
+    act(() => emit(changed('task', now.task.id)))
+    await waitFor(() => expect(within(view).getByText('1 open, 2 fixed')).toBeTruthy())
+    expect(getFileDiff.mock.calls.length).toBeGreaterThan(reads)
+    const fixed = await within(view).findByRole('article', { current: true })
+    expect(fixed.textContent).toContain('The caller stops after three.')
+    expect(fixed.parentElement?.previousElementSibling?.textContent).toContain('line 16')
   })
 
   it('takes the person from a round’s marker to what started it', async () => {

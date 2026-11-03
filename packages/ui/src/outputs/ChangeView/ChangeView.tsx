@@ -196,7 +196,8 @@ export function ChangeView({
     setGoneTo(finding)
     if (on !== undefined) setApart(on.path === null)
   }
-  const showingLoose = apart && loose.length > 0
+  // With no file to be on, what isn't about one is all there is to show.
+  const showingLoose = loose.length > 0 && (apart || current === undefined)
   const notes: readonly DiffNote[] = findings
     .filter((one) => one.path !== null && one.path === current?.path)
     .map((one) => ({
@@ -284,7 +285,7 @@ export function ChangeView({
               </ActionButton>
             </Dialog.Close>
           </header>
-          {current === undefined ? (
+          {current === undefined && loose.length === 0 ? (
             <p className={s.empty}>{t.empty}</p>
           ) : (
             <div className={s.body}>
@@ -305,7 +306,7 @@ export function ChangeView({
                   )}
                   {files.map((file, index) => {
                     const { dir, name } = split(file.path)
-                    const on = !showingLoose && file.path === current.path
+                    const on = !showingLoose && file.path === current?.path
                     const status = file.untouched === true ? t.untouched : file.status === 'modified' ? null : t.status[file.status]
                     const here = findings.filter((one) => one.path === file.path)
                     return (
@@ -334,7 +335,7 @@ export function ChangeView({
                   })}
                 </ul>
               </nav>
-              {showingLoose ? (
+              {showingLoose || current === undefined ? (
                 <section className={s.code} ref={code} aria-label={t.loose}>
                   <div className={s.fileHead}>
                     <span className={s.filePath}>{t.loose}</span>

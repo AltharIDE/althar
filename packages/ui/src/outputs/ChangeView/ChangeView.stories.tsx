@@ -317,3 +317,15 @@ export const FindingNotInTheCode: Story = {
     await expect(body.queryByRole('region', { name: 'Not in the code' })).toBeNull()
   },
 }
+
+/** A change with no files yet, and a review that found only what isn't about one: its findings still show, whole. */
+export const FindingsWithNoFiles: Story = {
+  args: { ...Findings.args, files: [], selected: null, findings: [REVIEW_LOOSE], finding: null },
+  render: (args) => <Reviewed {...args} />,
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByRole('region', { name: 'Not in the code' })).toBeInTheDocument()
+    await expect(body.getByRole('article')).toHaveTextContent('No picture of the settled note and Usage layout')
+    await expect(body.queryByText('Nothing has changed yet.')).toBeNull()
+  },
+}

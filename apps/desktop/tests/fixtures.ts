@@ -1037,7 +1037,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       ],
       truncated: false,
     })),
-    getTaskFindings: vi.fn(async (_taskId: string): Promise<TaskFindings> => ({ findings: [] })),
+    getTaskFindings: vi.fn(async (_taskId: string, _review?: string): Promise<TaskFindings> => ({ findings: [], review: null })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),

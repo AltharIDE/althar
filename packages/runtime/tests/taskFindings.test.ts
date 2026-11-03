@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -144,6 +145,7 @@ describe('a task’s findings', () => {
         findings: [
           { severity: 'major', title: 'The heading names the old project', file: 'README.md', line: 1, claim: 'It still says Meridian.' },
           { severity: 'minor', claim: 'No screenshot of the page.' },
+          { severity: 'minor', title: 'The third line says too much', file: 'notes.md', line: 3, claim: 'Cut it.' },
         ],
       })
 
@@ -172,6 +174,41 @@ describe('a task’s findings', () => {
       writeFileSync(join(worktree?.path ?? '', 'README.md'), '# Intro\n\n# Meridian\n')
       const [moved] = (yield* queries.findings(task.taskId)).findings
       assert.deepStrictEqual(moved?.at, { path: 'README.md', line: 3, changed: false, untouched: false })
+
+      // A new file nobody has added yet, as the review read it: its finding stays on its line, then moves with it.
+      const path = worktree?.path ?? ''
+      writeFileSync(join(path, 'notes.md'), 'one\ntwo\nthree\n')
+      assert.include(execFileSync('git', ['-C', path, 'status', '--porcelain']).toString(), '?? notes.md')
+      const [attempt] = yield* sql<{ id: string }>`SELECT review_attempt_id AS id FROM findings WHERE location LIKE '%notes.md%'`
+      const index = join(path, '..', 'snapshot-index')
+      const env = {
+        ...process.env,
+        GIT_INDEX_FILE: index,
+        GIT_AUTHOR_NAME: 'T',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 'T',
+        GIT_COMMITTER_EMAIL: 't@t',
+      }
+      execFileSync('git', ['-C', path, 'add', '-A'], { env })
+      const tree = execFileSync('git', ['-C', path, 'write-tree'], { env }).toString().trim()
+      const snapshot = execFileSync('git', ['-C', path, 'commit-tree', tree, '-p', 'HEAD', '-m', 'read'], { env }).toString().trim()
+      yield* sql`UPDATE workspace_snapshots SET commit_sha = ${snapshot} WHERE node_attempt_id = ${attempt?.id ?? ''}`
+      const untracked = () =>
+        Effect.map(queries.findings(task.taskId), (all) => all.findings.find((one) => one.title === 'The third line says too much')?.at)
+      assert.deepStrictEqual(yield* untracked(), { path: 'notes.md', line: 3, changed: false, untouched: false })
+      writeFileSync(join(path, 'notes.md'), 'zero\nhalf\none\ntwo\nthree\n')
+      assert.deepStrictEqual(yield* untracked(), { path: 'notes.md', line: 5, changed: false, untouched: false })
+
+      // A review's report opens its own run's findings: by the review it names, or, from before reports named it, by when it was said.
+      const [report] = yield* sql<{ id: string }>`
+        SELECT i.id FROM thread_items i JOIN threads t ON t.id = i.thread_id
+        WHERE t.task_id = ${task.taskId} AND i.kind = 'step_result' AND json_extract(i.content, '$.step') = 'review'`
+      const byReport = yield* queries.findings(task.taskId, report?.id ?? '')
+      assert.strictEqual(byReport.review, attempt?.id)
+      assert.lengthOf(byReport.findings, 3)
+      yield* sql`UPDATE thread_items SET content = json_remove(content, '$.attemptId') WHERE id = ${report?.id ?? ''}`
+      assert.strictEqual((yield* queries.findings(task.taskId, report?.id ?? '')).review, attempt?.id)
+      assert.isNull((yield* queries.findings(task.taskId, 'item_elsewhere')).review)
     }).pipe(Effect.provide(withQueries())),
   )
 })

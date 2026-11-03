@@ -5,7 +5,7 @@ import type { Finding, TaskFinding } from '@althar/contracts'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { gitExactly } from './git'
+import { gitExactly, treeOf } from './git'
 import { reviewCopyOf } from './reviewCopy'
 
 /*
@@ -118,10 +118,47 @@ export const placeIn = (
   return index < 0 ? null : { index, inside: path }
 }
 
-/** What the reviews of a task's latest run that found anything found, each where it is in the change now, and what became of it. */
-export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<FindingsWorktree>) =>
+/**
+ * The review a report in the task's thread is of, by its attempt: as the
+ * report names it; or, for one from before reports did, the review whose
+ * findings were the last kept by the time it was said. Null for no review.
+ */
+const reviewOf = (taskId: string, itemId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const [item] = yield* sql<{ attemptId: string | null; createdAt: string }>`
+      SELECT json_extract(i.content, '$.attemptId') AS attempt_id, i.created_at FROM thread_items i JOIN threads t ON t.id = i.thread_id
+      WHERE i.id = ${itemId} AND t.task_id = ${taskId} AND i.kind = 'step_result'`
+    if (item === undefined) return null
+    if (item.attemptId !== null) return item.attemptId
+    const [found] = yield* sql<{ attemptId: string }>`
+      SELECT f.review_attempt_id AS attempt_id FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
+      JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+      WHERE r.task_id = ${taskId} AND f.created_at <= ${item.createdAt} ORDER BY f.created_at DESC, f.rowid DESC LIMIT 1`
+    return found?.attemptId ?? null
+  })
+
+/**
+ * What the reviews of one of a task's runs found, each where it is in the
+ * change now, and what became of it: the run of the review whose report is
+ * `review`, a thread item; without it, the latest run that found anything.
+ */
+export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<FindingsWorktree>, review?: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const asked = review === undefined ? null : yield* reviewOf(taskId, review)
+    // The run asked about, by its review; else the latest that found anything.
+    const [ran] =
+      asked !== null
+        ? yield* sql<{ id: string }>`
+            SELECT e.run_id AS id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            WHERE a.id = ${asked}`
+        : yield* sql<{ id: string }>`
+            SELECT r.id FROM runs r WHERE r.task_id = ${taskId} AND EXISTS (
+              SELECT 1 FROM findings g JOIN node_attempts b ON b.id = g.review_attempt_id JOIN nodes m ON m.id = b.node_id
+              JOIN workflow_executions x ON x.id = m.execution_id WHERE x.run_id = r.id)
+            ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+    if (ran === undefined) return { findings: [], review: null }
     const rows = yield* sql<{
       id: string
       round: number
@@ -139,13 +176,9 @@ export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<Findings
           WHERE r.aggregate_type = 'finding' AND r.aggregate_id = f.id AND r.type = 'finding.fixed' ORDER BY r.sequence DESC LIMIT 1) AS fixed_by
       FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
       JOIN workflow_executions e ON e.id = n.execution_id
-      WHERE f.state <> 'dismissed' AND e.run_id = (
-        SELECT r.id FROM runs r WHERE r.task_id = ${taskId} AND EXISTS (
-          SELECT 1 FROM findings g JOIN node_attempts b ON b.id = g.review_attempt_id JOIN nodes m ON m.id = b.node_id
-          JOIN workflow_executions x ON x.id = m.execution_id WHERE x.run_id = r.id)
-        ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)
+      WHERE f.state <> 'dismissed' AND e.run_id = ${ran.id}
       ORDER BY n.iteration, f.created_at, f.rowid`
-    if (rows.length === 0) return { findings: [] }
+    if (rows.length === 0) return { findings: [], review: asked }
 
     // What each review read in each repository: the snapshot it was given.
     const snapshots = new Map<string, string | null>()
@@ -161,11 +194,21 @@ export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<Findings
         return snapshots.get(key) ?? null
       })
 
-    // What changed in a file since a snapshot: one diff each, however many findings name it.
+    // Each worktree's files as they are, new ones nobody has added yet among them, as its review's snapshot was taken.
+    const trees = new Map<string, string | null>()
+    const treeNow = (worktree: FindingsWorktree) =>
+      Effect.gen(function* () {
+        if (!trees.has(worktree.path)) trees.set(worktree.path, yield* treeOf(worktree.path).pipe(Effect.orElseSucceed(() => null)))
+        return trees.get(worktree.path) ?? null
+      })
+
+    // What changed in a file since a snapshot, to the files as they are: one diff each, however many findings name it.
     const changes = new Map<string, ReadonlyArray<Hunk> | null>()
     const changedSince = (worktree: FindingsWorktree, snapshot: string, path: string) =>
       Effect.gen(function* () {
         const key = `${worktree.path}\0${snapshot}\0${path}`
+        const now = yield* treeNow(worktree)
+        if (now === null) return null
         if (!changes.has(key))
           changes.set(
             key,
@@ -178,6 +221,7 @@ export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<Findings
               '--no-textconv',
               '-U0',
               snapshot,
+              now,
               '--',
               path,
             ).pipe(
@@ -208,6 +252,7 @@ export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<Findings
       }
       findings.push({
         id: row.id,
+        review: row.attemptId,
         round: row.round,
         severity: row.severity,
         title: row.title,
@@ -220,5 +265,5 @@ export const taskFindingsOf = (taskId: string, worktrees: ReadonlyArray<Findings
         commit: row.state === 'fixed' ? commitNamed(row.fixedBy) : null,
       })
     }
-    return { findings }
+    return { findings, review: asked }
   })

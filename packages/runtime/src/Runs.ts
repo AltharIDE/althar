@@ -3369,6 +3369,8 @@ export class Runs extends Context.Service<
               const [reviewer] = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE id = ${access.sessionId}`
               yield* result(current, {
                 step: 'review',
+                // Which review this is, so its report opens its own findings, whatever ran after.
+                attemptId: attempt.id,
                 round: attempt.iteration,
                 verdict: reviewed.verdict,
                 summary: reviewed.summary,

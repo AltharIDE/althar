@@ -38,8 +38,8 @@ export interface GraphFaceProps {
   permissions: (calls: ReadonlyArray<AttentionRequest>) => ReactNode
   /** Goes to an item of the conversation by its id; with none, to the conversation as it is. */
   onShow: (itemId: string | undefined) => void
-  /** Opens a review's findings in the code, by its round: a review card that found something opens there, not in a popover. */
-  onReview?: (round: number) => void
+  /** Opens a review's findings in the code, by its report: a review card that found something opens there, not in a popover. */
+  onReview?: (review: string) => void
   /** What went wrong with the last thing done in the window, an answer given here among them; and its dismissal. */
   error?: string | null
   onDismissError?: () => void
@@ -69,7 +69,7 @@ export function GraphFace({ graph, stuck, permissions, onShow, onReview, error =
             report != null &&
             report.content.findings.length > 0
           )
-            onReview(report.content.round)
+            onReview(report.id)
           else setOpen(id)
         }}
         onRound={(id) => onShow(graph.saidAt.get(id))}
