@@ -498,11 +498,9 @@ describe('the CPU an agent uses', () => {
         // Readings a moment apart rather than one pair: a runner's short-lived worker is caught only by a reading that
         // finds it alive, so the watch looks often, and one pair a good while apart can miss every worker it started.
         // 430ms isn't a multiple of the runner's 50ms sleep, so the readings don't land in the same gap between workers.
-        const readings: Array<ReadonlyMap<number, ReadonlyMap<number, number> | null>> = []
-        for (let n = 0; n < 6; n += 1) {
-          readings.push(yield* treeMembers(pids))
-          yield* Effect.sleep('430 millis')
-        }
+        const readings = yield* Effect.forEach([0, 1, 2, 3, 4, 5], (n) =>
+          Effect.tap(treeMembers(pids), () => (n === 5 ? Effect.void : Effect.sleep('430 millis'))),
+        )
         const worked = pids.map((pid) =>
           readings.some((after, index) => {
             const before = readings[index - 1]?.get(pid)
