@@ -90,6 +90,7 @@ describe('what a task used of each account', () => {
     const toggle = screen.getByRole('button', { name: /Usage/ })
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     await userEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
     cleanup()
     show(task({ threadId: 'a third', usage: USAGE }))
     expect(screen.getByRole('button', { name: /Usage/ }).getAttribute('aria-expanded')).toBe('false')

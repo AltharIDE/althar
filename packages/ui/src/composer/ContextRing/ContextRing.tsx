@@ -89,7 +89,7 @@ export function ContextRing({
       label={t.panel}
       placement="above"
       align="end"
-      width={usage === undefined ? 232 : 272}
+      width={usage === undefined ? 232 : 296}
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
