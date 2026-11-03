@@ -1861,3 +1861,132 @@ describe('GitHub’s open pull requests, for following them', () => {
     }),
   )
 })
+
+describe('GitHub bringing a pull request’s branch up to date', () => {
+  const COMPARE = `${REPO}/compare/main...abc`
+  const UPDATE = `${REPO}/pulls/12/update-branch`
+  const change = {
+    id: 'PR_1',
+    number: 12,
+    title: '',
+    body: '',
+    url: '',
+    state: 'open' as const,
+    draft: false,
+    source: 'althar/mer-231',
+    target: 'main',
+    headSha: 'abc',
+    author: null,
+    additions: null,
+    deletions: null,
+    changedFiles: null,
+    updatedAt: '',
+  }
+  const hosted = (routes: ReadonlyArray<Route>, merge?: Parameters<typeof makeGitHub>[0]['merge']) => {
+    const { fetch, sent } = stubFetch(routes)
+    return {
+      host: makeGitHub({
+        fetch,
+        apiUrl: API,
+        webUrl: 'https://github.com',
+        credential: Effect.succeed({ kind: 'bearer', token: 'ghu_t' }),
+        ...(merge === undefined ? {} : { merge }),
+      }),
+      sent,
+    }
+  }
+
+  it.effect('asks GitHub to merge the base in, at the head it read, never to rebase', () =>
+    Effect.gen(function* () {
+      const { host, sent } = hosted([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['GET', COMPARE, { json: { behind_by: 3 } }],
+        ['PUT', UPDATE, { status: 202, json: { message: 'Updating pull request branch.' } }],
+      ])
+      // GitHub merges in the background: the branch hasn't moved when it answers.
+      assert.deepStrictEqual(yield* host.updateBranch(repository, change, { expectedHead: 'abc' }), { outcome: 'updated', head: null })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { expected_head_sha: 'abc', update_method: 'merge' })
+    }),
+  )
+
+  it.effect('says so, and sends nothing, when the branch has everything the base has', () =>
+    Effect.gen(function* () {
+      const { host, sent } = hosted([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['GET', COMPARE, { json: { behind_by: 0 } }],
+      ])
+      assert.deepStrictEqual(yield* host.updateBranch(repository, change, { expectedHead: 'abc' }), { outcome: 'current' })
+      assert.isFalse(sent.some((request) => request.method === 'PUT'))
+    }),
+  )
+
+  it.effect('leaves a branch pushed to since it was read, and a pull request that is no longer open', () =>
+    Effect.gen(function* () {
+      const moved = hosted([['GET', `${REPO}/pulls/12`, { json: pull({ head: { ref: 'althar/mer-231', sha: 'def' } }) }]])
+      assert.deepStrictEqual(yield* moved.host.updateBranch(repository, change, { expectedHead: 'abc' }), { outcome: 'moved', head: 'def' })
+      assert.isFalse(moved.sent.some((request) => request.method === 'PUT'))
+      // GitHub's own check catches a push between its read and ours.
+      const raced = hosted([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['GET', COMPARE, { json: { behind_by: 1 } }],
+        ['PUT', UPDATE, { status: 422, json: { message: 'expected head sha didn’t match current head ref.' } }],
+      ])
+      assert.strictEqual((yield* raced.host.updateBranch(repository, change, { expectedHead: 'abc' })).outcome, 'moved')
+      const closed = hosted([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }]])
+      assert.deepInclude(yield* Effect.flip(closed.host.updateBranch(repository, change, { expectedHead: 'abc' })), { reason: 'rejected' })
+    }),
+  )
+
+  it.effect('stops at a conflict and names the files, read by merging in a copy that pushes nothing', () =>
+    Effect.gen(function* () {
+      const seen: Array<boolean> = []
+      const { host } = hosted(
+        [
+          ['GET', `${REPO}/pulls/12`, { json: pull() }],
+          ['GET', COMPARE, { json: { behind_by: 1 } }],
+          ['PUT', UPDATE, { status: 422, json: { message: 'merge conflict between base and head' } }],
+        ],
+        (merge) => {
+          seen.push(merge.push)
+          return Effect.succeed({ outcome: 'conflict', files: ['src/refunds.ts'] })
+        },
+      )
+      assert.deepStrictEqual(yield* host.updateBranch(repository, change, { expectedHead: 'abc' }), {
+        outcome: 'conflict',
+        files: ['src/refunds.ts'],
+      })
+      assert.deepStrictEqual(seen, [false])
+    }),
+  )
+
+  it.effect('says no_access for a fork’s branch GitHub won’t let the account push to, and fails for its own in GitHub’s words', () =>
+    Effect.gen(function* () {
+      const fork = hosted([
+        [
+          'GET',
+          `${REPO}/pulls/12`,
+          {
+            json: pull({
+              head: { ref: 'fix-typo', sha: 'abc', repo: { full_name: 'stranger/api' } },
+              base: { ref: 'main', repo: { full_name: 'meridian/api' } },
+            }),
+          },
+        ],
+        ['GET', COMPARE, { json: { behind_by: 1 } }],
+        [
+          'PUT',
+          UPDATE,
+          { status: 422, json: { message: 'Cannot push to the head branch: the author doesn’t allow edits from maintainers.' } },
+        ],
+      ])
+      const refused = yield* fork.host.updateBranch(repository, change, { expectedHead: 'abc' })
+      assert.strictEqual(refused.outcome, 'no_access')
+      const own = hosted([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['GET', COMPARE, { json: { behind_by: 1 } }],
+        ['PUT', UPDATE, { status: 403, json: { message: 'Resource not accessible by integration' } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(own.host.updateBranch(repository, change, { expectedHead: 'abc' })), { reason: 'forbidden' })
+    }),
+  )
+})

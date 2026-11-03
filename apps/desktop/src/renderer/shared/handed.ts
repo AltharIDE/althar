@@ -10,6 +10,12 @@ import { pictureUrl } from '../../main/pictureAddress'
  * that opens in the side panel; and other files it pointed at, each a card.
  * A command's output stays in its tool call. Files it changed in passing are
  * the task's change, not something it handed back, so they make no card.
+ *
+ * Only what the person can open is a document: a markdown file written outside
+ * the task's folder (Claude Code's memory in `~/.claude`, Codex's in `~/.codex`:
+ * an agent's own bookkeeping) is not handed back, and one it merely pointed at
+ * from there is a plain file line, not a card that can't be read. The runtime
+ * already keeps such writes out of new items; this holds for those kept before.
  */
 
 /** A command's output as far as it has come, while it runs: its last lines, and how many came before them. */
@@ -170,7 +176,10 @@ export const handedBy = (parts: ReadonlyArray<PartHanded>, worktree: string | nu
       if (file.how === 'wrote' && part.undone === true) continue
       const shown = shownPath(file.path, worktree)
       if (seen.has(`file:${shown}`)) continue
-      const markdown = isMarkdown(shown)
+      const local = editorPath(file.path, worktree)
+      // Outside the task's folder it can't be read: written there it is the agent's own, pointed at there it is a plain file.
+      const markdown = isMarkdown(shown) && local !== null
+      if (isMarkdown(shown) && local === null && file.how === 'wrote') continue
       // A file written in passing is the task's change; only a document it wrote, or a file it pointed at, is handed back.
       if (!markdown && file.how === 'wrote') continue
       seen.add(`file:${shown}`)
@@ -179,7 +188,7 @@ export const handedBy = (parts: ReadonlyArray<PartHanded>, worktree: string | nu
         path: file.path,
         shown,
         whole: wholePath(file.path, worktree),
-        local: editorPath(file.path, worktree),
+        local,
         kind: kindOf(shown),
         size: file.bytes === null ? null : bytesText(file.bytes),
       }

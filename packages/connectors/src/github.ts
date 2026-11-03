@@ -2,6 +2,7 @@ import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
+import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { makeGitHubReleases } from './githubReleases'
@@ -25,6 +26,7 @@ import type {
   IssueQuery,
   ListedChange,
   Person,
+  BranchUpdate,
   Repository,
   Review,
   ReviewEvent,
@@ -32,7 +34,7 @@ import type {
   TrackerCapabilities,
   Verdict,
 } from './model'
-import { branchPath, cantChange, lacking, leftAsItIs, mergedForGood, noPictures, stillOpen, unchangeable } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, mergedForGood, noPictures, notOpen, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -109,6 +111,9 @@ const PullAnswer = Schema.Struct({
   updated_at: Schema.String,
 })
 type PullAnswer = typeof PullAnswer.Type
+
+/** How far a commit is behind the base it is compared with, in commits. */
+const Behind = Schema.Struct({ behind_by: Schema.Number })
 
 const CheckRuns = Schema.Struct({
   check_runs: Schema.Array(
@@ -886,6 +891,32 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       return issueOf(yield* http.json(IssueAnswer, 'GET', at), owner, name)
     })
 
+  /** The files a pull request's branch would conflict in with its base, found by merging in a copy; none where that can't be done. */
+  const filesConflicting = (repository: Repository, now: PullAnswer) =>
+    Effect.gen(function* () {
+      const headPath = (now.head.repo?.full_name ?? repository.path.join('/')).split('/')
+      const [into, from] = yield* Effect.all([pushTarget({ ...repository, path: headPath }), pushTarget(repository)])
+      const merged = yield* (options.merge ?? mergeInCopy)({
+        into: { target: into, branch: now.head.ref, head: now.head.sha },
+        from: { target: from, branch: now.base.ref },
+        push: false,
+      })
+      return merged.outcome === 'conflict' ? merged.files : []
+    }).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+
+  /** The web address without trailing slashes, trimmed by hand: a pattern for it backtracks on a long run of them. */
+  const webBase = (() => {
+    let end = options.webUrl.length
+    while (end > 0 && options.webUrl[end - 1] === '/') end--
+    return options.webUrl.slice(0, end)
+  })()
+
+  const pushTarget = (repository: Repository) =>
+    Effect.map(options.credential, (credential) => ({
+      url: `${webBase}/${repository.path.join('/')}.git`,
+      header: `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`,
+    }))
+
   /*
    * An issue's latest comments, oldest first. GitHub lists them oldest first,
    * a hundred to a page at most, so the issue's count of them says which
@@ -1122,6 +1153,46 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         )
       }),
+    updateBranch: (repository, change, ask) =>
+      Effect.gen(function* () {
+        const at = `${repo(repository)}/pulls/${change.number}`
+        const now = yield* http.json(PullAnswer, 'GET', at)
+        const seen = changeOf(now)
+        if (seen.state !== 'open')
+          return yield* notOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number, seen.state)
+        // A push since the caller read it: not merged unseen. GitHub checks it too (`expected_head_sha`), for a push in between.
+        if (now.head.sha !== ask.expectedHead) return { outcome: 'moved', head: now.head.sha } satisfies BranchUpdate
+        const compared = yield* http.json(
+          Behind,
+          'GET',
+          `${repo(repository)}/compare/${encodeURIComponent(now.base.ref)}...${encodeURIComponent(now.head.sha)}`,
+        )
+        if (compared.behind_by === 0) return { outcome: 'current' } satisfies BranchUpdate
+        const own = seen.headRepository === null || seen.headRepository === undefined
+        // Its merge, not a rebase: GitHub's update-branch does either, as it is told.
+        const done = yield* http
+          .json(Schema.Unknown, 'PUT', `${at}/update-branch`, { expected_head_sha: ask.expectedHead, update_method: 'merge' })
+          .pipe(
+            Effect.map((): BranchUpdate | null => null),
+            Effect.catchIf(
+              (error) => error.reason === 'rejected' || error.reason === 'forbidden',
+              (error): Effect.Effect<BranchUpdate, ConnectorFailed> => {
+                if (/merge conflict/i.test(error.message))
+                  // GitHub says only that it conflicts: the files are read in a copy of Althar's own, which pushes nothing.
+                  return filesConflicting(repository, now).pipe(Effect.map((files) => ({ outcome: 'conflict', files })))
+                if (/expected head sha|head sha didn/i.test(error.message))
+                  return Effect.map(http.json(PullAnswer, 'GET', at), (read) => ({ outcome: 'moved', head: read.head.sha }))
+                // A fork's branch that GitHub won't let the account push to: the author didn't allow maintainers to, or the fork is private.
+                if (!own) return Effect.succeed({ outcome: 'no_access', reason: error.message })
+                return Effect.fail(error)
+              },
+            ),
+          )
+        if (done !== null) return done
+        // GitHub answers 202 and merges in the background: the branch may not have moved yet.
+        const after = yield* http.json(PullAnswer, 'GET', at)
+        return { outcome: 'updated', head: after.head.sha === now.head.sha ? null : after.head.sha } satisfies BranchUpdate
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
@@ -1310,11 +1381,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         http.json(CommentAnswer, 'PATCH', `${repo(repository)}/issues/comments/${encodeURIComponent(commentId)}`, { body }),
         (comment) => commentOf(comment, false),
       ),
-    pushTarget: (repository) =>
-      Effect.map(options.credential, (credential) => ({
-        url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
-        header: `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`,
-      })),
+    pushTarget,
     issue: (ref) =>
       Effect.gen(function* () {
         const { owner, name, number } = yield* parseRef(ref)
