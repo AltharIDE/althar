@@ -77,7 +77,7 @@ describe('the thread recorder', () => {
   it.live("keeps a tool call's command and paths, not what it writes or what came back, and says what it left out", () =>
     Effect.gen(function* () {
       const where = yield* place
-      const record = recorder(where)
+      const record = recorder({ ...where, folders: ['/w'] })
       yield* record.record({ _tag: 'ToolCall', toolCallId: 'write', title: 'Write .env', kind: 'edit', status: 'pending' })
       yield* record.record({
         _tag: 'ToolCallUpdate',

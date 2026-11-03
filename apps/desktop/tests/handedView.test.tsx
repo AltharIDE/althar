@@ -423,8 +423,7 @@ describe('what an agent hands back, elsewhere', () => {
     expect(within(screen.getByRole('article', { name: 'report.csv' })).queryByRole('button', { name: 'Open in editor' })).toBeNull()
   })
 
-  it('names a document outside the worktree whole, and opens it in no editor', async () => {
-    const user = userEvent.setup()
+  it('shows a markdown file it pointed at outside the worktree as a plain line, whole, and opens it in no editor', async () => {
     const outside = snapshot({
       items: [
         items.you('Write it up'),
@@ -433,13 +432,27 @@ describe('what an agent hands back, elsewhere', () => {
         }),
       ],
     })
-    const { client } = fakeClient({ getThread: vi.fn(async () => outside) })
+    const readDocument = vi.fn()
+    const { client } = fakeClient({ getThread: vi.fn(async () => outside), readDocument })
     withServices(<Task />, client)
     const card = await screen.findByRole('article', { name: 'notes.md' })
     expect(within(card).getByText(/\/elsewhere\//)).toBeTruthy()
     expect(within(card).queryByRole('button', { name: 'Open in editor' })).toBeNull()
-    await user.click(await within(card).findByRole('button', { name: 'Read in the panel' }))
-    const panel = await screen.findByRole('complementary', { name: 'notes.md' })
-    expect(within(panel).queryByRole('button', { name: 'Open in editor' })).toBeNull()
+    // Never read, so never a card with an error, and nothing to open in the panel.
+    expect(within(card).queryByRole('button', { name: 'Read in the panel' })).toBeNull()
+    expect(readDocument).not.toHaveBeenCalled()
+  })
+
+  it('shows a document it can’t read, gone or not in a worktree, as a plain line and not a card with an error', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => handing()),
+      readDocument: vi.fn(async () =>
+        Promise.reject(new ApiError({ reason: 'DocumentRefused', message: 'This file isn’t in the task’s worktree.' })),
+      ),
+    })
+    withServices(<Task />, client)
+    const card = await screen.findByRole('article', { name: 'notes.md' })
+    await waitFor(() => expect(within(card).queryByRole('button', { name: 'Read in the panel' })).toBeNull())
+    expect(screen.queryByText(/isn’t in the task’s worktree/)).toBeNull()
   })
 })
