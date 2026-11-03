@@ -18,6 +18,8 @@ export const statements: ReadonlyArray<string> = [
     state TEXT NOT NULL CHECK (state IN ('open', 'merged', 'closed')),
     head_sha TEXT,
     from_fork INTEGER NOT NULL DEFAULT 0 CHECK (from_fork IN (0, 1)),
+    -- Open before Althar first looked at its repository: its first checks are read without news.
+    baseline INTEGER NOT NULL DEFAULT 0 CHECK (baseline IN (0, 1)),
     checks_sha TEXT,
     checks_outcome TEXT CHECK (checks_outcome IN ('passed', 'failed', 'running')),
     checks_revision INTEGER NOT NULL DEFAULT 0 CHECK (checks_revision >= 0),

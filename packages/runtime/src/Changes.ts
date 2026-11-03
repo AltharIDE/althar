@@ -1,4 +1,5 @@
 import { Errands } from './Errands'
+import { makeFollowing } from './Follow'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
@@ -5483,6 +5484,8 @@ export class Changes extends Context.Service<
       const wake = yield* Queue.sliding<string | null>(16)
       const wakeNow = (taskId: string | null) => void Queue.offerUnsafe(wake, taskId)
 
+      /** Every open pull request in the project's repositories, for news: asked in these same turns, as much as the hosts' allowances let. */
+      const following = makeFollowing({ every, due: listenDue })
       const listenOnce = (only: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -5510,6 +5513,7 @@ export class Changes extends Context.Service<
             for (const id of polledAt.keys()) if (!links.has(id)) polledAt.delete(id)
             for (const id of waitUntil.keys()) if (!links.has(id)) waitUntil.delete(id)
             for (const id of newsAt.keys()) if (!tasks.has(id)) newsAt.delete(id)
+            yield* following.tick.pipe(contained('Changes.follow', () => undefined))
           }
         })
 
