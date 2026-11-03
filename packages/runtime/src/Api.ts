@@ -84,6 +84,7 @@ import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
+import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
@@ -223,6 +224,7 @@ export const handlers = Api.toLayer(
     const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
+    const taskActions = yield* TaskActions
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
     const cursorNow = Effect.map(
       sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
@@ -970,6 +972,7 @@ export const handlers = Api.toLayer(
       RunAutomationNow: ({ commandId, automationId, itemId }) =>
         once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
+      AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
       SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),

@@ -100,7 +100,8 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       ORDER BY sequence`
     // What became of its issue drafts, and of changes to issues in its thread, are told together.
     const drafts = [...(yield* draftNews(projectId, last.sequence)), ...(yield* changeNews(projectId, last.sequence))]
-    const pulls = yield* pullRequestNews(projectId, last.sequence)
+    // What the person answered on its cards asking to move a task on is told with the pull requests' news: a line each, nothing to close.
+    const pulls = [...(yield* pullRequestNews(projectId, last.sequence)), ...(yield* askNews(projectId, last.sequence))]
     const started = yield* startedNews(projectId, last.sequence)
     const made = yield* madeNews(projectId, last.sequence, modelOf)
     if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0 && pulls.length === 0) return null
@@ -165,6 +166,36 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
             ? 'Speak of these issues as they are now, not as you drafted them.'
             : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
     return `Since you last spoke, in Althar:\n${[...lines, ...started, ...made, ...drafts, ...pulls, ...(close === null ? [] : [close])].join('\n')}`
+  })
+
+/** What the coordinator asked of a task, in the words the person's answer is told in. */
+const ASKED: Readonly<Record<string, string>> = {
+  stop: 'stop',
+  stop_turn: 'stop the lead’s turn on',
+  hold: 'hold',
+  restart: 'restart',
+  done: 'mark done',
+  keep: 'keep for later',
+  discard: 'discard',
+}
+
+/** What the person answered on the coordinator's cards asking to stop, hold, restart or settle a task, since a place in the ledger. */
+const askNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const events = yield* sql<{ payload: string; slug: string }>`
+      SELECT e.payload, k.slug FROM record_events e JOIN tasks k ON k.id = e.aggregate_id
+      WHERE e.project_id = ${projectId} AND e.aggregate_type = 'task' AND e.type = 'task.ask_answered' AND e.sequence > ${since}
+      ORDER BY e.sequence`
+    return events.map((event) => {
+      const { move, state, said } = JSON.parse(event.payload) as { move: string; state: string; said: string | null }
+      const asked = `${ASKED[move] ?? move} ${event.slug}`
+      return state === 'done'
+        ? `- The person pressed your card to ${asked}: ${said ?? 'done'}`
+        : state === 'moot'
+          ? `- The person pressed your card to ${asked}, but there was nothing to do: ${said ?? ''}`
+          : `- The person said not now to your card to ${asked}: it stays as it was.`
+    })
   })
 
 /** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */

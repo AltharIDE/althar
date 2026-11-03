@@ -2163,6 +2163,31 @@ export const AutomationItem = Schema.Struct({
   content: AutomationCard,
 })
 
+/**
+ * The coordinator asking the person to stop, hold, restart or settle a task,
+ * in its thread, where no message of theirs in that turn asked it to
+ * (ADR-086): one button, which does it as the person's own press, and Not
+ * now. Answered, it says what became of it: done, declined, or nothing to do
+ * any more and why. Althar posts it and keeps it current.
+ */
+export const TaskAskItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('task_ask'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    slug: Schema.String,
+    /** The task's title when it was asked. */
+    title: Schema.String,
+    /** What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; or settle it done, kept for later, or discarded. */
+    move: Schema.Literals(['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']),
+    /** Why the coordinator asks, in a line. */
+    why: Schema.NullOr(Schema.String),
+    state: Schema.Literals(['open', 'done', 'declined', 'moot']),
+    /** What was done, or why there was nothing to do; null while open, and when declined. */
+    said: Schema.NullOr(Schema.String),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -2181,6 +2206,7 @@ export const ThreadItem = Schema.Union([
   IssueChangesItem,
   AutomationItem,
   PicturesItem,
+  TaskAskItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -3417,6 +3443,8 @@ export const Api = RpcGroup.make(
   command('RunAutomationNow', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
+  /** The person answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it, as their own press would. */
+  command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
   /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */

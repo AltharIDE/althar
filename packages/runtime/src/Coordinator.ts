@@ -58,6 +58,7 @@ import { SignIns } from './SignIns'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { Tasks } from './Tasks'
 import { addItem, transcript } from './threads'
+import { personsWords, quoted } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describeModels, type Route, routeTo, usableModels } from './usableModels'
 
@@ -656,11 +657,12 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const asked = yield* read(Attaching, input)
           const task = yield* taskOf(access, asked.task)
+          // The person asking in this turn is their word to start from its head too: the task's own commits are kept on top of it.
           const done = yield* changes
             .attach({
               taskId: task.id,
               pullRequest: String(asked.pull_request),
-              start: asked.start_from_head === true,
+              start: asked.start_from_head === true || (yield* personsWords(access)) !== undefined,
               actorId: instance.coordinatorId,
             })
             .pipe(
@@ -1384,11 +1386,29 @@ export class Coordinator extends Context.Service<
           return `Paused “${now.name}”: nothing of it starts until the person turns it on again. A run under way finishes.`
         })
 
+      /*
+       * Resuming an automation or running it now spends the person's plan: on their word in this turn it happens at once, with a
+       * line saying so (ADR-086); otherwise a card asks them.
+       */
       const askOf = (what: 'resume' | 'run') => (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(NamedAutomation, input)
           const now = yield* toldOf(automations.find(access.projectId, asked.automation))
           if (what === 'resume' && now.state === 'on') return `“${now.name}” is on already.`
+          const words = yield* personsWords(access)
+          if (words !== undefined) {
+            yield* toldOf(
+              what === 'resume' ? automations.turnOn(now.id, instance.coordinatorId) : automations.runNow(now.id, instance.coordinatorId),
+            )
+            yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `${what === 'resume' ? 'Resumed' : 'Started a run of'} “${now.name}”, as you asked: ${quoted(words)}`,
+            })
+            return what === 'resume'
+              ? `Resumed “${now.name}”: it runs on its schedule again. A line in your thread says so; say it in a sentence.`
+              : `Started a run of “${now.name}” now. A line in your thread says so; say it in a sentence.`
+          }
           yield* automations.ask({ automationId: now.id, threadId: access.threadId, what })
           return what === 'resume'
             ? `Asked the person to resume “${now.name}” on a card: it runs again once they do. Say so in a sentence.`
@@ -1540,7 +1560,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'attach_pull_request',
-          "Attaches a task to an open pull request it didn't open, by its link or number: one opened by hand, or upstream from the fork the project pushes to. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
+          "Attaches a task to an open pull request it didn't open, by its link or number: one opened by hand, or upstream from the fork the project pushes to. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, in a turn the person's message started it starts from the head at once, its own commits kept on top; otherwise nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
           {
             type: 'object',
             properties: {
@@ -1794,13 +1814,13 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'resume_automation',
-          'Asks the person to turn a paused automation on again, by its id or its name: a small card they press, since a run spends their plan. Only when they ask for it.',
+          'Turns a paused automation on again, by its id or its name, when the person asks: at once in a turn their message started, else a small card they press, since a run spends their plan.',
           { type: 'object', properties: { automation: { type: 'string' } }, required: ['automation'] },
           askOf('resume'),
         ),
         tool(
           'run_automation_now',
-          'Asks the person to run one of the project’s automations once now, by its id or its name: a small card they press, since a run spends their plan. Only when they ask for it.',
+          'Runs one of the project’s automations once now, by its id or its name, when the person asks: at once in a turn their message started, else a small card they press, since a run spends their plan.',
           { type: 'object', properties: { automation: { type: 'string' } }, required: ['automation'] },
           askOf('run'),
         ),
