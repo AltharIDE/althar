@@ -101,7 +101,8 @@ export const bodyOf = (input: {
   readonly built?: string | null
   /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
-  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
+  /** The issue it came from; `partOf` where it does only part of it, said in the words trackers read as not closing it. */
+  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null
   /** The repository's template, if it has one. */
   readonly template?: string | null
   /** The description the lead wrote for the pull request: in the template, where there is one. */
@@ -129,8 +130,10 @@ export const bodyOf = (input: {
     if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
   }
   if (input.review != null) parts.push(input.review.details)
-  if (input.issue !== null)
-    parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
+  if (input.issue !== null) {
+    const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
+    parts.push(input.issue.partOf === true ? `Part of ${named}` : `Issue: ${named}`)
+  }
   if (input.automation !== undefined && input.automation !== null)
     parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
   else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CHANGES_DONE, CHANGES_IN_REVIEW, CHANGES_LINEAR, COMMENTED_LINEAR } from '../../fixtures/coordinator'
+import { Brand } from '../../foundations/brands/brands'
 import { IssueChangesState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -33,6 +34,48 @@ export const Pending: Story = {
     await expect(c.getByRole('link', { name: /DEV-67/ })).toHaveAttribute('target', '_blank')
     await userEvent.click(c.getByRole('button', { name: 'Apply' }))
     await expect(args.onApply).toHaveBeenCalled()
+  },
+}
+
+/** Every field a tracker has: a milestone, a parent, people added and taken off, a due date and a new description. */
+export const EveryField: Story = {
+  args: {
+    onAlwaysAtOnce: fn(),
+    issues: [
+      {
+        mark: Brand.Linear,
+        source: 'Linear',
+        key: 'DEV-67',
+        href: 'https://linear.app/meridian/issue/DEV-67',
+        title: 'Refunds skip the rate limiter',
+        changes: [
+          { field: 'milestone', to: 'Beta' },
+          { field: 'parent', to: 'DEV-60' },
+          { field: 'assignees', add: ['Ana Ruiz'], remove: ['Sam Rivera'] },
+          { field: 'due', to: '2026-11-30' },
+          { field: 'description', to: 'Steps to reproduce…' },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const change = (text: string) =>
+      c.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === text && node.childElementCount > 0)
+    await expect(change('Milestone Beta')).toBeInTheDocument()
+    await expect(change('Part of DEV-60')).toBeInTheDocument()
+    await expect(change('Assignees +Ana Ruiz −Sam Rivera')).toBeInTheDocument()
+    await expect(change('Due 2026-11-30')).toBeInTheDocument()
+    await expect(c.getByText('New description')).toBeInTheDocument()
+  },
+}
+
+/** Always change at once applies these, and has every later change to an issue made at once. */
+export const AlwaysChangeAtOnce: Story = {
+  args: { onAlwaysAtOnce: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always change at once' }))
+    await expect(args.onAlwaysAtOnce).toHaveBeenCalled()
   },
 }
 
@@ -94,6 +137,15 @@ export const Applied: Story = {
     await expect(c.getByText(/DEV-67/)).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /DEV-142/ })).toBeInTheDocument()
     await expect(c.queryByRole('button')).not.toBeInTheDocument()
+  },
+}
+
+/** Changed at once, as you prefer: its line is the record, and says it can ask first next time. */
+export const AppliedAtOnce: Story = {
+  args: { state: IssueChangesState.Applied, onAlwaysAsk: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always ask first' }))
+    await expect(args.onAlwaysAsk).toHaveBeenCalled()
   },
 }
 
