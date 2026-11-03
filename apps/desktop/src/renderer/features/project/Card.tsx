@@ -21,7 +21,7 @@ import s from './Card.module.css'
  * starts, where it stands, and a way in.
  */
 
-/** How long a plan waits before it starts on its own: the runtime's countdown. */
+/** How long a plan waits before it starts on its own where its card doesn't say: the runtime's countdown unless the person changed it. */
 export const COUNTDOWN = 25
 
 export const text = {
@@ -144,7 +144,7 @@ function PlanCard({
           )
         )
       }}
-      wait={COUNTDOWN}
+      wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
