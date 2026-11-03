@@ -9,12 +9,15 @@ import {
   type EndpointRead,
   majorOf,
   noReadingOf,
+  OPENCODE_GO,
   openCodeCannotList,
   planPairOf,
   readAgentUsage,
   readOpenCodeCredentials,
+  readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsageAccount,
+  usagePairs,
   usageReader,
   type UsageRead,
   type UsageSource,
@@ -34,23 +37,27 @@ import { SignIns } from './SignIns'
  * the window's plan gauge, the pickers and steering (Limits). Where the numbers come from differs by
  * agent and moves to ACP as the adapters speak it:
  *
- * - Claude Code: live, the adapter's `_meta` on its usage updates, one
- *   window per event, heard from sessions (`heard`); and for any account,
- *   idle ones too, Anthropic's usage endpoint with the account's own sign-in
- *   (the usage read, ADR-062), at most every five minutes and not while a
- *   session has just said.
+ * - Claude Code: live, the adapter's `_meta` on its usage updates, each
+ *   window the CLI tracks, as its use moves, heard from sessions (`heard`);
+ *   and where no session has said for a while, as on an idle account,
+ *   Anthropic's usage endpoint with the account's own sign-in (the usage read,
+ *   ADR-062), at most every five minutes, waiting as long as it asks. What the
+ *   endpoint answers never replaces what a session said since.
  * - Codex: its app-server, asked in the account's home; ChatGPT's usage
  *   endpoint where that can't answer.
  * - Kimi Code and Grok Build: their providers' usage endpoints, with the
  *   account's own sign-in.
  * - OpenCode: its own listing of the account's sign-ins tells plan from key
- *   per provider; no plan's provider is read, and each says why.
+ *   per provider. OpenCode Go, a plan with limits, is read from OpenCode's
+ *   own server in the account's home, through its OpenCode Console sign-in;
+ *   without one it is shown connected, unread. No other plan's provider is
+ *   read, and each says why.
  * - The others report no usage anyone can read, and say so calmly
  *   (`usageSources.ts`). Their limits are still recognised when they hit.
  * - An API key has no plan window, and says so.
  *
- * A window whose reset has passed is shown as reset: Claude Code says nothing more until its limits change, which on a quiet
- * account can be days.
+ * A window whose reset has passed is unknown until it is read again: it has started again, but how much of it is used since
+ * no one has said. It is left out of the view, as steering leaves it out of an account's room (`tightestWindow`).
  */
 
 /** The longest a reading is kept before another is taken: a window asking within a minute hears the one before. */
@@ -59,8 +66,12 @@ const KEPT = Duration.minutes(1)
 const LEAST = Duration.seconds(5)
 /** How long a heard window waits before the view is told, so a turn's windows go out as one and the turn never waits on it. */
 const SETTLE = Duration.millis(250)
-/** While a session has said its windows this lately, Claude Code's endpoint isn't asked: what was heard is fresher. */
-const HEARD_LATELY = Duration.minutes(5)
+/**
+ * While a session has said its windows this lately, Claude Code's endpoint isn't asked: what was heard is fresher. The CLI
+ * says them again each time one's rounded percentage moves, so a session at work says them every few minutes; one quiet
+ * this long means the windows have barely moved, or no one is working. As long as the window shows numbers without their age.
+ */
+const HEARD_LATELY = Duration.minutes(15)
 
 /** What the service is built with in a test: how each source is read, and how often accounts are read on their own. */
 export interface PlanUsageOptions {
@@ -69,29 +80,41 @@ export interface PlanUsageOptions {
   /** An agent's version as its CLI says it; as it is, unless a test says. OpenCode is listed only on a version known to list its sign-ins. */
   readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
   /** How a provider's usage endpoint is read with an account's sign-in (ADR-062); the package's reader, unless a test says. */
-  readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
+  readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
+  /** How OpenCode's own server is asked for an account's OpenCode Go limits. */
+  readonly readGoUsage?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
   /** How often accounts are read on their own while the runtime runs: five minutes. Zero turns it off. */
   readonly every?: Duration.Duration
   /** How long a reading is kept before another is taken: a minute. */
   readonly kept?: Duration.Duration
 }
 
+/** A window as it is held: with when it was read, as an account's windows may come from a session and its endpoint at different times. */
+type Dated = UsageWindow & { readonly observedAt: string }
+
 interface Held {
   readonly agentId: string
   readonly source: UsageSource | null
   readonly plan: string | null
-  readonly windows: ReadonlyArray<UsageWindow>
+  readonly windows: ReadonlyArray<Dated>
+  /** When the newest of its windows was read. */
   readonly observedAt: string | null
   readonly fault: { readonly kind: UsageFaultKind; readonly message: string } | null
   /** How the account is paid for where the agent's status can't say (OpenCode's can't, by account). */
   readonly paidBy?: 'plan' | 'key'
   /** Why it has no reading, where the agent reports none anyone can read: said calmly, not a fault. */
   readonly noReading?: string
+  /** For an agent whose providers each have a sign-in (OpenCode): how each listed is paid, unknown where Althar can't tell. */
+  readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
 }
 
 const keyOf = (window: UsageWindow) => (window.label === undefined ? window.kind : `${window.kind}:${window.label}`)
+
+/** Windows read together, each with when they were. */
+const dated = (windows: ReadonlyArray<UsageWindow>, observedAt: string): ReadonlyArray<Dated> =>
+  windows.map((window) => ({ ...window, observedAt }))
 
 /** The message a failed Codex read is shown as, and whether the person should sign in again. */
 const faultOfRead = (message: string): { kind: UsageFaultKind; message: string } =>
@@ -103,13 +126,28 @@ const faultOfRead = (message: string): { kind: UsageFaultKind; message: string }
 const past = (resetsAt: string | null | undefined, now: number) =>
   resetsAt !== null && resetsAt !== undefined && Date.parse(resetsAt) <= now
 
-/** A window as the view shows it: one whose reset has passed has all of its plan left, until it is heard again. */
-const shown = (window: UsageWindow, now: number) => ({
-  kind: window.kind,
-  label: window.label ?? null,
-  usedPercent: past(window.resetsAt, now) ? 0 : window.usedPercent,
-  resetsAt: past(window.resetsAt, now) ? null : (window.resetsAt ?? null),
-})
+/**
+ * When the numbers shown were read: the oldest of their windows, as one only the endpoint says (a model's own week) may not
+ * have been read again since a session said the others.
+ */
+const readAt = (held: Held, now: number) =>
+  held.windows
+    .filter((window) => !past(window.resetsAt, now))
+    .reduce<string | null>(
+      (oldest, window) => (oldest === null || Date.parse(window.observedAt) < Date.parse(oldest) ? window.observedAt : oldest),
+      null,
+    ) ?? held.observedAt
+
+/** The windows as the view shows them: one whose reset has passed is unknown until it is read again, so it isn't shown. */
+const shown = (windows: ReadonlyArray<UsageWindow>, now: number) =>
+  windows
+    .filter((window) => !past(window.resetsAt, now))
+    .map((window) => ({
+      kind: window.kind,
+      label: window.label ?? null,
+      usedPercent: window.usedPercent,
+      resetsAt: window.resetsAt ?? null,
+    }))
 
 type Failure = SqlError.SqlError
 
@@ -118,8 +156,23 @@ export class PlanUsage extends Context.Service<
   {
     /** Every account's plan usage; `refresh` asks the sources again first. */
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
-    /** A window Claude Code's adapter reported on a session of the account. */
-    readonly heard: (accountId: string, agentId: string, window: UsageWindow) => Effect.Effect<void, never>
+    /** The windows Claude Code's adapter reported on a session of the account, from one event. */
+    readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
+    /**
+     * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
+     * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
+     * read this run (none before it is); and why
+     * a plan has no reading, where it reports none.
+     */
+    readonly paidBy: (accountId: string) => Effect.Effect<
+      {
+        readonly paidBy: 'plan' | 'key'
+        readonly plan: string | null
+        readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
+        readonly noReading?: string
+      } | null,
+      Failure
+    >
   }
 >()('@althar/runtime/PlanUsage') {
   static readonly layer: Layer.Layer<PlanUsage, never, SqlClient.SqlClient | Agents | Accounts | SignIns | Live | RuntimeConfig> =
@@ -133,13 +186,20 @@ export class PlanUsage extends Context.Service<
         const live = yield* Live
         const scope = yield* Effect.scope
         const options = (yield* RuntimeConfig).usage ?? {}
+        // The runtime's clock, for the readers outside any effect, which read the windows' resets by it.
+        const nowAsDate = yield* Clock.clockWith((clock) => Effect.succeed(() => new Date(clock.currentTimeMillisUnsafe())))
         const readAgent =
           options.readAgent ??
-          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) => readAgentUsage(agent, { node: adapterNode(), home }))
+          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
+            readAgentUsage(agent, { node: adapterNode(), home, now: nowAsDate }))
         const readCredentials =
           options.readCredentials ??
           ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
             readOpenCodeCredentials(agent, { node: adapterNode(), home }))
+        const readGoUsage =
+          options.readGoUsage ??
+          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
+            readOpenCodeGoUsage(agent, { node: adapterNode(), home, now: nowAsDate }))
         const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
         const readEndpoint = options.readEndpoint ?? usageReader.read
         const versions = new Map<string, string | undefined>()
@@ -158,6 +218,10 @@ export class PlanUsage extends Context.Service<
 
         const held = new Map<string, Held>()
         const asked = new Map<string, number>()
+        /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
+        const sayings = new Map<string, number>()
+        /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
+        const saidIn = new Map<string, Map<string, number>>()
         let hydrated = false
 
         /* What the store kept of the accounts' last readings, once. */
@@ -178,7 +242,11 @@ export class PlanUsage extends Context.Service<
               agentId: row.agentId,
               source: row.source as UsageSource,
               plan: row.plan,
-              windows: JSON.parse(row.windows) as ReadonlyArray<UsageWindow>,
+              // Each with its own time, as kept; one kept before windows had their own, with the reading's.
+              windows: (JSON.parse(row.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>).map((window) => ({
+                ...window,
+                observedAt: window.observedAt ?? row.observedAt,
+              })),
               observedAt: row.observedAt,
               fault: null,
             })
@@ -187,9 +255,62 @@ export class PlanUsage extends Context.Service<
           hydrated = true
         })
 
+        /* Each account's week as last kept in plan_usage_weeks, read from the store once. */
+        const weeks = new Map<
+          string,
+          { readonly usedPercent: number; readonly resetsAt: string | null; readonly observedAt: string; readonly repeat: boolean } | null
+        >()
+        /*
+         * The account's week, kept as it moves (ADR-084): a task's share of it is the rise between two of these, put on the
+         * turns that ran on the account then. The plan's own week, every model's, before a model's own. A week that hasn't
+         * moved keeps where it started standing still and its latest reading, so a task that runs after a quiet stretch
+         * has a reading from just before it.
+         */
+        const keepWeek = (accountId: string, windows: ReadonlyArray<Dated>) =>
+          Effect.gen(function* () {
+            const weekly = windows.filter((window) => window.kind === 'weekly' && window.spend !== true)
+            const week = weekly.find((window) => window.label === undefined && window.model === undefined) ?? weekly[0]
+            if (week === undefined) return
+            if (!weeks.has(accountId)) {
+              const [last, before] = yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
+                SELECT used_percent, resets_at, observed_at FROM plan_usage_weeks WHERE account_id = ${accountId}
+                ORDER BY observed_at DESC LIMIT 2`
+              weeks.set(
+                accountId,
+                last === undefined
+                  ? null
+                  : {
+                      ...last,
+                      repeat: before !== undefined && before.usedPercent === last.usedPercent && before.resetsAt === last.resetsAt,
+                    },
+              )
+            }
+            const last = weeks.get(accountId)
+            const resetsAt = week.resetsAt ?? null
+            const observed = Date.parse(week.observedAt)
+            if (!Number.isFinite(observed)) return
+            const observedAt = new Date(observed).toISOString()
+            if (last != null && observedAt <= last.observedAt) return
+            const same = last != null && last.usedPercent === week.usedPercent && last.resetsAt === resetsAt
+            weeks.set(accountId, { usedPercent: week.usedPercent, resetsAt, observedAt, repeat: same })
+            // Standing still since a reading that already repeats the one before: that one moves up to now.
+            if (same && last.repeat)
+              return yield* sql`
+              UPDATE plan_usage_weeks SET observed_at = ${observedAt} WHERE account_id = ${accountId} AND observed_at = ${last.observedAt}`
+            yield* sql`
+            INSERT INTO plan_usage_weeks ${sql.insert({
+              accountId,
+              usedPercent: week.usedPercent,
+              resetsAt,
+              observedAt,
+            })}
+            ON CONFLICT (account_id, observed_at) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at`
+          })
+
         const keep = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
+            if (next.paidBy !== 'key') yield* keepWeek(accountId, next.windows)
             // A key has no windows: one read while it was on a plan no longer steers work, nor says it is on one (SignIns).
             if (next.paidBy === 'key') return yield* sql`DELETE FROM plan_usage_readings WHERE account_id = ${accountId}`
             if (next.source === null || next.observedAt === null || next.windows.length === 0) return
@@ -215,14 +336,18 @@ export class PlanUsage extends Context.Service<
             const check = yield* signIns.account(account)
             const before = held.get(account.id)
             const env = accounts.env(account)
-            const fault = (kind: UsageFaultKind, message: string): Held => ({
-              agentId: definition.id,
-              source: before?.source ?? null,
-              plan: before?.plan ?? null,
-              windows: before?.windows ?? [],
-              observedAt: before?.observedAt ?? null,
-              fault: { kind, message },
-            })
+            /* A fault, with the reading held when it is kept: one a session said while the source was asked stays. */
+            const fault = (kind: UsageFaultKind, message: string): Held => {
+              const last = held.get(account.id)
+              return {
+                agentId: definition.id,
+                source: last?.source ?? null,
+                plan: last?.plan ?? null,
+                windows: last?.windows ?? [],
+                observedAt: last?.observedAt ?? null,
+                fault: { kind, message },
+              }
+            }
             const key: Held = {
               agentId: definition.id,
               source: null,
@@ -250,7 +375,7 @@ export class PlanUsage extends Context.Service<
                 agentId: definition.id,
                 source: usage.source,
                 plan: usage.plan ?? before?.plan ?? null,
-                windows: usage.windows,
+                windows: dated(usage.windows, usage.observedAt),
                 observedAt: usage.observedAt,
                 fault: null,
               })
@@ -265,22 +390,62 @@ export class PlanUsage extends Context.Service<
                 const variable = definition.home.variable
                 const named = env[variable] ?? process.env[variable]
                 const version = yield* versionOf(definition)
+                const said = sayings.get(account.id) ?? 0
                 const got = yield* Effect.promise(() =>
-                  readEndpoint(sourceId, {
-                    agent: definition.id,
-                    provider,
-                    home: env[variable] ?? definition.home.usual(process.env, homedir()),
-                    named: named !== undefined && named !== '',
-                    ...(version === undefined ? {} : { agentVersion: version }),
-                  }).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
+                  readEndpoint(
+                    sourceId,
+                    {
+                      agent: definition.id,
+                      provider,
+                      home: env[variable] ?? definition.home.usual(process.env, homedir()),
+                      named: named !== undefined && named !== '',
+                      ...(version === undefined ? {} : { agentVersion: version }),
+                    },
+                    nowAsDate,
+                  ).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
                 )
-                if (got.kind === 'usage') return yield* read(got.usage)
-                if (got.kind === 'none') return yield* keep(account.id, none)
-                yield* keep(
-                  account.id,
-                  got.fault === 'expired'
-                    ? fault('expired', `Its sign-in has expired. ${definition.name} renews it the next time it runs on this account.`)
-                    : fault(got.fault, got.message),
+                if (got.kind === 'fault' && got.waiting !== undefined)
+                  yield* Effect.logInfo('A usage endpoint asked Althar to wait').pipe(
+                    Effect.annotateLogs({ agent: definition.id, retryAfter: got.waiting.retryAfter ?? 'none', until: got.waiting.until }),
+                  )
+                // Kept one at a time with what sessions say, and against what is held by then: a session may have said its windows meanwhile.
+                yield* hearing.withPermits(1)(
+                  Effect.gen(function* () {
+                    if (got.kind === 'usage') {
+                      // Window by window, the newer stays: one a session said while the endpoint was asked, which may yet answer with a
+                      // later time, or since the answer's time, as when the reader gives its own from before it was asked to wait. The
+                      // answer's others replace theirs, as a model's own week a session doesn't say; and a window it no longer has goes.
+                      const last = held.get(account.id)
+                      const at = Date.parse(got.usage.observedAt)
+                      const saying = saidIn.get(account.id)
+                      const newer = (last?.windows ?? []).filter(
+                        (window) => Date.parse(window.observedAt) > at || (saying?.get(keyOf(window)) ?? 0) > said,
+                      )
+                      if (newer.length === 0) return yield* read(got.usage)
+                      const kept = new Set(newer.map(keyOf))
+                      const windows = [
+                        ...newer,
+                        ...dated(got.usage.windows, got.usage.observedAt).filter((window) => !kept.has(keyOf(window))),
+                      ]
+                      return yield* keep(account.id, {
+                        agentId: definition.id,
+                        source: last?.source ?? got.usage.source,
+                        plan: got.usage.plan ?? last?.plan ?? null,
+                        windows,
+                        observedAt: last?.observedAt ?? got.usage.observedAt,
+                        fault: null,
+                      })
+                    }
+                    // A session said its windows while the endpoint was asked: they are fresher than why it couldn't answer.
+                    if ((sayings.get(account.id) ?? 0) !== said) return
+                    if (got.kind === 'none') return yield* keep(account.id, none)
+                    yield* keep(
+                      account.id,
+                      got.fault === 'expired'
+                        ? fault('expired', `Its sign-in has expired. ${definition.name} renews it the next time it runs on this account.`)
+                        : fault(got.fault, got.message),
+                    )
+                  }),
                 )
               })
             if (check.status === 'signed_out')
@@ -299,9 +464,18 @@ export class PlanUsage extends Context.Service<
             }
             if (definition.id === 'claude-code') {
               if (check.paidBy === 'key') return yield* keep(account.id, key)
-              // A session said its windows lately: fresher than the endpoint, which limits how often it is asked.
-              const lately = (yield* Clock.currentTimeMillis) - Duration.toMillis(HEARD_LATELY)
-              if (before?.source === 'acp_extension' && before.observedAt !== null && Date.parse(before.observedAt) > lately) return
+              // A session said its windows lately: fresher than the endpoint, which limits how often it is asked. Unless it holds
+              // a window no session has said as lately, or one whose reset has passed, as a model's own week only the endpoint
+              // says: that is read again, no more often than the reader asks, and waiting as long as the endpoint says.
+              const now = yield* Clock.currentTimeMillis
+              const lately = now - Duration.toMillis(HEARD_LATELY)
+              const windows = before?.windows ?? []
+              if (
+                before?.source === 'acp_extension' &&
+                windows.length > 0 &&
+                windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
+              )
+                return
               return yield* fromEndpoint('claude-oauth', 'anthropic', unfound)
             }
             if (definition.id === 'opencode') {
@@ -310,6 +484,48 @@ export class PlanUsage extends Context.Service<
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
               const listed = yield* Effect.promise(() => readCredentials(definition, env))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
+              // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
+              // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
+              const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
+              for (const { provider, pays } of listed.credentials)
+                providers[provider] = providers[provider] === undefined || providers[provider] === pays ? pays : 'unknown'
+              // OpenCode Go is the account's plan where it has Go's key, or its OpenCode Console sign-in reads Go's limits.
+              const go = listed.credentials.some((credential) => credential.provider === 'opencode-go')
+              const asked =
+                go || listed.credentials.some((credential) => credential.provider === 'opencode')
+                  ? yield* Effect.promise(() => readGoUsage(definition, env))
+                  : ({ kind: 'none' } as const)
+              // Go refused its key lately, or OpenCode says it needs signing in, and nothing has put it right since: its models
+              // need it signed in again first, though its key may be gone from the listing.
+              const refused = ((yield* signIns.providers(account, check)) ?? []).some(
+                (row) => row.id === 'opencode-go' && row.refusedAt !== null,
+              )
+              if (go || refused || asked.kind === 'usage') {
+                const again = refused ? { kind: 'sign_in_again' as const, message: `${OPENCODE_GO} needs signing in again.` } : null
+                const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const, providers }
+                if (asked.kind === 'usage')
+                  return yield* keep(account.id, {
+                    ...onGo,
+                    source: asked.usage.source,
+                    windows: dated(asked.usage.windows, asked.usage.observedAt),
+                    observedAt: asked.usage.observedAt,
+                    fault: again,
+                  })
+                if (asked.kind === 'failed') {
+                  const failed = fault('unreachable', asked.message)
+                  // Never read before: why is all there is to show, as for one connected and unread.
+                  const why = failed.windows.length === 0 ? { noReading: asked.message } : {}
+                  return yield* keep(account.id, { ...failed, ...onGo, ...why, fault: again ?? failed.fault })
+                }
+                // Connected, its usage unread: OpenCode reads it only through a Console sign-in.
+                const pair = usagePairs.find((one) => one.agent === 'opencode' && one.provider === 'opencode-go')
+                return yield* keep(account.id, {
+                  ...key,
+                  ...onGo,
+                  fault: again,
+                  noReading: (pair === undefined ? null : noReadingOf(pair)) ?? `${OPENCODE_GO}’s usage can’t be read.`,
+                })
+              }
               // A key needs nothing. A plan says why it has no reading, or that its sign-in isn't one Althar knows.
               let unknown: string | undefined
               let unread: string | undefined
@@ -319,8 +535,11 @@ export class PlanUsage extends Context.Service<
                   unknown ??= `OpenCode has a ${credential.provider} sign-in whose usage Althar cannot read yet.`
                 else if (credential.pays === 'plan') unread ??= noReadingOf(resolved.pair) ?? undefined
               }
-              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan' })
-              return yield* keep(account.id, unread === undefined ? key : { ...key, paidBy: 'plan', noReading: unread })
+              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan', providers })
+              return yield* keep(
+                account.id,
+                unread === undefined ? { ...key, providers } : { ...key, paidBy: 'plan', noReading: unread, providers },
+              )
             }
             if (check.paidBy === 'key') return yield* keep(account.id, key)
             const pair = planPairOf(definition.id)
@@ -338,7 +557,7 @@ export class PlanUsage extends Context.Service<
         const readAll = (force: boolean) =>
           Effect.gen(function* () {
             yield* hydrate
-            const now = Date.now()
+            const now = yield* Clock.currentTimeMillis
             let read = 0
             for (const entry of agents.list) {
               // Each account at once: one agent slow to answer (up to its timeout) holds up none of the others.
@@ -369,6 +588,7 @@ export class PlanUsage extends Context.Service<
               const paidBy = mine?.paidBy ?? check.paidBy
               const key = paidBy === 'key'
               const noReading = mine?.noReading ?? null
+              const windows = shown(key ? [] : (mine?.windows ?? []), now)
               // No window and no fault yet, where there is a reading to have, is a fault too: the agent has not been read yet.
               const fault =
                 mine?.fault ??
@@ -382,11 +602,13 @@ export class PlanUsage extends Context.Service<
                 accountName: account.name,
                 paidBy,
                 source: mine?.source ?? null,
-                observedAt: mine?.observedAt ?? null,
+                observedAt: mine === undefined ? null : readAt(mine, now),
                 plan: mine?.plan ?? null,
-                windows: (key ? [] : (mine?.windows ?? [])).map((window) => shown(window, now)),
+                windows,
                 fault,
                 noReading,
+                // Read with windows, every one of which has reset since: said so, as no window shown isn't the same as none read.
+                resetSince: !key && (mine?.windows.length ?? 0) > 0 && windows.length === 0,
               })
             }
           }
@@ -420,6 +642,18 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          paidBy: (accountId) =>
+            Effect.map(hydrate, () => {
+              const one = held.get(accountId)
+              const paidBy = one?.paidBy ?? (one?.source != null ? 'plan' : null)
+              if (one === undefined || paidBy === null) return null
+              return {
+                paidBy,
+                plan: paidBy === 'plan' ? one.plan : null,
+                ...(one.providers === undefined ? {} : { providers: one.providers }),
+                ...(one.noReading === undefined ? {} : { noReading: one.noReading }),
+              }
+            }),
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh
@@ -431,16 +665,22 @@ export class PlanUsage extends Context.Service<
                   ),
                   view,
                 ),
-          // One window at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
-          heard: (accountId, agentId, window) =>
+          // One event at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
+          heard: (accountId, agentId, said) =>
             hearing
               .withPermits(1)(
                 Effect.gen(function* () {
                   yield* hydrate
+                  const saying = (sayings.get(accountId) ?? 0) + 1
+                  sayings.set(accountId, saying)
+                  const byWindow = saidIn.get(accountId) ?? new Map<string, number>()
+                  for (const window of said) byWindow.set(keyOf(window), saying)
+                  saidIn.set(accountId, byWindow)
                   const before = held.get(accountId)
                   const at = yield* timestamp
-                  // One window per event: it replaces its own, and the others stay as last said.
-                  const windows = [...(before?.windows ?? []).filter((each) => keyOf(each) !== keyOf(window)), window]
+                  // Each window said replaces its own, and the others stay as last said, each with when it was.
+                  const named = new Set(said.map(keyOf))
+                  const windows = [...(before?.windows ?? []).filter((each) => !named.has(keyOf(each))), ...dated(said, at)]
                   yield* keep(accountId, {
                     agentId,
                     source: 'acp_extension',

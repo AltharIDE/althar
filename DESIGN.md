@@ -51,7 +51,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 - **Keep the top bar uncluttered.** One pill or chip rather than several.
 - **Nothing overlaps or overflows:** labels, chips, model lists, queued messages, popovers. Check the longest name and the narrowest window.
 - **Truncate with "…", and show the full text on hover.**
-- **Never leave a button alone on its own row.** Put it beside what it acts on.
+- **Never leave a button alone on its own row.** Put it beside what it acts on. A card's actions are the exception: they are its last row, a strip the card's width with the main one last in violet (NextSteps), so they sit in the same place on every card.
 - **Lay a card out as a tidy list of facts,** not a wrapped run of dot-separated words.
 - **Order a card's facts by urgency:** problems first, then what to do, then what's fine.
 - **Make what blocks a task visible at a glance,** without opening it.

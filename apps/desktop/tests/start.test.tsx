@@ -18,6 +18,7 @@ import { type StartModel, useStart } from '../src/renderer/features/start/useSta
 import { shortFolder } from '../src/renderer/shared/folders'
 import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
+import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
   return <HomeView model={useHome()} start={start} onProject={onProject} onTalk={vi.fn()} onTask={vi.fn()} />
@@ -60,9 +61,6 @@ const codexAccounts = () => screen.findByRole('list', { name: 'Codex accounts' }
 
 const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
 
-/** A whole sign-in, step by step, with the window's own polling: more than the usual five seconds where the machine is busy. */
-const LONG_FLOW = 15_000
-
 describe('accounts in settings', () => {
   it('says where each account signs in and how it stands', () => {
     const now = new Date('2026-10-03T12:00:00')
@@ -84,6 +82,27 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
+  it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {
+    const providers = [
+      { id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z', pays: 'plan' as const },
+      { id: 'anthropic', name: 'Anthropic', refusedAt: null },
+      { id: 'opencode', name: 'OpenCode Zen', refusedAt: null, pays: 'key' as const },
+    ]
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).toMatchObject({
+      providers: [
+        { name: 'OpenCode Go', paid: 'plan', refused: true },
+        { name: 'OpenCode Zen', paid: 'key' },
+      ],
+      state: { kind: 'ready' },
+    })
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).not.toHaveProperty('who')
+    // A fresh Go key puts it right: Go is on its plan again, nothing to sign in to.
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [{ ...providers[0]!, refusedAt: null }] }).providers).toEqual([
+      { name: 'OpenCode Go', paid: 'plan' },
+    ])
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [providers[1]!] })).not.toHaveProperty('providers')
+  })
+
   it('offers no second account for an agent whose sign-in every folder shares', async () => {
     const one: Status = {
       apiVersion: 1,
@@ -96,43 +115,39 @@ describe('accounts in settings', () => {
     expect(screen.queryByRole('button', { name: 'Add an account' })).toBeNull()
   })
 
-  it(
-    'signs a new account in in Terminal, in its line, says when it isn’t yet, and names it once it is',
-    async () => {
-      const codex = codexWith(usual('acc_usual', 'signed_in'), work)
-      const { client } = fakeClient({ status: codex.status })
-      withServices(<Settings />, client)
-      const accounts = await codexAccounts()
-      await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-      expect(within(accounts).getByText('New account')).toBeTruthy()
-      await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
-      await waitFor(() => expect(client.addAccount).toHaveBeenCalledWith({ agentId: 'codex', name: 'Account 3' }))
-      await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
-      expect(await within(accounts).findByText('Finish signing in from the terminal')).toBeTruthy()
-      // While it signs in, the list starts no other.
-      expect(screen.getByRole('button', { name: 'Add an account' }).hasAttribute('disabled')).toBe(true)
+  it('signs a new account in in Terminal, in its line, says when it isn’t yet, and names it once it is', async () => {
+    const codex = codexWith(usual('acc_usual', 'signed_in'), work)
+    const { client } = fakeClient({ status: codex.status })
+    withServices(<Settings />, client)
+    const accounts = await codexAccounts()
+    await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+    expect(within(accounts).getByText('New account')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
+    await waitFor(() => expect(client.addAccount).toHaveBeenCalledWith({ agentId: 'codex', name: 'Account 3' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
+    expect(await within(accounts).findByText('Finish signing in from the terminal')).toBeTruthy()
+    // While it signs in, the list starts no other.
+    expect(screen.getByRole('button', { name: 'Add an account' }).hasAttribute('disabled')).toBe(true)
 
-      // Back from Terminal, not signed in yet.
-      const made = { ...usual('acc_added', 'signed_out'), name: 'Account 3', home: '/Users/me/accounts/acc_added' }
-      codex.next(usual('acc_usual', 'signed_in'), work, made)
-      act(() => void window.dispatchEvent(new Event('focus')))
-      expect(await within(accounts).findByText(/Not signed in yet\./)).toBeTruthy()
-      // It is the sign-in's line, not one of its own.
-      expect(within(accounts).getAllByText(/Account 3|New account/)).toHaveLength(1)
+    // Back from Terminal, not signed in yet.
+    const made = { ...usual('acc_added', 'signed_out'), name: 'Account 3', home: '/Users/me/accounts/acc_added' }
+    codex.next(usual('acc_usual', 'signed_in'), work, made)
+    act(() => void window.dispatchEvent(new Event('focus')))
+    expect(await within(accounts).findByText(/Not signed in yet\./)).toBeTruthy()
+    // It is the sign-in's line, not one of its own.
+    expect(within(accounts).getAllByText(/Account 3|New account/)).toHaveLength(1)
 
-      // Signed in now: named in its line, Return keeps it.
-      codex.next(usual('acc_usual', 'signed_in'), work, { ...made, signIn: 'signed_in', paidBy: 'plan' })
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Check again' }))
-      const name = await within(accounts).findByRole('textbox', { name: 'Name this account' })
-      expect((name as HTMLInputElement).value).toBe('Account 3')
-      expect(within(screen.getByRole('group', { name: 'New account' })).getByText('on a plan')).toBeTruthy()
-      await userEvent.clear(name)
-      await userEvent.type(name, 'weekend{Enter}')
-      await waitFor(() => expect(client.renameAccount).toHaveBeenCalledWith('acc_added', 'weekend'))
-      await waitFor(() => expect(within(accounts).queryByRole('textbox', { name: 'Name this account' })).toBeNull())
-    },
-    LONG_FLOW,
-  )
+    // Signed in now: named in its line, Return keeps it.
+    codex.next(usual('acc_usual', 'signed_in'), work, { ...made, signIn: 'signed_in', paidBy: 'plan' })
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Check again' }))
+    const name = await within(accounts).findByRole('textbox', { name: 'Name this account' })
+    expect((name as HTMLInputElement).value).toBe('Account 3')
+    expect(within(screen.getByRole('group', { name: 'New account' })).getByText('on a plan')).toBeTruthy()
+    await userEvent.clear(name)
+    await userEvent.type(name, 'weekend{Enter}')
+    await waitFor(() => expect(client.renameAccount).toHaveBeenCalledWith('acc_added', 'weekend'))
+    await waitFor(() => expect(within(accounts).queryByRole('textbox', { name: 'Name this account' })).toBeNull())
+  })
 
   it('signs in a new account the agent can’t tell is signed in, rather than taking it as signed in', async () => {
     const codex = codexWith(usual('acc_usual', 'signed_in'))
@@ -143,31 +158,27 @@ describe('accounts in settings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
-    // Back from Terminal, and still it can't tell: not signed in yet.
+    // Back from Terminal, and still it can't tell: it says so, rather than taking it as signed in.
     codex.next(usual('acc_usual', 'signed_in'), { ...usual('acc_added', 'unknown'), name: 'Account 2' })
     act(() => void window.dispatchEvent(new Event('focus')))
-    expect(await within(accounts).findByText(/Not signed in yet\./)).toBeTruthy()
+    expect(await within(accounts).findByText(/Couldn’t tell if it signed in\./)).toBeTruthy()
   })
 
-  it(
-    'keeps an account the person named, even when the screen closes before Althar has read the agents again',
-    async () => {
-      const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
-      const done: AccountSignInState = { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' }
-      const { client } = fakeClient({ status: codex.status, getAccountSignIn: vi.fn(async () => done) })
-      const view = withServices(<Settings />, client)
-      const accounts = await codexAccounts()
-      await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
-      await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
-      // The agents' next read never comes back before the screen closes.
-      vi.mocked(client.status).mockImplementation(() => new Promise(() => undefined))
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
-      view.unmount()
-      expect(client.removeAccount).not.toHaveBeenCalled()
-    },
-    LONG_FLOW,
-  )
+  it('keeps an account the person named, even when the screen closes before Althar has read the agents again', async () => {
+    const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
+    const done: AccountSignInState = { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' }
+    const { client } = fakeClient({ status: codex.status, getAccountSignIn: vi.fn(async () => done) })
+    const view = withServices(<Settings />, client)
+    const accounts = await codexAccounts()
+    await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+    await within(accounts).findByRole('textbox', { name: 'Name this account' })
+    // The agents' next read never comes back before the screen closes.
+    vi.mocked(client.status).mockImplementation(() => new Promise(() => undefined))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
+    view.unmount()
+    expect(client.removeAccount).not.toHaveBeenCalled()
+  })
 
   it('stops a sign-in in the browser that was left while it started', async () => {
     const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
@@ -217,39 +228,35 @@ describe('accounts in settings', () => {
     expect(client.cancelAccountSignIn).toHaveBeenCalledWith('flow_open')
   })
 
-  it(
-    'signs a new account in in the browser, takes a pasted code, and names it as who signed in',
-    async () => {
-      const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
-      const states: AccountSignInState[] = [
-        { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: null },
-        { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: 'Invalid code.' },
-        { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' },
-      ]
-      let at = 0
-      const { client } = fakeClient({ status: codex.status, getAccountSignIn: vi.fn(async () => states[Math.min(at, states.length - 1)]!) })
-      withServices(<Settings />, client)
-      const accounts = await codexAccounts()
-      await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
-      await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
-      expect(await within(accounts).findByText('Approve on chatgpt.com in your browser')).toBeTruthy()
-      // A code the page showed goes to the agent; one it turns down says so.
-      await userEvent.click(await within(accounts).findByRole('button', { name: 'Paste a code' }))
-      await userEvent.type(within(accounts).getByRole('textbox', { name: 'The code chatgpt.com showed' }), 'AB12{Enter}')
-      expect(client.pasteAccountSignInCode).toHaveBeenCalledWith('flow_account', 'AB12')
-      at = 1
-      expect(await within(accounts).findByText('Invalid code.', {}, { timeout: 3000 })).toBeTruthy()
-      at = 2
-      const name = await within(accounts).findByRole('textbox', { name: 'Name this account' }, { timeout: 3000 })
-      expect((name as HTMLInputElement).value).toBe('Account 2')
-      expect(within(accounts).getByText('dana@northwind.io')).toBeTruthy()
-      expect(within(accounts).getByText('ChatGPT Team')).toBeTruthy()
-      await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
-      await waitFor(() => expect(within(accounts).queryByRole('textbox', { name: 'Name this account' })).toBeNull())
-    },
-    LONG_FLOW,
-  )
+  it('signs a new account in in the browser, takes a pasted code, and names it as who signed in', async () => {
+    const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'))
+    const states: AccountSignInState[] = [
+      { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: null },
+      { state: 'browser', link: 'https://auth.openai.com/oauth/authorize?x=1', paste: true, refused: 'Invalid code.' },
+      { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' },
+    ]
+    let at = 0
+    const { client } = fakeClient({ status: codex.status, getAccountSignIn: vi.fn(async () => states[Math.min(at, states.length - 1)]!) })
+    withServices(<Settings />, client)
+    const accounts = await codexAccounts()
+    await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Continue with ChatGPT' }))
+    await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_added', 'browser'))
+    expect(await within(accounts).findByText('Approve on chatgpt.com in your browser')).toBeTruthy()
+    // A code the page showed goes to the agent; one it turns down says so.
+    await userEvent.click(await within(accounts).findByRole('button', { name: 'Paste a code' }))
+    await userEvent.type(within(accounts).getByRole('textbox', { name: 'The code chatgpt.com showed' }), 'AB12{Enter}')
+    expect(client.pasteAccountSignInCode).toHaveBeenCalledWith('flow_account', 'AB12')
+    at = 1
+    expect(await within(accounts).findByText('Invalid code.')).toBeTruthy()
+    at = 2
+    const name = await within(accounts).findByRole('textbox', { name: 'Name this account' })
+    expect((name as HTMLInputElement).value).toBe('Account 2')
+    expect(within(accounts).getByText('dana@northwind.io')).toBeTruthy()
+    expect(within(accounts).getByText('ChatGPT Team')).toBeTruthy()
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Add account' }))
+    await waitFor(() => expect(within(accounts).queryByRole('textbox', { name: 'Name this account' })).toBeNull())
+  })
 
   it('gives a one-time code with its page, signs one in again by its ways, and leaves the agent’s login when left', async () => {
     const codex = withWays(['browser', 'device'], usual('acc_usual', 'signed_in'), {
@@ -289,7 +296,7 @@ describe('accounts in settings', () => {
     // Signed in again: back to its line, nothing to name.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in again' }))
     finished = true
-    await waitFor(() => expect(within(accounts).queryByRole('group', { name: 'Signing x in' })).toBeNull(), { timeout: 3000 })
+    await waitFor(() => expect(within(accounts).queryByRole('group', { name: 'Signing x in' })).toBeNull())
     open.mockRestore()
   })
 
@@ -452,11 +459,15 @@ describe('accounts in settings', () => {
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_work'))
   })
 
-  it('offers to remove an account anyway when its sign-out didn’t work', async () => {
+  it('offers to remove an account anyway when its sign-out didn’t work, saying its sign-in may stay', async () => {
     const codex = codexWith(usual('acc_usual', 'signed_in'), { ...usual('acc_x', 'signed_in'), name: 'x', home: '/x' })
     const { client } = fakeClient({
       removeAccount: vi.fn(async (_accountId: string, anyway?: boolean) => {
-        if (anyway !== true) throw new ApiError({ reason: 'SignOutFailed', message: 'Althar couldn’t sign this account out.' })
+        if (anyway !== true)
+          throw new ApiError({
+            reason: 'SignOutFailed',
+            message: "Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on this computer.",
+          })
       }),
       status: codex.status,
     })
@@ -464,7 +475,7 @@ describe('accounts in settings', () => {
     const accounts = await codexAccounts()
     await userEvent.click(within(accounts).getByRole('button', { name: 'More for x' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Remove/ }))
-    expect((await screen.findByRole('alert')).textContent).toContain('couldn’t sign this account out')
+    expect((await screen.findByRole('alert')).textContent).toContain('its sign-in may stay on this computer')
     await userEvent.click(screen.getByRole('button', { name: 'Remove anyway' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenLastCalledWith('acc_x', true))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove anyway' })).toBeNull())
@@ -491,6 +502,58 @@ describe('the start', () => {
     expect(watching).toHaveLength(1)
   })
 
+  it('keeps the welcome on show over the project made on its way, with its code hosts, then its trackers, until its last step opens it', async () => {
+    const onProject = vi.fn()
+    let projects: ReadonlyArray<ProjectSummary> = []
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects })),
+      readFolder: vi.fn(async () => ({
+        kind: 'repository' as const,
+        name: 'meridian',
+        repositories: [{ path: '/Users/me/Projects/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+        project: null,
+      })),
+      openProject: vi.fn(async () => {
+        projects = [project]
+        return project
+      }),
+    })
+    seenTheTour()
+    withServices(<Start onProject={onProject} />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Make the project/ }))
+    // The projects are read again with it in them, and the welcome stays: where its code is, then a tracker.
+    const hosts = await screen.findByRole('list', { name: 'Code hosts' })
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
+    expect(within(hosts).getByText('GitHub')).toBeTruthy()
+    expect(within(hosts).getByText(/meridian’s code is here/)).toBeTruthy()
+    expect(within(hosts).queryByText('Linear')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Projects' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    const trackers = await screen.findByRole('list', { name: 'Trackers' })
+    expect(within(trackers).getByText('Linear')).toBeTruthy()
+    expect(within(trackers).queryByText('GitHub')).toBeNull()
+    // Its walk in opens in place of the list, with the way back to it.
+    await userEvent.click(within(trackers).getByRole('button', { name: 'Connect' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Back to trackers' }))
+    expect(await screen.findByRole('list', { name: 'Trackers' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open meridian' }))
+    expect(onProject).toHaveBeenCalledWith('p1')
+    // Over, the window shows the home it now has.
+    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+  })
+
+  it('signs an agent in from its row, in its own walk under it', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    seenTheTour()
+    withServices(<Start onProject={vi.fn()} />, client, fakeHost())
+    // OpenCode is signed out, and signs in only in Terminal: its account, named, signs in again.
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_opencode'))
+    expect(await screen.findByRole('group', { name: 'Signing main in' })).toBeTruthy()
+  })
+
   it('offers to download an agent that isn’t on this Mac, says it downloads, and why it didn’t finish', async () => {
     let installing = false
     let finish: () => void = () => {}
@@ -511,6 +574,7 @@ describe('the start', () => {
         throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
       }),
     })
+    seenTheTour()
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
     // Under those on this Mac, a tile of its own: its size on its button, and no long note.
     const away = await screen.findByRole('list', { name: 'Agents not on this Mac' })
@@ -542,9 +606,10 @@ describe('the start', () => {
     }))
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
     const host = fakeHost({ findRepositories })
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
+    await toTheProject()
     const found = await screen.findByRole('list', { name: 'Repositories for the project' })
-    expect(screen.getByText('in ~/Projects, ~/code')).toBeTruthy()
     expect(
       within(found)
         .getByRole('checkbox', { name: /meridian/ })
@@ -564,6 +629,10 @@ describe('the start', () => {
     await userEvent.clear(name)
     await userEvent.type(name, 'Halyard')
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    // Made, the welcome goes on to its code host and a tracker; its last step opens it.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    expect(onProject).not.toHaveBeenCalled()
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(host.grantFound).toHaveBeenCalledWith('r2')
     expect(host.grantFound).toHaveBeenCalledWith('r1')
@@ -576,14 +645,15 @@ describe('the start', () => {
     })
   })
 
-  it('asks about crash reports once, as one quiet line with its switch at the first screen’s foot, on until turned off', async () => {
+  it('asks about crash reports once, as one quiet line with its switch at the foot of the welcome’s agents, on until turned off', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
     const host = fakeHost()
+    seenTheTour()
     const view = withServices(<Start onProject={vi.fn()} />, client, host)
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+      'go to Althar’s team. Never your code or any name.',
     )
     // Not a dialog, and nothing waits on it.
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -593,6 +663,7 @@ describe('the start', () => {
     view.unmount()
 
     // DO_NOT_TRACK keeps it off, and the line says so.
+    seenTheTour()
     withServices(
       <Start onProject={vi.fn()} />,
       fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) }).client,
@@ -619,8 +690,10 @@ describe('the start', () => {
     )
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })), readFolder })
     const host = fakeHost()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
     const list = screen.getByRole('list', { name: 'Repositories for the project' })
     expect(within(list).getByRole('checkbox', { name: /api/ }).getAttribute('aria-checked')).toBe('true')
     expect(within(list).getByRole('checkbox', { name: /web/ }).getAttribute('aria-checked')).toBe('true')
@@ -635,14 +708,13 @@ describe('the start', () => {
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
     expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
-    expect(
-      await screen.findByText('docs is a folder inside mono: on its own it makes a project, but with others, add mono itself.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('docs is inside mono. Add mono instead.')).toBeTruthy()
     expect(client.openProject).not.toHaveBeenCalled()
     // Alone, it opens as the folder it is.
     await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
     await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(client.openProject).toHaveBeenCalledWith('grant_dropped', { name: 'docs' })
   })
@@ -667,8 +739,10 @@ describe('the start', () => {
         repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
       })),
     })
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByRole('heading', { name: 'Where should they work?' })
+    await toTheProject()
+    await screen.findByRole('heading', { name: 'Your first project' })
 
     // Typed into an account's form, such as its key, ⌘⏎ and ⌘N are the form's.
     const form = document.createElement('form')
@@ -677,7 +751,7 @@ describe('the start', () => {
     ;(await screen.findByRole('list', { name: 'Repositories for the project' })).append(form)
     fireEvent.keyDown(key, { key: 'Enter', metaKey: true })
     fireEvent.keyDown(key, { key: 'n', metaKey: true })
-    expect(screen.queryByText('Tick a repository for the project first.')).toBeNull()
+    expect(screen.queryByText('Tick a repository, or add a folder.')).toBeNull()
     expect(host.pickFolder).not.toHaveBeenCalled()
     form.remove()
 
@@ -687,6 +761,10 @@ describe('the start', () => {
     await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
     act(() => made(project))
+    // On past it, ⌘⏎ makes nothing more.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(opened).toHaveBeenCalledTimes(1)
   })
@@ -703,32 +781,13 @@ describe('the start', () => {
         repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
       })),
     })
+    seenTheTour()
     withServices(<Start onProject={vi.fn()} />, client, host)
+    await toTheProject()
     await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
     expect(await screen.findByText('meridian isn’t a git repository any more.')).toBeTruthy()
     expect(client.openProject).not.toHaveBeenCalled()
-  })
-
-  it('keeps focus in the project as its repositories are left out, then on the last one’s tick', async () => {
-    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
-    const host = fakeHost({
-      findRepositories: vi.fn(async () => ({
-        lookedIn: ['~/Projects'],
-        repositories: [
-          { id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 },
-          { id: 'r2', name: 'halyard', where: '~/Projects/halyard', branch: 'main', worked: 0 },
-        ],
-      })),
-    })
-    withServices(<Start onProject={vi.fn()} />, client, host)
-    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /halyard/ }))
-    await userEvent.click(screen.getByRole('button', { name: 'Leave meridian out' }))
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Leave halyard out' })))
-    await userEvent.keyboard('{Enter}')
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: /halyard/ })))
-    expect(screen.getByRole('checkbox', { name: /halyard/ }).getAttribute('aria-checked')).toBe('false')
   })
 
   it('says what went wrong making the first project, and when nothing was found or the runtime can’t answer', async () => {
@@ -751,13 +810,15 @@ describe('the start', () => {
       grantDropped: vi.fn(async () => null),
     })
     const onProject = vi.fn()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    await screen.findByRole('heading', { name: 'Where should they work?' })
+    await toTheProject()
+    await screen.findByRole('heading', { name: 'Your first project' })
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
-    expect(await screen.findByText('Tick a repository for the project first.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    expect(await screen.findByText('Tick a repository, or add a folder.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(await screen.findByText('There’s no git repository in empty.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
     const list = screen.getByRole('list', { name: 'Repositories for the project' })
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
@@ -770,17 +831,23 @@ describe('the start', () => {
     expect(onProject).not.toHaveBeenCalled()
   })
 
-  it('offers no repositories when none were found or the look failed, and says when the runtime cannot answer', async () => {
+  it('says at once, with no tour, when the runtime cannot answer, and offers no repositories when none were found or the look failed', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
       status: vi.fn(async () => Promise.reject(new Error('The runtime stopped'))),
     })
     const host = fakeHost({ pickFolder: vi.fn(async () => null), findRepositories: vi.fn(async () => Promise.reject(new Error('EACCES'))) })
+    // The tour not seen: with no projects read, this may be someone's install of long ago, so it isn't greeted as new.
     withServices(<Start onProject={vi.fn()} />, client, host)
-    await screen.findAllByText("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
-    expect(await screen.findByRole('heading', { name: 'Where is your code?' })).toBeTruthy()
-    expect(screen.getByText('None found in the usual places.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    // Said on the agents' step, where no agent could be asked; the project can still be made.
+    expect((await screen.findByRole('alert')).textContent).toBe("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
+    expect(screen.getByText('None found.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
+    expect(await screen.findByText('None found in the usual places.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(client.readFolder).not.toHaveBeenCalled()
   })
 

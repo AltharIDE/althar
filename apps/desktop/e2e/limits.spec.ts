@@ -77,7 +77,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
   const { electronApp, page } = await startWhileOut('claude-code:3600')
   try {
     // Codex took the step over and finished it.
-    await expect(shown(page, 'Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Ready', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved-card.png', animations: 'disabled' })
     await openTask(page)
     await expect(
@@ -95,7 +95,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
   try {
     // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
     const held = /Codex is out of usage until /
-    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
@@ -106,21 +106,13 @@ test('waits for the reset where no other agent is free, and says so on its card,
     ).toBeVisible()
     // It moves work on, but nothing else was free: it says so, and that the person can pick another model.
     await expect(
-      shown(
-        page,
-        /^Codex ran out of usage while working on the task\. No other model was free, so the work waits until .+, when Codex is back\. Pick one on the task to carry on now\.$/,
-      ),
+      shown(page, /^Codex ran out of usage while working on the task\. No other model is free: the work waits until .+\.$/),
     ).toBeVisible()
     // Its header says so too, rather than that it is idle.
-    await expect(shown(page, held)).toBeVisible()
+    await expect(shown(page, /^The work waits: Codex is out of usage until /)).toBeVisible()
     await expect(shown(page, 'Idle', { exact: true })).toHaveCount(0)
     // And the task offers what could carry it on, though nothing is free now.
-    await expect(
-      shown(
-        page,
-        /^Codex ran out of usage while working on the task\. No other model was free, so the work waits until .+, when it's back\./,
-      ),
-    ).toBeVisible()
+    await expect(shown(page, /^Codex is out of usage until .+\.$/)).toBeVisible()
     await expect(shown(page, 'No other model is free now.')).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits.png', animations: 'disabled' })
   } finally {
@@ -131,17 +123,12 @@ test('waits for the reset where no other agent is free, and says so on its card,
 test('asks the person when the reset isn’t known and no other agent is free', async () => {
   const { electronApp, page } = await startWhileOut('claude-code,codex')
   try {
-    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     await openTask(page)
     await expect(
       shown(page, /^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
     ).toBeVisible()
-    await expect(
-      shown(
-        page,
-        "Codex ran out of usage while working on the task and didn't say when it's back. Pick another model to carry on, or try Codex again.",
-      ),
-    ).toBeVisible()
+    await expect(shown(page, 'Codex is out of usage.')).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
     await expect(shown(page, 'Out of usage', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Tell the lead' })).toHaveCount(0)
@@ -158,22 +145,19 @@ test('asks the person when the reset isn’t known and no other agent is free', 
 test('asks the person where the project says to, on the home too, and moves the step to the model they pick', async () => {
   const { electronApp, page } = await startWhileOut('claude-code:3600', { asks: true })
   try {
-    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     // The home lists it, for a person who is elsewhere.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const call = page.getByRole('article', { name: 'Add a retry to the checkout call' })
     await expect(call.getByText('Out of usage', { exact: true })).toBeVisible()
-    await expect(call.getByText(/^Claude Code ran out of usage while working on the task\. It's back at .+\./)).toBeVisible()
+    await expect(call.getByText(/^Claude Code is out of usage until .+\./)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-ask-home.png', animations: 'disabled' })
     await call.getByRole('button', { name: 'Open' }).click()
 
     // In the task: the models free now, and waiting for the reset.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()
-    await shown(
-      page,
-      /^Claude Code ran out of usage while working on the task\. It's back at .+\. Pick another model to carry on now, or wait until then\.$/,
-    )
+    await shown(page, /^Claude Code is out of usage until .+\.$/)
       .locator('xpath=ancestor::div[1]')
       .screenshot({ path: 'test-results/limit-ask-call.png', scale: 'css' })
     await page.getByRole('button', { name: 'Choose another model' }).click()
@@ -181,8 +165,8 @@ test('asks the person where the project says to, on the home too, and moves the 
     await page.screenshot({ path: 'test-results/limit-ask.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: /^Continue with/ }).click()
-    await expect(shown(page, 'Switched from Claude Code to Codex.')).toBeVisible({ timeout: 15_000 })
-    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Switched from Claude Code to Codex.')).toBeVisible()
+    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
   } finally {
     await electronApp.close()
   }
@@ -193,28 +177,20 @@ test('lets the person hand a step held for the reset to another model, from the 
   try {
     // The project waits for resets: the step is held, and its card says what ran out, on which step, and until when.
     const held = /Claude Code is out of usage until /
-    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page
       .getByRole('article', { name: /Add a retry to the checkout call/ })
       .first()
       .screenshot({ path: 'test-results/limit-held-card.png', scale: 'css' })
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(shown(page, held)).toBeVisible()
+    await expect(shown(page, /^The work waits: Claude Code is out of usage until /)).toBeVisible()
     await page
       .locator('header[aria-label="Add a retry to the checkout call"]')
       .screenshot({ path: 'test-results/limit-held-header.png', scale: 'css' })
     // The thread says it, and offers the models that could carry it on now, though nothing waits on the person.
-    await expect(
-      shown(
-        page,
-        /^Claude Code ran out of usage while working on the task\. The work waits until .+, when Claude Code is back\. To carry on now, pick another model on the task\.$/,
-      ),
-    ).toBeVisible()
-    const offer = shown(
-      page,
-      /^Claude Code ran out of usage while working on the task\. This project waits for usage to reset, so the work waits until /,
-    )
+    await expect(shown(page, /^Claude Code ran out of usage while working on the task\. The work waits until .+\.$/)).toBeVisible()
+    const offer = shown(page, /^Claude Code is out of usage until .+\.$/)
     await expect(offer).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()
     await offer.locator('xpath=ancestor::div[1]').screenshot({ path: 'test-results/limit-held-offer.png', scale: 'css' })
@@ -229,7 +205,7 @@ test('lets the person hand a step held for the reset to another model, from the 
     await page.getByRole('button', { name: 'Pick another model' }).click()
     await page.getByRole('button', { name: /^Continue with/ }).click()
     // Handed to Codex, it carries on there now, and the reset brings nothing back.
-    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
     await expect(shown(page, held)).toHaveCount(0)
   } finally {
     await electronApp.close()

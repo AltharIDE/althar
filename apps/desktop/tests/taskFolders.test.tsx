@@ -69,7 +69,7 @@ describe('finished tasks’ folders under Work on this computer', () => {
     await userEvent.click(within(page).getByRole('combobox', { name: 'Remove finished tasks’ folders' }))
     await userEvent.click(within(document.body).getByRole('option', { name: 'Only when I clean up' }))
     expect(client.setFolderWait).toHaveBeenLastCalledWith('never')
-    expect(await within(page).findByText('Nothing goes by itself.')).toBeTruthy()
+    expect(await within(page).findByText('Their branches stay.')).toBeTruthy()
     // The legend opens the folders, held back apart with why.
     await userEvent.click(legend)
     const held = await screen.findByRole('region', { name: 'Held back' })
@@ -136,7 +136,7 @@ describe('finished tasks’ folders under Work on this computer', () => {
     expect(await within(page).findByRole('button', { name: /^Can go now Measuring…\s*Held back 2\.3 GB/ })).toBeTruthy()
     expect(within(page).queryByText(/MB/)).toBeNull()
     getTaskFolders.mockResolvedValue({ ...partly, measuring: false, folders: [partly.folders[0]!, held!] })
-    expect(await within(page).findByRole('button', { name: /^Can go now under 1 MB\s*Held back 2\.3 GB/ }, { timeout: 3000 })).toBeTruthy()
+    expect(await within(page).findByRole('button', { name: /^Can go now under 1 MB\s*Held back 2\.3 GB/ })).toBeTruthy()
   })
 
   it('says so where more would be lost than it said, and reads the folders again', async () => {

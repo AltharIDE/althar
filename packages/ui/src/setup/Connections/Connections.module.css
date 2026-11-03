@@ -44,19 +44,10 @@
 .head > .actions {
   grid-area: actions;
 }
-.account {
-  min-height: 28px;
-}
 .mark {
   display: flex;
   justify-content: center;
   color: var(--t-1);
-}
-.body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
 .name {
   font-size: 13px;
@@ -71,36 +62,74 @@
   font-size: 12px;
   color: var(--t-2);
 }
-.calls {
-  color: var(--signal);
-}
-.instance {
-  color: var(--t-3);
-}
 .actions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-/* Narrow, as in a side panel: the name and what connects it share a line, and how it stands runs under both. */
+
+/* Its connections, in one soft group under its name: the group's words start where the name does. */
+.rows {
+  margin: 8px 0 2px 22px;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--well);
+}
+/* A connection: where it reaches over who it signs in as, and its own Disconnect beside them. */
+.connection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 46px;
+  padding: 4px 12px;
+}
+.connection + .connection {
+  border-top: 1px solid var(--line);
+}
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.first,
+.then {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.first {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.then {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* Narrow, as in a side panel: how a service stands runs under its name and what connects it. */
 @container (max-width: 440px) {
   .head {
     grid-template-areas:
       'mark name actions'
       '. status status';
   }
-  .head > .status,
-  .account .line {
+  .head > .status {
     white-space: normal;
   }
-  /* an account's actions go under its line, as an agent's do */
-  .account {
-    grid-template-columns: 20px minmax(0, 1fr);
-    row-gap: 0;
+}
+/* Narrower: a connection to sign in again puts its two actions under its words; Disconnect alone stays beside them. */
+@container (max-width: 280px) {
+  .needs {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 6px;
   }
-  /* pulled out by an action's padding, so its word starts under the line's */
-  .account > .actions {
-    grid-column: 2;
-    margin-inline-start: -8px;
+  .needs > .actions {
+    margin: 2px 0 0 -8px;
   }
 }

@@ -1,54 +1,49 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 
-import { Board, BoardColumn, BoardList } from '../../board/Board/Board'
-import { CallCard } from '../../board/CallCard/CallCard'
-import { NextRow } from '../../board/NextRow/NextRow'
-import { WorkCard } from '../../board/WorkCard/WorkCard'
-import { TitleBar } from '../../chrome/TitleBar/TitleBar'
-import { WorkStatus } from '../../chrome/WorkStatus/WorkStatus'
+import { PullChip } from '../../board/BoardCard/Chips'
 import { TaskCard } from '../../coordinator/TaskCard/TaskCard'
-import { CallPeek } from '../../dock/CallPeek/CallPeek'
-import { ListPeek } from '../../dock/ListPeek/ListPeek'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
-import { BoardLane, ChangeState, CheckState, RuntimeState, TaskStatus } from '../../foundations/vocabulary'
-import { ChangeSet } from '../../outputs/ChangeSet/ChangeSet'
+import { BrandMark } from '../../foundations/Marks/Marks'
+import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
+import { FindingState, StepState, TaskStatus, ToolState, Verdict } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import { Button } from '../../primitives/Button/Button'
-import { Panel } from '../../primitives/Panel/Panel'
-import { Runtimes, type RuntimeEntry } from '../../setup/Runtimes/Runtimes'
-import { SourceMap } from '../../setup/SourceMap/SourceMap'
+import { ReviewSealGlyph } from '../../setup/ReviewSeal/ReviewSeal'
+import { Review, type ReviewFinding } from '../../thread/Review/Review'
+import { StepGraph } from '../../thread/StepGraph/StepGraph'
 import { You } from '../../thread/You/You'
 import {
-  AGENTS,
-  CALL,
+  ASKED,
   DOING,
-  GEMINI,
+  FINDINGS,
+  FIX,
   GPT,
-  LEARNED,
-  NEXT_UP,
-  NOTES,
+  HAS,
+  LANES,
+  LOOP,
   OPUS,
-  PRS,
-  ROLES,
-  RUNNING_421,
-  SONNET,
-  SOURCES,
+  PROJECT,
+  REPLY,
+  REPOSITORIES,
+  REVIEWING,
+  SEAL,
+  SEALED,
+  SET_ASIDE,
   STEPS,
   TASK,
-  checks,
+  TASKS,
 } from './demo'
-import { Note, find, rectIn, useScene } from './Station'
-
-const GITHUB = { name: 'GitHub', brand: Brand.GitHub }
+import { useScene } from './Station'
 import s from './scenes.module.css'
 
 /*
- * The five scenes. Each is made of the real components, holding the demo
+ * The tour's scenes. Each is made of the real components, holding the demo
  * project's state, with a script that changes that state the way Althar
- * would, and a pointer where a person would act. `end` is where the script
- * finishes, so leaving a scene early, or arriving with no motion, shows the
- * same final picture.
+ * would. Each is drawn at its real size and fits the card's room as it is,
+ * made smaller only where the window is small; nothing is pinned outside
+ * one, so nothing needs room round it. `end` is where the script finishes,
+ * so leaving a scene early, or arriving with no motion, shows the same final
+ * picture.
  */
 
 export interface SceneProps {
@@ -56,472 +51,246 @@ export interface SceneProps {
   instant: boolean
 }
 
-const noop = () => {}
+const GITHUB = { name: 'GitHub', brand: Brand.GitHub }
 
-/* Things that change place glide there: measured before and after, relative to the scene. Arriving instant, nothing moves. */
-function useGlide(root: RefObject<HTMLElement | null>, instant: boolean) {
-  const last = useRef(new Map<string, { x: number; y: number }>())
-  useLayoutEffect(() => {
-    const el = root.current
-    if (!el) return
-    const box = el.getBoundingClientRect()
-    const k = box.width ? el.offsetWidth / box.width : 1
-    const next = new Map<string, { x: number; y: number }>()
-    const first = last.current.size === 0
-    const can = !instant && typeof el.animate === 'function'
-    el.querySelectorAll<HTMLElement>('[data-glide]').forEach((n) => {
-      const r = n.getBoundingClientRect()
-      const at = { x: (r.left - box.left) * k, y: (r.top - box.top) * k }
-      const id = n.dataset.glide ?? ''
-      next.set(id, at)
-      const was = last.current.get(id)
-      if (!can) return
-      if (was && (Math.abs(was.x - at.x) > 1 || Math.abs(was.y - at.y) > 1))
-        n.animate([{ transform: `translate(${was.x - at.x}px, ${was.y - at.y}px)` }, { transform: 'none' }], {
-          duration: 760,
-          easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
-        })
-      /* something new arrives from the left, the way work moves across the board, and unfolds */
-      else if (!was && !first)
-        n.animate(
-          [
-            { opacity: 0, transform: 'translateX(-24px)', clipPath: 'inset(0 0 100% 0 round 12px)' },
-            { opacity: 1, transform: 'none', clipPath: 'inset(0 0 0 0 round 12px)' },
-          ],
-          { duration: 640, easing: 'cubic-bezier(0.22, 0.61, 0.24, 1)' },
-        )
-    })
-    last.current = next
-  })
-}
-
-/*
- * Each scene holds the room it ends with from the start (the min-heights in
- * its styles), so its plot on the table and the camera's framing are the size
- * of the finished scene.
- */
-
-/* ---- 01 · a project --------------------------------------------------------- */
+/* ---- work happens in projects: repositories into it, tasks out of it -------- */
 
 export function ProjectScene({ live, instant }: SceneProps) {
-  const [task, setTask] = useState<'off' | 'on' | 'done' | 'gone'>('off')
-  const [at, setAt] = useState(0)
-  const [learned, setLearned] = useState(false)
-  const [notes, setNotes] = useState(0)
+  const [shown, setShown] = useState(0)
   const root = useRef<HTMLDivElement>(null)
-  useGlide(root, instant)
-  const pointer = useScene(
+  useScene(
     live,
     instant,
     async (stage) => {
-      await stage.wait(1500)
-      setNotes(1)
-      await stage.wait(700)
-      setTask('on')
-      await stage.wait(700)
-      setNotes(2)
-      for (const i of [1, 2, 3]) {
-        await stage.wait(1100)
-        setAt(i)
+      for (const i of [1, 2, 3] as const) {
+        await stage.wait(i === 1 ? 500 : 1100)
+        setShown(i)
       }
-      await stage.wait(500)
-      setLearned(true)
-      await stage.wait(500)
-      setNotes(3)
-      await stage.wait(900)
-      setTask('done')
     },
-    () => {
-      setTask('done')
-      setAt(3)
-      setLearned(true)
-      setNotes(3)
-    },
+    () => setShown(3),
   )
+  const piece = (n: number) => cx(s.piece, shown >= n && s.pieceOn)
   return (
     <div ref={root} className={s.project}>
-      <Panel kicker="Project" title="Meridian" className={s.projectPanel}>
-        <div className={s.block}>
-          <span className={s.eyebrow}>Repositories</span>
-          <SourceMap sources={SOURCES} roles={ROLES} onRoleChange={noop} onOriginChange={noop} onFindingChange={noop} onRemove={noop} />
-        </div>
-        <div className={s.block}>
-          <ListPeek sections={[{ label: 'Notes', entries: learned ? [LEARNED, ...NOTES] : NOTES }]} />
-        </div>
-      </Panel>
-      <div className={s.visitor}>
-        {task !== 'off' && task !== 'gone' && (
-          <div data-glide="418" className={s.enterRight}>
-            <WorkCard
-              {...TASK}
-              status={task === 'done' ? TaskStatus.Done : TaskStatus.Running}
-              steps={STEPS}
-              at={at}
-              elapsed="12m"
-              lead={OPUS}
-              onStep={[GPT, GEMINI]}
-              note={task === 'done' ? 'Merged · left a note for the project' : DOING[at]}
-            />
-          </div>
-        )}
+      <ul className={s.column}>
+        {REPOSITORIES.map((r) => (
+          <li key={r.name} className={cx(s.small, piece(1))} data-into="">
+            <span className={s.smallHead}>
+              <BrandMark brand={Brand.GitHub} size={14} />
+              <span className={s.smallName}>{r.name}</span>
+              <span className={s.role}>{r.role}</span>
+            </span>
+            <code className={s.mono}>{r.where}</code>
+          </li>
+        ))}
+      </ul>
+      <div className={cx(s.hub, piece(2))} data-hub="">
+        <span className={s.hubName}>
+          <ProjectMark seed={PROJECT.seed} ink={PROJECT.ink} size={28} />
+          {PROJECT.name}
+        </span>
+        <ul className={s.has}>
+          {HAS.map((h) => (
+            <li key={h.name}>
+              <Icon name={h.icon} size={13} />
+              {h.name}
+            </li>
+          ))}
+        </ul>
       </div>
-      {notes > 0 && <Note target="meridian-api" side="left" reach={44} shift={-12} label="The code it may change" />}
-      {notes > 1 && <Note target="Repair token refresh" side="bottom" reach={44} shift={-40} label="A task comes, works, and goes" />}
-      {notes > 2 && <Note target={LEARNED.title} side="left" from="far" reach={44} shift={12} label="What it learned stays" />}
-      {pointer}
+      <ul className={s.column}>
+        {TASKS.map((x) => (
+          <li key={x.task} className={cx(s.small, piece(3))} data-out="">
+            <span className={s.smallHead}>
+              <span className={s.taskNo}>{x.task}</span>
+              <span className={s.smallName}>{x.title}</span>
+            </span>
+            <span className={s.branch}>
+              <Icon name="branch" size={12} />
+              <code className={s.mono}>{x.branch}</code>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Links rootRef={root} into={shown >= 2} out={shown >= 3} instant={instant} />
     </div>
   )
 }
 
-/* ---- 02 · a task and its lead ------------------------------------------------- */
+/** Where an element sits in the scene by layout alone, so the scale the card gives the scene doesn't move it. */
+const placeIn = (root: HTMLElement, el: HTMLElement) => {
+  let x = 0
+  let y = 0
+  for (let n: HTMLElement | null = el; n !== null && n !== root; n = n.offsetParent instanceof HTMLElement ? n.offsetParent : null) {
+    x += n.offsetLeft
+    y += n.offsetTop
+  }
+  return { x, y, w: el.offsetWidth, h: el.offsetHeight }
+}
 
-const REPLY =
-  'One task. Opus 5 leads it and writes the change; GPT-5.2 and Gemini 3 Pro review it. A security review joins because it touches auth.'
+/** The lines: each repository into the project, from edge to edge, and the project out to each task. */
+function Links({
+  rootRef,
+  into,
+  out,
+  instant,
+}: {
+  rootRef: RefObject<HTMLDivElement | null>
+  into: boolean
+  out: boolean
+  instant: boolean
+}) {
+  const [paths, setPaths] = useState<{ into: string[]; out: string[] }>({ into: [], out: [] })
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    const hub = el?.querySelector<HTMLElement>('[data-hub]')
+    if (!el || !hub) return
+    const h = placeIn(el, hub)
+    const curve = (x1: number, y1: number, x2: number, y2: number) => {
+      const mid = (x1 + x2) / 2
+      return `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`
+    }
+    /* where on the project's side each line meets it: spread round its middle */
+    const at = (i: number, n: number) => h.y + h.h / 2 + (i - (n - 1) / 2) * 14
+    const from = Array.from(el.querySelectorAll<HTMLElement>('[data-into]'), (n) => placeIn(el, n))
+    const to = Array.from(el.querySelectorAll<HTMLElement>('[data-out]'), (n) => placeIn(el, n))
+    setPaths({
+      into: from.map((r, i) => curve(r.x + r.w, r.y + r.h / 2, h.x, at(i, from.length))),
+      out: to.map((r, i) => curve(h.x + h.w, at(i, to.length), r.x, r.y + r.h / 2)),
+    })
+  }, [rootRef, into, out])
+  return (
+    <svg className={cx(s.links, instant && s.still)} aria-hidden="true">
+      {into && paths.into.map((d, i) => <path key={d} d={d} pathLength={1} style={{ animationDelay: `${i * 90}ms` }} />)}
+      {out && paths.out.map((d, i) => <path key={d} d={d} pathLength={1} style={{ animationDelay: `${i * 90}ms` }} />)}
+    </svg>
+  )
+}
 
-export function TaskScene({ live, instant }: SceneProps) {
+/* ---- meet the coordinator: what you asked, its plan, the task it starts ----- */
+
+export function CoordinatorScene({ live, instant }: SceneProps) {
   const [shown, setShown] = useState(0)
   const [at, setAt] = useState(0)
-  const [notes, setNotes] = useState(0)
-  const pointer = useScene(
+  useScene(
     live,
     instant,
     async (stage) => {
-      await stage.wait(1400)
+      await stage.wait(900)
       setShown(1)
       await stage.wait(1500)
       setShown(2)
-      await stage.wait(900)
-      setNotes(1)
-      await stage.wait(700)
-      setNotes(2)
       for (const i of [1, 2, 3]) {
-        await stage.wait(1000)
+        await stage.wait(1100)
         setAt(i)
-        if (i === 2) setNotes(3)
       }
     },
     () => {
       setShown(2)
-      setAt(3)
-      setNotes(3)
+      setAt(1)
     },
   )
   return (
-    <div className={s.task}>
+    <div className={s.coordinator}>
       <div className={s.threadHead}>
         <Icon name="agents" size={13} />
         Coordinator
       </div>
       <div className={s.thread}>
-        <You at="now">Token refresh breaks when someone’s role changes. Fix it, and keep the old cache.</You>
-        {shown > 0 && (
-          <p className={s.reply}>
-            {REPLY.split(' ').map((word, i) => (
-              <span key={i} className={s.word} style={{ animationDelay: `${i * 32}ms` }}>
+        <You at="now">{ASKED.said}</You>
+        <p className={s.reply}>
+          {shown > 0 &&
+            REPLY.split(' ').map((word, i) => (
+              <span key={i} className={cx(!instant && s.word)} style={{ animationDelay: `${i * 28}ms` }}>
                 {word}{' '}
               </span>
             ))}
-          </p>
-        )}
-        {shown > 1 && (
-          <div className={s.enter}>
-            <TaskCard {...TASK} status={TaskStatus.Running} steps={STEPS} at={at} now={DOING[at]} started="just now" lead={OPUS} fresh />
-          </div>
-        )}
-      </div>
-      {notes > 0 && <Note target="One task." side="left" reach={44} label="The coordinator plans; it writes no code" />}
-      {notes > 1 && <Note target="Opus 5" side="bottom" from="far" reach={40} shift={-40} label="The lead: the agent in charge" />}
-      {notes > 2 && <Note target="Verify" side="bottom" from="far" reach={40} shift={-20} label="Steps report back to the lead" />}
-      {pointer}
-    </div>
-  )
-}
-
-/* ---- 03 · the calls are yours ------------------------------------------------- */
-
-export function CallsScene({ live, instant }: SceneProps) {
-  const [leaving, setLeaving] = useState(false)
-  const [started, setStarted] = useState(false)
-  const [call, setCall] = useState<'none' | 'waiting' | 'open' | 'closing' | 'answered'>('none')
-  const [notes, setNotes] = useState(0)
-  const root = useRef<HTMLDivElement>(null)
-  useGlide(root, instant)
-  const pointer = useScene(
-    live,
-    instant,
-    async (stage) => {
-      await stage.wait(1500)
-      setLeaving(true)
-      await stage.wait(360)
-      setStarted(true)
-      await stage.wait(900)
-      setNotes(1)
-      await stage.wait(900)
-      setCall('waiting')
-      await stage.wait(700)
-      setNotes(2)
-      await stage.wait(1100)
-      await stage.point(CALL.title)
-      await stage.press()
-      await stage.wait(700)
-      await stage.point('Queue and retry with backoff', 'aside')
-      await stage.press()
-      await stage.point('Record decision', 'aside')
-      await stage.press()
-      stage.rest()
-      await stage.wait(360)
-      setCall('answered')
-      await stage.wait(500)
-      setNotes(3)
-    },
-    () => {
-      setStarted(true)
-      setCall('answered')
-      setNotes(3)
-    },
-  )
-  /* 421 waits on you until you record; the call's card and the dock stay a moment longer, leaving */
-  const held = call === 'waiting' || call === 'open'
-  const shown = held || call === 'closing'
-  const next = started ? NEXT_UP.slice(1) : NEXT_UP
-  const running = [
-    { ...TASK, status: TaskStatus.Running, steps: STEPS, at: 2, elapsed: '14m', lead: OPUS, onStep: [SONNET], note: DOING[2] },
-    {
-      ...RUNNING_421,
-      status: held ? TaskStatus.Yours : TaskStatus.Running,
-      steps: ['Implement', 'Review', 'Verify'],
-      at: held ? 0 : 1,
-      elapsed: '6m',
-      lead: GPT,
-      note: held ? 'waiting on your call' : 'retries with backoff, as you chose',
-    },
-    ...(started
-      ? [
-          {
-            ...NEXT_UP[0]!,
-            status: TaskStatus.Running,
-            steps: ['Implement', 'Verify'],
-            at: 0,
-            elapsed: 'now',
-            lead: GEMINI,
-            note: 'reading the refunds table',
-          },
-        ]
-      : []),
-  ]
-  return (
-    <div ref={root} className={s.calls}>
-      <TitleBar lights="drawn" className={s.bar} end={<WorkStatus running={running.length} yours={held ? 1 : 0} onYours={noop} />}>
-        <span className={s.barName}>Meridian</span>
-      </TitleBar>
-      <div className={s.boardWrap}>
-        <Board label="Meridian’s work" className={s.board}>
-          <BoardColumn lane={BoardLane.Next} count={next.length}>
-            <BoardList>
-              {next.map((x, i) => (
-                <div key={x.task} data-glide={`next-${x.task}`} className={cx(leaving && !started && i === 0 && s.leaveRight)}>
-                  <NextRow {...x} place={i + 1} onOpen={noop} />
-                </div>
-              ))}
-            </BoardList>
-          </BoardColumn>
-          <BoardColumn lane={BoardLane.Running} count={running.length}>
-            {running.map((x) => (
-              <div key={x.task} data-glide={x.task}>
-                <WorkCard {...x} onOpen={noop} />
-              </div>
-            ))}
-          </BoardColumn>
-          <BoardColumn lane={BoardLane.Yours} count={held ? 1 : 0}>
-            {shown && (
-              <div data-glide="call" className={cx(call === 'closing' && s.leaveLeft)}>
-                <CallCard
-                  kind={CALL.kind}
-                  title={CALL.title}
-                  because={CALL.because}
-                  options={CALL.options.map((o) => o.label)}
-                  holds={['421']}
-                  at="now"
-                  current={call === 'open'}
-                  onOpen={() => setCall('open')}
-                />
-              </div>
-            )}
-          </BoardColumn>
-        </Board>
-        {(call === 'open' || call === 'closing') && (
-          <aside className={cx(s.dock, call === 'closing' && s.dockLeaving)}>
-            <div className={s.dockHead}>
-              <span className={s.dockKind}>{CALL.kind}</span>
-              <span className={s.dockFrom}>Task 421 · now</span>
-            </div>
-            <div className={s.dockBody}>
-              <CallPeek
-                title={CALL.title}
-                because={CALL.because}
-                options={CALL.options}
-                releases="Releases task 421"
-                onRecord={() => setCall('closing')}
-              />
-            </div>
-          </aside>
-        )}
-      </div>
-      {notes > 0 && <Note target="Backfill idempotency" side="left" reach={52} shift={-40} label="Work moves on its own" />}
-      {notes > 1 && call === 'waiting' && <Note target={CALL.title} side="bottom" reach={56} label="Only this waits for you" />}
-      {notes > 2 && <Note target="Nothing here needs you" side="top" reach={48} shift={-40} label="Answered: back to the work" />}
-      {pointer}
-    </div>
-  )
-}
-
-/* ---- 04 · the change comes back ------------------------------------------------ */
-
-export function ChangeScene({ live, instant }: SceneProps) {
-  const [stage, setStage] = useState(0)
-  const [merged, setMerged] = useState(false)
-  const [notes, setNotes] = useState(0)
-  const pointer = useScene(
-    live,
-    instant,
-    async (st) => {
-      await st.wait(1600)
-      setNotes(1)
-      await st.wait(900)
-      setStage(1)
-      await st.wait(1200)
-      setStage(2)
-      setNotes(2)
-      await st.wait(1000)
-      await st.point('Accept and merge both')
-      await st.wait(500)
-      await st.press()
-      st.rest()
-      await st.wait(500)
-      setNotes(3)
-    },
-    () => {
-      setStage(2)
-      setMerged(true)
-      setNotes(3)
-    },
-  )
-  const ready = stage > 1
-  return (
-    <div className={s.change}>
-      <ChangeSet
-        host={GITHUB}
-        state={merged ? ChangeState.Merged : ready ? ChangeState.Ready : ChangeState.Draft}
-        {...(merged ? { note: 'Accepted by you · merged in order' } : {})}
-        prs={PRS}
-        checks={checks(stage).filter((check) => check.id !== 'review')}
-        review={{ state: CheckState.Passed, by: [GPT, GEMINI] }}
-        actions={
-          ready &&
-          !merged && (
-            <Button variant="signal" onClick={() => setMerged(true)}>
-              Accept and merge both
-            </Button>
-          )
-        }
-      />
-      {notes > 0 && <Note target="api #1191" side="left" from="far" reach={44} label="Its own branch; your folders untouched" />}
-      {notes > 1 && <Note target='[aria-label^="Its checks"]' side="right" from="far" reach={44} label="Every check, run for you" />}
-      {notes > 2 && merged && <Note target="Accepted by you" side="top" from="far" reach={48} shift={120} label="Merging stays yours" />}
-      {pointer}
-    </div>
-  )
-}
-
-/* ---- 05 · your agents -------------------------------------------------------- */
-
-export function AgentsScene({ live, instant }: SceneProps) {
-  const [codex, setCodex] = useState<RuntimeState.Checking | RuntimeState.Ready>(RuntimeState.Checking)
-  const [wired, setWired] = useState(false)
-  const [notes, setNotes] = useState(0)
-  const root = useRef<HTMLDivElement>(null)
-  const pointer = useScene(
-    live,
-    instant,
-    async (stage) => {
-      await stage.wait(1700)
-      setCodex(RuntimeState.Ready)
-      await stage.wait(600)
-      setWired(true)
-      await stage.wait(900)
-      setNotes(1)
-      await stage.wait(700)
-      setNotes(2)
-    },
-    () => {
-      setCodex(RuntimeState.Ready)
-      setWired(true)
-      setNotes(2)
-    },
-  )
-  return (
-    <div ref={root} className={s.agents}>
-      <Panel title="Agents on this Mac" className={s.agentsPanel}>
-        <div className={s.block}>
-          <Runtimes
-            label="Agents on this Mac"
-            runtimes={AGENTS.map((a): RuntimeEntry =>
-              a.id === 'codex' && codex === RuntimeState.Checking ? { id: a.id, name: a.name, brand: a.brand, state: codex } : a,
-            )}
+        </p>
+        {/* Its room is held from the start, so the thread doesn't grow as the task arrives. */}
+        <div className={cx(shown > 1 && !instant && s.enter)} style={{ visibility: shown > 1 ? 'visible' : 'hidden' }}>
+          <TaskCard
+            {...TASK}
+            status={TaskStatus.Running}
+            steps={STEPS}
+            at={at}
+            now={DOING[at]}
+            started="just now"
+            lead={OPUS}
+            fresh={shown > 1 && !instant}
           />
         </div>
-      </Panel>
-      <div className={s.agentsTask} data-wire-to="">
-        <WorkCard
-          {...TASK}
-          status={TaskStatus.Running}
-          steps={STEPS}
-          at={1}
-          elapsed="4m"
-          lead={OPUS}
-          onStep={[GPT, GEMINI]}
-          note="two labs reviewing one change"
-        />
       </div>
-      {wired && <Wires rootRef={root} from={['Claude Code', 'Codex', 'Gemini CLI']} to="[data-wire-to]" />}
-      {notes > 0 && <Note target="Gemini CLI" side="bottom" from="far" reach={44} shift={30} label="Each signed in as you, on your plan" />}
-      {notes > 1 && <Note target={TASK.title} side="top" reach={48} shift={30} label="One lab checks another" />}
-      {pointer}
     </div>
   )
 }
 
-/* Lines from each agent to the task it works on. */
-function Wires({ rootRef, from, to }: { rootRef: RefObject<HTMLDivElement | null>; from: readonly string[]; to: string }) {
-  const [paths, setPaths] = useState<string[]>([])
-  useLayoutEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-    const k = el.getBoundingClientRect().width ? el.offsetWidth / el.getBoundingClientRect().width : 1
-    const target = find(el, to)
-    if (!target) return
-    const t = rectIn(el, target, k)
-    setPaths(
-      from.flatMap((name, i) => {
-        const a = find(el, name)
-        if (!a) return []
-        const r = rectIn(el, a, k)
-        const x1 = r.x + r.w + 10
-        const y1 = r.y + r.h / 2
-        const x2 = t.x - 6
-        const y2 = t.y + 30 + i * 22
-        const mid = (x1 + x2) / 2
-        return [`M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`]
-      }),
-    )
-  }, [rootRef, from, to])
+/* ---- agents from different makers: one leads, another's reviews ------------- */
+
+export function MakersScene({ live, instant }: SceneProps) {
+  const [beat, setBeat] = useState(0)
+  useScene(
+    live,
+    instant,
+    async (stage) => {
+      for (const i of [1, 2, 3] as const) {
+        await stage.wait(1500)
+        setBeat(i)
+      }
+    },
+    () => setBeat(LOOP.length - 1),
+  )
   return (
-    <svg className={s.wires} aria-hidden="true">
-      {paths.map((d, i) => (
-        <path key={d} d={d} pathLength={1} style={{ animationDelay: `${i * 140}ms` }} />
-      ))}
-    </svg>
+    <div className={s.makers}>
+      <StepGraph lanes={LANES} rounds={[ASKED]} steps={LOOP[beat] ?? []} className={s.graph} />
+    </div>
   )
 }
 
-export const SCENES: ((p: SceneProps) => ReactNode)[] = [ProjectScene, TaskScene, CallsScene, ChangeScene, AgentsScene]
+/* ---- reviewed before you see it -------------------------------------------- */
+
+/* The review as the lead settles it: one finding fixed in the second round, one set aside with its reason. */
+const settled = (finding: ReviewFinding): ReviewFinding =>
+  finding.id === FIX ? { ...finding, state: FindingState.Fixed, round: 2 } : { ...finding, state: FindingState.Aside, reason: SET_ASIDE }
+
+export function ReviewScene({ live, instant }: SceneProps) {
+  const [read, setRead] = useState(false)
+  const [findings, setFindings] = useState(FINDINGS)
+  const [sealed, setSealed] = useState(false)
+  useScene(
+    live,
+    instant,
+    async (stage) => {
+      await stage.wait(1400)
+      setRead(true)
+      await stage.wait(1500)
+      setFindings((now) => now.map((f) => (f.id === FIX ? settled(f) : f)))
+      await stage.wait(900)
+      setFindings((now) => now.map(settled))
+      await stage.wait(1100)
+      setSealed(true)
+    },
+    () => {
+      setRead(true)
+      setFindings(FINDINGS.map(settled))
+      setSealed(true)
+    },
+  )
+  return (
+    <div className={s.review}>
+      <Review
+        n={2}
+        of={4}
+        reviewers={[read ? { model: GPT } : { model: GPT, state: ToolState.Running, meta: REVIEWING }]}
+        state={read ? StepState.Done : StepState.Running}
+        findings={findings}
+        {...(read ? { verdict: Verdict.Changes, took: '3m 10s' } : {})}
+        open={read}
+      />
+      <div className={s.sealed} data-shown={sealed || undefined} aria-hidden={!sealed || undefined}>
+        <PullChip host={GITHUB} repo="meridian/api" number={1191} />
+        <span className={s.sealedWords}>{SEALED}</span>
+        <ReviewSealGlyph facts={SEAL} size={44} />
+      </div>
+    </div>
+  )
+}

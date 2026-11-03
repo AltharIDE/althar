@@ -49,6 +49,19 @@ ul.windows {
 .agent:hover {
   background: var(--line);
 }
+/* an agent a sign-in stops: its button beside the row, where the figure would be; the detail below them both */
+.withAction {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 6px;
+}
+.withAction > .detail {
+  grid-column: 1 / -1;
+}
+.action {
+  margin-right: 6px;
+}
 .agentName {
   display: inline-flex;
   align-items: center;

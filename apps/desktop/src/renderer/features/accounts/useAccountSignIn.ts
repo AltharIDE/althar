@@ -76,12 +76,29 @@ interface Flow extends SigningIn {
 /** Signed in, as the agent says: one that can't tell (OpenCode with no sign-in yet, or a check that failed) isn't. */
 const signedIn = (account: AccountStatus) => account.signIn === 'signed_in'
 
-/** A signed-in account, to name: what pays for it, when the agent says. */
-const naming = (account: AccountStatus): AccountSignInStep => ({
-  kind: 'named',
-  name: account.name,
-  ...(account.paidBy === 'plan' ? { paid: accountsText.plan } : account.paidBy === 'key' ? { paid: accountsText.key } : {}),
-})
+/** How a sign-in is paid for, as the account's line says it. */
+const paidWords = (pays: 'plan' | 'key') => (pays === 'plan' ? accountsText.plan : accountsText.key)
+
+/**
+ * A signed-in account, to name: what pays for it, when the agent says; for an agent with a sign-in per provider (OpenCode),
+ * each provider it can place, as Settings says them (OpenCode Go on a plan), not the account's one word.
+ */
+const naming = (account: AccountStatus): AccountSignInStep => {
+  const placed = (account.providers ?? []).flatMap((provider) =>
+    provider.pays === undefined ? [] : [`${provider.name} ${paidWords(provider.pays)}`],
+  )
+  return {
+    kind: 'named',
+    name: account.name,
+    ...(placed.length > 0
+      ? { paid: placed.join(' · ') }
+      : account.providers !== undefined
+        ? {}
+        : account.paidBy === 'plan' || account.paidBy === 'key'
+          ? { paid: paidWords(account.paidBy) }
+          : {}),
+  }
+}
 
 /** Terminal opening for the agent's sign-in, until the runtime says it has. */
 const opening: AccountSignInStep = { kind: 'terminal', line: '', opened: true }
@@ -112,7 +129,12 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const id = flow.again ?? flow.made
       const account = accountsOf(flow.agentId).find((one) => one.id === id)
       if (account !== undefined && signedIn(account)) setFlow(flow.again === null ? { ...flow, step: naming(account) } : null)
-      else if (account !== undefined && step.notYet !== true) setFlow({ ...flow, step: { ...step, notYet: true } })
+      else if (account !== undefined) {
+        // An agent that answered something Althar couldn't read isn't "not signed in yet": it says so.
+        const unclear = account.signIn === 'unknown'
+        if (step.notYet !== true || (step.unclear === true) !== unclear)
+          setFlow({ ...flow, step: { ...step, notYet: true, ...(unclear ? { unclear } : { unclear: undefined }) } })
+      }
     }
   }
 
@@ -315,7 +337,14 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const mine = token.current
       terminal(id, mine).catch((failure: unknown) => moveTo({ kind: 'failed', said: messageOf(failure) }, mine))
     },
-    check: () => void start.recheck(),
+    check: () => {
+      // It shows it is checking, so a read that finds the same answer still visibly happened.
+      const mine = token.current
+      const set = (checking: boolean) =>
+        setFlow((now) => (now?.step.kind !== 'terminal' || mine !== token.current ? now : { ...now, step: { ...now.step, checking } }))
+      set(true)
+      void start.recheck().finally(() => set(false))
+    },
     paste: (code) => {
       if (flow?.flowId != null) void client.pasteAccountSignInCode(flow.flowId, code).catch(() => undefined)
     },

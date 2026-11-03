@@ -38,8 +38,8 @@ export class PlanOnly extends Schema.TaggedError<PlanOnly>()('PlanOnly', { messa
 /** Why an automation's run can't run on these accounts, as its history and its task's thread say it. */
 export const planOnlyWords = (paidBy: ReadonlyArray<'plan' | 'key' | 'unknown'>) =>
   paidBy.includes('unknown') || paidBy.length === 0
-    ? 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
-    : 'Its agent pays per use, and automations run on a plan only for now.'
+    ? 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
+    : 'Automations run only on a plan for now, and its agent pays per use.'
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
@@ -67,8 +67,8 @@ export const windowWords = (room: Pick<Room, 'kind' | 'label'>): string => {
 }
 
 /** How much an account has left, as a thread says it: "3% of its five-hour limit left, until 14:00", or without the reset. */
-export const roomWords = (room: Room, reset = true): string =>
-  `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt)}`}`
+export const roomWords = (room: Room, now: number, reset = true): string =>
+  `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt, now)}`}`
 
 /**
  * What a thread says when a new step steers clear of an agent that is nearly
@@ -78,17 +78,19 @@ export const roomWords = (room: Room, reset = true): string =>
 export const lowWords = (input: {
   readonly from: string
   readonly room: Room
+  /** The time it is said at, which says whether the reset is today. */
+  readonly now: number
   readonly step?: keyof typeof outStep
   readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
 }): string => {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const work = step?.work ?? 'the step'
   if (input.to !== undefined)
-    return `${input.from} has ${roomWords(input.room)}, so ${input.to.agent} takes ${work} instead${
+    return `${input.from} has ${roomWords(input.room, input.now)}. ${input.to.agent} takes ${work} instead${
       input.to.model === null ? '' : `, on ${input.to.model}`
     }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
-  const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt)}`
-  return `${input.from} has ${roomWords(input.room, false)}, so ${work} ${step?.waits ?? 'waits'} ${back}. To carry on now, pick another model on the task.`
+  const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
+  return `${input.from} has ${roomWords(input.room, input.now, false)}. ${capitalized(work)} ${step?.waits ?? 'waits'} ${back}.`
 }
 
 /** An account that is out: until its reset, if it said, and when it is tried again either way. */
@@ -99,14 +101,14 @@ export interface Out {
   readonly until: string
 }
 
-/** When an agent is back, in the words a thread says it: the time, and the day where it isn't today. */
-export const whenWords = (iso: string, now: Date = new Date()): string => {
+/** When an agent is back, in the words a thread says it at `now`: the time, and the day where it isn't today. */
+export const whenWords = (iso: string, now: number): string => {
   const at = new Date(iso)
   const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(at)
-  if (at.toDateString() === now.toDateString()) return time
+  if (at.toDateString() === new Date(now).toDateString()) return time
   const day = new Intl.DateTimeFormat(
     undefined,
-    Duration.toMillis(Duration.days(6)) > at.getTime() - now.getTime() ? { weekday: 'long' } : { day: 'numeric', month: 'long' },
+    Duration.toMillis(Duration.days(6)) > at.getTime() - now ? { weekday: 'long' } : { day: 'numeric', month: 'long' },
   ).format(at)
   return `${day}, ${time}`
 }
@@ -126,6 +128,8 @@ export const outStep = {
 export const outWords = (input: {
   readonly from: string
   readonly resetsAt: string | null
+  /** The time it is said at, which says whether the reset is today. */
+  readonly now: number
   /** The step it was on; none outside one. */
   readonly step?: keyof typeof outStep
   /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
@@ -136,18 +140,16 @@ export const outWords = (input: {
 }): string => {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
-  const back = input.resetsAt === null ? null : whenWords(input.resetsAt)
+  const back = input.resetsAt === null ? null : whenWords(input.resetsAt, input.now)
   if (input.to !== undefined)
     return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
       input.to.model === null ? '' : `, on ${input.to.model}`
     }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
-  const until = back === null ? `until ${input.from} is back` : `until ${back}, when ${input.from} is back`
+  const until = back === null ? `until ${input.from} is back` : `until ${back}`
   if (input.waits === 'message') return `${out}. Your message waits ${until}.`
   const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
-  return input.nothingFree === true
-    ? `${out}. No other model was free, so ${waits} ${until}. Pick one on the task to carry on now.`
-    : `${out}. ${capitalized(waits)} ${until}. To carry on now, pick another model on the task.`
+  return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
 
 /** Words that open a sentence. */
@@ -229,6 +231,12 @@ export class Limits extends Context.Service<
       readonly rather?: ReadonlyArray<string>
       readonly planned?: { readonly agentId: string; readonly model: string | null }
     }): Effect.Effect<ReadonlyArray<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }>, Failure>
+    /**
+     * Whether any of these, as `choices` lists them, could take the work over
+     * now: signed in and not out of usage. Paid per use counts: the person may
+     * choose to spend their money, so that is a call of theirs.
+     */
+    canTakeOver(choices: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>): Effect.Effect<boolean, Failure>
     /**
      * The model an agent takes work over on: the one the plan named for it on
      * the step, else the last it ran in the project, else its own default.
@@ -314,6 +322,30 @@ export class Limits extends Context.Service<
               Option.match(yield* roomOf(account, model), { onNone: () => NEARLY_OUT, onSome: (room) => room.leftPercent }),
             )
           return list.toSorted((a, b) => (rooms.get(b.id) ?? 0) - (rooms.get(a.id) ?? 0))
+        })
+
+      /**
+       * For a model through a provider with a sign-in of its own (OpenCode Go): the accounts that list it working first, then
+       * those that don't list it, then those it refused lately, each in the order given. A fresh Go key in a new account is
+       * used before an old account's refused one, though the old has the room reading.
+       */
+      const byProvider = (agentId: string, list: ReadonlyArray<Account>, model?: string) =>
+        Effect.gen(function* () {
+          if (list.length < 2) return list
+          const standing = new Map<string, number>()
+          for (const account of list) standing.set(account.id, yield* providerStanding(account, model))
+          return list.toSorted((a, b) => (standing.get(a.id) ?? 1) - (standing.get(b.id) ?? 1))
+        })
+      /** How the model's provider stands on the account: 0 listed and working, 1 not listed or no provider of its own, 2 refused lately. */
+      const providerStanding = (account: Account, model?: string) =>
+        Effect.gen(function* () {
+          const through =
+            model === undefined
+              ? undefined
+              : agents.list.find((entry) => entry.definition.id === account.agentId)?.definition.signIn.providers?.of(model)
+          if (through === undefined) return 1
+          const row = ((yield* signIns.providers(account, yield* signIns.account(account))) ?? []).find((one) => one.id === through)
+          return row === undefined ? 1 : row.refusedAt === null ? 0 : 2
         })
 
       /** Whether the project moves work through an agent's accounts (ADR-012); without a project, as if it did. */
@@ -435,10 +467,18 @@ export class Limits extends Context.Service<
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`
               const own = list.find((account) => account.id === last?.accountId)
-              if (own !== undefined && (yield* runs(own)) && !nearly(yield* roomOf(own, input.model))) return own
+              // Not where the model's provider refused it lately (OpenCode Go's expired key): another account may have it working.
+              if (
+                own !== undefined &&
+                (yield* runs(own)) &&
+                !nearly(yield* roomOf(own, input.model)) &&
+                (yield* providerStanding(own, input.model)) < 2
+              )
+                return own
             }
             // Where it rotates, the one with the most room; where it doesn't, the first, in the person's order.
-            for (const account of rotate ? yield* byRoom(list, input.model) : list) if (yield* runs(account)) return account
+            const ordered = rotate ? yield* byRoom(list, input.model) : list
+            for (const account of yield* byProvider(input.agentId, ordered, input.model)) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
@@ -474,6 +514,15 @@ export class Limits extends Context.Service<
                 if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
             }
             return found
+          }),
+        canTakeOver: (choices) =>
+          Effect.gen(function* () {
+            for (const choice of choices) {
+              const account = (yield* accounts.of(choice.agentId)).find((each) => each.id === choice.accountId)
+              if (account === undefined || (yield* signIns.account(account)).status === 'signed_out') continue
+              if (Option.isNone(yield* outOf(account))) return true
+            }
+            return false
           }),
         modelFor,
         named: (agentId, model, accountId = null) =>

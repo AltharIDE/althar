@@ -1,11 +1,10 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
-import { platform } from '../../shared/device'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
@@ -50,7 +49,6 @@ export const text = {
     settled: 'Review settled',
     answered: (n: number) => (n === 1 ? 'Answered 1 permission ask' : `Answered ${n} permission asks`),
     coordinatorAnswered: (n: number) => (n === 1 ? 'Coordinator answered 1 permission ask' : `Coordinator answered ${n} permission asks`),
-    withinRules: 'within the projects’ rules',
     since: (at: string) => `since ${at}`,
   },
 }
@@ -75,7 +73,6 @@ export const lineOf = (
     return {
       icon: 'lock',
       what: event.by === 'coordinator' ? t.coordinatorAnswered(event.count) : t.answered(event.count),
-      detail: t.withinRules,
       at: t.since(clock(event.at, now)),
     }
   const project = projects.get(event.projectId)
@@ -233,7 +230,7 @@ export function HomeView({
             text={{
               projects: {
                 // The shortcut as this system writes it.
-                newProjectKbd: platform === 'darwin' ? '⌘N' : 'Ctrl+N',
+                newProjectKbd: modKey('N'),
                 ...(queued === null ? {} : { queued: (n: number) => queuedOfWords(n, queued) }),
               },
             }}

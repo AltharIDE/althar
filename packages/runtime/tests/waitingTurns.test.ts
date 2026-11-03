@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -20,7 +20,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { items, outUntilSoon, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
@@ -174,6 +174,9 @@ describe('a turn Althar’s word waited for when it stopped', () => {
   it.live('starts its lead again once there is a place, and lets it go once its turn is under way', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-waiting-')), 'althar.sqlite')
+      // The lead's answer is held until the test has seen its turn under way.
+      const told = holds()
+      const leads = { each: { codex: { holds: told } } }
       const before = yield* Effect.gen(function* () {
         const sessions = yield* Sessions
         const instance = yield* Instance
@@ -196,21 +199,20 @@ describe('a turn Althar’s word waited for when it stopped', () => {
           (rows) => rows.length === 1,
         )
         return { first, second, turns: (yield* turnsOn(first.threadId)).length }
-      }).pipe(Effect.provide(oneAtOnce({}, file)))
+      }).pipe(Effect.provide(oneAtOnce({}, file, leads)))
 
       yield* Effect.gen(function* () {
         const tasks = yield* Tasks
         const { first, second, turns } = before
-        yield* until(attempts(second.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+        yield* until(attempts(second.taskId), (rows) => rows.at(-1)?.state === 'running')
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
-        const told = yield* until(
-          turnsOn(first.threadId),
-          (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed',
-          Duration.seconds(15),
-        )
-        assert.include(told.at(-1)?.prompt, 'Look again.')
+        yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'delivered')
         assert.isNull(yield* waitsOn(first.threadId))
-      }).pipe(Effect.provide(oneAtOnce({}, file)))
+        told.open('[answers-after:1s]')
+        const answered = yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'completed')
+        assert.include(answered.at(-1)?.prompt, 'Look again.')
+        assert.isNull(yield* waitsOn(first.threadId))
+      }).pipe(Effect.provide(oneAtOnce({}, file, leads)))
     }),
   )
 })
@@ -266,7 +268,8 @@ describe('a task under way whose next turn waits for a place', () => {
       assert.strictEqual(going?.phase, 'running')
       assert.isUndefined(going?.continues)
       assert.isUndefined(going?.place)
-    }).pipe(Effect.provide(oneAtOnce())),
+      // Its answer held, the turn is still under way as the card is read.
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { holds: holds() } } }))),
   )
 })
 
@@ -365,8 +368,8 @@ describe('an answer kept for a place, as answers once were', () => {
 })
 
 describe('a review that waits for a place of its own', () => {
-  it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
-    const back = outUntilSoon()
+  it.effect('is gone on without when the person skips it, and its reviewer never starts again', () => {
+    const back = later()
     return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
@@ -379,14 +382,12 @@ describe('a review that waits for a place of its own', () => {
         { key: 'review', agentId: 'codex' },
       ])
       // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
-      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit')
+      const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running')
       // At the reset there is none: the review waits for a place of its own.
-      yield* until(
-        attempts(task.taskId),
-        (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy',
-        Duration.seconds(15),
-      )
+      yield* atReset(back)
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy')
       const reviewers = sql`SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       const before = (yield* reviewers).length
       yield* runs.skipReview({ envelope: yield* Runtime.envelope('run.skip_review', {}), taskId: task.taskId })
@@ -401,6 +402,6 @@ describe('a review that waits for a place of its own', () => {
       )
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* reviewers, before)
-    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: back } } })))
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })), onTestClock)
   })
 })

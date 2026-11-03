@@ -10,7 +10,20 @@ import type { SettingsWays } from '../src/renderer/features/settings/open'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
+import {
+  agents,
+  card,
+  changed,
+  coordinatorSnapshot,
+  efforts,
+  fakeClient,
+  items,
+  models,
+  project,
+  repositories,
+  status,
+  streamed,
+} from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { useSettingsOf, withServices } from './render'
 
@@ -98,7 +111,7 @@ describe('running the project, with no agent', () => {
     })
     withServices(<WithSettings />, client)
     // Once the conversation is read, its front offers what the project runs, on the default branch.
-    await screen.findByText(/^Ask the coordinator about/)
+    await screen.findByRole('button', { name: /^Coordinator: / })
     expect(screen.getByRole('button', { name: 'main' })).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     await userEvent.click(
@@ -241,21 +254,37 @@ describe('the project’s bar', () => {
 })
 
 describe('the Talk room', () => {
+  it('offers, once, to push a fork’s branches to the repository it came from, over the composer', async () => {
+    const [api, forked] = repositories
+    const offering = {
+      ...forked!,
+      fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream' as const, canPush: true, offer: true },
+    }
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()), getRepositories: vi.fn(async () => [api!, offering]) })
+    withServices(<Project room={Room.Talk} onTask={vi.fn()} />, client)
+    expect(await screen.findByText('You can push to meridian/web now. Push new tasks’ branches there instead of your fork?')).toBeTruthy()
+    vi.mocked(client.getRepositories).mockResolvedValue([api!, { ...offering, fork: { ...offering.fork, offer: false } }])
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: forked!.id, notNow: true })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Push there' })).toBeNull())
+  })
+
   it("shows the coordinator's thread with each task's card, folds its finished work, and opens a task", async () => {
     const onTask = vi.fn()
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
     withServices(<Project room={Room.Talk} onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
-    // Its front page says what it is made of, never where it is on this Mac.
-    const made = await screen.findByRole('list', { name: 'Made of' })
-    await waitFor(() =>
-      expect(
-        within(made)
-          .getAllByRole('listitem')
-          .map((part) => part.textContent),
-      ).toEqual(['meridian-api', 'meridian-web', 'meridian-infra']),
-    )
+    // Its header's ⋯ says what it is made of, never where it is on this computer.
+    await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
+    const made = await screen.findByRole('menu', { name: 'Made of' })
+    expect(
+      within(made)
+        .getAllByRole('menuitem')
+        .map((part) => part.textContent),
+    ).toEqual([expect.stringMatching(/^meridian-api/), expect.stringMatching(/^meridian-web/), expect.stringMatching(/^meridian-infra/)])
     expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Made of' })).toBeNull())
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
@@ -576,7 +605,7 @@ describe('the Talk room', () => {
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
+    await screen.findByRole('button', { name: /^Coordinator: / })
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
@@ -686,7 +715,7 @@ describe('the Talk room', () => {
       ),
     })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText("OpenCode isn't signed in, so the coordinator starts on Claude Code.")).toBeTruthy()
+    expect(await screen.findByText("OpenCode isn't signed in. Using Claude Code.")).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
   })
@@ -741,7 +770,7 @@ describe('the Talk room', () => {
     })
     withServices(<Project room={Room.Talk} />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
-    expect(screen.getByText('Queued; the coordinator reads it next')).toBeTruthy()
+    expect(screen.getByText('Queued')).toBeTruthy()
     // While it works, its work folds too, under how long it has worked so far and what it is doing now.
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
@@ -781,8 +810,8 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     // Behind a running turn, waiting messages are in the composer's queue rather than the thread.
-    expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
-    const queue = screen.getByRole('region', { name: '2 queued; the coordinator reads them in order' })
+    expect(screen.queryByText('Queued')).toBeNull()
+    const queue = screen.getByRole('region', { name: '2 queued' })
     // Waiting, it is in the composer's queue rather than the thread.
     expect(within(queue).getByText('Rename the flag')).toBeTruthy()
     await userEvent.type(composer, 'Also the docs')
@@ -809,7 +838,7 @@ describe('the Talk room', () => {
         ),
       })
       withServices(<Project room={Room.Talk} />, client)
-      await screen.findByText('Queued · the coordinator reads it next')
+      await screen.findByText('Queued')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
       // How full the coordinator's context is shows in its composer as it says.
@@ -833,7 +862,7 @@ describe('the Talk room', () => {
           .toSorted(),
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
-      await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+      await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
     } finally {
       vi.useRealTimers()
     }
@@ -855,17 +884,17 @@ describe('the Talk room', () => {
       withServices(<Project room={Room.Talk} />, client)
       // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
       expect(await screen.findByText('Thinking')).toBeTruthy()
-      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
+      expect(screen.queryByText('Queued')).toBeNull()
       act(() => emit(changed('provider_session', 's1', 'thc')))
       await vi.advanceTimersByTimeAsync(50)
       await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
       // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
-      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Queued' })).toBeNull()
       expect(screen.getByText('Why is checkout slow?')).toBeTruthy()
       act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
       await waitFor(() => expect(screen.getByRole('textbox', { name: /^Add to the queue/ })).toBeTruthy())
       expect(screen.getByText('Thinking')).toBeTruthy()
-      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Queued' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }

@@ -325,10 +325,9 @@ describe('attaching a task to a pull request it didn’t open', () => {
       assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), head)
       const [workspace] = yield* sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces WHERE task_id = ${task.taskId}`
       assert.isNotNull(workspace?.branchedAt)
-      const [said] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('The task follows PR #1'))
+      const [said] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Following PR #1'))
       assert.deepInclude(said, {
-        title: 'The task follows PR #1 now: Send back won’t restart a dead lead',
-        description: 'Its work goes to PR #1’s branch, fix-send-back, on you/api, as a plain push: nothing opens another.',
+        title: 'Following PR #1: Send back won’t restart a dead lead',
       })
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -365,10 +364,9 @@ describe('attaching a task to a pull request it didn’t open', () => {
         SELECT c.pull_request_state, c.branch FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
         WHERE w.task_id = ${task.taskId}`
       assert.deepStrictEqual(recorded, { pullRequestState: 'draft', branch: task.branch })
-      const [said] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('The task follows PR #1'))
+      const [said] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Following PR #1'))
       assert.deepInclude(said, {
-        title: 'The task follows PR #1 now: Retry checkout three times',
-        description: `Its branch ${task.branch} starts from PR #1’s head now. Its work goes to PR #1’s branch, fix-retry, on meridian/api, as a plain push: nothing opens another.`,
+        title: 'Following PR #1: Retry checkout three times',
       })
 
       // Its own branch's commits go onto the pull request's branch on the repository itself.
@@ -427,7 +425,7 @@ describe('attaching a task to a pull request it didn’t open', () => {
       const sql = yield* SqlClient.SqlClient
       const [links] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM external_links WHERE task_id = ${task.taskId} AND kind = 'change'`
       assert.strictEqual(links?.n, 1)
-      const said = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('The task follows PR #1'))
+      const said = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Following PR #1'))
       assert.lengthOf(said, 2)
       assert.notInclude(said[1]?.description ?? '', 'starts from')
     }).pipe(Effect.provide(withQueries(github)))
@@ -524,8 +522,8 @@ describe('attaching a task to a pull request it didn’t open', () => {
         actorId: personId,
       })
       assert.deepInclude(attached, { kind: 'attached', started: true })
-      const said = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('The task follows PR #1'))
-      assert.strictEqual(said[0]?.title, 'The task follows PR #1 in web now: Fix the layout')
+      const said = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Following PR #1'))
+      assert.strictEqual(said[0]?.title, 'Following PR #1 in web: Fix the layout')
       const sql = yield* SqlClient.SqlClient
       const [worktree] = yield* sql<{ path: string }>`
         SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id

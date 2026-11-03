@@ -15,6 +15,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
+import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -25,7 +26,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
+import { callTool, fakeSandbox, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -90,7 +91,7 @@ describe('the coordinator loop', () => {
       // The task keeps what the person said it from, in their words, for its thread to open with and its lead to read.
       const [kept] = yield* sql<{ request: string | null }>`SELECT request FROM tasks`
       assert.strictEqual(kept?.request, 'Add a retry. [coordinator:plan] [lead:finish] [review:findings]')
-      const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       const [briefed] = yield* sql<{ prompt: string }>`
         SELECT d.prompt FROM turn_deliveries d WHERE d.thread_id = ${ready?.threadId ?? ''} ORDER BY d.requested_at LIMIT 1`
       assert.include(briefed?.prompt, 'What the person asked for, in their words:\n\nAdd a retry. [coordinator:plan]')
@@ -275,6 +276,26 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('stops after two rounds when the person set two', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ rounds: 2 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
+      const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round']), {
+        step: 'review',
+        why: 'round_limit',
+        round: 2,
+      })
+      assert.deepStrictEqual(
+        (yield* results(waiting?.threadId ?? '')).map((step) => step.step),
+        ['implement', 'review', 'settle', 'review', 'settle'],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
+  )
+
   it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -282,7 +303,7 @@ describe('the coordinator loop', () => {
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       // Out of rounds, with settled changes no review has seen: it needs the person, with the findings still open.
-      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting', Duration.seconds(60))
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
       const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
       assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
         step: 'review',
@@ -296,7 +317,7 @@ describe('the coordinator loop', () => {
         attentionId: call?.id ?? '',
         answer: { kind: 'abandon' },
       })
-      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(10))
+      const [first] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(first?.taskId, waiting?.taskId)
       assert.deepStrictEqual(
         (yield* results(first?.threadId ?? '')).map((step) => [step.step, step.verdict ?? null]),
@@ -312,11 +333,7 @@ describe('the coordinator loop', () => {
       )
       // The lead sets the findings aside: nothing changed, so there's nothing new to review.
       yield* say(threadId, 'Rename a file. [coordinator:plan] [lead:finish] [review:findings] [lead:set-aside]')
-      const [second] = yield* until(
-        cardsOf(projectId),
-        (cards) => cards.length === 2 && cards.every((card) => card.phase === 'ready'),
-        Duration.seconds(60),
-      )
+      const [second] = yield* until(cardsOf(projectId), (cards) => cards.length === 2 && cards.every((card) => card.phase === 'ready'))
       const later = (yield* cardsOf(projectId)).find((card) => card.taskId !== first?.taskId) ?? second
       assert.deepStrictEqual(
         (yield* results(later?.threadId ?? '')).map((step) => step.step),
@@ -467,7 +484,7 @@ describe('the coordinator loop', () => {
         }),
         /^Althar has your review\. The lead settles/,
       )
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual(
         (yield* results(card?.threadId ?? '')).map((step) => step.step),
         ['implement', 'review', 'settle', 'review'],
@@ -934,6 +951,36 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('starts a lead that goes on its own mid-step again, once, and asks nothing when it carries on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, task } = yield* planned('Crashes once', '[lead:gone-once] [lead:finish]', [
+        { key: 'implement', agentId: 'claude-code' },
+      ])
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.strictEqual(card?.summary, 'Did the task.')
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      const notices = yield* sql<{ title: string }>`
+        SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
+      assert.include(
+        notices.map((notice) => notice.title),
+        'Started again after its agent stopped on its own.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('needs the person when the lead it started again goes on its own again soon after', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* planned('Crashes twice', '[lead:gone-twice] [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'session_ended'])
+      // Started again once only: two sessions, the second gone too.
+      const sessions = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      assert.lengthOf(sessions, 2)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -1181,11 +1228,52 @@ describe("the coordinator's tools", () => {
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Try the double jump. [coordinator:start]')
-      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(10))
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running')
       assert.strictEqual(card?.title, 'Try the double jump')
       assert.isNull(card?.plan?.startsAt)
       assert.lengthOf(card?.plan?.steps ?? [], 1)
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps a held plan held when the coordinator plans the task again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      yield* callTool(access, 'draft_task', { title: 'Hold me' })
+      assert.match(
+        yield* callTool(access, 'propose_plan', { task: 'hold-me', lead: { agent: 'codex', model: 'large' } }),
+        /starts in 25 seconds/,
+      )
+      const proposed = () =>
+        sql<{ id: string; startsAt: string | null; parameters: string }>`
+          SELECT id, starts_at, parameters FROM task_plans WHERE state = 'proposed'`
+      const [first] = yield* proposed()
+      yield* plans.hold(first?.id ?? '', actor)
+      const reply = yield* callTool(access, 'propose_plan', {
+        task: 'hold-me',
+        lead: { agent: 'codex', model: 'large' },
+        review: { agent: 'claude-code', model: 'small' },
+      })
+      assert.match(reply, /stays held until the person starts it/)
+      assert.notMatch(reply, /25 seconds/)
+      const [again, ...others] = yield* proposed()
+      assert.isEmpty(others)
+      assert.notStrictEqual(again?.id, first?.id)
+      assert.strictEqual(again?.startsAt, null)
+      assert.deepStrictEqual(
+        (JSON.parse(again?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string }> }).steps.map((step) => step.key),
+        ['implement', 'review'],
+      )
+      // Past the countdown it would have had, it is still held and has not started.
+      yield* Effect.sleep('400 millis')
+      assert.strictEqual((yield* proposed())[0]?.id, again?.id)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'held')
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(100) }))),
   )
 
   it.live('read the project and its tasks, pass messages on, and refuse what they cannot do', () =>
@@ -1286,10 +1374,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       // Althar's own housekeeping, kept with the lead's work: it asks nothing of the person.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        [
-          'Fake codex showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn and told it to carry on.',
-          'aside',
-        ],
+        ['Fake codex went quiet for a minute. Told it to carry on.', 'aside'],
       )
       const told = (yield* turns(task.threadId)).map((turn) => turn.prompt ?? '')
       assert.isTrue(
@@ -1309,7 +1394,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       assert.deepStrictEqual((call as unknown as { tried: ReadonlyArray<string> }).tried, ['carried_on', 'restarted'])
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Fake codex showed no sign of work again, so Althar started it afresh.',
+        'Fake codex went quiet again. Started it afresh.',
       )
       // Nothing is left running while the call waits.
       yield* until(
@@ -1324,10 +1409,10 @@ describe('a step whose agent stalls or goes round in circles', () => {
   it.live("starts afresh a lead that doesn't stop its turn when asked, and it finishes", () =>
     Effect.gen(function* () {
       const { projectId, task } = yield* planned('Wedged', '[lead:wedge-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
-      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(15))
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
-        "Fake codex didn't stop its turn when asked, so Althar started it afresh.",
+        "Fake codex didn't stop when asked. Started it afresh.",
       )
     }).pipe(
       Effect.provide(
@@ -1346,7 +1431,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
       )
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        ['Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.', 'aside'],
+        ['Fake codex ran the same command 3 times. Told it to try another way.', 'aside'],
       )
       // Only its turn stops: it keeps what it knows for what the person says.
       yield* idleOn(task.threadId)
@@ -1405,13 +1490,13 @@ describe('a step whose agent stalls or goes round in circles', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Serve it. [lead:hang]' })
       const [last] = yield* until(
         Effect.map(notices(task.threadId), (said) => said.slice(-1)),
-        (said) => said[0]?.title?.endsWith('so Althar stopped it.') === true,
+        (said) => said[0]?.title?.endsWith('Stopped.') === true,
       )
       assert.deepStrictEqual(last, {
         source: 'runtime',
         severity: 'warning',
-        title: 'Fake codex showed no sign of work again after Althar started it afresh, so Althar stopped it.',
-        description: 'Start the lead again to carry on; it picks up from the thread.',
+        title: 'Fake codex went quiet again after a fresh start. Stopped.',
+        description: 'Start the lead again to carry on.',
         // The home reads it as something the loop dealt with.
         about: 'stall',
       })
@@ -1489,5 +1574,71 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
         for (const given of allowed) assert.isFalse(secret.startsWith(`${given}/`) || given.startsWith(secret), `${given} and ${secret}`)
       }
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('runs a loop that only looks, and answers once where its rules refuse a command, with nothing more in its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId } = yield* opened
+      const settled = (count: number) =>
+        until(turns(threadId), (rows) => rows.length === count && rows.every((row) => row.state === 'completed'))
+      const decided = (command: string) =>
+        until(
+          sql<{ outcome: string }>`
+            SELECT d.outcome FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+            WHERE json_extract(r.raw_input, '$.command') = ${command}`,
+          (rows) => rows.length > 0,
+        )
+      const said = sql<{ kind: string; text: string | null }>`
+        SELECT kind, json_extract(content, '$.text') AS text FROM thread_items WHERE thread_id = ${threadId} ORDER BY sequence`
+      yield* say(threadId, 'hello')
+      yield* settled(1)
+      const loop = 'for r in api web docs; do git -C "$r" status -sb; done'
+      yield* say(threadId, `${scenarios.run}${loop}`)
+      assert.strictEqual((yield* decided(loop))[0]?.outcome, 'allow')
+      yield* settled(2)
+      // Refused, the agent carries on past it in the same turn, and no turn of its own follows to explain it.
+      const before = (yield* said).length
+      yield* say(threadId, `${scenarios.run}git fetch origin`)
+      assert.strictEqual((yield* decided('git fetch origin'))[0]?.outcome, 'reject')
+      yield* settled(3)
+      const refused = (yield* said).slice(before)
+      assert.deepStrictEqual(
+        refused.filter((item) => item.kind === 'agent_message').map((item) => item.text),
+        ['chosen=decline'],
+      )
+      assert.notInclude(JSON.stringify(refused), 'Carry on without it')
+      // Nor does the person's next message carry it: the agent worked around it already.
+      yield* say(threadId, 'what next?')
+      yield* settled(4)
+      // The fake agent says back what it was sent.
+      const echoed = (yield* said).findLast((item) => item.kind === 'agent_message')?.text ?? ''
+      assert.include(echoed, 'what next?')
+      assert.notInclude(echoed, 'From Althar')
+      assert.notInclude(JSON.stringify(yield* said), 'Carry on without it')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('fetches its copies in a loop where its sandbox holds every command to them', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId } = yield* opened
+      yield* say(threadId, 'hello')
+      yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+      const loop = 'for r in api web docs; do git -C "$r" fetch -q; git -C "$r" status -sb; done'
+      yield* say(threadId, `${scenarios.run}${loop}`)
+      const [decided] = yield* until(
+        sql<{ outcome: string }>`
+          SELECT d.outcome FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+          WHERE json_extract(r.raw_input, '$.command') = ${loop}`,
+        (rows) => rows.length > 0,
+      )
+      assert.strictEqual(decided?.outcome, 'allow')
+    }).pipe(
+      Effect.provide(runtime()),
+      // Held so from its session's start, as Claude Code's coordinator is where its sandbox starts.
+      (effect) => Effect.sync(() => (fakeSandbox.contains = true)).pipe(Effect.andThen(effect)),
+      Effect.ensuring(Effect.sync(() => (fakeSandbox.contains = false))),
+    ),
   )
 })

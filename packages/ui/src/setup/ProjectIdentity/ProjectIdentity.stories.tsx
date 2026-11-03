@@ -140,8 +140,8 @@ export const ChoosingAnInk: Story = {
     await userEvent.keyboard('{ArrowRight>}')
     await new Promise((r) => setTimeout(r, 30))
     await userEvent.keyboard('{/ArrowRight}')
-    await waitFor(() => expect(args.onInk).toHaveBeenLastCalledWith(ProjectInk.Umber))
-    await expect(c.getByRole('radio', { name: 'Umber' })).toBeChecked()
+    await waitFor(() => expect(args.onInk).toHaveBeenLastCalledWith(ProjectInk.Brick))
+    await expect(c.getByRole('radio', { name: 'Brick' })).toBeChecked()
   },
 }
 

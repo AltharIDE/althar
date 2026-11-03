@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
-import { launch, mainWindow } from './support'
+import { launch, mainWindow, pastTheTour } from './support'
 
 /*
  * A profile another runtime has open (DEV-115): the CLI, or another Althar.
@@ -40,6 +40,7 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
 
   // A profile made by an earlier run, then held as the CLI holds it: exclusive, from its first statement until it closes.
   const before = await launch(home)
+  await pastTheTour(before.page)
   await expect(before.page.getByText('Claude Code').first()).toBeVisible()
   await before.electronApp.close()
   const earlier = runtimeLines(home)
@@ -53,11 +54,11 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
   try {
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
     await expect(page.getByRole('alert')).toContainText('Another copy of Althar is using this profile.')
-    await expect(page.getByRole('alert')).toContainText('Once it closes, Althar can open again.')
+    await expect(page.getByRole('alert')).toContainText('Close it, then try again.')
     await page.screenshot({ path: 'test-results/profile-in-use.png' })
 
-    // Main waits out the restarts it would have made; the runtime started once and never exited.
-    await page.waitForTimeout(3_000)
+    // Main makes none of the restarts it would have: the runtime started once, found the profile held, and hasn't exited.
+    await expect.poll(() => runtimeLines(home).held).toBe(earlier.held + 1)
     expect(runtimeLines(home)).toEqual({ started: earlier.started + 1, exited: earlier.exited, held: earlier.held + 1 })
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
@@ -68,12 +69,15 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
     await expect.poll(() => runtimeLines(home).started).toBe(earlier.started + 2)
     // The new runtime has found it held, so letting go of it now can't let that one open it before Try again.
     await expect.poll(() => runtimeLines(home).held).toBe(earlier.held + 2)
+    // Nothing else started or stopped meanwhile: the first runtime waited for Try again, and nothing restarted it.
+    expect(runtimeLines(home)).toEqual({ started: earlier.started + 2, exited: earlier.exited + 1, held: earlier.held + 2 })
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
     // Closed, it opens.
     other.close()
     held = false
     await page.getByRole('button', { name: 'Try again' }).click()
+    await pastTheTour(page)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
   } finally {
     if (held) other.close()
@@ -85,6 +89,7 @@ test('a second launch on the same profile brings the first forward and ends, whi
   const home = mkdtempSync(join(tmpdir(), 'althar-twice-'))
   const { electronApp, page } = await launch(home)
   try {
+    await pastTheTour(page)
     await expect(page.getByText('Claude Code').first()).toBeVisible()
     await electronApp.evaluate(({ BrowserWindow }) => {
       for (const window of BrowserWindow.getAllWindows()) window.hide()
@@ -115,7 +120,9 @@ test('a second launch on the same profile brings the first forward and ends, whi
     const otherHome = mkdtempSync(join(tmpdir(), 'althar-beside-'))
     const beside = await launch(otherHome)
     try {
+      await pastTheTour(beside.page)
       await expect(beside.page.getByText('Claude Code').first()).toBeVisible()
+      await pastTheTour(page)
       await expect(page.getByText('Claude Code').first()).toBeVisible()
       expect(await mainWindow(beside.electronApp)).not.toBe(page)
     } finally {

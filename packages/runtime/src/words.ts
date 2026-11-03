@@ -1,11 +1,15 @@
+import { basename } from 'node:path'
+
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
+import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
+import { pushDetailOf, secondsOf } from './pushFailure'
 import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
@@ -28,6 +32,15 @@ const text = (error: unknown, key: string): string => {
 }
 
 /** The last line of an agent's error output, which usually says why. */
+/** What git said without the advice it ends a remote it couldn't read with, whose last line says nothing alone. */
+const saidByGit = (stderr: string): string =>
+  lastLine(
+    stderr.replace(
+      /(fatal: )?Could not read from remote repository\.\s*(Please make sure you have the correct access rights\s*and the repository exists\.\s*)?/i,
+      '',
+    ),
+  )
+
 const lastLine = (output: string): string =>
   output
     .split('\n')
@@ -46,6 +59,24 @@ const hostDenied =
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
+/**
+ * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`
+ * rebuilt the `workspace` table without `project_id`, which 1.x still updates
+ * when it opens a repository, so it stops on every start there (anomalyco/opencode#42170).
+ * Neither `opencode upgrade` nor 1.x's installer moves to 2 (the installer refuses
+ * a 2.x version): OpenCode 2 has an installer of its own, which its docs give for
+ * each platform. Seen 2 November 2026, 1.18.31 against 2.2.5.
+ */
+const olderOpenCode = /no such column: project_id/
+const olderOpenCodeWords =
+  'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.'
+
+/** An agent that no longer has the session Althar sent to, as its process died: what it said ("Resource not found") stays its detail. */
+export const lostWords = (agent: string) => `${agent} had lost this conversation.`
+
+/** The same, where Althar started the agent afresh on the thread for it. */
+export const startedAfreshWords = (agent: string) => `${agent} had lost this conversation. Started it afresh.`
+
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
@@ -60,13 +91,14 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on this computer's PATH.`
+        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
         : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
       const said = lastLine(text(error, 'stderr'))
       // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
       if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
+      if (olderOpenCode.test(said)) return olderOpenCodeWords
       return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed':
@@ -79,6 +111,8 @@ export const agentSaid = (error: unknown): string | undefined => {
         }
         case 'context_full':
           return "The agent's context is full."
+        case 'session_lost':
+          return lostWords('The agent')
         default:
           return sentence(text(error, 'message'))
       }
@@ -132,7 +166,11 @@ export const words = (
   const message = ((): string => {
     switch (reason) {
       case 'NotARepository':
-        return `${text(error, 'path')} isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.`
+        return `${text(error, 'path')} isn't a git repository. Choose another folder.`
+      case 'RepositoryRefused':
+        return text(error, 'reason') === 'taken'
+          ? `There’s a folder named ${text(error, 'name')} in ${basename(text(error, 'parent'))} already. Choose another place, or rename the project.`
+          : 'Name the project first: its repository is named after it.'
       case 'RepositoriesNeeded': {
         const unknown = (error as { readonly unknown?: ReadonlyArray<string> }).unknown ?? []
         const choices = ((error as { readonly choices?: ReadonlyArray<string> }).choices ?? []).join(', ')
@@ -168,7 +206,7 @@ export const words = (
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
-        return 'No agent is working on this task.'
+        return 'The task isn’t running.'
       case 'InstallFailed':
         return text(error, 'summary')
       case 'SessionFailed': {
@@ -177,40 +215,50 @@ export const words = (
       }
       case 'EffortUnchanged': {
         const summary = text(error, 'summary')
-        return `${agentName(text(error, 'agentId'))} still thinks as hard as it did.${summary === '' ? '' : ` ${summary}`}`
+        return `${agentName(text(error, 'agentId'))}’s effort didn't change.${summary === '' ? '' : ` ${summary}`}`
       }
       case 'ModelUnchanged': {
         const summary = text(error, 'summary')
-        return `${agentName(text(error, 'agentId'))} is still on its old model.${summary === '' ? '' : ` ${summary}`}`
+        return `${agentName(text(error, 'agentId'))}’s model didn't change.${summary === '' ? '' : ` ${summary}`}`
       }
       case 'CoordinatorUnavailable':
-        return `${text(error, 'agentName')} isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.`
+        return `${text(error, 'agentName')} isn't signed in. Sign it in, or pick another agent for the coordinator.`
       case 'AttentionClosed':
-        return 'That call was already answered, or the agent took it back.'
+        return 'That call is closed.'
       case 'RuleOnAnotherList': {
         const words = fieldOf(error, 'exact') === true ? `“${text(error, 'pattern')}”` : `Commands starting “${text(error, 'pattern')}”`
         const list = text(error, 'list') === 'never' ? '“Never”' : '“Always ask me”'
-        return `${words} ${fieldOf(error, 'exact') === true ? 'is' : 'are'} on ${list}, which comes first, so nothing changed. Take ${fieldOf(error, 'exact') === true ? 'it' : 'them'} off ${list} first.`
+        return `${words} ${fieldOf(error, 'exact') === true ? 'is' : 'are'} on ${list}. Take ${fieldOf(error, 'exact') === true ? 'it' : 'them'} off ${list} first.`
       }
       case 'RulesChanged':
-        return "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted."
+        return "The project's rules changed meanwhile. Make the change again."
       case 'AlwaysNotOffered':
-        return "That can't be kept as a rule for this request. Answer it once instead."
+        return "That can't be kept as a rule. Answer it once."
       case 'QuestionUnanswered':
         return 'Answer each question: pick an option, or write your own.'
       case 'NothingToWaitFor':
-        return "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again."
+        return "The agent didn't say when its limit resets. Pick another model, or try again."
       case 'NotHeld':
-        return "The step isn't waiting for its usage limit any more: it carried on, or was stopped."
+        return "The step isn't waiting for its usage limit any more."
       case 'AlreadyDelivered':
-        return "The agent already has that message, so it can't be taken back."
+        return 'The agent already has that message.'
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
-        const said = lastLine(text(error, 'stderr'))
-        return sentence(`git ${Array.isArray(args) ? String(args[0] ?? '') : ''} didn't work${said === '' ? '' : `: ${said}`}`)
+        const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
+        const said = saidByGit(text(error, 'stderr'))
+        if (said !== '') return sentence(`${command} didn't work: ${said}`)
+        // git said nothing: what Althar knows of how it ended.
+        if (fieldOf(error, 'timedOut') === true) {
+          const timeout = fieldOf(error, 'timeout')
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+        }
+        const signal = text(error, 'signal')
+        if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
+        const code = fieldOf(error, 'code')
+        return typeof code === 'number' ? `${command} failed with code ${code}, without saying why.` : `${command} didn't work.`
       }
       case 'CommandIdReused':
-        return 'That request was already used for something else. Try again.'
+        return 'Something went wrong. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
       case 'PushRefused': {
@@ -222,33 +270,61 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
+        if (why === 'fork_gone')
+          return `${remote}’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.`
+        if (why === 'unplaced')
+          return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
+        if (why === 'no_push_address')
+          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
+        const host = text(error, 'host')
+        const where = host === '' ? remote : host
+        if (why === 'forbidden')
+          return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`
+        if (why === 'protected')
+          return `${host === '' ? `The branch is protected, so ${remote} didn’t take the push.` : `The branch is protected on ${host}, so it didn’t take the push.`} Push to another branch or a fork, or ask its owners to let you push to it.`
+        if (why === 'unreachable')
+          return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
+        if (why === 'unanswered')
+          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+        if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
+        // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
+        if (host !== '')
+          return `${host} didn’t accept your sign-in, so nothing was pushed. Sign git in to ${host} from a terminal, then try again.`
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }
       case 'CantMerge': {
         const detail = text(error, 'detail')
-        return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
+        const files = fieldOf(error, 'files')
+        const said = {
+          detail,
+          into: text(error, 'into') === '' ? 'the default branch' : text(error, 'into'),
+          files: Array.isArray(files) ? files.filter((file): file is string => typeof file === 'string') : [],
+        }
+        return cantMerge[text(error, 'why') as CantMerge['why']]?.(said) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
         return text(error, 'message')
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.`
+        return `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
         return text(error, 'what') === 'branch'
-          ? 'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.'
+          ? 'The branch changed since you looked. Look again, then push.'
           : text(error, 'what') === 'folder'
-            ? 'What is in the task’s folder changed since you looked at it, so it stays. Have another look before you remove it.'
-            : 'The pull request changed since you looked at it. Have another look before you accept it.'
+            ? 'The task’s folder changed since you looked. Look again, then remove it.'
+            : 'The pull request changed since you looked. Look again, then accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
@@ -264,7 +340,7 @@ export const words = (
       case 'ReviewDraftIncomplete':
         return reviewIncomplete[text(error, 'missing') as ReviewDraftIncomplete['missing']]
       case 'OutwardUncertain':
-        return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
+        return 'That may have gone through. Check on the host before trying again.'
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
       // The keychain's own words, where main marked its refusal; anything else of its own — a file that won't write, a bad name, an empty reason — gets the generic sentence.
@@ -273,7 +349,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'CliSignedOut':
-        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this computer.`
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
       case 'CliUnanswered':
         return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
@@ -287,7 +363,24 @@ export const words = (
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
-  if (reason === 'PushRefused') return { reason, message, why: text(error, 'why') }
+  if (reason === 'PushRefused')
+    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+  // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
+  if (reason === 'GitFailed') {
+    const code = fieldOf(error, 'code')
+    const timeout = fieldOf(error, 'timeout')
+    const detail =
+      text(error, 'stderr').trim() === ''
+        ? ''
+        : pushDetailOf({
+            stderr: text(error, 'stderr'),
+            ...(typeof code === 'number' ? { code } : {}),
+            ...(text(error, 'signal') === '' ? {} : { signal: text(error, 'signal') }),
+            ...(fieldOf(error, 'timedOut') === true ? { timedOut: true } : {}),
+            ...(typeof timeout === 'number' ? { timeout } : {}),
+          })
+    return { reason, message, ...(detail === '' ? {} : { detail }) }
+  }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
@@ -313,7 +406,7 @@ const hostSaid = (host: string, reason: string, said: string) => {
     case 'not_found':
       return `${host} can't find it any more.`
     case 'rate_limited':
-      return `${host} is asking Althar to slow down. Try again in a little while.`
+      return `${host} is rate limiting. Try again in a little while.`
     case 'unreachable':
       return `Althar couldn't reach ${host}. Try again in a moment.`
     case 'invalid_response':
@@ -323,49 +416,61 @@ const hostSaid = (host: string, reason: string, said: string) => {
   }
 }
 
-/** Why Althar won't merge a task here, by reason. */
+/** A couple of files by name, the rest counted: a.ts, b.ts and 3 more. */
+const fewOf = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
+
+/** What a refused merge says of itself: the branch, and the files in the way. */
+interface MergeSaid {
+  readonly detail: string
+  readonly into: string
+  readonly files: ReadonlyArray<string>
+}
+
+/** Why Althar won't merge a task here, by reason: in a few words, a couple of files by name. */
 const cantMerge = {
   pull_request: () => 'The task has a pull request: merge it there.',
-  settled: () => 'The task is settled, so its branch stays as it is.',
+  settled: () => 'The task is settled.',
   changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
-  conflicts: (files: string) =>
-    `It conflicts with the default branch, in ${files}. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.`,
-  resolving: (files: string) =>
-    `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
-  busy: (where: string) =>
-    `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
-  submodule: (where: string) =>
-    `The merge moves the submodule at ${where}, which has changes not committed or isn’t at the commit the default branch has for it. Commit or put them away, or bring it along (git submodule update), then merge again.`,
-  unreadable: (detail: string) =>
-    `Althar couldn’t read the default branch’s checkout, or a submodule the merge moves, so nothing was merged. Where, and what git said:\n${detail}`,
-  untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
-  moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
-  missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
-} as const satisfies Record<CantMerge['why'], (detail: string) => string>
+  conflicts: ({ into, files, detail }) => `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}.`,
+  resolving: ({ into, files, detail }) =>
+    `It conflicts with ${into} in ${files.length > 0 ? fewOf(files) : detail}. The lead is resolving it.`,
+  busy: ({ into, files }) =>
+    files.length > 0
+      ? `Your ${into} checkout has uncommitted changes to ${fewOf(files)}.`
+      : `Your ${into} checkout has changes in the way.`,
+  submodule: ({ files, detail }) => `Submodule ${files[0] ?? detail} has uncommitted changes, or isn’t at the commit recorded for it.`,
+  unreadable: () => 'Couldn’t read the default branch’s checkout. Nothing was merged.',
+  untracked: ({ into, files }) =>
+    `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
+  moved: ({ detail }) => `${detail} moved meanwhile. Merge again.`,
+  missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+} as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {
-  working: () => "The task's work isn't done yet. Its pull request opens when it is.",
-  stopped: () => 'The task’s work stopped before it was done, so it has no pull request to open.',
-  settled: () => 'The task is settled, so its branch stays as it is.',
+  working: () => "The task's work isn't done yet.",
+  settled: () => 'The task is settled.',
   opened: () => 'The task already has its pull request.',
-  nothing: () => 'Every commit on the task’s branch is in a pull request already, so there’s nothing new to open one for.',
+  nothing: () => 'Every commit is in a pull request already.',
   uncommitted: (files: string) =>
-    `The lead left changes it didn’t commit${files === '' ? '' : `, in ${files}`}. Ask it to commit them or clear them away, then open the pull request again.`,
+    `The lead left changes it didn’t commit${files === '' ? '' : `, in ${files}`}. Ask it to commit them, then open the pull request again.`,
   conflicts: (files: string) =>
-    `The new commits don’t apply on the default branch as it is now: they conflict${files === '' ? '' : ` in ${files}`}. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.`,
+    `It conflicts with the default branch${files === '' ? '' : `, in ${files}`}. Ask the lead to merge the default branch in, then open the pull request again.`,
 } as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
-  merged: 'The task is merged, so it stays done.',
-  branch_gone: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+  merged: 'The task is merged.',
+  branch_gone: 'The task’s worktree and branch are gone.',
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
-  title_too_long: 'Keep the title short: what should change, in a few words.',
-  folder_in_use: 'Something runs from the task’s folder, or an agent works in it, so it stays. Stop it first, then remove the folder.',
-  folder_in_way:
-    'Something that isn’t the task’s worktree is where its folder goes, so the folder can’t come back there. Move it away, then try again.',
+  title_too_long: 'Keep the title to a few words.',
+  folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
+  folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */
@@ -400,6 +505,7 @@ const reviewIncomplete = {
 export const expected = new Set([
   'LaunchRefused',
   'AttachRefused',
+  'ScreenshotsRefused',
   'DraftClosed',
   'DraftUntitled',
   'ChangesClosed',
@@ -418,6 +524,7 @@ export const expected = new Set([
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
+  'RepositoryRefused',
   'ProjectRefused',
   'DocumentRefused',
   'ImageRefused',
@@ -440,55 +547,56 @@ export const expected = new Set([
 
 /** Why a note can't be kept as it is said, by reason. */
 const noteRefused: Readonly<Record<NoteRefused['why'], string>> = {
-  empty: 'A note needs some words. To take one out, remove it.',
-  long: `A note is a sentence or two: at most ${NOTE_LENGTH} characters.`,
-  full: `A project keeps at most ${NOTES_KEPT} notes. Remove one that no longer holds first.`,
+  empty: 'A note needs some words.',
+  long: `A note is at most ${NOTE_LENGTH} characters.`,
+  full: `A project keeps at most ${NOTES_KEPT} notes. Remove one first.`,
 }
 
 /** Why a document isn't shown, by reason. */
 const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
   not_markdown: 'Only markdown documents open here. Open the file in your editor.',
-  outside: 'This file isn’t in the task’s worktree, so Althar doesn’t show it.',
+  outside: 'This file isn’t in the task’s worktree.',
   too_large: 'This document is too large to show here. Open it in your editor.',
 }
 
 /** Why an image sent with a message isn't sent, by reason, of the image by its name. */
 const imageRefused = {
-  unsupported: (name) => `${name} isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.`,
-  too_large: (name) => `${name} is larger than ${MESSAGE_IMAGES.bytes / (1024 * 1024)} MB, so it can't be sent.`,
+  unsupported: (name) => `${name} isn't a PNG, JPEG, GIF or WebP image.`,
+  too_large: (name) => `${name} is over ${MESSAGE_IMAGES.bytes / (1024 * 1024)} MB.`,
   too_many: () => `A message can carry at most ${MESSAGE_IMAGES.count} images.`,
   missing: (name) => `${name} isn't kept any more. Add it again.`,
-  unkept: () => 'Althar has nowhere to keep images here, so none can be sent.',
+  unkept: () => 'Images can’t be sent here.',
 } as const satisfies Record<ImageRefused['reason'], (name: string) => string>
 
 /** Why a file or folder sent with a message isn't sent, by reason, of it by its name. */
 const fileRefused = {
-  too_large: (name) => `${name} is larger than ${MESSAGE_FILES.bytes / (1024 * 1024)} MB, so it can't be sent.`,
-  too_many_files: (name) => `${name} holds more than ${MESSAGE_FILES.entries.toLocaleString('en')} files, so it can't be sent.`,
+  too_large: (name) => `${name} is over ${MESSAGE_FILES.bytes / (1024 * 1024)} MB.`,
+  too_many_files: (name) => `${name} holds over ${MESSAGE_FILES.entries.toLocaleString('en')} files.`,
   too_many: () => `A message can carry at most ${MESSAGE_FILES.count} files and folders.`,
-  too_much: () =>
-    `A message's files can come to at most ${MESSAGE_FILES.total / (1024 * 1024)} MB together. Send some in a message of their own.`,
+  too_much: () => `A message's files come to at most ${MESSAGE_FILES.total / (1024 * 1024)} MB together.`,
   unreadable: (name) => `Althar couldn't read ${name}.`,
   missing: (name) => `${name} isn't there any more. Add it again.`,
-  nowhere: () => "The task's folder isn't ready on this computer, so files can't be sent to it yet.",
+  nowhere: () => "The task's folder isn't ready yet.",
 } as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {
   no_name: 'Give the project a name.',
-  last_repository: 'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
+  last_repository: 'A project needs a repository. Add another first.',
   no_role: "That isn't a role a repository can have.",
-  not_a_fork: "That repository isn't a fork, so its pull requests open on it.",
-  id_taken: "Althar couldn't make the project under the id its mark was drawn from. Close the tab and start again.",
+  not_a_fork: "That repository isn't a fork.",
+  no_upstream_access: "You can't push to the repository it was forked from yet. Its owners can give you access.",
+  id_taken: "Couldn't make the project. Close the tab and start again.",
+  bad_setup: 'Name each file from the repository’s root, inside it and not in .git, and give at most 20 commands.',
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */
 const accountRefused = {
   no_room: "Althar has nowhere to keep a new account's folder here. Choose a folder the agent signed in with instead.",
   not_a_folder: "That isn't a folder. Choose the folder the agent keeps the account's sign-in in.",
-  usual: "That's the agent's usual sign-in, its first account: it stays.",
+  usual: "That's the agent's usual sign-in: it stays.",
   taken: 'That folder is an account already.',
   no_name: 'Give the account a name.',
-  one: "This agent keeps its sign-in where every folder shares it, so it can't have a second account yet: sign its usual one in to the account you want.",
+  one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
 } as const satisfies Record<AccountRefused['reason'], string>

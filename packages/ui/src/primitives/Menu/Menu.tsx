@@ -1,5 +1,5 @@
 import { DropdownMenu as M } from 'radix-ui'
-import { createContext, type ReactElement, type ReactNode, useContext, useId, useState } from 'react'
+import { createContext, type ReactElement, type ReactNode, useContext, useId, useRef, useState } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -77,6 +77,8 @@ export function Menu({
 }: MenuProps) {
   const noteId = useId()
   const [said, setSaid] = useState<ReactNode>(null)
+  const [shown, setShown] = useState(defaultOpen ?? false)
+  const button = useRef<HTMLButtonElement>(null)
   const describing: Describing = { foot: descriptions === 'foot', show: setSaid, hide: () => setSaid(null) }
   return (
     <M.Root
@@ -85,11 +87,14 @@ export function Menu({
       onOpenChange={(next) => {
         // Opened again, it says nothing until an item is highlighted.
         setSaid(null)
+        setShown(next)
         onOpenChange?.(next)
       }}
       modal={false}
     >
-      <M.Trigger asChild>{trigger}</M.Trigger>
+      <M.Trigger asChild ref={button}>
+        {trigger}
+      </M.Trigger>
       <M.Portal>
         <M.Content
           /* Radix names the menu after its trigger, which would override the label: Effort, not Effort: High */
@@ -103,6 +108,16 @@ export function Menu({
           loop
           onCloseAutoFocus={(event) => {
             if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
+          }}
+          /*
+           * Going, it is inert: the pointer leaving an item as it stops taking
+           * the pointer would focus the menu, taking focus from where the
+           * chosen item put it, such as a field to type in.
+           */
+          inert={!(open ?? shown)}
+          /* Its button opens and closes it: pressed as the menu goes, it opens it again, which a dismissal would undo at once. */
+          onInteractOutside={(event) => {
+            if (event.target instanceof Node && button.current?.contains(event.target)) event.preventDefault()
           }}
           className={cx('ch-root', s.menu, className)}
           style={width ? { width } : undefined}

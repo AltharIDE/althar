@@ -110,14 +110,19 @@ describe('finding an agent’s command', () => {
     let found: { command: string; whose: 'theirs' | 'bundled' | 'althar' } | null = null
     const pointed = usingLocated(agents.opencode, () => found)
     expect(pointed.launch('node').command).toBe('opencode')
-    expect(pointed.signIn.login).toBe('opencode auth login')
+    expect(pointed.signIn.login).toBe('opencode auth login --standalone')
     found = { command: '/kept/opencode', whose: 'althar' }
     expect(pointed.launch('node')).toMatchObject({ command: '/kept/opencode', args: ['acp'] })
     expect(pointed.signIn.status?.('node').command).toBe('/kept/opencode')
+    expect(pointed.signIn.statusFallback?.('node')).toMatchObject({ command: '/kept/opencode', args: ['auth', 'list'] })
     expect(pointed.version?.('node').command).toBe('/kept/opencode')
-    expect(pointed.signIn.login).toBe('/kept/opencode auth login')
+    expect(pointed.usageLimits?.('node')).toMatchObject({
+      command: '/kept/opencode',
+      args: ['api', '--standalone', 'experimental.usage.limits'],
+    })
+    expect(pointed.signIn.login).toBe('/kept/opencode auth login --standalone')
     found = { command: 'opencode', whose: 'theirs' }
-    expect(pointed.signIn.login).toBe('opencode auth login')
+    expect(pointed.signIn.login).toBe('opencode auth login --standalone')
     const codex = usingLocated(agents.codex, () => found)
     expect(codex.launch('node').command).toBe('node')
     found = { command: '/device/codex', whose: 'theirs' }
@@ -144,8 +149,13 @@ describe('finding an agent’s command', () => {
       env: { A: 'b' },
     })
     expect(seen).toEqual([{ command: '/device/opencode', args: ['acp'] }])
+    // OpenCode 1.x's fallback status read runs there too, not in the sandbox.
+    expect(pointed.signIn.statusFallback?.('node').onDevice?.({ cwd: '/w', env: {} })).toMatchObject({
+      command: 'flatpak-spawn',
+      args: ['--host', '/device/opencode', 'auth', 'list'],
+    })
     // What the person runs to sign in names the same copy, where their shell finds it.
-    expect(pointed.signIn.login).toBe('/device/opencode auth login')
+    expect(pointed.signIn.login).toBe('/device/opencode auth login --standalone')
     // Codex's usage read runs on the device with the copy that is there, like its sign-in.
     const codexOut = usingLocated(agents.codex, () => ({ command: '/device/codex', whose: 'theirs', out })).usage?.run('node')
     expect(codexOut?.command).toBe('/device/codex')

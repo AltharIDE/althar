@@ -91,7 +91,14 @@ test('closes from the first screen, before any project', async () => {
     // The close really closes: it is the last window and there is no project yet, so the app goes with it.
     const closed = new Promise<void>((resolve) => page.on('close', () => resolve()))
     const exited = new Promise<void>((resolve) => electronApp.process().once('exit', () => resolve()))
-    await page.getByRole('button', { name: 'Close the window' }).click()
+    // The launch's veil is decoration over the first screen until the launch has opened, then lets the pointer through.
+    // Waiting for that is waiting for the window to be usable, as a person waits for the launch to open.
+    await page.waitForFunction(() => {
+      const veil = document.querySelector('[class*="veil"]')
+      return veil === null || getComputedStyle(veil).pointerEvents === 'none'
+    })
+    // The window goes as it is clicked, so there is nothing after the click to wait for.
+    await page.getByRole('button', { name: 'Close the window' }).click({ noWaitAfter: true })
     await closed
     await exited
   } finally {
@@ -102,11 +109,10 @@ test('closes from the first screen, before any project', async () => {
 test('maximizes and restores from the failure screen, before any project', async () => {
   test.skip(process.platform === 'darwin', 'macOS keeps the system menu bar and traffic lights')
   // The failure screen comes after the wait for the runtime's port, which never comes here.
-  test.setTimeout(60_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page } = await launch(home, { ALTHAR_NO_RUNTIME: '1' })
   try {
-    await expect(page.getByRole('button', { name: 'Maximize the window' })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Maximize the window' })).toBeVisible()
     // Catch what the button asks for, and tell the window, so the third button's name is judged.
     await electronApp.evaluate(({ BrowserWindow }) => {
       globalThis.windowCalls = []

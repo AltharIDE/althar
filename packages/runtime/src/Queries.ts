@@ -1,3 +1,4 @@
+import { errandLines } from './Errands'
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -37,25 +38,33 @@ import {
   FieldAnswer,
   type OutputText,
   PushRequestItem,
+  TaskAskItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
+  type ScreenshotsOnChange,
+  type TaskFindings,
 } from '@althar/contracts'
-import { Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
+import { ModelFacts } from './ModelFacts'
+import { PlanUsage } from './PlanUsage'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
-import { questionTitle } from './Questions'
-import { Changes } from './Changes'
+import { backgroundOf, questionTitle } from './Questions'
+import { Changes, STUCK_AFTER } from './Changes'
 import { Coordinator } from './Coordinator'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
-import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverifiedIn } from './evidence'
+import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
+import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
+import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -63,10 +72,12 @@ import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import type { ChangeTarget } from '@althar/domain'
+import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
+import { spendingOf } from './Spending'
 import { actionsOf, standingOf } from './Tasks'
 
 /*
@@ -229,9 +240,11 @@ const questionOf = (payload: unknown) => ({
 
 /** An agent's question as a call shows it: what it asks, why, and who asks. */
 const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; readonly model?: string | null }) => {
-  const why = text(payload, 'why')
+  const asked = questionOf(payload)
+  // What the agent said before, else what its question says past its headline.
+  const why = text(payload, 'why') || backgroundOf(asked.fields[0]?.question ?? asked.message)
   return {
-    ...questionOf(payload),
+    ...asked,
     ...(why === '' ? {} : { why }),
     ...(asker.agentId == null ? {} : { askedBy: { agentId: asker.agentId, model: asker.model ?? null } }),
   }
@@ -259,6 +272,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   const service = field(payload, 'service')
+  const model = field(payload, 'model')
+  const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -290,6 +305,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       : {}),
     ...(limit === undefined ? {} : { limit }),
     ...(typeof service === 'string' ? { service } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof provider === 'string' ? { provider } : {}),
   }
 }
 
@@ -379,6 +396,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
           },
     ...(target === '' ? {} : { target }),
     ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
+    ...(field(value, 'queued') === true ? { queued: true } : {}),
     head: text(value, 'headSha') || null,
     listening,
     localHead: null,
@@ -394,6 +412,7 @@ const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
+const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -522,17 +541,20 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           findings: (Array.isArray(findings) ? findings : []).map((finding) => {
             const severity = text(finding, 'severity')
             const line = field(finding, 'line')
+            const title = text(finding, 'title')
             return {
               severity: severity === 'blocking' || severity === 'major' || severity === 'nit' ? severity : 'minor',
               file: text(finding, 'file') || null,
               line: typeof line === 'number' ? line : null,
               claim: text(finding, 'claim'),
+              ...(title === '' ? {} : { title }),
             }
           }),
           built: builtIn(field(content, 'built')),
           evidence: evidenceOf(field(content, 'evidence')),
           unverified: unverifiedIn(field(content, 'unverified')),
           ...descriptionsIn(field(content, 'descriptions')),
+          ...keptViewsIn(field(content, 'keptViews')),
           agentId: agentId === '' ? null : agentId,
         },
       }
@@ -598,6 +620,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
+          name: text(content, 'name') || null,
           where: text(content, 'where'),
           // A branch's or a pull request's run (ADR-066): what it is at a glance, and what was asked for, to run it again.
           branch: text(content, 'branch') || null,
@@ -647,6 +670,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
       })
+    // The coordinator asking the person to move a task on, written whole as it is asked and answered.
+    case 'task_ask':
+      return Option.match(decodeTaskAsk(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'task_ask', content: asked }),
+      })
     case 'setup': {
       const ended = field(content, 'ended')
       const code = field(ended, 'code')
@@ -685,7 +714,20 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Agents
+  | ModelFacts
+  | PlanUsage
+  | Sessions
+  | Coordinator
+  | Changes
+  | PullRequestScreenshots
+  | RuntimeConfig
+  | Artifacts
+  | Launches
+  | Busy
 
 /** The lines of what waits one read has read, by project: a board of queued cards reads its line once, not once a card. */
 const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>('@althar/runtime/Queries/LinesRead', {
@@ -708,8 +750,10 @@ export class Queries extends Context.Service<
     output(threadId: string, itemId: string): Effect.Effect<OutputText, SqlError.SqlError | NotFound>
     /** A markdown document an agent in a thread wrote, as it is now in the task's worktrees. */
     document(threadId: string, path: string): Effect.Effect<DocumentText, SqlError.SqlError | NotFound | DocumentRefused>
-    /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
-    fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
+    /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, as a finding may name. */
+    fileDiff(taskId: string, path: string, untouched?: boolean): Effect.Effect<FileDiff, unknown>
+    /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
+    findings(taskId: string, review?: string): Effect.Effect<TaskFindings, unknown>
     /** Where a thread's agent works, for the code it names: its task's worktrees here, or the project's repositories at their default branches. */
     codeRoots(threadId: string): Effect.Effect<CodeRoots, SqlError.SqlError | NotFound>
     /** What the names in a thread's messages name there, each message as it was when said where it is an item of the thread. */
@@ -1031,8 +1075,9 @@ export class Queries extends Context.Service<
             projectId: string
             workspaceId: string
             state: string
+            changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
               w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -1122,21 +1167,50 @@ export class Queries extends Context.Service<
        * Where a task's branch stands on its repository's remote, for pushing
        * it without a connection: the remote it goes to, whether that has the
        * branch, how many commits of it it doesn't have, and the host's page
-       * for a new pull request from it. None without a remote.
+       * for a new pull request from it. None without a remote. What it has
+       * is what it said when last asked at this commit (`askRemotes`); not
+       * asked, only what git or Althar's own push noted here, which can miss
+       * a push made elsewhere: so then a count above none isn't known.
        */
-      const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
+      const branchRemoteOf = (
+        root: string,
+        worktree: string,
+        branch: string,
+        base: string,
+        head: string,
+        baseCommit: string | null,
+        target: ChangeTarget | null,
+      ) =>
         Effect.gen(function* () {
-          const remote = yield* remoteOf(root, base)
+          const remote = yield* branchRemoteIn(root, base, target)
           if (remote === null) return null
-          const [there = null] = yield* commitsOf(root, [`refs/remotes/${remote}/${branch}`])
-          const from = there ?? baseCommit
-          const ahead = from === null || from === head ? 0 : yield* commitsAhead(worktree, from, head).pipe(Effect.orElseSucceed(() => 0))
+          const asked = (yield* (yield* Changes).askedAt(worktree, branch)) === head
+          const [there = null, pushed = null] = yield* commitsOf(root, [
+            `refs/remotes/${remote}/${branch}`,
+            ...(asked ? [] : [`${PUSHED}${branch}`]),
+          ])
+          // Its own commits, since it started, on nothing the remote is known to have: what a default branch merged in
+          // brought, the remote has already, and the branch where it pushed it, Althar noted.
+          const counted =
+            head === there || head === pushed
+              ? 0
+              : yield* gitOutcome(
+                  worktree,
+                  'rev-list',
+                  '--count',
+                  head,
+                  '--not',
+                  ...(baseCommit === null ? [] : [baseCommit]),
+                  `--remotes=${remote}`,
+                  ...(pushed === null ? [] : [pushed]),
+                ).pipe(Effect.map(({ code, stdout }) => (code === 0 ? Number(stdout) || 0 : null)))
+          const ahead = asked || counted === 0 ? counted : null
           // Where the branch goes: the remote's push URL, which can be a fork of the one it fetches from.
           const url = (yield* namedRemotes(root, 'push').pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
           return {
             name: remote,
             branch,
-            pushed: there !== null,
+            pushed: there !== null || pushed !== null,
             ahead,
             newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
           }
@@ -1219,6 +1293,7 @@ export class Queries extends Context.Service<
                                     worktree.defaultBranch,
                                     head,
                                     worktree.baseCommit,
+                                    worktree.changeTarget,
                                   ),
                           },
                         ]
@@ -1359,16 +1434,18 @@ export class Queries extends Context.Service<
         })
 
       /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */
-      const diffOf = (taskId: string, path: string) =>
+      const diffOf = (taskId: string, path: string, untouched = false) =>
         Effect.gen(function* () {
           const worktrees = yield* worktreesOf(taskId)
           const slash = path.indexOf('/')
           const named = worktrees.length > 1 ? worktrees.find((worktree) => worktree.slug === path.slice(0, slash)) : worktrees[0]
           const inside = worktrees.length > 1 ? path.slice(slash + 1) : path
           if (named === undefined || named.baseCommit === null) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          const diff = existsSync(named.path)
-            ? yield* fileDiff(named.path, yield* baseOf(named.path, named.baseRef, named.baseCommit), inside)
-            : yield* removedDiff(named, inside)
+          const diff = !existsSync(named.path)
+            ? yield* removedDiff(named, inside)
+            : untouched
+              ? yield* unchangedFileDiff(named.path, inside)
+              : yield* fileDiff(named.path, yield* baseOf(named.path, named.baseRef, named.baseCommit), inside)
           return worktrees.length > 1
             ? {
                 ...diff,
@@ -1379,6 +1456,28 @@ export class Queries extends Context.Service<
                 },
               }
             : diff
+        })
+
+      /** What a task's reviews found, placed in its worktrees here as they are now. */
+      const findingsOf = (taskId: string, review?: string) =>
+        Effect.gen(function* () {
+          const worktrees = (yield* worktreesOf(taskId)).filter((worktree) => worktree.baseCommit !== null && existsSync(worktree.path))
+          const placed = yield* Effect.forEach(
+            worktrees,
+            (worktree) =>
+              Effect.gen(function* () {
+                const base = yield* baseOf(worktree.path, worktree.baseRef, worktree.baseCommit ?? '')
+                const changed = yield* changedFiles(worktree.path, base).pipe(Effect.orElseSucceed(() => []))
+                return {
+                  slug: worktree.slug,
+                  path: worktree.path,
+                  workspaceId: worktree.workspaceId,
+                  changed: new Set(changed.map((file) => file.path)),
+                }
+              }),
+            { concurrency: 'unbounded' },
+          )
+          return yield* taskFindingsOf(taskId, placed, review)
         })
 
       /** Where a folder really is, as an agent may write it: its links followed. */
@@ -1500,8 +1599,9 @@ export class Queries extends Context.Service<
             snapshot: string
             listening: number
             connectionId: string | null
+            partOf: number
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
             ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
@@ -1534,6 +1634,12 @@ export class Queries extends Context.Service<
               container: text(kept, 'container') || null,
             }
           })()
+          // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
+          const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
+          // How its screenshots stand on each open pull request whose host takes them (ADR-077).
+          const screenshots = links.some((link) => link.kind === 'change')
+            ? yield* Effect.flatMap(PullRequestScreenshots, (all) => all.onChanges(taskId))
+            : new Map<string, ScreenshotsOnChange>()
           const changes = yield* Effect.forEach(
             links.flatMap((link) => {
               const found = link.kind === 'change' ? changeOf(parse(link.snapshot), link.product, link.listening === 1) : null
@@ -1567,14 +1673,27 @@ export class Queries extends Context.Service<
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
                         b.created_at, b.rowid
                       LIMIT 1`
-                        if (here === undefined || !existsSync(here.path)) return change
-                        return { ...change, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
+                        const held = pushing?.get(change.url)
+                        const pictures = screenshots.get(change.url)
+                        const shown = {
+                          ...change,
+                          ...(held === undefined ? {} : { pushing: held }),
+                          ...(pictures === undefined ? {} : { screenshots: pictures }),
+                        }
+                        if (here === undefined || !existsSync(here.path)) return shown
+                        return { ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
                       }),
                 ),
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
+          return {
+            issue,
+            issueConnection: issueRow?.connectionId ?? null,
+            // It does only part of its issue: its merge comments rather than closing it.
+            ...(issueRow?.partOf === 1 ? { issuePartOf: true } : {}),
+            changes,
+          }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
@@ -1618,10 +1737,9 @@ export class Queries extends Context.Service<
             unshipped:
               links.changes.length === 0
                 ? 0
-                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId)).pipe(Effect.orElseSucceed(() => []))).reduce(
-                    (sum, one) => sum + one.commits.length,
-                    0,
-                  ),
+                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId, { kept: true })).pipe(
+                    Effect.orElseSucceed(() => []),
+                  )).reduce((sum, one) => sum + one.commits.length, 0),
           }
         })
 
@@ -1704,6 +1822,31 @@ export class Queries extends Context.Service<
        * one long unread is read from git again.
        */
       const settledKinds = new Map<string, { readonly as: string; readonly kind: TaskCard['kind'] }>()
+
+      /** How long a task is between agents, or its lead's commits on their way up, before it is the person's (`betweenAgents`). */
+      const betweenMs = config.betweenAgents === undefined ? BETWEEN_AGENTS_MS : Duration.toMillis(config.betweenAgents)
+
+      /**
+       * Whether Althar no longer sees the checks on a task's pull request's head through: they have run longer than it waits for
+       * them, or it gave up on them so, or its host won't show them (ADR-041), when what it last read of them never changes.
+       */
+      const ranTooLong = (taskId: string, head: string | null) =>
+        Effect.gen(function* () {
+          if (head === null) return false
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ since: string | null; stuck: number }>`
+            SELECT
+              (SELECT min(o.observed_at) FROM observations o JOIN external_links l ON l.id = o.subject_id
+                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change' AND o.kind = 'checks_running'
+                AND json_extract(o.payload, '$.id') = ${`running:${head}`}) AS since,
+              EXISTS (SELECT 1 FROM observations o JOIN external_links l ON l.id = o.subject_id
+                WHERE o.subject_type = 'external_link' AND l.task_id = ${taskId} AND l.kind = 'change'
+                AND json_extract(o.payload, '$.id') IN (${`stuck:${head}`}, ${`unreadable:${head}`})
+                AND o.kind IN ('checks_stuck', 'checks_unreadable')) AS stuck`
+          if (row === undefined) return false
+          const limit = Duration.toMillis(config.checksStuck ?? STUCK_AFTER)
+          return row.stuck === 1 || (row.since !== null && (yield* Clock.currentTimeMillis) - Date.parse(row.since) >= limit)
+        })
       const SETTLED_KEPT = 1_000
 
       /** Whether a task has made something on its branch: commits, or changes not committed yet, its evidence aside. */
@@ -1764,9 +1907,10 @@ export class Queries extends Context.Service<
             FROM tasks k WHERE k.id = ${taskId}`
           const after =
             shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
-              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
+              ? yield* (yield* Changes).unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{
+            projectId: string
             threadId: string
             title: string
             slug: string
@@ -1778,8 +1922,10 @@ export class Queries extends Context.Service<
             planState: string | null
             parameters: string | null
             startsAt: string | null
+            proposedAt: string | null
             runState: string | null
             runAt: string | null
+            attemptAt: string | null
             step: string | null
             waiting: number
             review: string | null
@@ -1787,6 +1933,9 @@ export class Queries extends Context.Service<
             leadModel: string | null
             leadEffort: string | null
             firstSession: string | null
+            lastEnded: string | null
+            turns: number
+            settingUp: number | null
             starting: number
             held: string | null
             heldFor: string | null
@@ -1795,9 +1944,11 @@ export class Queries extends Context.Service<
             turnWaits: number
             runPlan: string | null
           }>`
-            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
-              p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
+            SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
+              p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
+              -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
+              (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
@@ -1819,6 +1970,15 @@ export class Queries extends Context.Service<
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
               (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
+              -- When its last agent went: for a moment after, with nothing that says why, the next is on its way (DEV-173).
+              (SELECT max(s.ended_at) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = k.id)
+                AS last_ended,
+              -- Whether its lead has had a turn yet: before its first, no agent has worked on it.
+              (SELECT count(*) FROM turn_deliveries d WHERE d.thread_id = t.id) AS turns,
+              -- Its folder being set up (Setups.ts): whether by the setup kept for its repository (1), else the install its
+              -- lockfile names (0); null for none under way.
+              (SELECT json_extract(i.content, '$.kept') FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'setup'
+                AND json_extract(i.content, '$.ended') IS NULL ORDER BY i.sequence DESC LIMIT 1) AS setting_up,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'admitted')
@@ -1840,6 +2000,10 @@ export class Queries extends Context.Service<
           const hands =
             task.runState === 'succeeded' ? yield* (yield* Changes).inHands(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const seeing = hands !== null && !hands.given
+          // Checks that failed, whoever has looked, are its lead's to see through: under way while the checks on its fix run, and
+          // why they are the person's where they are (ADR-070).
+          const fixing = task.state === 'open' ? yield* (yield* Changes).fixing(taskId).pipe(Effect.orElseSucceed(() => null)) : null
+          const checksRun = (seeing && hands.running) || fixing?.running === true
           const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
@@ -1879,22 +2043,50 @@ export class Queries extends Context.Service<
               : yield* sql<{ state: string }>`
                   SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
           const cutShort = lastTurn?.state === 'interrupted' && task.held === null
+          // Before its lead's first turn no agent has worked on it: its folder still being set up, or its plan started, it is
+          // under way, its lead on its way, never stopped. Its first turn waits for the setup.
+          const settingUp = task.turns === 0 && task.settingUp !== null
+          const unstarted = task.turns === 0 && (task.planState === 'accepted' || task.runState === 'running')
+          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
+          // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
+          const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
+          // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
+          const going = task.runState === 'succeeded' ? byItself(shown) : null
+          // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
+          // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
+          const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
+          // Its last agent gone a moment ago, no turn of its cut short and nothing that says why: the next is on its way, as a step
+          // is started again or the call that says why comes, not stopped. Sessions reads its card again once the moment is over.
+          const between =
+            !busy &&
+            !queued &&
+            Option.isNone(lead) &&
+            (task.runState === null || task.runState === 'running') &&
+            betweenAgents(task.lastEnded, yield* Clock.currentTimeMillis, betweenMs) &&
+            (yield* sql<{ state: string }>`
+              SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`)[0]
+              ?.state !== 'interrupted'
+          // Its round over, Althar opening its next pull request by itself: under way until it opens or can't (ADR-034).
+          const opening = yield* (yield* Changes).openingNext(taskId)
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
             // A call waiting on the person, and work under way, come before anything else (ADR-034): work sent back isn't ready
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
-            if (busy || queued || resolving !== undefined) return 'running'
+            if (busy || queued || resolving !== undefined || opening) return 'running'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
             // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-051).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
+            // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
+            // conflict round whose merge they fail on handed them back, its lead not told again.
+            const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
+            if (task.runState === 'succeeded') return checksRun || withLead || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
-            return (working && !cutShort) || task.held !== null ? 'running' : 'stopped'
+            return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
           })()
           // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it.
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null ? 'kept' : ready
@@ -1904,12 +2096,29 @@ export class Queries extends Context.Service<
             phase !== 'stopped'
               ? undefined
               : yield* Effect.gen(function* () {
+                  // Suspended, its run stopped when its latest attempt ended: what stopped it is the turn that attempt ended in, not
+                  // one its lead was sent after without the run carried on, so a later turn doesn't make it stopped "just now".
+                  // Who suspended it is on record: Althar, as an automation's run out of time, or the coordinator, is no one's call.
+                  const [suspended] =
+                    task.runState === 'suspended'
+                      ? yield* sql<{ endedAt: string | null; actorId: string | null }>`
+                          SELECT
+                            (SELECT a.ended_at FROM run_attempts a WHERE a.run_id = r.id ORDER BY a.attempt_number DESC LIMIT 1) AS ended_at,
+                            (SELECT e.actor_id FROM record_events e WHERE e.aggregate_type = 'run' AND e.aggregate_id = r.id AND e.type = 'run.suspended'
+                              ORDER BY e.sequence DESC LIMIT 1) AS actor_id
+                          FROM runs r WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+                      : []
+                  const until = suspended?.endedAt ?? null
+                  if (suspended?.actorId === instance.systemId || suspended?.actorId === instance.coordinatorId)
+                    return { by: 'althar' as const, at: until ?? task.runAt }
                   const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
                     SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
-                    WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+                    WHERE thread_id = ${task.threadId} AND (${until} IS NULL OR requested_at <= ${until})
+                    ORDER BY requested_at DESC, rowid DESC LIMIT 1`
                   const [run] = yield* sql<{ endedAt: string | null }>`
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
-                  const at = turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
+                  // Null where nothing says when: the card then shows no time.
+                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
@@ -1941,8 +2150,6 @@ export class Queries extends Context.Service<
           const implement = planned.find((step) => step.key === 'implement')
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
-          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
-          const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
           // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
           // until it opens again.
@@ -1958,11 +2165,16 @@ export class Queries extends Context.Service<
           for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           return {
             taskId,
+            errands: yield* errandLines(task.projectId, taskId),
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,
             phase,
             ...(stopped === undefined ? {} : { stopped }),
+            // Stopped, with its pull request ready to merge as it is: still the person's to accept, next to Carry on.
+            ...(phase === 'stopped' && isMergeable(shown) ? { mergeable: true } : {}),
+            // Its folder being set up before its lead's first turn: the install its lockfile names, or the setup kept for it.
+            ...(settingUp ? { settingUp: task.settingUp === 1 ? ('kept' as const) : ('install' as const) } : {}),
             kind,
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,
@@ -1974,6 +2186,9 @@ export class Queries extends Context.Service<
                     id: task.planId,
                     steps: planned,
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
+                    ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
+                      ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
+                      : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
@@ -2008,11 +2223,11 @@ export class Queries extends Context.Service<
                   ? resolving.checks
                     ? 'checks'
                     : 'conflict'
-                  : seeing
-                    ? busy || !hands.running
+                  : seeing || fixing?.open === true
+                    ? busy || !checksRun
                       ? 'checks'
                       : 'checks_running'
-                    : null),
+                    : goes),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
@@ -2020,7 +2235,7 @@ export class Queries extends Context.Service<
             leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
             leadEffort,
             branch: task.branch,
-            startedAt: task.runAt ?? task.firstSession,
+            startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
@@ -2034,6 +2249,8 @@ export class Queries extends Context.Service<
                 ? { continues: true, place: line.place }
                 : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            // Its checks fail, and its lead brought them to the person, or spent its tries: why, on its card.
+            ...(fixing?.why != null && phase === 'ready' ? { checksBack: fixing.why } : {}),
             // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
@@ -2283,7 +2500,7 @@ export class Queries extends Context.Service<
             looked: string | null
           }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
           const looked = device?.looked ?? null
-          const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
+          const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
             WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (
@@ -2623,6 +2840,8 @@ export class Queries extends Context.Service<
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
           const graph = yield* Effect.option(graphFor(head.projectId, head.taskId, threadId))
+          // Looked at, its branches' remotes are asked where they are, and it is read again once they say.
+          if (page.fresh === true) yield* (yield* Changes).askRemotes(head.taskId)
           // What git says of its worktrees, and its host, read at the same time.
           const [said, host] = yield* Effect.all(
             [gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
@@ -2630,9 +2849,12 @@ export class Queries extends Context.Service<
               concurrency: 'unbounded',
             },
           )
+          // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
+          const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {
@@ -2649,8 +2871,11 @@ export class Queries extends Context.Service<
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              ...(card?.stopped == null ? {} : { stopped: card.stopped }),
+              ...(card?.mergeable === true ? { mergeable: true as const } : {}),
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              checksBack: card?.checksBack ?? null,
               conflictUnsent: card?.conflictUnsent ?? null,
               conflictUnchecked: card?.conflictUnchecked ?? null,
               madeChangeAt: head.madeChangeAt,
@@ -2731,9 +2956,14 @@ export class Queries extends Context.Service<
             [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
             { concurrency: 'unbounded' },
           )
+          // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
+          const midnight = new Date(yield* Clock.currentTimeMillis)
+          midnight.setHours(0, 0, 0, 0)
+          const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: projectId, name: project.name },
             session,
             suggested,
@@ -2805,7 +3035,8 @@ export class Queries extends Context.Service<
             ),
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
-        fileDiff: (taskId, path) => run(diffOf(taskId, path)),
+        fileDiff: (taskId, path, untouched) => run(diffOf(taskId, path, untouched)),
+        findings: (taskId, review) => run(findingsOf(taskId, review)),
         codeRoots: (threadId) => run(codeRoots(threadId)),
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>

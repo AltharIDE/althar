@@ -8,6 +8,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { thisDevice } from '../src/device'
 import { DICTATED, Sessions } from '../src/Sessions'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -76,7 +77,7 @@ describe('an agent taking a thread over', () => {
         assert.include(told, 'You are taking over a task, in the same worktree. Its record so far is below.')
         assert.include(
           told,
-          `Writing in the repository is fine: its work is on a branch of its own, ${created.branch}, which stays on this computer. Commit there as on any task.`,
+          `Writing in the repository is fine: its work is on a branch of its own, ${created.branch}, which stays on ${thisDevice()}. Commit there as on any task.`,
         )
       }).pipe(Effect.provide(runtime())),
   )

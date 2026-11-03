@@ -36,6 +36,7 @@ const OPS: NewProjectFolder = {
   remote: 'northwind/ops',
 }
 const LOCAL: NewProjectFolder = { id: 'notes', name: 'notes', where: '~/notes', host: null, remote: null }
+const FRESH: NewProjectFolder = { id: 'fresh', fresh: true, name: 'northwind', where: '~/code/northwind' }
 
 const FOUND: NewProjectFound = {
   like: 'Northwind',
@@ -67,6 +68,7 @@ const ARGS = {
   onInkChange: fn(),
   onRemove: fn(),
   onChoose: fn(),
+  onStartFresh: fn(),
   onDrop: fn(),
   onAdd: fn(),
   onConnect: fn(),
@@ -115,6 +117,9 @@ export const Named: Story = {}
 
 /** Just opened: no name, so no mark yet, and what is found is offered as it is. */
 export const Unnamed: Story = { args: { name: '', found: { like: null, first: FOUND.more, more: [] } } }
+
+/** Nothing on this Mac to offer: where the folders will be, with the two ways to add one. */
+export const NothingFound: Story = { args: { name: 'Northwind Ops', found: { like: null, first: [], more: [] } } }
 
 /** Still looking on this Mac: nothing offered yet. */
 export const Looking: Story = { args: { found: null } }
@@ -190,6 +195,28 @@ export const AddingByKeyboard: Story = {
   },
 }
 
+/** Starting from nothing: a new repository, named after the project, made as the project is. */
+export const Fresh: Story = { args: { folders: [FRESH], found: { like: null, first: FOUND.more, more: [] } } }
+
+/** A new repository beside a repository read. */
+export const FreshBeside: Story = { args: { folders: [APP, FRESH], found: { ...FOUND, first: FOUND.first.slice(1) } } }
+
+/** New repository, pressed before the project has a name: the name comes first, as the repository is named after it. */
+export const FreshUnnamed: Story = {
+  render: (args) => <Forming onStartFresh={args.onStartFresh} />,
+  args: { onStartFresh: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'New repository…' }))
+    await expect(c.getByRole('alert')).toHaveTextContent('Name the project first.')
+    await expect(c.getByRole('textbox', { name: 'Name' })).toHaveFocus()
+    await expect(args.onStartFresh).not.toHaveBeenCalled()
+    await userEvent.type(c.getByRole('textbox', { name: 'Name' }), 'Northwind')
+    await userEvent.click(c.getByRole('button', { name: 'New repository…' }))
+    await expect(args.onStartFresh).toHaveBeenCalledOnce()
+  },
+}
+
 /** Create, pressed with something missing, says what, and goes to it: the name, then a folder. */
 export const Missing: Story = {
   render: (args) => <Forming onCreate={args.onCreate} />,
@@ -202,7 +229,7 @@ export const Missing: Story = {
     await userEvent.type(c.getByRole('textbox', { name: 'Name' }), 'Northwind')
     await expect(c.queryByRole('alert')).toBeNull()
     await userEvent.click(c.getByRole('button', { name: /Create Northwind/ }))
-    await expect(c.getByRole('alert')).toHaveTextContent('Add a folder first.')
+    await expect(c.getByRole('alert')).toHaveTextContent('Add a folder, or start a new repository.')
     await expect(c.getByRole('button', { name: 'Choose a folder…' })).toHaveFocus()
     await expect(args.onCreate).not.toHaveBeenCalled()
   },
@@ -287,10 +314,12 @@ export const AllStates: Story = {
       cells={[
         { state: 'unnamed', node: <NewProject {...args} name="" found={{ like: null, first: FOUND.more, more: [] }} /> },
         { state: 'named', node: <NewProject {...args} /> },
+        { state: 'nothing found', node: <NewProject {...args} {...NothingFound.args} /> },
         { state: 'looking', node: <NewProject {...args} found={null} /> },
         { state: 'reading', node: <NewProject {...args} {...Reading.args} /> },
         { state: 'read', node: <NewProject {...args} {...Read.args} /> },
         { state: 'local and shared', node: <NewProject {...args} {...LocalAndShared.args} /> },
+        { state: 'a new repository', node: <NewProject {...args} {...Fresh.args} /> },
         { state: 'making it', node: <NewProject {...args} {...Creating.args} /> },
         { state: 'couldn’t make it', node: <NewProject {...args} {...Failed.args} /> },
         { state: 'in another ink', node: <NewProject {...args} {...Read.args} ink={ProjectInk.Slate} /> },

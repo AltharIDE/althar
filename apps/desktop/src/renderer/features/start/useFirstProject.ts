@@ -141,12 +141,12 @@ export const useFirstProject = (): FirstProjectModel => {
   const make = useCallback(async () => {
     if (busy.current) return null
     if (chosen.length === 0) {
-      setError('Tick a repository for the project first.')
+      setError('Tick a repository, or add a folder.')
       return null
     }
     const [inside] = chosen.length > 1 ? chosen.flatMap(({ name, added }) => (added?.insideOf ? [{ name, of: added.insideOf }] : [])) : []
     if (inside !== undefined) {
-      setError(`${inside.name} is a folder inside ${inside.of}: on its own it makes a project, but with others, add ${inside.of} itself.`)
+      setError(`${inside.name} is inside ${inside.of}. Add ${inside.of} instead.`)
       return null
     }
     busy.current = true

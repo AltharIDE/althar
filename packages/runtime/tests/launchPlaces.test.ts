@@ -8,6 +8,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { thisDevice } from '../src/device'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
@@ -137,7 +138,7 @@ describe('a project of several repositories', () => {
       // Of the default branch, with another repository named, the same.
       assert.deepInclude(
         yield* Effect.flip(launches.start({ projectId, taskId: null, runnableId: tests.id, repository: 'web', threadId: null })),
-        { why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' },
+        { why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` },
       )
     }).pipe(Effect.provide(withQueries())),
   )
@@ -186,18 +187,18 @@ describe('a project whose repositories are not on this computer', () => {
       yield* sql`DELETE FROM repository_locations WHERE project_id = ${projectId}`
       assert.deepInclude(yield* Effect.flip(launches.start({ projectId, taskId: null, threadId: null })), {
         why: 'elsewhere',
-        message: 'The project has no repository on this computer to run.',
+        message: `The project has no repository on ${thisDevice()} to run.`,
       })
       assert.deepInclude(
         yield* Effect.flip(launches.keep({ projectId, run: { command: 'make', setup: null }, actorId: instance.personId })),
         {
           why: 'elsewhere',
-          message: 'The project has no repository on this computer to keep a way to run.',
+          message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
         },
       )
       assert.deepInclude(
         yield* Effect.flip(launches.keepRunnable({ projectId, name: 'Docs', command: 'make docs', actorId: instance.personId })),
-        { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' },
+        { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` },
       )
       assert.lengthOf(yield* launches.runnables(projectId, null), 0)
       assert.strictEqual(
@@ -230,7 +231,7 @@ describe('a run that ends at once', () => {
   )
 
   // Not on Windows, which ends a process by no signal.
-  it.live.skipIf(process.platform === 'win32')('says how one killed by a signal ended, with no exit code', () =>
+  it.live.skipIf(process.platform === 'win32')('says which signal killed one, and that it crashed where it did', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
       const instance = yield* Instance
@@ -238,7 +239,18 @@ describe('a run that ends at once', () => {
       yield* launches.keep({ projectId, run: { command: 'kill -9 $$', setup: null }, actorId: instance.personId })
       assert.match(
         yield* callTool(access('coordinator', projectId), 'run_project', {}),
-        /^`kill -9 \$\$` in a fresh copy of the default branch ended at once\. Its last lines:\n\n\(nothing\)\n/,
+        /^`kill -9 \$\$` in a fresh copy of the default branch ended at once, killed by SIGKILL, and printed nothing, on stdout or stderr\.\n/,
+      )
+      for (const ended of yield* launches.ofProject(projectId)) yield* launches.clear(ended.id)
+      // What it runs crashing under the shell: the shell says so by its exit code, where it doesn't become what it runs.
+      yield* launches.keep({
+        projectId,
+        run: { command: `node -e "process.kill(process.pid, 'SIGSEGV')"`, setup: 'true' },
+        actorId: instance.personId,
+      })
+      assert.match(
+        yield* callTool(access('coordinator', projectId), 'run_project', {}),
+        /ended at once, (with exit code 139: )?killed by SIGSEGV, so it crashed/,
       )
     }).pipe(Effect.provide(withQueries())),
   )

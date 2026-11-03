@@ -142,8 +142,7 @@ const workspacesOf = (taskId: string) =>
   })
 
 /** Waits until each of a task's worktrees has been set up. */
-const setUp = (taskId: string, limit?: Duration.Duration) =>
-  until(workspacesOf(taskId), (rows) => rows.length > 0 && rows.every((row) => row.setup !== null), limit)
+const setUp = (taskId: string) => until(workspacesOf(taskId), (rows) => rows.length > 0 && rows.every((row) => row.setup !== null))
 
 /** The setup items in a thread, as their content. */
 const setupItems = (threadId: string) =>
@@ -300,23 +299,46 @@ describe('what sets up a worktree', () => {
 
   it('tells the lead what ran, and for what failed, why and how it ended, by repository where there are several', () => {
     const done: SetUp = { at: '2026-10-11T10:00:00.000Z', command: INSTALL, code: 0, timedOut: false, last: null }
-    const one = toldOf([{ name: 'meridian', setUp: done }], false)
+    const one = toldOf([{ name: 'meridian', setUp: done, recorded: false, checkout: '/code/meridian' }], false)
     assert.include(one, `When the worktree was made, Althar set it up with \`${INSTALL}\`, and that went through`)
-    assert.notInclude(one, 'set_run_command')
+    // With no setup recorded, it is asked to get the folder ready and record one, whatever ran.
+    assert.include(one, 'No setup is recorded for the repository yet, so get the worktree ready to work in before anything else')
+    assert.include(one, "from the person's checkout at /code/meridian, such as `.env`")
+    // A recorded one that went through asks nothing more.
+    const replayed = toldOf([{ name: 'meridian', setUp: done, recorded: true, checkout: null }], false)
+    assert.strictEqual(
+      replayed,
+      "When the worktree was made, Althar set it up with the repository's recorded setup, and that went through: what it installs and copies is there, so don't run it again.",
+    )
+    // Nothing ran and nothing recorded: only the ask.
+    assert.match(
+      toldOf([{ name: 'meridian', setUp: { ...done, command: null }, recorded: false, checkout: null }], false),
+      /^No setup is recorded/,
+    )
     const failed: SetUp = { ...done, command: 'npm ci', code: 1, last: 'npm ERR! missing: left-pad' }
     const timedOut: SetUp = { ...done, command: 'make deps', code: null, timedOut: true, last: null }
     const several = toldOf(
       [
-        { name: 'web', setUp: failed },
-        { name: 'api', setUp: timedOut },
+        { name: 'web', setUp: failed, recorded: true, checkout: null },
+        { name: 'api', setUp: timedOut, recorded: false, checkout: null },
       ],
       true,
     )
-    assert.include(several, "When web's worktree was made, Althar set it up with `npm ci`, and it failed with exit code 1.")
+    assert.include(
+      several,
+      "When web's worktree was made, Althar set it up with the repository's recorded setup, and it failed with exit code 1.",
+    )
     assert.include(several, '```\nnpm ERR! missing: left-pad\n```')
+    assert.include(
+      several,
+      "get web's worktree ready yourself, and record the setup that works with record_setup: it replaces the one that failed",
+    )
     assert.include(several, "When api's worktree was made, Althar set it up with `make deps`, and it ran out of time and was stopped.")
-    assert.include(several, 'keep the right one with set_run_command')
-    assert.include(toldOf([{ name: 'web', setUp: { ...failed, code: null, last: null } }], false), "and it didn't finish.")
+    assert.include(several, 'No setup is recorded for api yet')
+    assert.include(
+      toldOf([{ name: 'web', setUp: { ...failed, code: null, last: null }, recorded: false, checkout: null }], false),
+      "and it didn't finish.",
+    )
   })
 })
 
@@ -325,18 +347,20 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const path = withPackages()
       const { task } = yield* taskIn(path)
-      const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
+      const [workspace] = yield* setUp(task.taskId)
       // Installed in the worktree, by Bun, with the lockfile as it was.
       assert.isTrue(existsSync(join(task.worktree, 'node_modules', 'greet', 'index.js')))
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
-      assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0, timedOut: false, last: null })
+      assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0, timedOut: false })
+      // What it printed is kept, for the thread to show folded.
+      assert.include(workspace?.setup?.last ?? '', 'bun install')
       // As Althar's own process, recorded as one, which has ended.
       const [ran] = yield* setupProcesses
       assert.deepInclude(ran, { state: 'exited', exitCode: 0 })
       // The thread shows it, ended.
       const [item] = yield* setupItems(task.threadId)
       assert.deepInclude(item, { repository: basename(path), command: INSTALL, kept: false })
-      assert.deepInclude((item?.ended ?? {}) as object, { code: 0, timedOut: false, stopped: false, last: null })
+      assert.deepInclude((item?.ended ?? {}) as object, { code: 0, timedOut: false, stopped: false })
       // The lead's first turn says so.
       const brief = yield* lead(task.threadId)
       assert.include(brief, `When the worktree was made, Althar set it up with \`${INSTALL}\`, and that went through`)
@@ -346,7 +370,7 @@ describe('setting up a task’s worktree', () => {
   it.live('installs a monorepo whose root names only its workspaces', () =>
     Effect.gen(function* () {
       const { task } = yield* taskIn(withWorkspaces())
-      const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
+      const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0 }, workspace?.setup?.last ?? '')
       assert.isTrue(existsSync(join(task.worktree, 'packages', 'app', 'node_modules', 'greet', 'index.js')))
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
@@ -357,7 +381,7 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { task } = yield* taskIn(withPackages())
-      yield* setUp(task.taskId, Duration.seconds(60))
+      yield* setUp(task.taskId)
       // As Althar quitting while Bun installs leaves it: the folder made, the package not yet in it, and nothing kept.
       rmSync(join(task.worktree, 'node_modules', 'greet'), { recursive: true, force: true })
       assert.isTrue(existsSync(join(task.worktree, 'node_modules')))
@@ -391,12 +415,18 @@ describe('setting up a task’s worktree', () => {
   it.live('stops a lead that waits on its worktree’s setup at once, and the setup goes on', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
-      const { task } = yield* taskIn(repository(), `node -e "setTimeout(() => require('fs').writeFileSync('kept.txt', 'ready'), 2000)"`)
+      // A setup that finishes only once the test lets it.
+      const gate = join(mkdtempSync(join(tmpdir(), 'althar-gate-')), 'open').replaceAll('\\', '/')
+      const { task } = yield* taskIn(
+        repository(),
+        `node -e "const fs = require('fs'); const t = setInterval(() => fs.existsSync('${gate}') && (clearInterval(t), fs.writeFileSync('kept.txt', 'ready')), 20)"`,
+      )
       yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code' })
-      const asked = Date.now()
       yield* sessions.stop(task.threadId)
-      assert.isBelow(Date.now() - asked, 1_500)
+      // Stopped while the setup still waits, so stopping didn't wait for it.
+      assert.isFalse(existsSync(join(task.worktree, 'kept.txt')))
       assert.lengthOf(yield* turnsOf(task.threadId), 0)
+      writeFileSync(gate, '')
       const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { code: 0 })
       assert.isTrue(existsSync(join(task.worktree, 'kept.txt')))
@@ -431,7 +461,7 @@ describe('setting up a task’s worktree', () => {
       const brief = yield* lead(task.threadId)
       assert.include(brief, `Althar set it up with \`${failing}\`, and it failed with exit code 3.`)
       assert.include(brief, '```\nresolving\nnpm ERR! missing: left-pad\n```')
-      assert.include(brief, 'keep the right one with set_run_command')
+      assert.include(brief, 'No setup is recorded for the repository yet')
     }).pipe(Effect.provide(runtime())),
   )
 

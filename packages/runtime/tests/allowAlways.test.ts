@@ -380,7 +380,7 @@ describe('answers that meet each other', () => {
       const lead = yield* separateLead
       // The first read of the rules is followed, at once, by the person letting everything through.
       lead.next((projectId, policies) => Effect.orDie(policies.set(projectId, { permissions: 'allow' }, instance.personId)))
-      const decided = yield* lead.ask('cargo build').pipe(Effect.timeout('5 seconds'))
+      const decided = yield* lead.ask('cargo build')
       assert.deepStrictEqual(decided, { decision: 'allow', reason: 'Allowed by the project rules.' })
       const [call] = yield* sql<{ state: string }>`SELECT state FROM attention_requests`
       assert.strictEqual(call?.state, 'answered')

@@ -1,3 +1,4 @@
+import { RELEASES, releaseUrl } from '../content/changelog'
 import { LINKS } from '../content/facts'
 import { PAGE_META, type PagePath } from '../content/pages'
 import { SHIFTS } from '../content/shifts'
@@ -6,7 +7,7 @@ import { urlOf } from './meta'
 
 /*
  * What each page is, in schema.org terms, for search engines and AI
- * assistants: the product, the shifts with their sources, the thesis. Only
+ * assistants: the product, the shifts with their sources, the releases, the thesis. Only
  * what the site itself says: the app's description is the home page's, its
  * systems are the ones the page names, and each shift is its line, its day
  * and its source. Pure, so the prerender and the tests share it.
@@ -113,6 +114,44 @@ function shifts(origin: string): object[] {
   ]
 }
 
+function changelog(origin: string): object[] {
+  const page = PAGE_META['/changelog']
+  const url = urlOf(origin, page.path)
+  return [
+    {
+      '@context': CONTEXT,
+      '@type': 'CollectionPage',
+      '@id': url,
+      url,
+      name: page.name,
+      description: page.description,
+      image: urlOf(origin, page.image),
+      dateModified: RELEASES[0]?.date,
+      about: { '@id': ids(origin).app },
+      isPartOf: { '@id': ids(origin).site },
+      mainEntity: {
+        '@type': 'ItemList',
+        itemListOrder: 'https://schema.org/ItemListOrderDescending',
+        numberOfItems: RELEASES.length,
+        itemListElement: RELEASES.map((release, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          item: {
+            '@type': 'CreativeWork',
+            '@id': `${url}#v${release.version}`,
+            url: `${url}#v${release.version}`,
+            name: `${release.version}: ${release.title}`,
+            version: release.version,
+            datePublished: release.date,
+            sameAs: releaseUrl(release.version),
+          },
+        })),
+      },
+    },
+    breadcrumbs(origin, '/changelog'),
+  ]
+}
+
 function thesis(origin: string): object[] {
   const page = PAGE_META['/thesis']
   const url = urlOf(origin, page.path)
@@ -157,6 +196,7 @@ function wallpaper(origin: string): object[] {
 const BY_PATH: Partial<Record<PagePath, (origin: string) => object[]>> = {
   '/': home,
   '/shifts': shifts,
+  '/changelog': changelog,
   '/thesis': thesis,
   '/wallpaper': wallpaper,
 }

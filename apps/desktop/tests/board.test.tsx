@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
+import { TrackStep, trackOf as trackItems } from '@althar/ui'
 
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
+import { MERGE_QUEUE_STEP, MERGING_STEP } from '../src/renderer/data/merges'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
@@ -166,6 +168,16 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps a task under way, out of Needs you, until the call it waits on is read (DEV-173)', () => {
+    const lanes = lanesOf(board({ calls: [] }))
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => [work.taskId, work.phase])).toEqual([
+      ['t2', 'running'],
+      ['t3', 'running'],
+    ])
+    expect(yoursOf(lanes)).toBe(2)
+  })
+
   describe('a task whose lead stopped, with no agent on it', () => {
     const NOW = '2026-10-01T10:00:00.000Z'
     const at = '2026-09-30T14:00:00.000Z'
@@ -198,11 +210,22 @@ describe('the board’s lanes', () => {
       const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
       expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
       expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
-      expect(card('Stopped n').getByText('No agent is working on it')).toBeTruthy()
+      // Where nothing says what stopped it, the word Stopped says it all.
+      expect(card('Stopped n').queryByText('No agent is working on it')).toBeNull()
+      expect(card('Stopped n').queryByText(/^Stopped (when|by)/)).toBeNull()
       expect(card('Stopped d').getByText('20h ago')).toBeTruthy()
       expect(card('Stopped d').queryByText('21h')).toBeNull()
       expect(card('Stopped r').getByText('From Nightly dependency check')).toBeTruthy()
       expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/^Stopped /)).toBeNull()
+    })
+
+    it('shows no time where nothing says when it stopped', () => {
+      const unknown = stopped('u', null, { stopped: { by: null, at: null } })
+      const lanes = lanesOf(board({ tasks: [unknown], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      const article = screen.getByRole('button', { name: 'Stopped u' }).closest('article') as HTMLElement
+      expect(within(article).getByText('Stopped')).toBeTruthy()
+      expect(article.textContent).not.toMatch(/Invalid Date|NaN|ago/)
     })
   })
 
@@ -437,7 +460,7 @@ describe('the board’s lanes', () => {
     })
   })
 
-  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
+  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet under way', () => {
     const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
     const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
     const lanes = lanesOf(
@@ -450,13 +473,13 @@ describe('the board’s lanes', () => {
       }),
     )
     expect(lanes.calls.map((call) => call.id)).toEqual(['q1', 'a2'])
-    expect(lanes.waiting.map(({ task: work, call }) => [work.taskId, call])).toEqual([['t9', null]])
+    expect(lanes.waiting).toEqual([])
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['t9'])
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
-      ['Waiting on you', 'Asks soon'],
       ['Question', 'Run make deploy'],
       ['Permission', 'Run make deploy'],
     ])
-    expect(yoursOf(lanes)).toBe(3)
+    expect(yoursOf(lanes)).toBe(2)
   })
 
   it('keeps a plain task that finished in Needs you, counted, until the person keeps it for later, the latest kept first', () => {
@@ -659,14 +682,31 @@ describe('the board’s lanes', () => {
   })
 
   it('names a task’s steps, and the one it is on', () => {
-    expect(trackOf(task({ step: 'settle' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'publish' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0 })
+    expect(trackOf(task({ step: 'settle' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'publish' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0, done: false })
     // A task with no plan is a conversation with its lead.
-    expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0 })
+    expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0, done: false })
     // Resolving a conflict, or fixing the checks on the merge, comes after the steps.
-    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
-    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: false })
+  })
+
+  it('has every step done, none on, while no agent is on a task: its checks run, its commits push, or it merges', () => {
+    // Its steps are finished; the checks, the push or the merge is what is left, and the words at the top say so.
+    expect(trackOf(task({ step: 'checks_running', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: 'pushing', phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: MERGE_QUEUE_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    expect(trackOf(task({ step: MERGING_STEP, phase: 'running' }))).toEqual({ steps: ['Implement', 'Review'], at: 1, done: true })
+    // Drawn with that flag, no step is left as the one on it.
+    for (const step of ['checks_running', 'pushing', MERGE_QUEUE_STEP]) {
+      const { steps, at, done } = trackOf(task({ step, phase: 'running' }))
+      expect(trackItems(steps, at, at, done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Done])
+    }
+    // A checks round is a lead's work: its last step stays on.
+    const round = trackOf(task({ step: 'checks', phase: 'running' }))
+    expect(round.done).toBe(false)
+    expect(trackItems(round.steps, round.at, round.at, round.done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Now])
   })
 
   it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
@@ -675,6 +715,14 @@ describe('the board’s lanes', () => {
       board({ tasks: [task({ taskId: 't8', threadId: 'th8', title: 'Add a limit', phase: 'ready', handedBack: why })], calls: [] }),
     )
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+  })
+
+  it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
+    const why = 'Fails on main too: test times out in limit.test.ts.'
+    const lanes = lanesOf(
+      board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
+    )
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
   })
 })
@@ -696,11 +744,43 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // On the front page: three things that need you, one in progress, and what settled last; nothing says what runs.
-    expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
-    const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
-    expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
+    // In the header, where it stands is one chip: three things that need you, a way into them; what runs isn't said beside it.
+    const header = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header') as HTMLElement
+    expect(within(header).getByRole('button', { name: '3 need you' })).toBeTruthy()
+    expect(header.textContent).not.toMatch(/in progress|running|merged/)
     expect(screen.queryByText(/running/)).toBeNull()
+  })
+
+  it('says in Up next, on a board with nothing on it, that work comes from the coordinator, and puts the person in its composer', async () => {
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: [], calls: [], settledTotal: 0 })) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const next = within(await screen.findByRole('region', { name: 'Up next' }))
+    expect(next.getByText('Nothing queued')).toBeTruthy()
+    expect(next.getByText('Tell the coordinator what you want done. The tasks it plans line up here.')).toBeTruthy()
+    // Only Up next says so; the other lanes stay empty boxes.
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
+    await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
+    // The conversation comes in beside the board, with the composer ready to write in.
+    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
+    expect(screen.getByRole('region', { name: 'The project’s work' })).toBeTruthy()
+  })
+
+  it('says the same in an empty Up next while there is other work on the board, and puts the person in the composer', async () => {
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () =>
+        board({ tasks: [task({ taskId: 't2', threadId: 'th2', title: 'Mine', slug: 'mine', phase: 'running' })], calls: [] }),
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const next = within(await screen.findByRole('region', { name: 'Up next' }))
+    expect(next.getByText('Nothing queued')).toBeTruthy()
+    // Only Up next says so; the other lanes stay plain boxes.
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
+    await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
   })
 
   it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {
@@ -967,6 +1047,25 @@ describe('the board', () => {
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
     })
 
+    it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
+      const queued = board({
+        tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: change({ queued: true }) } : one)),
+      })
+      const getBoard = vi.fn(async () => queued)
+      const { client, emit } = fakeClient({ getBoard })
+      withServices(<Project />, client)
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      // Read so, as after a restart, with nothing pressed in this window: at work, and saying where.
+      expect(await lane('Running').findByText('In the merge queue')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The queue took it out: it is the person's to merge again.
+      getBoard.mockImplementation(async () => board())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('In the merge queue')).toBeNull()
+    })
+
     it('is the person’s again once its pull request merged and another of its own is open', async () => {
       const merge = vi.fn(async () => undefined)
       const next = change({ number: 13, url: 'https://github.com/meridian/api/pull/13', head: 'def456', draft: false })
@@ -1080,7 +1179,7 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
     await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
     await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
-    expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
+    expect(await screen.findByText('No lead to start. Pick an agent for it first.')).toBeTruthy()
     expect(send).not.toHaveBeenCalled()
     expect(startSession).not.toHaveBeenCalled()
   })
@@ -1111,9 +1210,8 @@ describe('the board', () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     const status = await screen.findByRole('alert')
-    expect(status.textContent).toContain('Note queued, but the lead could not start.')
+    expect(status.textContent).toContain("Queued, but the lead didn't start.")
     expect(status.textContent).toContain('No signed-in account is available.')
-    expect(status.textContent).toContain("The note is already queued; don't send it again.")
     expect(screen.queryByRole('textbox')).toBeNull()
   })
 
@@ -1136,6 +1234,20 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Push' }))
     await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
     expect(push).toHaveBeenLastCalledWith('t4', 'def456', 'https://github.com/meridian/api/pull/12')
+  })
+
+  it('offers neither Push nor Accept while what the lead committed goes up on its own (ADR-072)', async () => {
+    const later = board().tasks.map((work) =>
+      work.taskId === 't4' && work.change !== null
+        ? { ...work, change: { ...work.change, unpushed: 1, localHead: 'def456', pushing: { held: null } } }
+        : work,
+    )
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: later })) })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    expect(await within(dock).findByText('One commit is going up to the pull request')).toBeTruthy()
+    expect(within(dock).queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+    expect(within(dock).queryByRole('button', { name: 'Push' })).toBeNull()
   })
 
   it('opens work ready on its branch to review its changes, and its task', async () => {
@@ -1290,6 +1402,46 @@ describe('every state the board shows', () => {
     calls: [stuck('implement', 'session_ended'), stuck('publish', 'failed_to_start'), stuck('publish', 'not_connected')],
   })
 
+  it('never says "Invalid Date", or NaN, on any card, whatever time it has or lacks', () => {
+    const lacking = board({
+      tasks: [
+        task({ taskId: 'n1', title: 'Stopped, no time known', phase: 'stopped', startedAt: null, stopped: { by: null, at: null } }),
+        task({ taskId: 'n2', title: 'Stopped, an empty time', phase: 'stopped', startedAt: '', stopped: { by: 'althar', at: '' } }),
+        task({ taskId: 'n3', title: 'Running, an empty start', phase: 'running', step: 'implement', startedAt: '' }),
+        task({
+          taskId: 'n4',
+          title: 'Paused, an empty reset',
+          phase: 'running',
+          step: 'implement',
+          waits: { agentId: 'codex', until: '' },
+        }),
+        task({ taskId: 'n5', title: 'Settled, an empty time', phase: 'settled', state: 'done', settledAt: '' }),
+        task({ taskId: 'n6', title: 'Kept, an empty time', phase: 'kept', keptAt: '' }),
+        task({ taskId: 'n7', title: 'Setting up', phase: 'running', step: 'implement', startedAt: 'not a time', settingUp: 'install' }),
+      ],
+      calls: [{ ...permission, id: 'c-empty', createdAt: '' }],
+    })
+    withServices(<BoardView lanes={lanesOf(lacking)} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    expect(screen.getByText('Stopped, no time known')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/Invalid Date|NaN/)
+  })
+
+  it('says a task whose folder is being set up before its lead starts is under way, and why no step has begun', () => {
+    const tasks = [
+      task({ taskId: 's1', title: 'Installing', phase: 'running', step: 'implement', settingUp: 'install' }),
+      task({ taskId: 's2', title: 'Its own setup', phase: 'running', step: 'implement', settingUp: 'kept' }),
+    ]
+    const lanes = lanesOf(board({ tasks, calls: [] }))
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['s1', 's2'])
+    expect(lanes.stopped).toEqual([])
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    const running = within(screen.getByRole('region', { name: 'Running' }))
+    const of = (title: string) => within(running.getByRole('button', { name: title }).closest('article') as HTMLElement)
+    expect(of('Installing').getByText('Installing dependencies')).toBeTruthy()
+    expect(of('Its own setup').getByText('Setting up')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Needs you' })?.textContent ?? '').not.toMatch(/Installing/)
+  })
+
   it('draws plans waiting, stopped and planless work, stuck calls, and what settled', () => {
     const lanes = lanesOf(all)
     expect(lanes.next.map((work) => work.taskId)).toEqual(['b', 'c', 'a'])
@@ -1306,17 +1458,13 @@ describe('every state the board shows', () => {
     expect(within(screen.getByRole('region', { name: 'Needs you' })).getByText('Stopped work')).toBeTruthy()
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText('Stopped work')).toBeNull()
     expect(screen.getByText('Conversation')).toBeTruthy()
-    expect(
-      screen.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(screen.getByText('Claude Code closed before finishing the step.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
     expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
-    expect(screen.getByText("Althar couldn't open the pull request. Try again, or go on without it.")).toBeTruthy()
+    expect(screen.getByText("Couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
@@ -1571,7 +1719,7 @@ describe('every state the board shows', () => {
       getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', phase: 'ready', change: runningChecks })], calls: [] })),
     })
     withServices(<Docked target={{ kind: 'task', id: 't9' }} />, client)
-    expect(await screen.findByText('It can be accepted once its checks pass')).toBeTruthy()
+    expect(await screen.findByText('Waiting for its checks')).toBeTruthy()
   })
 })
 
@@ -1742,11 +1890,7 @@ describe('each kind’s card', () => {
     expect(question.getByText('Which database?')).toBeTruthy()
     const stuck = within(cardOf('Gave up'))
     expect(stuck.getByText('Stuck')).toBeTruthy()
-    expect(
-      stuck.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
-      ),
-    ).toBeTruthy()
+    expect(stuck.getByText('Claude Code closed before finishing the step.')).toBeTruthy()
     // Merged, with commits after it: its branch, with what is in no pull request yet.
     const after = within(cardOf('Merged, then more'))
     expect(after.getByText('Ready for a new pull request')).toBeTruthy()
@@ -1859,7 +2003,7 @@ describe('a ready card’s next step, done from the card', () => {
     const model = useBoard('p1')
     return (
       <BoardView
-        lanes={lanesOf(model.board ?? board({ tasks: [], calls: [] }))}
+        lanes={lanesOf(model.board ?? board({ tasks: [], calls: [], settledTotal: 0 }))}
         agents={agents}
         now={NOW}
         onOpen={onOpen}
@@ -1886,11 +2030,47 @@ describe('a ready card’s next step, done from the card', () => {
       snapshot({ session: null, task: { ...base.task, lead: { agentId: 'claude-code', model: null, account: null } } }),
     )
     const onOpen = vi.fn()
-    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Stopped d')
     await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledWith({ taskId: 'sd', action: 'carry_on' }))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('counts Keep pressed in Needs you as settled with one press, and Done on one kept for later not (DEV-173)', async () => {
+    tasks = [
+      task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null }),
+      task({
+        taskId: 'p2',
+        threadId: 'thp2',
+        title: 'Spike the limits',
+        phase: 'kept',
+        kind: 'plain',
+        branch: null,
+        keptAt: '2026-09-30T11:00:00.000Z',
+      }),
+    ]
+    const markTaskDone = vi.fn(async () => {})
+    const keepTaskForLater = vi.fn(async () => {})
+    const settledWithOnePress = vi.fn(async () => {})
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ markTaskDone, keepTaskForLater, settledWithOnePress, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Prototype the tabs')
+    await userEvent.click(card.getByRole('button', { name: 'Keep for later' }))
+    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 'p1', action: 'keep' }))
+    // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
+    const lane = within(screen.getByRole('region', { name: /^Settled/ }))
+    await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
+    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(settledWithOnePress).toHaveBeenCalledOnce()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
@@ -1898,7 +2078,8 @@ describe('a ready card’s next step, done from the card', () => {
     const onOpen = vi.fn()
     let finish = () => {}
     const push = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
-    withServices(<Board onOpen={onOpen} />, fakeClient({ push, getBoard: getBoard() }).client)
+    const settledWithOnePress = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ push, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Commits to push')
     // A button of its own, named for what it does and to which pull request.
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
@@ -1910,9 +2091,12 @@ describe('a ready card’s next step, done from the card', () => {
     expect(busy.textContent).toBe('Pushing 3 commits')
     await userEvent.click(busy)
     expect(push).toHaveBeenCalledTimes(1)
+    expect(settledWithOnePress).not.toHaveBeenCalled()
     finish()
     await waitFor(() => expect(card.getByRole('button', { name: 'Push 3 commits to #12' }).getAttribute('aria-busy')).toBeNull())
     expect(onOpen).not.toHaveBeenCalled()
+    // Kept on this computer as settled with one press, once it went through (DEV-173).
+    expect(settledWithOnePress).toHaveBeenCalledExactlyOnceWith({ taskId: 's5', action: 'push' })
     // The rest of the card still opens its task.
     await userEvent.click(screen.getByRole('button', { name: 'Commits to push' }))
     expect(onOpen).toHaveBeenCalledWith('th-s5')
@@ -1995,6 +2179,39 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('offers a stopped task’s green pull request to merge, next to Carry on, and keeps Carry on alone where it is not ready', async () => {
+    tasks = [
+      task({
+        taskId: 'sm',
+        threadId: 'th-sm',
+        title: 'Stopped with a green pull request',
+        kind: 'change',
+        phase: 'stopped',
+        mergeable: true,
+        stopped: { by: 'althar', at: '2026-09-30T14:00:00.000Z' },
+        change: change({ draft: false, checks: passed }),
+      }),
+      task({
+        taskId: 'sf',
+        threadId: 'th-sf',
+        title: 'Stopped with failing checks',
+        kind: 'change',
+        phase: 'stopped',
+        stopped: { by: 'althar', at: '2026-09-30T14:00:00.000Z' },
+        change: change({ draft: false, checks: { ...passed, outcome: 'failed', passed: 4, failed: 1, failing: ['test'] } }),
+      }),
+    ]
+    const merge = vi.fn(async () => {})
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ merge, getBoard: getBoard() }).client)
+    const green = await cardOf('Stopped with a green pull request')
+    expect(green.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    await userEvent.click(green.getByRole('button', { name: 'Accept and merge #12' }))
+    expect(merge).toHaveBeenCalledWith('sm', 'abc123', 'https://github.com/meridian/api/pull/12')
+    const failing = await cardOf('Stopped with failing checks')
+    expect(failing.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    expect(failing.queryByRole('button', { name: /Accept and merge/ })).toBeNull()
+  })
+
   it('leaves what needs the lead to the task: words that open it, not a button of their own', async () => {
     const onOpen = vi.fn()
     withServices(<Board onOpen={onOpen} />, fakeClient({ getBoard: getBoard() }).client)
@@ -2004,40 +2221,98 @@ describe('a ready card’s next step, done from the card', () => {
     expect(onOpen).toHaveBeenCalledWith('th-s4')
   })
 
-  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
-    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
-    // Stopped, it is among what waits on the person, not ready: its card says it there.
+  it('shows a stopped task in conflict as stopped: what stopped it and when, the conflict a line under it, and Carry on settles both', async () => {
+    // An automation's run Althar stopped two days ago, out of its minutes: on its branch, no pull request, and a conflict Althar
+    // didn't ask its lead about, as it is stopped.
     tasks = [
-      {
-        ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),
-        phase: 'stopped' as const,
-        startedAt: '2026-10-01T07:30:00.000Z',
-        conflictUnsent: why,
-      },
+      task({
+        taskId: 's9',
+        threadId: 'th-s9',
+        title: 'Nightly dependency check, 27 Oct',
+        kind: 'change',
+        phase: 'stopped',
+        step: null,
+        branch: 'althar/nightly-dependency-check-27-oct',
+        changed: { files: 3, add: 287, del: 375 },
+        startedAt: '2026-09-29T08:00:00.000Z',
+        stopped: { by: 'althar', at: '2026-09-29T09:00:00.000Z' },
+        conflictUnsent: 'It’s stopped.',
+        automation: { id: 'au1', name: 'Nightly dependency check' },
+      }),
     ]
-    const onOpen = vi.fn()
+    const send = vi.fn(async () => {})
+    const resumeTask = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
-    const card = await cardOf('Stopped in conflict')
-    // Still stopped, with why its lead wasn't asked in one line, in place of its foot.
+    const base = snapshot()
+    // Its run suspended, the task's own screen would resume it.
+    const getThread = vi.fn(async () =>
+      snapshot({
+        session: null,
+        task: { ...base.task, actions: ['resume', 'abandon'], lead: { agentId: 'claude-code', model: null, account: null } },
+      }),
+    )
+    const onOpen = vi.fn()
+    withServices(
+      <Board onOpen={onOpen} />,
+      fakeClient({ send, resumeTask, startSession, getThread, resolveConflictsNow, getBoard: getBoard() }).client,
+    )
+    const card = await cardOf('Nightly dependency check, 27 Oct')
+    // In Needs you, stopped, with what stopped it and when; never under way, with a step and a running clock.
+    const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+    expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
-    expect(card.getByText(why)).toBeTruthy()
-    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(card.getByText('Stopped by Althar')).toBeTruthy()
+    expect(card.getByText('Sep 29')).toBeTruthy()
+    expect(card.queryByText(/^\d+d \d+h$/)).toBeNull()
+    // The conflict is one quiet line, not why it waits, and not that the person stopped it.
+    expect(card.getByText('Conflicts with the default branch')).toBeTruthy()
+    expect(card.queryByText(/stopped, so Althar/)).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    // One action covers both: the lead is told to merge the default branch in, then go on, and its run carries on.
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        threadId: 'th-s9',
+        body: 'Carry on. Your branch conflicts with the default branch: merge it in and settle the conflict first.',
+        disposition: 'after_current',
+      }),
+    )
+    await waitFor(() => expect(resumeTask).toHaveBeenCalledWith({ taskId: 's9' }))
+    expect(startSession).not.toHaveBeenCalled()
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
-  it('offers Resolve now where the lead couldn’t resolve a conflict, though neither branch moved', async () => {
+  it('says why the lead couldn’t resolve a conflict, and opens its task rather than asking the lead again (DEV-173)', async () => {
     const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
     tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
     const resolveConflictsNow = vi.fn(async () => {})
-    withServices(<Board onOpen={vi.fn()} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
     const card = await cardOf('Handed back')
     expect(card.getByText('Merge conflict')).toBeTruthy()
     expect(card.getByText(why)).toBeTruthy()
-    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
-    expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Handed back' }))
+    expect(onOpen).toHaveBeenCalledWith('th-s10')
+    expect(resolveConflictsNow).not.toHaveBeenCalled()
+  })
+
+  it('shows only what fails where its lead brought its failing checks to the person', async () => {
+    const why = 'Fails on main too: test times out in limit.test.ts. Fixing it on main brings this one green.'
+    tasks = [{ ...ready('s13', 'Broken on main', { checks: change().checks }), checksBack: why }]
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
+    const card = await cardOf('Broken on main')
+    // One fact, with its glyph: the lead's line is in its task, not on the card.
+    expect(card.queryByText(why)).toBeNull()
+    const failed = card.getByText(/ failed$/)
+    expect(failed.closest('[class*="factLine"]')?.textContent).toBe(failed.textContent)
+    expect(failed.querySelector('svg')).not.toBeNull()
+    // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
+    expect(card.queryByText('Ask the lead to fix it')).toBeNull()
+    expect(card.queryByText('Merge conflict')).toBeNull()
+    expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
   })
 
   it('says where Althar couldn’t look for a conflict, and keeps its next step', async () => {

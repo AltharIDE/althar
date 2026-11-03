@@ -1,8 +1,11 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { cleanUp } from '@althar/provider-adapters'
+import { Effect } from 'effect'
 
 /*
  * How a Mac's processes are read for the load meter (machine.ts) where `ps`
@@ -138,7 +141,8 @@ const build = async (folder: string): Promise<string | null> => {
   } catch {
     // Another build put its reader in place first.
   }
-  rmSync(work, { recursive: true, force: true })
+  // Where it was built goes, but a folder still held after the compiler leaves no reader unbuilt.
+  await Effect.runPromise(cleanUp(work, 'where the process reader was built'))
   return existsSync(path) ? path : null
 }
 

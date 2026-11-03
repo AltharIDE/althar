@@ -20,11 +20,15 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
+  PlansAndReviews,
   LinkButton,
+  NewProjectDefaults,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  ReviewSeal,
+  ReviewSealGlyph,
   Segmented,
   SettingList,
   SettingRow,
@@ -65,7 +69,10 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
 import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
+import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
+import { usePlansAndReviews } from './usePlansAndReviews'
+import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useTaskFolders } from './useTaskFolders'
@@ -114,7 +121,11 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
-      const account = wanted.accounts.find((one) => one.signIn === 'signed_out') ?? wanted.accounts[0]
+      // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
+      const account =
+        wanted.accounts.find((one) => one.signIn === 'signed_out') ??
+        wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
+        wanted.accounts[0]
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
@@ -130,7 +141,6 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     <SettingsLayout
       section={section}
       title={open.title}
-      lede={open.lede}
       side={
         <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
@@ -195,6 +205,10 @@ function SectionBody({
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
+    case 'plans-and-reviews':
+      return <PlansAndReviewsSection />
+    case 'new-projects':
+      return <NewProjectsSection />
     case 'reviews':
       return <ReviewsSection connections={connections} />
     case 'notifications':
@@ -325,7 +339,6 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
         <SettingSwitch
           title={text.loadTitle}
-          note={text.loadNote}
           glyph={<Icon name="load" size={15} />}
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
@@ -371,6 +384,30 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   )
 }
 
+/* ---- plans and reviews ------------------------------------------------------------- */
+
+function PlansAndReviewsSection() {
+  const plansAndReviews = usePlansAndReviews()
+  return (
+    <>
+      {plansAndReviews !== null && <PlansAndReviews value={plansAndReviews.value} onChange={plansAndReviews.set} />}
+      <Failed when={plansAndReviews?.failed === true} />
+    </>
+  )
+}
+
+/* ---- new projects ------------------------------------------------------------------ */
+
+function NewProjectsSection() {
+  const defaults = useNewProjectDefaults()
+  return (
+    <>
+      {defaults !== null && <NewProjectDefaults value={defaults.value} onChange={defaults.set} />}
+      <Failed when={defaults?.failed === true} />
+    </>
+  )
+}
+
 /* ---- reviews and pull requests ---------------------------------------------------- */
 
 const face = <img src={altharFace} alt="" />
@@ -378,6 +415,7 @@ const face = <img src={altharFace} alt="" />
 function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
   const postTeam = usePostTeamReviews()
   const coAuthor = useCoAuthor()
+  const seal = useReviewSeal()
   // The person, on the commit co-author is shown on, as GitHub names them.
   const author = connections.list?.connections.find((connection) => connection.product === 'github')?.account.login ?? text.you
   return (
@@ -395,7 +433,6 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
         {coAuthor !== null && (
           <SettingSwitch
             title={text.coAuthorTitle}
-            note={text.coAuthorNote}
             glyph={<CoAuthorFace picture={face} size={30} />}
             checked={coAuthor.on}
             onChange={coAuthor.set}
@@ -407,7 +444,23 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
           <CoAuthor on={coAuthor.on} onChange={coAuthor.set} trailer={coAuthor.line} author={author} commit={text.commit} picture={face} />
         </div>
       )}
-      <Failed when={postTeam?.failed === true || coAuthor?.failed === true} />
+      {seal !== null && (
+        <>
+          <SettingList>
+            <SettingSwitch
+              title={text.reviewSealTitle}
+              note={text.reviewSealNote}
+              mark={<ReviewSealGlyph facts={text.pullRequest.facts} />}
+              checked={seal.on}
+              onChange={seal.set}
+            />
+          </SettingList>
+          <div className={s.coAuthor}>
+            <ReviewSeal on={seal.on} style={seal.style} onStyle={seal.choose} sample={text.pullRequest} />
+          </div>
+        </>
+      )}
+      <Failed when={postTeam?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
     </>
   )
 }
@@ -448,7 +501,6 @@ function NotificationsSection() {
               set('sound', sound)
             }}
             onPlay={sounds.play}
-            text={{ note: text.soundNote }}
           />
         )}
       </SettingList>
@@ -469,7 +521,7 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   return (
     <>
       <SettingList>
-        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+        <SettingRow title={text.theme} glyph={<Icon name="theme" size={15} />}>
           {() => (
             <Segmented<Appearance>
               label={text.theme}

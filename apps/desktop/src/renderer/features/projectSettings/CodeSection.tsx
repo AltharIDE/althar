@@ -4,7 +4,8 @@ import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, 
 import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { serviceOfProduct } from '../connections/ways'
-import { text as frontText, type Tracker } from '../project/front'
+import { text as frontText, trackerIdOf, type Tracker } from '../project/front'
+import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -26,8 +27,12 @@ import { useProjectTracker } from './useProjectTracker'
 export const text = {
   trackers: 'Trackers',
   connectTracker: 'Connect a tracker',
+  /** Beside a tracker already there: connecting another is still valid, and no call to action. */
+  connectAnother: 'Connect another',
+  /** On a tracker its issues are on, where another is the one drafts go to. */
+  draftsElsewhere: 'Its drafts go to the tracker above',
+  issuesOnly: 'Only its issues are here; the bound workspace is above',
   none: 'No tracker yet',
-  noneNote: 'Connect one, and the coordinator can start tasks from its issues.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
   issues: (tracker: Tracker) =>
     tracker.key === null ? frontText.issues(tracker) : `${frontText.issues(tracker)} · ${productName(tracker.product)}`,
@@ -39,7 +44,6 @@ export const text = {
   connect: 'Connect',
   signIn: 'Sign in again',
   openOn: (tracker: Tracker) => `Open on ${productName(tracker.product)}`,
-  appWide: 'Connections are shared by every project.',
   manage: 'Manage connections',
 }
 
@@ -59,9 +63,15 @@ function TrackerRow({
   tracker,
   list,
   onConnect,
+  elsewhere,
+  byTeam,
 }: {
   tracker: Tracker
   list: ConnectionList | null
+  /** Another tracker is the one bound: drafts don't go to this one. */
+  elsewhere: boolean
+  /** The bound one is a team: its drafts go there. Bound to a workspace alone, each draft's team is chosen with it. */
+  byTeam: boolean
   onConnect: (opening: Opening) => void
 }) {
   const standing = standingOf(list, tracker)
@@ -74,19 +84,27 @@ function TrackerRow({
   return (
     <SettingRow
       title={text.issues(tracker)}
-      note={<StandingLine standing={standing} />}
+      note={
+        <>
+          <StandingLine standing={standing} />
+          {elsewhere && <> · {byTeam ? text.draftsElsewhere : text.issuesOnly}</>}
+        </>
+      }
       mark={<BrandMark brand={productBrand(tracker.product)} size={18} />}
     >
-      {() =>
-        standing.kind !== 'connected' ? (
-          <Button size="small" variant="signal" onClick={() => onConnect(opening)}>
-            {standing.kind === 'signedOut' ? text.signIn : text.connect}
-          </Button>
-        ) : url === null ? null : (
-          // The window opens web pages in the person's browser.
-          <LinkButton onClick={() => void window.open(url, '_blank')}>{text.openOn(tracker)}</LinkButton>
-        )
-      }
+      {() => (
+        <>
+          {standing.kind !== 'connected' && (
+            <Button size="small" variant="signal" onClick={() => onConnect(opening)}>
+              {standing.kind === 'signedOut' ? text.signIn : text.connect}
+            </Button>
+          )}
+          {/* Signed out, its page is still there to open; the window opens web pages in the person's browser. */}
+          {url !== null && standing.kind !== 'notConnected' && (
+            <LinkButton onClick={() => void window.open(url, '_blank')}>{text.openOn(tracker)}</LinkButton>
+          )}
+        </>
+      )}
     </SettingRow>
   )
 }
@@ -99,7 +117,7 @@ export function CodeSection({
   onManage,
 }: {
   projectId: string
-  /** The trackers its tasks' issues are on, the one most of them name first. */
+  /** The trackers it is on: the one it is bound to first, then those its tasks' issues are on. */
   trackers: ReadonlyArray<Tracker>
   /** The code hosts and trackers connected, and those Althar knows. */
   list: ConnectionList | null
@@ -109,17 +127,25 @@ export function CodeSection({
   onManage: () => void
 }) {
   const repositories = useRepositories(projectId)
+  const offer = useForkOffer(projectId, repositories.repositories)
   const bound = useProjectTracker(projectId, list)
+  // Once one is bound, drafts go there alone: the rest are only where its issues are.
+  const binding = trackers.some((tracker) => tracker.bound === true)
   return (
     <>
+      <ForkOffer offer={offer} />
       <Repositories model={repositories} connections={list} onConnect={onConnect} />
       <SettingGroup
         title={text.trackers}
         headingLevel={HEADING.part}
         action={
-          <Button size="small" icon="plug" onClick={() => onConnect('all')}>
-            {text.connectTracker}
-          </Button>
+          !binding ? (
+            <Button size="small" icon="plug" onClick={() => onConnect('all')}>
+              {text.connectTracker}
+            </Button>
+          ) : (
+            <LinkButton onClick={() => onConnect('all')}>{text.connectAnother}</LinkButton>
+          )
         }
       >
         <SettingList>
@@ -140,23 +166,23 @@ export function CodeSection({
             </p>
           )}
           {trackers.length === 0 ? (
-            <SettingRow title={text.none} note={text.noneNote}>
-              {() => null}
-            </SettingRow>
+            <SettingRow title={text.none}>{() => null}</SettingRow>
           ) : (
             trackers.map((tracker) => (
               <TrackerRow
-                key={`${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`}
+                key={trackerIdOf(tracker)}
                 tracker={tracker}
                 list={list}
                 onConnect={onConnect}
+                elsewhere={binding && tracker.bound !== true}
+                byTeam={bound.container !== null}
               />
             ))
           )}
         </SettingList>
       </SettingGroup>
       <p className={s.quiet}>
-        {text.appWide} <LinkButton onClick={onManage}>{text.manage}</LinkButton>
+        <LinkButton onClick={onManage}>{text.manage}</LinkButton>
       </p>
     </>
   )

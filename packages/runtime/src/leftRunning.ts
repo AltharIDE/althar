@@ -70,6 +70,14 @@ export const WAKE_FOR = Duration.minutes(5)
  */
 export const REPORT_FOR = Duration.seconds(2)
 
+/**
+ * How long after a turn ends what the agent says is still that turn's: its
+ * last words can reach Althar after the turn's own end, and ACP's updates
+ * don't say which turn they are of. A call it begins is new work however
+ * soon, and words after this are the agent going on by itself.
+ */
+export const TRAILS_FOR = Duration.seconds(1)
+
 /** A command that ends by itself, whatever it prints of where it answers: tests, builds, checks. */
 const FINITE = /\b(test|tests|vitest|jest|mocha|playwright|cypress|pytest|check|lint|build|tsc|typecheck|e2e|ci)\b/i
 
@@ -128,6 +136,39 @@ export const servingAt = (output: string): string | null => {
 export const exitCodeIn = (output: string): number | null => {
   const code = /\[exited with code (-?\d+)\]\s*$/.exec(output)?.[1]
   return code === undefined ? null : Number(code)
+}
+
+/** Table rules and box characters, sizes and the like: a build's report, which says nothing of why a run ended. */
+const NOISE = /[│┃├┤┌┐└┘─━╭╮╰╯]|\b\d[\d,.]*\s?(?:kB|KB|MB|GB)\b|\bgzip:|^[-=*#~\s]{3,}$/
+const ERRORISH =
+  /\b(?:errors?|err!|fatal|failed|failure|exception|panic|traceback|segfault|aborted|killed|cannot|can't|couldn't|not found|no such|refused|denied|timed out|EADDRINUSE|ENOENT|EACCES)\b/i
+/** "0 errors", "0 failed": a summary that says it went well. */
+const WELL = /\b0 (?:errors?|failed|failures?)\b/i
+const LINES_READ = 40
+const LINE_MAX = 200
+
+/**
+ * The line that says why a run ended, from what it printed and its stderr:
+ * the last that looks like an error, however much noise comes after it; else,
+ * for one that failed, the last line its stderr printed; else, for one that
+ * ended well, its last line. A line of a build's report or a table is never
+ * it. Where nothing says, null: no line is better than a misleading one.
+ */
+export const endingLine = (printed: string, code: number | null, stderr = ''): string | null => {
+  const linesOf = (text: string) =>
+    uncoloured(text)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !NOISE.test(line))
+      .slice(-LINES_READ)
+  // One that ended well has no error to find: a warning earlier must not sit beside a calm "exited 0".
+  const found =
+    code === 0
+      ? linesOf(printed).at(-1)
+      : (linesOf(`${printed}\n${stderr}`).findLast((line) => ERRORISH.test(line) && !WELL.test(line)) ??
+        (code === null ? undefined : linesOf(stderr).at(-1)))
+  if (found === undefined) return null
+  return found.length > LINE_MAX ? `${found.slice(0, LINE_MAX - 1)}…` : found
 }
 
 /** What it printed, with more on the end, kept to as much as is read. */

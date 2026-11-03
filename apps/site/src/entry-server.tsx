@@ -25,7 +25,7 @@ globalThis.IntersectionObserver ??= class {
 } as unknown as typeof IntersectionObserver
 
 export { PAGE_META, NOT_FOUND } from './content/pages'
-export { llmsTxt, MARKDOWN, robotsTxt, shiftsMd, sitemapXml } from './lib/crawl'
+export { changelogMd, llmsTxt, MARKDOWN, robotsTxt, shiftsMd, sitemapXml } from './lib/crawl'
 export { withMeta } from './lib/meta'
 export { structuredData } from './lib/structured'
 

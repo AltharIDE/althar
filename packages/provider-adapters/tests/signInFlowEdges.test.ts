@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '@althar/testing'
 
 import { type AgentDefinition, agents, type LaunchSpec } from '../src/registry'
 import { type SignInFlowEvent, type SignInFlowHandle, type SignInFlowOptions, startSignInFlow } from '../src/signInFlow'
@@ -166,8 +167,8 @@ describe('signing in inside Althar, when it goes otherwise', () => {
         { way: 'device' },
       )
     })
-    for (let waited = 0; waited < 5000 && !existsSync(marker); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(readFileSync(marker, 'utf8')).toBe('l1')
+    // What the fake was told to stop, once it has written it: the file is there a moment before what is in it.
+    expect(await waitFor(() => (existsSync(marker) ? readFileSync(marker, 'utf8') : ''))).toBe('l1')
     expect(said.map((event) => event.kind)).toEqual(['device'])
   })
 
@@ -248,9 +249,7 @@ setInterval(() => {}, 1000)`
         },
       },
     }
-    const until = async (path: string) => {
-      for (let waited = 0; waited < 5000 && !existsSync(path); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
-    }
+    const until = (path: string) => waitFor(() => existsSync(path))
     const opened: string[] = []
     const said: SignInFlowEvent[] = []
     const handle = startSignInFlow(agent, (event) => void said.push(event), { way: 'browser', openUrl: (url) => void opened.push(url) })

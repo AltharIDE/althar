@@ -129,10 +129,10 @@ export const graphChangedText: GraphChangedText = {
   undo: 'Undo',
   left: (n) => `${n}s`,
   detail: 'What changed',
-  byRule: (rule, project) => `Added by ${project}’s rule: ${rule}. Rules apply without asking.`,
+  byRule: (rule, project) => `Added by ${project}’s rule: ${rule}`,
   byModel: (model, why) => (
     <>
-      Proposed by {model} {why}. Inside what this run may already do, so it applied without asking.
+      Proposed by {model} {why}
     </>
   ),
 }

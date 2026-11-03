@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Schedule } from 'effect'
+import { Effect, Layer } from 'effect'
+import { until } from '@althar/testing/effect'
 
 import { Accounts } from '../src/Accounts'
 import { AccountSignIns, type AccountSignInState } from '../src/AccountSignIns'
@@ -96,10 +97,6 @@ const layer = (finish: boolean, opened: string[], claude = definition('claude-co
   })
 
 const settled = (state: AccountSignInState) => state.state !== 'starting'
-
-/** Asks how a sign-in stands until it says what the test waits for. */
-const until = (read: Effect.Effect<AccountSignInState>, done: (state: AccountSignInState) => boolean, within = Duration.seconds(5)) =>
-  read.pipe(Effect.repeat({ until: done, schedule: Schedule.spaced(Duration.millis(20)) }), Effect.timeout(within))
 
 describe('signing accounts of two agents in inside Althar', () => {
   it.live('leaves one agent’s sign-in under way while another’s starts', () => {

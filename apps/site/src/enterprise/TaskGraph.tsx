@@ -224,7 +224,7 @@ export function TaskGraph() {
             status="Lead"
             mark={<BrandMark brand={Brand.ClaudeCode} size={15} />}
             name="Claude Code"
-            sub="Opus 5"
+            sub="Opus 5.5"
           />
           <Cell
             x={X.security}
@@ -245,7 +245,7 @@ export function TaskGraph() {
             status="Pass"
             mark={<BrandMark brand={Brand.Codex} size={15} />}
             name="Codex"
-            sub="GPT-5.2"
+            sub="GPT-6.1 Sol"
           />
           <Cell
             x={X.review}
@@ -362,7 +362,14 @@ function TaskList() {
   return (
     <ol className={s.list} aria-hidden="true">
       <Row no="01" kind="Triage" mark={<Logo size={15} />} name="Coordinator" sub="6 notes attached" />
-      <Row no="02" kind="Implement" status="Lead" mark={<BrandMark brand={Brand.ClaudeCode} size={14} />} name="Claude Code" sub="Opus 5" />
+      <Row
+        no="02"
+        kind="Implement"
+        status="Lead"
+        mark={<BrandMark brand={Brand.ClaudeCode} size={14} />}
+        name="Claude Code"
+        sub="Opus 5.5"
+      />
       <Row
         no="03"
         kind="Security"

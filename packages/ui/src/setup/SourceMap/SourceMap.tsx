@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { SourceOrigin } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -74,15 +75,15 @@ export interface SourceMapText {
 
 export const sourceMapText: SourceMapText = {
   label: 'Sources',
-  reading: 'Reading it. Nothing in the folder is changed',
+  reading: 'Reading…',
   noRemote: 'no remote',
-  origin: 'On this Mac',
+  origin: `On ${device.this}`,
   clone: 'Clone it here',
   later: 'Map it later',
-  laterNote: 'Tasks that need it wait until it is on this Mac',
+  laterNote: `Tasks that need it wait until it is on ${device.this}`,
   role: (name) => `Role of ${name}`,
   remove: (name) => `Remove ${name}`,
-  empty: 'No repositories. The project can plan, research and write; add one when it needs code.',
+  empty: 'No repositories',
   folders: 'Choose folders',
   url: 'Clone from a URL',
   urlField: 'Repository URL',

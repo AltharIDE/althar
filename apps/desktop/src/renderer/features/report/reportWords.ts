@@ -13,7 +13,7 @@ import { device } from '../../shared/device'
  */
 
 export const text = {
-  byMail: 'Althar saves the report in Downloads and opens a message in your mail app to send it with.',
+  byMail: 'Saved to Downloads, with a message in your mail app.',
   about: (what: string) => `About ${what}.`,
   update: 'an update that couldn’t move your data',
   /** A stuck step, as the report's about line has it: the stuck Implement step. */

@@ -11,8 +11,9 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { until } from '@althar/testing/effect'
 
-import { connection, services } from '../src/Api'
+import { connection, services, text } from '../src/Api'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
 import { Folders } from '../src/Folders'
 import { Secrets } from '../src/Secrets'
@@ -47,21 +48,18 @@ const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly ed
         ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     return { client, grant }
-  })
-
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
   })
 
 const idle = (thread: { readonly session: ThreadSnapshot['session'] }) => thread.session !== null && !thread.session.turnRunning
@@ -188,6 +186,29 @@ describe('a file moved in one of a task’s several repositories, through the AP
   )
 })
 
+describe('an issue card’s Always file at once and Always ask first, through the API', () => {
+  it.live('say it to the coordinator as the person, for it to keep as a note', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const path = folderWith(['api'])
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(path, 'api')) })
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.PreferIssueCards({ commandId: commandId(), threadId, atOnce: true })
+        yield* client.PreferIssueCards({ commandId: commandId(), threadId, atOnce: false })
+        const said = yield* until(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.items.filter((item) => item.kind === 'user_message').length >= 2,
+        )
+        assert.deepStrictEqual(said.items.flatMap((item) => (item.kind === 'user_message' ? [item.content.text] : [])).slice(0, 2), [
+          text.issuesAtOnce,
+          text.issuesAskFirst,
+        ])
+      }),
+    ),
+  )
+})
+
 describe('the coordinator’s question, through the API', () => {
   it.live('is answered from the window, and the coordinator that asked hears it', () =>
     Effect.scoped(
@@ -198,9 +219,9 @@ describe('the coordinator’s question, through the API', () => {
         const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
         // Its first turn reads its brief; the next asks.
         yield* client.Send({ commandId: commandId(), threadId, body: 'Hello.', disposition: 'after_current' })
-        yield* eventually(client.GetCoordinator({ projectId: project.id }), idle)
+        yield* until(client.GetCoordinator({ projectId: project.id }), idle)
         yield* client.Send({ commandId: commandId(), threadId, body: scenarios.questions, disposition: 'after_current' })
-        const asking = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const asking = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'open'),
         )
         const question = asking.items.find((item) => item.kind === 'question')
@@ -210,7 +231,7 @@ describe('the coordinator’s question, through the API', () => {
           attentionId: question?.kind === 'question' ? question.content.attentionId : '',
           answers: Object.fromEntries(fields.map((field) => [field.id, { values: [field.options[0]?.value ?? ''] }])),
         })
-        const answered = yield* eventually(
+        const answered = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => idle(snapshot) && snapshot.items.some((item) => item.kind === 'question' && item.content.state === 'answered'),
         )

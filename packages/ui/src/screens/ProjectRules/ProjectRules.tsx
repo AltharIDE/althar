@@ -86,6 +86,22 @@ export interface KindWords {
   except?: string
 }
 
+/**
+ * What an ask or a refusal is counted as (ADR-071): one of the kinds, what
+ * Althar can't read, a command the project names, credentials, the code
+ * host, what a reader may not do, and the rest.
+ */
+export type TallyKind = RuleKind | 'unclear' | 'command' | 'credentials' | 'code-host' | 'reader' | 'other'
+
+/** How one kind went lately: asked and allowed, refused, and how often the agent found another way after one it wasn't allowed. */
+export interface KindTally {
+  kind: TallyKind
+  asked: number
+  allowed: number
+  refused: number
+  workedAround: number
+}
+
 /** A value of a setting, as its menu offers it and as the sentence says it. */
 interface Worded extends ChoiceWords {
   word: string
@@ -96,7 +112,17 @@ export interface ProjectRulesText {
   lede: (project: string) => string
   key: Partial<CharterKeyText>
   /** Each sentence's word in the margin. */
-  label: { always: string; never: string; ask: string; allow: string; rest: string; sandbox: string; finished: string; limits: string }
+  label: {
+    always: string
+    never: string
+    ask: string
+    allow: string
+    rest: string
+    sandbox: string
+    tally: string
+    finished: string
+    limits: string
+  }
   /** What no project can change. */
   fixed: string
   /** Who the sentences are about: first named, then again. */
@@ -142,6 +168,13 @@ export interface ProjectRulesText {
     empty: Record<SandboxList, string>
     typed: Record<SandboxList, string>
   }
+  /** How each kind went lately, a line each: its name, then how often it asked and was allowed, was refused and worked around. */
+  tally: {
+    names: Record<Exclude<TallyKind, RuleKind>, string>
+    asked: (times: number, allowed: number) => string
+    refused: (times: number, around: number) => string
+    none: string
+  }
   finished: {
     opens: string
     pushes: string
@@ -184,6 +217,7 @@ export const projectRulesText: ProjectRulesText = {
     allow: 'Go ahead',
     rest: 'The rest',
     sandbox: 'Sandbox',
+    tally: 'Last 14 days',
     finished: 'Finished',
     limits: 'Limits',
   },
@@ -254,13 +288,12 @@ export const projectRulesText: ProjectRulesText = {
   },
   allow: {
     with: (subject) => `${subject} go ahead with `,
-    none: 'Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.',
+    none: 'Nothing goes ahead by a rule yet.',
   },
   off: 'Off while everything is allowed.',
   allowAll: {
     title: 'Allow everything',
-    note: (project) =>
-      `Nothing in ${project} waits for you but what can’t be undone, such as a force push or deleting outside the task, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
+    note: (project) => `Nothing in ${project} waits for you but what can’t be undone. Never still holds.`,
   },
   add: {
     [RulePlace.Never]: 'Add a command to Never',
@@ -284,13 +317,13 @@ export const projectRulesText: ProjectRulesText = {
       [PermissionPolicy.Coordinator]: {
         word: 'the coordinator decides',
         title: 'The coordinator decides',
-        note: 'Allows or refuses, with a reason; what it can’t settle comes to you',
+        note: 'What it can’t settle comes to you',
         after: 'What it can’t settle, and what Althar can’t read, comes to you.',
       },
       [PermissionPolicy.Ask]: {
         word: 'ask me',
         title: 'Ask me',
-        note: 'Reads and the task’s own files still go ahead. OpenCode has no sandbox, so each of its commands waits',
+        note: 'Reads and the task’s own files still go ahead',
         after: 'Reads and the task’s own files still go ahead.',
       },
     },
@@ -303,14 +336,29 @@ export const projectRulesText: ProjectRulesText = {
     withoutAsking: ' without asking',
     once: ', once everything else is allowed',
     noHosts: ' Every host they reach asks first.',
-    holds: ' Each command still meets these rules.',
+    holds: ' What stays in their sandbox runs without asking; what leaves it meets these rules.',
     add: { commands: 'Add a command leads run outside their sandbox', hosts: 'Add a host leads reach without asking' },
     field: { commands: 'A command, as it starts', hosts: 'A host' },
     empty: {
-      commands: 'How the command starts. Run outside the sandbox, it still asks, and meets these rules',
+      commands: 'How the command starts',
       hosts: 'A host such as registry.npmjs.org',
     },
     typed: { commands: 'Runs outside the sandbox', hosts: 'Reached without asking' },
+  },
+  tally: {
+    names: {
+      unclear: 'Commands Althar couldn’t read',
+      command: 'Commands this project names',
+      credentials: 'Reading credentials or keys',
+      'code-host': 'Changing things on the code host',
+      reader: 'What a reader may not do',
+      other: 'Everything else',
+    },
+    asked: (times, allowed) =>
+      `asked you ${times === 1 ? 'once' : `${times} times`}, ${allowed === times ? (times === 1 ? 'and you allowed it' : `and you allowed all ${times}`) : `and you allowed ${allowed}`}`,
+    refused: (times, around) =>
+      `refused ${times === 1 ? 'once' : `${times} times`}${around === 0 ? '' : `, and agents found another way ${around === times ? (times === 1 ? 'that time' : 'each time') : `${around} times`}`}`,
+    none: 'Nothing asked you or was refused.',
   },
   finished: {
     opens: 'A finished task opens ',
@@ -321,7 +369,7 @@ export const projectRulesText: ProjectRulesText = {
     prTitled: '. A pull request opened from it is titled ',
     described: ', described in ',
     label: 'When a task is done',
-    note: 'Merging stays yours. A repository on a host Althar doesn’t know ends on its branch',
+    note: 'Merging stays yours',
     end: {
       [TaskEnd.DraftPr]: { word: 'a draft pull request', title: 'Open a draft pull request', note: 'Checks run on it; you mark it ready' },
       [TaskEnd.ReadyPr]: {
@@ -336,7 +384,7 @@ export const projectRulesText: ProjectRulesText = {
   titles: { label: 'Pull request titles', note: '{key} is the issue’s key, {title} the task’s title', each: 'as each repository says' },
   templates: {
     label: 'Descriptions',
-    note: 'Written in the repository’s pull request template, where it has one. The boxes are yours to tick',
+    note: 'The repository’s pull request template, where it has one',
     every: 'each repository’s template',
     some: 'each repository’s template, where it has one',
     none: 'Althar’s own words',
@@ -349,18 +397,18 @@ export const projectRulesText: ProjectRulesText = {
       [LimitPolicy.Move]: {
         word: 'moves to the next agent free',
         title: 'Move the work to the next agent free',
-        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands. With none free, it waits for the reset, and you can move it to another model meanwhile',
+        note: 'In the order of your agents; with none free, it waits for the reset',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
         title: 'Wait for the reset',
-        note: 'The step keeps its place and runs again at the reset, unless you move it to another model meanwhile',
+        note: 'Runs again at the reset',
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',
         after: ' to move it to a model that’s free, or to wait for the reset',
         title: 'Ask me',
-        note: 'The step waits for you: move it to a model that’s free, or wait for the reset',
+        note: 'Move it to a free model, or wait for the reset',
       },
     },
   },
@@ -374,7 +422,7 @@ export const projectRulesText: ProjectRulesText = {
       first: { title: 'Stay on the first', note: 'Then the work does as the limit says' },
       next: { title: 'Go on with the next', note: 'The agent’s next account here, then as the limit says' },
     },
-    note: 'In your order from Settings. Going on with the next holds for every agent in this project',
+    note: 'In your order from Settings',
   },
   token: {},
   hint: {},
@@ -388,6 +436,8 @@ const KINDS = [
   RuleKind.Deploy,
   RuleKind.Outside,
 ] as const
+/** Whether what a tally counts is one of the kinds, which say their own name. */
+const isRuleKind = (kind: TallyKind): kind is RuleKind => (KINDS as readonly string[]).includes(kind)
 const PLACES = [RulePlace.Never, RulePlace.Ask, RulePlace.Allow, RulePlace.Rest] as const
 /** What the rest can be; allowing everything is the switch over every sentence. */
 const MODES = [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask] as const
@@ -446,6 +496,12 @@ export type ProjectRulesProps = RootProps<
       onAdd: (list: SandboxList, typed: string) => string | undefined
       onRemove: (list: SandboxList, value: string) => void
     }
+    /**
+     * How each kind of ask and refusal went lately, the most first, for
+     * leads and the coordinator, so a kind that mostly gets worked around
+     * can be dropped. Without it, the sentence isn't said.
+     */
+    tally?: readonly KindTally[]
     text?: Partial<ProjectRulesText>
   }
 >
@@ -554,6 +610,7 @@ export function ProjectRules({
   allowed,
   onAllowedChange,
   sandbox,
+  tally,
   text,
   className,
   ...rest
@@ -953,6 +1010,21 @@ export function ProjectRules({
               )}
             </span>
             {t.sandbox.holds}
+          </Clause>
+        )}
+
+        {tally !== undefined && (
+          <Clause label={t.label.tally} headingLevel={sub}>
+            {tally.length === 0
+              ? t.tally.none
+              : tally.map((each) => (
+                  <span key={each.kind} className={s.tallyLine}>
+                    {`${isRuleKind(each.kind) ? t.kinds[each.kind].name : t.tally.names[each.kind]}: ${[
+                      ...(each.asked > 0 ? [t.tally.asked(each.asked, each.allowed)] : []),
+                      ...(each.refused > 0 ? [t.tally.refused(each.refused, each.workedAround)] : []),
+                    ].join('; ')}.`}
+                  </span>
+                ))}
           </Clause>
         )}
 

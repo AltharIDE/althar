@@ -1,5 +1,6 @@
 import type { Effect } from 'effect'
 
+import type { MergeInCopy } from './branchCopy'
 import type { ConnectorFailed } from './errors'
 import type { Fetch } from './http'
 
@@ -36,4 +37,6 @@ export interface AdapterOptions {
   /** The service's own pages: `https://github.com`, or an instance's. */
   readonly webUrl: string
   readonly credential: Effect.Effect<Credential, ConnectorFailed>
+  /** How a branch is brought up to date in a copy, where the host has no call for it: git's, unless a test stands in. */
+  readonly merge?: MergeInCopy
 }

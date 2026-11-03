@@ -1,4 +1,5 @@
 import { isAgentDefault, knownModelName } from '@althar/contracts'
+import type { AgentDefinition } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 
 import { Agents } from './Config'
@@ -32,6 +33,11 @@ export interface Route {
   readonly defaultEffort: string | null
   /** How much room the plan it runs on has for it, its tightest window as last read; null where none is read, or it is a key. */
   readonly room: Room | null
+  /**
+   * Where the agent reaches it through a provider whose sign-in refused work lately (OpenCode Go): that provider, as the agent names
+   * it. The same model through another provider the person is signed in to is the way to take instead.
+   */
+  readonly refusedProvider?: string
 }
 
 export interface UsableModel {
@@ -79,6 +85,8 @@ export const usableModels = (projectId?: string) =>
     const limits = yield* Limits
     const catalog = yield* models.catalog
     const byKey = new Map<string, { name: string; maker: string | null; fact: ModelFact | null; routes: Route[] }>()
+    // Per account, the providers within its agent that refused work lately, by id: read once for all its models.
+    const refusing = new Map<string, ReadonlyMap<string, string>>()
     for (const entry of agents.list) {
       const agent = { id: entry.definition.id, name: entry.definition.name }
       if (!isInstalled(installs, entry.definition) || (yield* signIns.of(agent.id)) === 'signed_out') continue
@@ -97,9 +105,16 @@ export const usableModels = (projectId?: string) =>
         if (Option.isNone(starts)) continue
         const account = yield* signIns.account(starts.value)
         if (account.status === 'signed_out') continue
-        // A plan pays where that account is on one, not just any signed in.
-        const plan = account.paidBy === 'plan'
+        // An agent with a sign-in for each provider it reaches (OpenCode): this model may go through one that refused it lately.
+        const through = entry.definition.signIn.providers?.of(model.id)
+        // A plan pays where that account is on one, not just any signed in, or where the model goes through a provider that is one (OpenCode Go).
+        const plan = account.paidBy === 'plan' || onPlanProvider(entry.definition, through)
         const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, named)) : null
+        if (through !== undefined && !refusing.has(starts.value.id)) {
+          const rows = (yield* signIns.providers(starts.value, account)) ?? []
+          refusing.set(starts.value.id, new Map(rows.flatMap((row) => (row.refusedAt === null ? [] : [[row.id, row.name] as const]))))
+        }
+        const refusedProvider = through === undefined ? undefined : refusing.get(starts.value.id)?.get(through)
         const fact = facts.of(agent, model)
         const key = fact?.slug ?? name.toLowerCase()
         const route: Route = {
@@ -111,6 +126,7 @@ export const usableModels = (projectId?: string) =>
           effort: model.effort,
           defaultEffort: offered.defaults.find((chosen) => chosen.model === model.id)?.effort ?? null,
           room,
+          ...(refusedProvider === undefined ? {} : { refusedProvider }),
         }
         const found = byKey.get(key)
         if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id), fact, routes: [route] })
@@ -119,8 +135,7 @@ export const usableModels = (projectId?: string) =>
     }
     const usable: UsableModel[] = [...byKey.values()].map((model) => ({
       ...model,
-      // A plan with room before one nearly out, a plan before a key; else in the agents' order.
-      routes: model.routes.toSorted((a, b) => Number(b.plan) - Number(a.plan) || Number(nearlyOut(a)) - Number(nearlyOut(b))),
+      routes: bestFirst(model.routes),
     }))
     return usable.toSorted(
       (a, b) =>
@@ -129,6 +144,19 @@ export const usableModels = (projectId?: string) =>
         a.name.localeCompare(b.name),
     )
   })
+
+/** Whether a model goes through a provider of the agent's that is a plan with limits of its own (OpenCode Go), whatever pays for the rest. */
+export const onPlanProvider = (definition: AgentDefinition, through: string | undefined): boolean =>
+  through !== undefined && (definition.signIn.providers?.plans ?? []).includes(through)
+
+/** The ways to a model, the best first: a provider that refused its sign-in last, then a plan with room before one nearly out, a plan before a key; else in the agents' order. */
+export const bestFirst = (routes: ReadonlyArray<Route>): ReadonlyArray<Route> =>
+  routes.toSorted(
+    (a, b) =>
+      Number(a.refusedProvider !== undefined) - Number(b.refusedProvider !== undefined) ||
+      Number(b.plan) - Number(a.plan) ||
+      Number(nearlyOut(a)) - Number(nearlyOut(b)),
+  )
 
 const nearlyOut = (route: Route) => route.room !== null && route.room.leftPercent < NEARLY_OUT
 
@@ -156,6 +184,8 @@ const effortWords = (route: Route | undefined): string => {
  */
 export const describeModels = (
   usable: ReadonlyArray<UsableModel>,
+  /** The time they are read at, which says whether a reset is today. */
+  now: number,
   use = "propose_plan's lead and review and start_task's lead",
 ): string => {
   if (usable.length === 0)
@@ -180,11 +210,13 @@ export const describeModels = (
       best?.plan === true
         ? best.room === null
           ? 'on a plan'
-          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room)}`
+          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room, now)}`
         : fact?.price == null
           ? 'per use'
           : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`
-    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}`)
+    // Only through a provider that refused its sign-in: the person has to sign in to it again before work on this goes through.
+    const signIn = best?.refusedProvider === undefined ? '' : `; needs ${best.refusedProvider} signed in again first`
+    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}${signIn}`)
   }
   return lines.join('\n')
 }

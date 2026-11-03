@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../../fixtures/setup'
+import { device } from '../../foundations/device'
 import { Brand } from '../../foundations/brands/brands'
 import { ChangeTarget, HostReach, RepositoryRole } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
@@ -32,7 +33,7 @@ type Story = StoryObj<typeof meta>
 export const Meridian: Story = {
   play: async ({ canvasElement }) => {
     const map = within(canvasElement)
-    await expect(map.getByRole('list', { name: 'On this computer' }).querySelectorAll('li')).toHaveLength(3)
+    await expect(map.getByRole('list', { name: `On ${device.this}` }).querySelectorAll('li')).toHaveLength(3)
     await expect(map.getByRole('region', { name: 'GitHub' })).toHaveTextContent('Connected as balazs')
     await expect(map.getByRole('region', { name: 'GitLab' })).toHaveTextContent('Not connected')
     // Each card says where its work goes, as the wires draw it.
@@ -86,6 +87,56 @@ export const ChangingTarget: Story = {
     await expect(
       map.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on balazs/halyard-api.'),
     ).toBeInTheDocument()
+  },
+}
+
+const forkWith = (fork: { target: ChangeTarget; canPush?: boolean }) =>
+  MAP_HALYARD.map((one) => (one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...fork } }))
+
+/** The host says the person can't push to the repository it forks: there's no such choice, and it says so. */
+export const ForkWithoutPushAccess: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, canPush: false }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('You can’t push to halyard/api yet. Its owners can give you access.')).toBeVisible()
+    await userEvent.click(map.getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
+    const page = within(document.body)
+    await expect(await page.findByRole('option', { name: 'halyard/api' })).toBeInTheDocument()
+    await expect(page.queryByRole('option', { name: 'halyard/api, branches too' })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+  },
+}
+
+/** The host says the person can push there: its branches can go there too. */
+export const ForkWithPushAccess: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, canPush: true }), worktrees: '~/Althar/halyard' },
+  play: async ({ args, canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.queryByText(/You can’t push/)).toBeNull()
+    await userEvent.click(map.getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'halyard/api, branches too' }))
+    await expect(args.onTargetChange).toHaveBeenCalledWith('halyard', ChangeTarget.UpstreamBranch)
+  },
+}
+
+/** Its branches chosen to go there: one wire, to the repository it forks, which takes both. */
+export const ForkPushingUpstream: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: true }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(await map.findByText('pushes, pull requests')).toBeInTheDocument()
+    await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(1)
+    await expect(map.getByText('It pushes to halyard/api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+  },
+}
+
+/** Chosen, and its access since taken away: it says so, and the wires show its branches on the fork, where they go. */
+export const ForkPushingUpstreamAccessGone: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: false }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('You can’t push to halyard/api yet. Its owners can give you access.')).toBeVisible()
+    await expect(map.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
   },
 }
 
@@ -148,9 +199,9 @@ export const Elsewhere: Story = {
   },
   play: async ({ canvasElement }) => {
     const map = within(canvasElement)
-    await expect(map.getByText('Not on this computer')).toBeVisible()
-    await expect(map.getByText('Stays on this computer')).toBeVisible()
-    await expect(map.getByText('Its work stays on this computer.')).toBeInTheDocument()
+    await expect(map.getByText(`Not on ${device.this}`)).toBeVisible()
+    await expect(map.getByText(`Stays on ${device.this}`)).toBeVisible()
+    await expect(map.getByText(`Its work stays on ${device.this}.`)).toBeInTheDocument()
     await expect(map.getByRole('region', { name: 'git.meridian.dev' })).toHaveTextContent('Not a host Althar connects to')
     // Althar can't connect a host it doesn't know.
     await expect(map.queryByRole('button', { name: /Connect/ })).toBeNull()
@@ -210,7 +261,7 @@ export const LeavingOutQuietly: Story = {
     const map = within(canvasElement)
     const page = within(document.body)
     await userEvent.click(map.getByRole('button', { name: 'More for meridian-infra' }))
-    await expect(await page.findByRole('menuitem', { name: /Leave out/ })).toHaveTextContent('Nothing in its folder changes')
+    await expect(await page.findByRole('menuitem', { name: /Leave out/ })).not.toHaveTextContent(/keep/)
     await userEvent.keyboard('{Escape}')
     await userEvent.click(map.getByRole('button', { name: 'More for meridian-api' }))
     await expect(await page.findByRole('menuitem', { name: /Leave out/ })).toHaveTextContent('The task using it keeps it')

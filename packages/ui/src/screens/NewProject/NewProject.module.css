@@ -145,6 +145,48 @@
   font-weight: 620;
   letter-spacing: -0.018em;
 }
+/* Nothing added yet: where the folders will be, which takes a drop. */
+.zone {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 44px 24px 36px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+  text-align: center;
+  transition: border-color var(--fast) var(--ease);
+}
+.zoneOver {
+  border-color: var(--t-2);
+}
+.zoneIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--t-2);
+}
+.zoneTitle {
+  margin: 0 0 4px;
+  color: var(--t-1);
+  font-size: 13.5px;
+  font-weight: 560;
+}
+.zoneButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.zone .note,
+.zone .missing {
+  max-width: 380px;
+}
+
 /* Folders held over the page: the box takes them. */
 .empty {
   height: 92px;

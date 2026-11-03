@@ -1,6 +1,6 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -20,9 +20,6 @@ import { notices, repository, runtime, until } from './support'
  * agent says its context is as full as a message ending `[context:25/1000000]`
  * says: a quarter of a million-token window.
  */
-
-/** How long a wait for a fake agent's turn may take: a handover starts a fresh session, slow on a loaded runner. */
-const ROOM = Duration.seconds(40)
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
 
@@ -101,12 +98,10 @@ const answered = (threadId: string, count: number) =>
     yield* until(
       prompts(threadId),
       (rows) => rows.length === count && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
-      ROOM,
     )
     yield* until(
       Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) && !running.value.turnRunning ? [true] : [])),
       (rows) => rows.length === 1,
-      ROOM,
     )
   })
 
@@ -116,7 +111,7 @@ const finished = (threadId: string) => answered(threadId, 1)
 /** The quiet lines in the thread. */
 const titles = (threadId: string) => Effect.map(notices(threadId), (said) => said.map((notice) => notice.title))
 
-const AFRESH = 'Started Fake codex afresh, briefed from the task, to keep its context small.'
+const AFRESH = 'Started Fake codex afresh.'
 
 describe('when to hand a lead over', () => {
   it('past its mark at any turn, or 80% of a smaller window; past a lower one at a break', () => {
@@ -142,80 +137,127 @@ describe('when to hand a lead over', () => {
 })
 
 describe('handing a lead to a fresh session', () => {
-  it.live(
-    'hands one past its mark over before its next turn, on the same agent and account, briefed from the task',
-    () =>
-      Effect.gen(function* () {
-        const projectId = yield* opened
-        const task = yield* started(projectId, 'Do it. [lead:finish]')
-        yield* finished(task.threadId)
-        // A turn that leaves a quarter of a million-token window full: past the lead's mark, though nowhere near 80%.
-        yield* say(task.threadId, 'Look again. [context:25/1000000]')
-        yield* answered(task.threadId, 2)
-        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+  it.live('hands one past its mark over before its next turn, on the same agent and account, briefed from the task', () =>
+    Effect.gen(function* () {
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:finish]')
+      yield* finished(task.threadId)
+      // A turn that leaves a quarter of a million-token window full: past the lead's mark, though nowhere near 80%.
+      yield* say(task.threadId, 'Look again. [context:25/1000000]')
+      yield* answered(task.threadId, 2)
+      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
 
-        // Its next turn starts in a fresh session, which takes what the person said after its brief.
-        yield* say(task.threadId, 'And now?')
-        const rows = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active', ROOM)
-        const [old, fresh] = rows
-        assert.strictEqual(old?.state, 'superseded')
-        assert.strictEqual(old?.supersededBySessionId, fresh?.id)
-        assert.deepStrictEqual([fresh?.agentId, fresh?.accountId], [old?.agentId, old?.accountId])
-        assert.include(yield* titles(task.threadId), AFRESH)
-        const [, , first] = yield* until(prompts(task.threadId), (all) => all.length === 3 && all[2]?.state === 'completed', ROOM)
-        assert.strictEqual(first?.providerSessionId, fresh?.id)
-        assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktree/)
-        assert.include(first?.prompt, 'Task: Lead')
-        assert.include(first?.prompt, 'The thread so far, oldest first')
-        assert.match(first?.prompt ?? '', /\n\nAnd now\?$/)
-      }).pipe(Effect.provide(withQueries())),
-    60_000,
+      // Its next turn starts in a fresh session, which takes what the person said after its brief.
+      yield* say(task.threadId, 'And now?')
+      const rows = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      const [old, fresh] = rows
+      assert.strictEqual(old?.state, 'superseded')
+      assert.strictEqual(old?.supersededBySessionId, fresh?.id)
+      assert.deepStrictEqual([fresh?.agentId, fresh?.accountId], [old?.agentId, old?.accountId])
+      assert.include(yield* titles(task.threadId), AFRESH)
+      const [, , first] = yield* until(prompts(task.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
+      assert.strictEqual(first?.providerSessionId, fresh?.id)
+      assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktree/)
+      assert.include(first?.prompt, 'Task: Lead')
+      assert.include(first?.prompt, 'The thread so far, oldest first')
+      assert.match(first?.prompt ?? '', /\n\nAnd now\?$/)
+    }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live(
-    'hands one over at a break past the lower mark, and not between turns of the same work',
-    () =>
-      Effect.gen(function* () {
-        const projectId = yield* opened
-        const task = yield* started(projectId, 'Do it. [lead:finish]')
-        yield* finished(task.threadId)
-        // A hundred thousand tokens, mid-work: under the mark, so the next turn is in the same session.
-        yield* say(task.threadId, 'Look again. [context:10/1000000]')
-        yield* answered(task.threadId, 2)
-        yield* say(task.threadId, 'And again.')
-        yield* answered(task.threadId, 3)
-        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+  it.live('hands one over at a break past the lower mark, and not between turns of the same work', () =>
+    Effect.gen(function* () {
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:finish]')
+      yield* finished(task.threadId)
+      // A hundred thousand tokens, mid-work: under the mark, so the next turn is in the same session.
+      yield* say(task.threadId, 'Look again. [context:10/1000000]')
+      yield* answered(task.threadId, 2)
+      yield* say(task.threadId, 'And again.')
+      yield* answered(task.threadId, 3)
+      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
 
-        // The same, ending a round of work that changed it with finish_step: a break, and the next turn starts afresh.
-        yield* say(task.threadId, 'Finish it. [lead:edit] [lead:finish] [context:10/1000000]')
-        yield* answered(task.threadId, 4)
-        yield* say(task.threadId, 'What next?')
-        yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active', ROOM)
-        assert.include(yield* titles(task.threadId), AFRESH)
-      }).pipe(Effect.provide(withQueries())),
-    60_000,
+      // The same, ending a round of work that changed it with finish_step: a break, and the next turn starts afresh.
+      yield* say(task.threadId, 'Finish it. [lead:edit] [lead:finish] [context:10/1000000]')
+      yield* answered(task.threadId, 4)
+      // Once it is done, as the person reads its answer before writing again: while it still seems at work, as when what it
+      // said last in its turn is heard after the turn, its next turn is the same session's, and the break is the next one's.
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(task.threadId)),
+        (busy) => !busy,
+      )
+      yield* say(task.threadId, 'What next?')
+      yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      assert.include(yield* titles(task.threadId), AFRESH)
+    }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live(
-    'leaves one as it is while something it left running still runs, which a fresh session would stop',
-    () =>
-      Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const projectId = yield* opened
-        const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-        yield* finished(task.threadId)
-        yield* until(
-          Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-          (left) => left.length === 1,
-          ROOM,
-        )
-        yield* say(task.threadId, 'Look again. [context:25/1000000]')
-        yield* answered(task.threadId, 2)
-        yield* say(task.threadId, 'And now?')
-        yield* answered(task.threadId, 3)
-        assert.lengthOf(yield* sessionsOn(task.threadId), 1)
-        assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
-      }).pipe(Effect.provide(withQueries())),
-    60_000,
+  it.live('leaves one as it is while something it left running still runs, which a fresh session would stop', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+      yield* finished(task.threadId)
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
+        (left) => left.length === 1,
+      )
+      yield* say(task.threadId, 'Look again. [context:25/1000000]')
+      yield* answered(task.threadId, 2)
+      yield* say(task.threadId, 'And now?')
+      yield* answered(task.threadId, 3)
+      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+      assert.isFalse((yield* titles(task.threadId)).some((title) => title?.includes('afresh') === true))
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe('a session its agent has lost', () => {
+  // Claude Code's adapter drops a session whose process died (a `pkill -f` matched it, on 2 November 2026), and answers its
+  // next prompt with "Resource not found": the turn is given to a fresh session, briefed from the task, not failed.
+  it.live('starts the lead afresh with what the person said, rather than fail the turn', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:finish]')
+      yield* finished(task.threadId)
+
+      yield* say(task.threadId, 'Look again. [lead:lost-once]')
+      const [old, fresh] = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      assert.strictEqual(old?.state, 'superseded')
+      assert.deepStrictEqual([fresh?.agentId, fresh?.accountId], [old?.agentId, old?.accountId])
+      const [, lost, first] = yield* until(prompts(task.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
+      assert.deepStrictEqual([lost?.providerSessionId, lost?.state], [old?.id, 'failed'])
+      const [failed] = yield* sql<{ errorClass: string | null }>`
+        SELECT error_class FROM turn_deliveries WHERE thread_id = ${task.threadId} AND state = 'failed'`
+      assert.strictEqual(failed?.errorClass, 'session_lost')
+      // What the person said goes to the fresh session, after its brief.
+      assert.strictEqual(first?.providerSessionId, fresh?.id)
+      assert.match(
+        first?.prompt ?? '',
+        /^You are carrying on a task an earlier session of yours worked on, in the same worktree: Althar started you afresh because that session was lost\./,
+      )
+      assert.match(first?.prompt ?? '', /\n\nLook again\. \[lead:lost-once\]$/)
+      // Said plainly, once, and not as a turn that couldn't answer.
+      const said = yield* titles(task.threadId)
+      assert.include(said, 'Fake codex had lost this conversation. Started it afresh.')
+      assert.isFalse(said.some((title) => title?.includes("couldn't answer") === true))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('carries a step on from its first turn, the fresh session briefed with it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:lost-once] [lead:finish]')
+      const [, fresh] = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      yield* until(sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE provider_session_id = ${fresh?.id ?? ''}`, (rows) =>
+        rows.some((row) => row.state === 'completed'),
+      )
+      const [step] = yield* until(sql<{ state: string }>`SELECT state FROM nodes WHERE node_key = 'implement'`, (rows) =>
+        rows.some((row) => row.state !== 'running' && row.state !== 'ready' && row.state !== 'pending'),
+      )
+      assert.strictEqual(step?.state, 'succeeded')
+      assert.include(yield* titles(task.threadId), 'Fake codex had lost this conversation. Started it afresh.')
+    }).pipe(Effect.provide(withQueries())),
   )
 })

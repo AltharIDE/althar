@@ -1,16 +1,13 @@
 import { useState } from 'react'
 
-import { TaskActivity, unreachable } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
 import { CheckList } from '../../primitives/CheckList/CheckList'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import s from './AbandonTask.module.css'
 
 /*
- * Abandoning a task, said in full before it happens: what stops, that its
- * worktree and branch stay where they are, untouched, and that it can be
- * reopened on them (a plain task, on its worktree alone: it has no branch
- * yet). A pull request it has open is offered to close on its host, on as
+ * Abandoning a task, asked first: the one thing said is that its branch and
+ * worktree stay (a plain task's worktree alone: it has no branch yet). A pull request it has open is offered to close on its host, on as
  * the dialog opens, with its branch there to delete too, off: only what
  * the person leaves on is done, as they press. A merged task abandons only
  * the commits after its pull request: that stays merged, and its lead
@@ -22,32 +19,18 @@ import s from './AbandonTask.module.css'
 
 export interface AbandonTaskText {
   title: string
-  description: string
-  /** What stops, by what the task has going; nothing is said when nothing runs. */
-  working: string
-  planned: string
-  /** Where its worktree stays, as the person would find it. */
-  worktree: (where: string) => string
-  noWorktree: string
-  /** Its branch, which stays, with nothing pushed or deleted. */
-  branch: (name: string) => string
-  /** Its branch, which stays here while its copy on the host is deleted. */
-  branchHere: (name: string) => string
+  /** What stays: its branch and worktree, or its worktree alone. */
+  kept: string
+  keptWorktree: string
   /** What its open pull requests are, for a screen reader. */
   changes: string
   /** Closing a pull request, by name, on its host. */
   close: (name: string, host: string) => string
   /** Deleting that pull request's branch on its host. */
   deleteBranch: (host: string) => string
-  reopen: string
-  /** For a task with a worktree and no branch yet, a plain one. */
-  reopenWorktree: string
-  /** For a task with neither yet. */
-  reopenLater: string
   /** For a merged task: its pull request, which stays merged, and the commits after it, left out. */
   mergedDescription: (change: string) => string
   mergedCommits: (count: number) => string
-  mergedLater: string
   abandon: string
   cancel: string
   /** Abandoned, with a pull request it was to close still open. */
@@ -59,27 +42,18 @@ export interface AbandonTaskText {
 
 export const abandonTaskText: AbandonTaskText = {
   title: 'Abandon this task?',
-  description: 'The task ends here, and its change isn’t merged.',
-  working: 'The agents on it stop.',
-  planned: 'Its plan doesn’t start.',
-  worktree: (where) => `Its worktree stays in ${where}, as it is.`,
-  noWorktree: 'It has no worktree to leave behind.',
-  branch: (name) => `Its branch ${name} stays. Nothing is pushed or deleted.`,
-  branchHere: (name) => `Its branch ${name} stays on this computer.`,
+  kept: 'Its branch and worktree stay.',
+  keptWorktree: 'Its worktree stays.',
   changes: 'Its pull requests',
   close: (name, host) => `Close ${name} on ${host}`,
   deleteBranch: (host) => `Delete its branch on ${host}`,
-  reopen: 'You can reopen it later, on the same worktree and branch.',
-  reopenWorktree: 'You can reopen it later, on the same worktree.',
-  reopenLater: 'You can reopen it later.',
-  mergedDescription: (change) => `${change} stays merged. The task ends here without the work after it.`,
+  mergedDescription: (change) => `${change} stays merged.`,
   mergedCommits: (count) =>
     count === 1 ? 'The commit after it goes in no pull request.' : `The ${count} commits after it go in no pull request.`,
-  mergedLater: 'Write to its lead to carry on with it later.',
   abandon: 'Abandon task',
   cancel: 'Cancel',
   abandonedTitle: 'Task abandoned',
-  abandonedDescription: 'Its pull request is still open on its host.',
+  abandonedDescription: 'Its pull request is still open.',
   closeAgain: 'Try again',
   leaveOpen: 'Leave it open',
 }
@@ -98,8 +72,6 @@ export interface AbandonChoices {
 }
 
 export interface AbandonTaskProps {
-  /** What it has going: agents on it, a plan waiting to start, or nothing. */
-  activity: TaskActivity
   /** Where its worktree is, as the person would find it; null where it has none. */
   worktree: string | null
   /** Its branch; null where it has none yet. */
@@ -117,26 +89,11 @@ export interface AbandonTaskProps {
   text?: Partial<AbandonTaskText>
 }
 
-/** What stops, in words; nothing when nothing runs. */
-const stops = (activity: TaskActivity, t: AbandonTaskText): string | null => {
-  switch (activity) {
-    case TaskActivity.Working:
-      return t.working
-    case TaskActivity.Planned:
-      return t.planned
-    case TaskActivity.Still:
-      return null
-    default:
-      return unreachable(activity)
-  }
-}
-
 /** A choice's id in the list: closing a pull request, or deleting its branch. */
 const closeId = (id: string) => `close:${id}`
 const branchId = (id: string) => `branch:${id}`
 
 export function AbandonTask({
-  activity,
   worktree,
   branch,
   changes = [],
@@ -149,7 +106,6 @@ export function AbandonTask({
   text,
 }: AbandonTaskProps) {
   const t = { ...abandonTaskText, ...text }
-  const stopping = stops(activity, t)
   // Each pull request closed unless the person says not; no branch deleted unless they say.
   const [on, setOn] = useState<ReadonlyArray<string>>(() => changes.map((change) => closeId(change.id)))
   const closing = changes.filter((change) => on.includes(closeId(change.id)))
@@ -163,7 +119,7 @@ export function AbandonTask({
   return (
     <Dialog
       title={abandoned ? t.abandonedTitle : t.title}
-      description={abandoned ? t.abandonedDescription : merged === undefined ? t.description : t.mergedDescription(merged.name)}
+      description={abandoned ? t.abandonedDescription : merged === undefined ? undefined : t.mergedDescription(merged.name)}
       onClose={onClose}
       width={460}
       actions={
@@ -182,15 +138,10 @@ export function AbandonTask({
         </>
       }
     >
-      {!abandoned && (
+      {!abandoned && (merged !== undefined || worktree !== null) && (
         <ul className={s.list}>
-          {stopping !== null && <li>{stopping}</li>}
           {merged !== undefined && <li>{t.mergedCommits(merged.commits)}</li>}
-          <li>{worktree === null ? t.noWorktree : t.worktree(worktree)}</li>
-          {branch !== null && <li>{deleting.length > 0 ? t.branchHere(branch) : t.branch(branch)}</li>}
-          <li>
-            {merged !== undefined ? t.mergedLater : branch !== null ? t.reopen : worktree !== null ? t.reopenWorktree : t.reopenLater}
-          </li>
+          {worktree !== null && <li>{branch === null ? t.keptWorktree : t.kept}</li>}
         </ul>
       )}
       {changes.length > 0 && (

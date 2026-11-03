@@ -10,7 +10,7 @@ import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
 import { Connectivity } from './Connectivity'
-import { Installs } from './Installs'
+import { Installs, type InstallsOptions } from './Installs'
 import { Instance } from './Instance'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
@@ -26,9 +26,11 @@ import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
+import { TaskActions } from './TaskActions'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
+import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { fillIndex } from './Search'
 import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
@@ -40,6 +42,8 @@ import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
+import { Errands } from './Errands'
+import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
@@ -55,6 +59,11 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
   readonly secrets?: Layer.Layer<Secrets>
   /** The code hosts and trackers it connects to: theirs, over the network, unless a test gives fakes. */
   readonly connectors?: Layer.Layer<Connectors>
+  /**
+   * Where the person's own agents are looked for: their PATH and the usual places, unless a test gives its own, as the
+   * end-to-end tests do, so that what this computer has installed isn't what they find (`Installs.ts`).
+   */
+  readonly agentSearch?: InstallsOptions['search']
 }
 
 /**
@@ -75,12 +84,19 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
     Layer.provideMerge(WebCrypto),
   )
-  const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
+  const base = Layer.mergeAll(
+    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(Instance.layer)))),
+    Live.layer,
+    ModelFacts.layer,
+    Artifacts.layer,
+  ).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
-    Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice })),
+    Layer.provideMerge(
+      Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),
+    ),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
   )
@@ -108,17 +124,24 @@ export const layer = (options: RuntimeLayerOptions) => {
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
+  // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-077).
+  const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
   const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
-    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))),
+    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
   // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
   const automating = Automations.layer.pipe(Layer.provideMerge(signing))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
-  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating))
+  // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
+  return MergeLine.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating)),
+    ),
+  )
 }
 
 export { envelope } from './envelope'

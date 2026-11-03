@@ -1,0 +1,257 @@
+/* The flight log: on the homepage's warm dark, lit by one cobalt light. Readouts and stamps in JetBrains Mono, the words in Inter. */
+
+.main {
+  --col: min(840px, calc(100% - 2 * var(--gut)));
+  --wide: min(1120px, calc(100% - 2 * var(--gut)));
+  /* How far the log's words stand in from the rail. */
+  --in: 48px;
+}
+
+/* The mission clock keeps its width as it counts. */
+.clock { min-width: 15ch; }
+
+/* The newest release in the window: its stamp across, over its version and title. */
+.lead { scroll-margin-top: 88px; }
+.lead .stamp { width: 100%; margin-bottom: 20px; }
+
+/* ---- the log ---- */
+
+.log { width: var(--col); margin: 112px auto 0; padding: 0; list-style: none; }
+
+/* An entry hangs from the rail at its left, the rail running on down to the next. */
+.entry { position: relative; padding: 0 0 88px var(--in); scroll-margin-top: 88px; }
+.entry::before { content: ''; position: absolute; left: 5px; top: 12px; bottom: -6px; width: 1px; background: var(--hair-2); }
+.launch { padding-bottom: 0; }
+.launch::before { display: none; }
+.node { position: absolute; left: 0; top: 1px; width: 11px; height: 11px; border-radius: 50%; background: #0e0b09; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.42); }
+/* The newest release, going on from the window: lit, the rail under it carrying the light down to the one before. */
+.current::before { top: 20px; background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 50%, var(--hair-2)); }
+.current .node { top: 9px; background: var(--lit); box-shadow: 0 0 0 4px rgba(60, 76, 255, 0.2), 0 0 14px var(--glow); }
+/* Its stamp opens it on a phone, where the window leaves it out. */
+.current > .stamp { margin-bottom: 26px; }
+.phoneOnly { display: none; }
+/* The launch: where the log begins. */
+.launch .node { background: radial-gradient(circle, var(--ink) 0 2px, transparent 2.5px); box-shadow: inset 0 0 0 1.5px var(--ink); }
+
+/* A stamp along a rule: its mission day, its date, and its link at the end. */
+.stamp {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 13px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.t { color: var(--lit); }
+.met { text-transform: none; letter-spacing: 0.06em; }
+.note { color: var(--ink-2); }
+.rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
+/* Its hit area runs taller than the line, for a thumb. */
+.out { display: inline-flex; align-items: center; gap: 6px; margin-block: -12px; padding-block: 12px; color: var(--ink-2); text-decoration: none; }
+.out:hover { color: #fff; }
+
+/* The version, as code, and the release's title. */
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 20px 0 30px; }
+.v { font: 500 28px/1.15 var(--mono); letter-spacing: -0.03em; color: #fff; }
+a.v { text-decoration: none; }
+a.v:hover { color: var(--lit); }
+.title { font: 400 28px/1.2 'Inter Display', var(--display); letter-spacing: -0.03em; color: #d6cfc4; text-wrap: balance; }
+
+/* Its changes, a run of each kind under its word. */
+.runs { display: grid; gap: 26px; }
+.run { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: baseline; }
+.label { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-3); }
+.run[data-kind='new'] > .label { color: var(--lit); }
+.run[data-kind='improved'] > .label { color: #d8d0c4; }
+.run[data-kind='fixed'] > .label { color: var(--ink-2); }
+.lines { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.6; letter-spacing: -0.005em; color: #e3ddd3; text-wrap: pretty; }
+/* Each line marked at its start, in its kind's colour, so a run reads as lines. */
+.run .lines li { position: relative; }
+.run .lines li::before { content: ''; position: absolute; left: -22px; top: 0.8em; width: 8px; height: 1px; background: currentColor; opacity: 0.28; }
+.run[data-kind='new'] .lines li::before { background: var(--lit); opacity: 0.6; }
+.code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 244, 232, 0.07); font: 0.86em var(--mono); color: #fff; white-space: pre-wrap; }
+
+
+/* ---- a highlight: what it gives you, why, and the picture ---- */
+
+.shown { display: grid; gap: 10px; margin-bottom: 40px; }
+.hl { font-family: 'Inter Display', var(--display); font-size: 23px; font-weight: 550; line-height: 1.2; letter-spacing: -0.025em; color: #fff; text-wrap: balance; }
+.hlWhy { max-width: 40em; font-size: 15.5px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.hlPic { margin-top: 14px; }
+
+/* What was improved and fixed, folded until asked for, opening in place. */
+.fold summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 104px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  list-style: none;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary:hover { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.3); }
+.fold summary svg { transition: transform var(--base) var(--ease); }
+.fold[open] summary svg { transform: rotate(180deg); }
+.fold:not([open]) .opened, .fold[open] .closed { display: none; }
+.fold > .runs { margin-top: 26px; }
+
+/* ---- what's next: a course on a chart ---- */
+
+/* A chart of its own, wider than the log, its stamp and title inside it as the window's readouts are. */
+.ahead {
+  position: relative;
+  isolation: isolate;
+  width: var(--wide);
+  margin: 128px auto 0;
+  padding: 34px 40px 52px;
+  border-radius: 28px;
+  scroll-margin-top: 88px;
+  background:
+    radial-gradient(ellipse 45% 70% at 0 100%, rgba(43, 59, 255, 0.13), transparent 70%),
+    #0b0907;
+  box-shadow: inset 0 0 0 1px var(--hair), 0 40px 80px -40px rgba(0, 0, 0, 0.9);
+}
+.ahead .head { margin-bottom: 8px; }
+/* The chart's grid, faint, fading out toward its far side. */
+.ahead::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: radial-gradient(circle, rgba(255, 238, 220, 0.15) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+  background-position: 4px 4px;
+  -webkit-mask: linear-gradient(100deg, #000 25%, transparent 95%);
+  mask: linear-gradient(100deg, #000 25%, transparent 95%);
+  pointer-events: none;
+}
+.plot { position: relative; }
+.course { position: absolute; left: 0; top: 0; width: 100%; overflow: visible; }
+.course path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.flown { stroke: var(--lit); stroke-width: 2; filter: drop-shadow(0 0 4px rgb(60 76 255)) drop-shadow(0 0 12px rgba(60, 76, 255, 0.6)); }
+.plotted { stroke: rgba(255, 244, 232, 0.42); stroke-width: 1.5; stroke-dasharray: 5 7; }
+.beyond { stroke-width: 1.5; stroke-dasharray: 0.5 8; }
+
+.stages { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+/*
+ * A stage: its waypoint on the course, and from it a line dropped through
+ * its plans, each hung on it: lit for Now, dashed for Next, dotted and
+ * fading for Later.
+ */
+.stage { --line: 1.5px solid var(--lit); position: relative; padding: calc(var(--y) + 26px) 36px 0 26px; }
+.stage[data-stage='next'] { --line: 1.5px dashed rgba(255, 244, 232, 0.36); }
+.stage[data-stage='later'] { --line: 1.5px dotted rgba(255, 244, 232, 0.3); }
+.stage::before { content: ''; position: absolute; left: 0; top: var(--y); bottom: 0; border-left: var(--line); }
+.stage[data-stage='now']::before { box-shadow: 0 0 10px var(--glow); -webkit-mask: linear-gradient(#000 70%, transparent); mask: linear-gradient(#000 70%, transparent); }
+.stage[data-stage='next']::before, .stage[data-stage='later']::before { -webkit-mask: linear-gradient(#000 40%, transparent); mask: linear-gradient(#000 40%, transparent); }
+.waypoint { position: absolute; z-index: 1; left: -5.25px; top: calc(var(--y) - 6px); width: 12px; height: 12px; border-radius: 50%; background: #0b0907; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.5); }
+.stage[data-stage='now'] .waypoint { background: var(--lit); box-shadow: 0 0 0 5px rgba(60, 76, 255, 0.18), 0 0 16px var(--glow); }
+.stage[data-stage='later'] .waypoint { box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.26); }
+.stage .label { margin-bottom: 20px; }
+.stage[data-stage='now'] .label { color: var(--lit); }
+.stage[data-stage='next'] .label { color: var(--ink-2); }
+.stage ul { display: grid; gap: 26px; margin: 0; padding: 0; list-style: none; }
+.stage li { position: relative; display: grid; gap: 6px; }
+/* Each plan hung on its stage's line by a small mark at its name. */
+.stage li::before { content: ''; position: absolute; left: -28.25px; top: 0.58em; width: 6px; height: 6px; border-radius: 50%; background: #0b0907; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.45); }
+.stage[data-stage='now'] li::before { background: var(--lit); box-shadow: 0 0 8px var(--glow); }
+.stage[data-stage='later'] li::before { box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.28); }
+.stage b { font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -0.012em; color: var(--ink); }
+.stage li span { max-width: 34em; font-size: 14.5px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.stage[data-stage='later'] b { color: #d6cfc4; }
+
+/* ---- the end: the latest, to download ---- */
+
+.endRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 40px;
+  width: var(--wide);
+  margin: 64px auto 0;
+  padding: 0 0 96px;
+}
+.endRow p { font-size: 17px; color: var(--ink-2); }
+.endRow .v { font-size: 17px; letter-spacing: -0.01em; }
+.ways { display: flex; flex-wrap: wrap; gap: 12px; }
+.primary, .secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 17px;
+  border-radius: 8px;
+  font: 600 14.5px var(--font);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.primary { background: #fff; color: var(--live); --os-belly: #fff; }
+.primary:hover { background: #eef0ff; }
+.secondary { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.secondary:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+
+/* ---- narrower ---- */
+
+@media (max-width: 900px) {
+  .stages { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .course { display: none; }
+  /* Down the left instead, one stage after another, the lines meeting: Now lit, Next dashed, Later fading out. */
+  .stage { padding: 0 0 40px 26px; }
+  .stage:last-child { padding-bottom: 0; }
+  .stage::before { top: 6px; bottom: -6px; }
+  .waypoint { top: 0; }
+  .stage[data-stage='now']::before, .stage[data-stage='next']::before { -webkit-mask: none; mask: none; }
+  .stage[data-stage='later']::before { -webkit-mask: linear-gradient(#000 50%, transparent); mask: linear-gradient(#000 50%, transparent); }
+  .stage .label { margin-bottom: 16px; }
+  .stage ul { gap: 22px; }
+  .ahead::before { -webkit-mask: linear-gradient(180deg, #000 30%, transparent 95%); mask: linear-gradient(180deg, #000 30%, transparent 95%); }
+  .ahead { padding: 30px 28px 40px; }
+  .plot { margin-top: 28px; padding-left: 6px; }
+}
+
+@media (max-width: 640px) {
+  .main { --in: 26px; }
+  /* The window keeps to the clock and the launch over the release: its version is said just under them, its stamp waits for the log. */
+  .wideOnly { display: none; }
+  .phoneOnly { display: flex; }
+  .current::before { top: 12px; }
+  .current .node { top: 1px; }
+  .clock { min-width: 0; }
+  .shown { margin-bottom: 32px; }
+  .hl { font-size: 20px; }
+  .hlWhy { font-size: 15px; }
+  .fold summary { margin-left: 0; }
+  .log { margin-top: 72px; }
+  .entry { padding-bottom: 64px; }
+  .head { gap: 2px 12px; margin: 16px 0 22px; }
+  .v, .title { font-size: 22px; }
+  .stamp { gap: 10px; letter-spacing: 0.1em; }
+  .runs { gap: 22px; }
+  /* Each kind's word over its run, so the lines take the width. */
+  .run { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .run .lines li::before { left: -13px; width: 6px; }
+  .lines { font-size: 15px; }
+  .ahead { width: auto; margin: 88px 10px 0; padding: 24px 20px 32px; border-radius: 24px; }
+  .endRow { flex-direction: column; align-items: stretch; margin-top: 88px; padding-bottom: 96px; }
+  .ways { display: grid; gap: 10px; }
+  .primary, .secondary { justify-content: center; height: 48px; }
+}
+
+@media (max-width: 380px) {
+  /* Narrower still: the launch's stamp drops its word (the window's readout says it), the plans' link says only where, and a stamp that still runs out wraps its link under it. */
+  .note, .long { display: none; }
+  .stamp { flex-wrap: wrap; row-gap: 12px; }
+}

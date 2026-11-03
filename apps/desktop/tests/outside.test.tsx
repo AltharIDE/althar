@@ -75,7 +75,7 @@ describe('connections', () => {
     emit(changed('connection', 'conn1', null, null))
     expect(await screen.findByText('Signed in as you')).toBeTruthy()
     vi.mocked(client.listConnections).mockResolvedValue(connectionList)
-    await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Disconnect GitHub' }))
     expect(client.disconnect).toHaveBeenCalledWith('conn1')
     await waitFor(() => expect(screen.queryByText('Signed in as you')).toBeNull())
   })
@@ -90,7 +90,7 @@ describe('connections', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Make a token/ }))
     expect(screen.getByRole('heading', { name: 'Make a token on GitHub' })).toBeTruthy()
     expect(screen.getByText('Step 1 of 3')).toBeTruthy()
-    expect(screen.getByText('It opens with the name, northwind as the owner, 90 days and the permissions set.')).toBeTruthy()
+    expect(screen.getByText('Opens filled in, for northwind.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open GitHub’s token page' }))
     expect(open).toHaveBeenCalledWith(GITHUB_TOKEN_PAGE, '_blank')
     await userEvent.click(screen.getByRole('button', { name: 'See the 6 permissions it sets' }))
@@ -165,7 +165,7 @@ describe('connections', () => {
 
     // Taken, but without one thing a task needs: said on its line, with how to change it.
     expect(await screen.findByRole('heading', { name: 'This token can’t open pull requests' })).toBeTruthy()
-    expect(screen.getByText('Pull requests isn’t allowed on this token, so a task would end on its branch.')).toBeTruthy()
+    expect(screen.getByText('Pull requests isn’t allowed on this token.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Done' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Change it on GitHub' }))
     expect(open).toHaveBeenCalledWith('https://github.com/settings/personal-access-tokens', '_blank')
@@ -274,7 +274,7 @@ describe('connections', () => {
     expect(await screen.findByText('git.example.com isn’t a GitHub server')).toBeTruthy()
     await userEvent.clear(field)
     await userEvent.type(field, 'git.meridian.dev')
-    expect(await screen.findByText('GitHub Enterprise Server answers at git.meridian.dev', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await screen.findByText('GitHub Enterprise Server answers at git.meridian.dev')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make a token' }))
     expect(screen.getByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open git.meridian.dev’s token page' }))
@@ -333,10 +333,9 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('Its sign-in stopped working')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in again to northwind.atlassian.net' }))
     expect(await screen.findByRole('heading', { name: 'Make a new API token' })).toBeTruthy()
-    expect(screen.getByText('Its token stopped working. Tasks can’t reach it until it’s back.')).toBeTruthy()
+    expect(screen.getByText('Its token stopped working.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Paste it myself' }))
     expect(screen.getByRole('heading', { name: 'Paste the new token' })).toBeTruthy()
     // The site and the email stay: only the token is asked for.
@@ -427,13 +426,13 @@ describe('connections', () => {
     expect(screen.getByRole('heading', { name: 'Type this code on GitHub' })).toBeTruthy()
     expect(open).toHaveBeenCalledWith('https://github.com/login/device', '_blank')
     state = 'done'
-    expect(await screen.findByRole('heading', { name: 'Let Althar into northwind' }, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Let Althar into northwind' })).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Install Althar on northwind' }))
     expect(open).toHaveBeenLastCalledWith('https://github.com/apps/althar/installations/new', '_blank')
     // Asked again, a little apart, until it is let in.
-    expect(await screen.findByRole('heading', { name: 'Connected as you' }, { timeout: 6000 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('says how a browser sign-in ended, starts it again once, and cancels one left for another way', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
@@ -447,7 +446,7 @@ describe('connections', () => {
     withServices(<Connections />, client)
     await connect(0)
     await userEvent.click(await screen.findByRole('button', { name: /Continue with GitHub/ }))
-    expect(await screen.findByText('Sign-in was declined.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await screen.findByText('Sign-in was declined.')).toBeTruthy()
     vi.mocked(client.getSignIn).mockResolvedValue({ state: 'waiting' })
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('ABCD-1234')).toBeTruthy()
@@ -456,7 +455,7 @@ describe('connections', () => {
     expect(await screen.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     expect(client.cancelSignIn).toHaveBeenCalledWith('flow1')
     open.mockRestore()
-  }, 15_000)
+  })
 
   it('drops what answers late for a way, a token or a sign-in left behind, and goes on once a server answers', async () => {
     /** A call answered when the test says, in the order it was made. */
@@ -545,7 +544,7 @@ describe('connections', () => {
       reason: null,
       tokenPage: 'https://git.meridian.dev/settings/tokens/new',
     }
-    await waitFor(() => expect(servers.call.mock.calls.length).toBe(2), { timeout: 2000 })
+    await waitFor(() => expect(servers.call.mock.calls.length).toBe(2))
     await act(async () => {
       servers.answer(0, answer)
       servers.answer(1, answer)
@@ -553,7 +552,7 @@ describe('connections', () => {
     expect(await within(panel).findByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
     expect(closed).not.toHaveBeenCalled()
     open.mockRestore()
-  }, 20_000)
+  })
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({
@@ -574,7 +573,7 @@ describe('connections', () => {
     })
     withServices(<Connections />, client)
     expect(await screen.findByText(/git\.meridian\.dev/)).toBeTruthy()
-    expect(screen.getByText('Its sign-in stopped working')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in again to Linear' })).toBeTruthy()
     // A connected service that runs on companies' own servers takes another, by its address.
     await userEvent.click(screen.getByRole('button', { name: 'Add a server' }))
     expect(await screen.findByLabelText('Server address')).toBeTruthy()
@@ -597,13 +596,11 @@ describe('connections', () => {
       })),
     })
     withServices(<Connections />, client)
-    expect(await screen.findByText('· FNT')).toBeTruthy()
-    expect(screen.getByText('· althar')).toBeTruthy()
-    expect(screen.getAllByText('Signed in as mate.kokai99', { exact: false })).toHaveLength(2)
-    // Each disconnects on its own.
-    const [, second] = screen.getAllByRole('button', { name: 'Disconnect' })
-    if (second === undefined) throw new Error('no second Disconnect')
-    await userEvent.click(second)
+    expect(await screen.findByText('FNT')).toBeTruthy()
+    expect(screen.getByText('althar')).toBeTruthy()
+    expect(screen.getAllByText('mate.kokai99')).toHaveLength(2)
+    // Each disconnects on its own, its Disconnect named for it.
+    await userEvent.click(screen.getByRole('button', { name: 'Disconnect FNT' }))
     await waitFor(() => expect(client.disconnect).toHaveBeenCalledWith('conn6'))
     // Another workspace is the first one's walk in again, not a server's.
     expect(screen.queryByRole('button', { name: 'Add a server' })).toBeNull()
@@ -862,7 +859,7 @@ describe('running what a task built, with no agent', () => {
     // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
     current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Couldn’t install dependencies in meridian. The lead is told.')).toBeTruthy()
+    expect(await screen.findByText('Couldn’t install dependencies in meridian.')).toBeTruthy()
     expect(screen.getByText('error: lockfile had changes')).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
     // A setup kept for the repository, out of time: it says so.
@@ -871,12 +868,12 @@ describe('running what a task built, with no agent', () => {
       items: [...thread.items, ended({ code: null, timedOut: true, last: 'waiting' }, { kept: true, command: 'make deps' })],
     }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Couldn’t set up meridian. The lead is told.')).toBeTruthy()
-    expect(screen.getByText('It took too long, and was stopped.')).toBeTruthy()
+    expect(await screen.findByText('Couldn’t set up meridian.')).toBeTruthy()
+    expect(screen.getByText('Timed out.')).toBeTruthy()
     // Cut short as Althar quit, it says it runs again.
     current = { ...thread, items: [...thread.items, ended({ code: null, stopped: true })] }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Setting up meridian stopped as Althar quit. It runs again before the lead starts.')).toBeTruthy()
+    expect(await screen.findByText('Setting up meridian stopped when Althar quit.')).toBeTruthy()
   })
 
   it('offers no run where nothing says how it runs', async () => {
@@ -905,9 +902,8 @@ describe('what keeps the places a task waits for', () => {
     await userEvent.click(chip)
     const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
     // Each task that holds a place, the server's by what it left running; a task at work in its turn has nothing to stop.
-    expect(list.getByText('2 tasks are running; 1 of them only for a server it left running.')).toBeTruthy()
     expect(list.getByText('Fix the login')).toBeTruthy()
-    expect(list.getByText('Only its bun dev keeps the place')).toBeTruthy()
+    expect(list.getByText('bun dev left running')).toBeTruthy()
     expect(list.getAllByRole('button', { name: /^Stop what/ })).toHaveLength(1)
     await userEvent.click(list.getByRole('button', { name: 'Stop what Prototype the board left running' }))
     expect(client.stopBackground).toHaveBeenCalledWith('th2', 'bg-1')
@@ -1384,15 +1380,11 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText(/isn't connected to this repository's host/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
-    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe(
-      "Althar couldn't open the pull request. The host said no. Try again, or go on without it.",
-    )
+    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Couldn't open the pull request. The host said no.")
     expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+      'Althar stopped unexpectedly twice while this step ran.',
     )
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe(
-      "Althar couldn't open the pull request. Try again, or go on without it.",
-    )
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Couldn't open the pull request.")
   })
 })
 

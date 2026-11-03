@@ -51,7 +51,7 @@ const withPullRequest = (github: FakeService, bare: string, working: string) =>
     const cards = Effect.map(queries.coordinator(project.projectId), (snapshot) =>
       snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
     )
-    const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(20))
+    const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change !== null)
     void bare
     return { projectId: project.projectId as ProjectId, taskId: ready?.taskId ?? '', threadId: ready?.threadId ?? '', cards }
   })
@@ -233,13 +233,16 @@ describe('the tools, as agents call them', () => {
       assert.match(yield* callTool(lead, 'read_pull_request', {}), /^The code host said: The fake change failed/)
 
       assert.match(yield* callTool(lead, 'read_issue', { issue: '#12' }), /^#12: Refunds ignore the limit\n\nTodo, in meridian\/api\./)
-      assert.match(yield* callTool({ ...lead, role: 'reviewer' }, 'read_issue', { issue: 'meridian/api#99' }), /can’t read that issue/)
+      assert.match(
+        yield* callTool({ ...lead, role: 'reviewer' }, 'read_issue', { issue: 'meridian/api#99' }),
+        /can’t read meridian\/api#99/,
+      )
       assert.match(yield* callTool({ ...lead, taskId: null }, 'read_pull_request', {}), /for a task’s lead/)
 
       // The coordinator reads and finds issues, and drafts from one it can read.
       const coordinator = { role: 'coordinator' as const, projectId, threadId: 'none', sessionId: 'coordinator-session', taskId: null }
       assert.match(yield* callTool(coordinator, 'read_issue', { issue: 'https://github.test/meridian/api/issues/12' }), /^#12: Refunds/)
-      assert.match(yield* callTool(coordinator, 'read_issue', { issue: 'MER-1' }), /can't read MER-1/)
+      assert.match(yield* callTool(coordinator, 'read_issue', { issue: 'MER-1' }), /can’t read MER-1/)
       assert.match(yield* callTool(coordinator, 'find_issues', {}), /^- #12: Refunds ignore the limit \(Todo\)/)
       assert.match(yield* callTool(coordinator, 'draft_task', { title: 'Fix it', issue: 'MER-404' }), /can't read MER-404/)
       assert.match(

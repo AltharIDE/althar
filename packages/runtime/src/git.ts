@@ -1,12 +1,15 @@
-import { execFile } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFile, type ExecFileException } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
+import type { ChangeTarget } from '@althar/domain'
+import { cleanUp } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import { GitFailed } from './errors'
+import { forkOf } from './forks'
 
 /*
  * The git commands the runtime runs itself, outside any agent. They never
@@ -95,6 +98,24 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/**
+ * A failed git command as git ended it: what it wrote to stderr, and how it
+ * stopped. Node's own message is only the command line, so it stands in only
+ * where git never ran or its output overflowed, a failure Node names itself.
+ * Stopped by Node with git still running is its time running out.
+ */
+const failedWith = (args: ReadonlyArray<string>, cwd: string, timeout: number, error: ExecFileException, stderr: string): GitFailed => {
+  const ownCode = typeof error.code === 'string'
+  return new GitFailed({
+    args: [...args],
+    cwd,
+    stderr: stderr.trim() || (ownCode ? error.message : ''),
+    ...(typeof error.code === 'number' ? { code: error.code } : {}),
+    ...(typeof error.signal === 'string' ? { signal: error.signal } : {}),
+    ...(error.killed === true && !ownCode ? { timedOut: true, timeout } : {}),
+  })
+}
+
 const run = (
   timeout: number,
   cwd: string,
@@ -117,11 +138,7 @@ const run = (
         env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
-        resume(
-          error === null
-            ? Effect.succeed(trim ? stdout.trim() : stdout)
-            : Effect.fail(new GitFailed({ args: [...args], cwd, stderr: stderr.trim() || error.message })),
-        ),
+        resume(error === null ? Effect.succeed(trim ? stdout.trim() : stdout) : Effect.fail(failedWith(args, cwd, timeout, error, stderr))),
     )
     if (input === undefined || child.stdin === null) return
     // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
@@ -149,17 +166,21 @@ export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
     }),
     (copy) =>
       Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
-    (copy) => Effect.sync(() => rmSync(dirname(copy), { recursive: true, force: true })),
+    // The index's copy goes as best it can: a folder git still holds a moment after it exits leaves the tree as it was read.
+    (copy) => cleanUp(dirname(copy), "where a worktree's tree was read"),
   )
+
+/** Who Althar commits as: its snapshots, and a new repository's first commit where git doesn't know who the person is. */
+const ALTHAR_IDENTITY = {
+  GIT_AUTHOR_NAME: 'Althar',
+  GIT_AUTHOR_EMAIL: 'althar@localhost',
+  GIT_COMMITTER_NAME: 'Althar',
+  GIT_COMMITTER_EMAIL: 'althar@localhost',
+}
 
 /** Commits a tree on top of a parent without touching any branch, as Althar: a snapshot a worktree can check out. */
 export const commitTree = (cwd: string, tree: string, parent: string, message: string): Effect.Effect<string, GitFailed> =>
-  run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], {
-    GIT_AUTHOR_NAME: 'Althar',
-    GIT_AUTHOR_EMAIL: 'althar@localhost',
-    GIT_COMMITTER_NAME: 'Althar',
-    GIT_COMMITTER_EMAIL: 'althar@localhost',
-  })
+  run(60_000, cwd, ['commit-tree', tree, '-p', parent, '-m', message], ALTHAR_IDENTITY)
 
 /** Who made a commit, and when, as git keeps it: `1760000000 +0200` for a date. */
 export interface Signature {
@@ -247,9 +268,12 @@ const signedIn = (target: { readonly header: string | null }): Record<string, st
 
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  askedRemoteTip(cwd, target, branch).pipe(Effect.orElseSucceed(() => null))
+
+/** As remoteTip, but a remote that doesn't answer fails, rather than looking as if it hasn't the branch. */
+export const askedRemoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
   run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
     Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
-    Effect.orElseSucceed(() => null),
   )
 
 /**
@@ -306,6 +330,19 @@ export const remoteHeads = (cwd: string, source: FetchSource) =>
       }),
     ),
     Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Where a remote's branch is, asked of it now: its commit, null where the
+ * remote has no such branch, undefined where it can't be asked, as offline.
+ */
+export const branchOn = (cwd: string, source: FetchSource, branch: string) =>
+  run(15_000, cwd, ['ls-remote', '--heads', source.url, `refs/heads/${branch}`], signedIn(source)).pipe(
+    Effect.map((listed): string | null | undefined => {
+      const line = listed.split('\n').find((one) => one.endsWith(`\trefs/heads/${branch}`))
+      return line === undefined ? null : (/^[0-9a-f]{40,64}/.exec(line)?.[0] ?? null)
+    }),
+    Effect.orElseSucceed(() => undefined),
   )
 
 /**
@@ -368,6 +405,27 @@ export const indexStamp = (worktree: string): Effect.Effect<string> =>
     const index = await stat(join(linked === undefined ? dotGit : resolve(worktree, linked.trim()), 'index'), { bigint: true })
     return `${index.ino}:${index.size}:${index.mtimeNs}`
   }).pipe(Effect.orElseSucceed(() => ''))
+
+/**
+ * Makes a new repository in the empty folder `path`, on `main`, with a first
+ * commit and nothing in it, so a task has a commit to branch from. The commit
+ * is the person's, as git knows them; where git doesn't, Althar's. It is
+ * never signed, as signing could wait on a passphrase nobody is asked for.
+ */
+export const startRepository = (path: string): Effect.Effect<void, GitFailed> =>
+  Effect.gen(function* () {
+    yield* run(60_000, path, ['init', '--quiet', '--initial-branch=main'])
+    const known = yield* run(60_000, path, ['var', 'GIT_COMMITTER_IDENT']).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    )
+    yield* run(
+      60_000,
+      path,
+      ['commit', '--quiet', '--allow-empty', '--no-gpg-sign', '--message', 'Initial commit'],
+      known ? {} : ALTHAR_IDENTITY,
+    )
+  })
 
 /** Whether a local branch exists. */
 export const branchExists = (cwd: string, branch: string) =>
@@ -434,6 +492,19 @@ export const remoteUrls = (cwd: string) =>
         .filter((url) => url !== ''),
     ),
   ])
+
+/**
+ * The remote a task's branch goes to with the person's own git. A fork's go to
+ * the fork, or upstream where the person chose that, whichever its default
+ * branch follows: a fork's usually follows upstream, as that is where it comes
+ * from. Any other's goes where its work goes.
+ */
+export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget | null) =>
+  Effect.gen(function* () {
+    const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
+    if (forkOf(remotes) === null) return yield* remoteOf(cwd, base)
+    return target === 'upstream_branch' ? 'upstream' : 'origin'
+  })
 
 /** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
 export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
@@ -506,7 +577,7 @@ export const addReadCopy = (repository: string, path: string, commit: string, re
       yield* write(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
       for (const [ref, at] of Object.entries(refs)) yield* git(path, 'update-ref', ref, at)
       yield* git(path, 'checkout', '--quiet', '--detach', commit)
-    }).pipe(Effect.tapError(() => Effect.sync(() => rmSync(path, { recursive: true, force: true }))))
+    }).pipe(Effect.tapError(() => cleanUp(path, 'a read copy that was never finished')))
   })
 
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */

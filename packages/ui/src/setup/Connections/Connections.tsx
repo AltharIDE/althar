@@ -13,6 +13,8 @@ import s from './Connections.module.css'
  * a service, Sign in again for a connection whose sign-in stopped working,
  * Add a server for a company's own, and Add a workspace for another of a
  * service whose sign-in reaches one, once the service has a connection.
+ * A service's connections sit in one soft group under its name, a row
+ * each: where it reaches, who it signs in as, and its own Disconnect.
  */
 
 export interface ServiceOption {
@@ -45,23 +47,27 @@ export interface ServiceConnection {
 export interface ConnectionsText {
   notConnected: string
   signedInAs: (account: string) => string
-  needsSignIn: string
   connect: string
   signInAgain: string
   addServer: string
   addWorkspace: string
   disconnect: string
+  /** Disconnect's name for a screen reader, saying which it disconnects: Disconnect Blushh. */
+  disconnectOne: (which: string) => string
+  /** Sign in again's, the same way: Sign in again to Blushh. */
+  signInAgainTo: (which: string) => string
 }
 
 export const connectionsText: ConnectionsText = {
   notConnected: 'Not connected',
   signedInAs: (account) => `Signed in as ${account}`,
-  needsSignIn: 'Its sign-in stopped working',
   connect: 'Connect',
   signInAgain: 'Sign in again',
   addServer: 'Add a server',
   addWorkspace: 'Add a workspace',
   disconnect: 'Disconnect',
+  disconnectOne: (which) => `Disconnect ${which}`,
+  signInAgainTo: (which) => `Sign in again to ${which}`,
 }
 
 export interface ConnectionsProps {
@@ -88,6 +94,18 @@ const hostOf = (url: string) => {
   } catch {
     return url
   }
+}
+
+/**
+ * A connection by where it reaches, its workspace or server, over who it
+ * signs in as there; by who alone where it reaches only the hosted service.
+ * `which` names it for its buttons: its workspace or server, or the service.
+ */
+const namesOf = (connection: ServiceConnection, service: ServiceOption, t: ConnectionsText) => {
+  const where = connection.workspace ?? (connection.instance === undefined ? undefined : hostOf(connection.instance))
+  return where === undefined
+    ? { first: t.signedInAs(connection.account), then: undefined, which: service.name }
+    : { first: where, then: connection.account, which: where }
 }
 
 /** The services Althar can reach for you, each with who you are there, or how to connect it. */
@@ -138,28 +156,46 @@ export function Connections({
                 </span>
               )}
             </div>
-            {mine.map((connection) => (
-              <div key={connection.id} className={cx(s.row, s.account)}>
-                <span />
-                <span className={s.body}>
-                  <span className={cx(s.line, connection.needsSignIn && s.calls)}>
-                    {connection.needsSignIn ? t.needsSignIn : t.signedInAs(connection.account)}
-                    {connection.instance && <span className={s.instance}> · {hostOf(connection.instance)}</span>}
-                    {connection.workspace && <span className={s.instance}> · {connection.workspace}</span>}
-                  </span>
-                </span>
-                <span className={s.actions}>
-                  <ActionButton {...(connection.needsSignIn ? {} : { flush: 'end' as const })} onClick={() => onDisconnect(connection.id)}>
-                    {t.disconnect}
-                  </ActionButton>
-                  {connection.needsSignIn && (
-                    <Button variant="signal" onClick={() => onSignInAgain(connection.id)}>
-                      {t.signInAgain}
-                    </Button>
-                  )}
-                </span>
-              </div>
-            ))}
+            {mine.length > 0 && (
+              <ul aria-label={service.name} className={s.rows}>
+                {mine.map((connection) => {
+                  const { first, then, which } = namesOf(connection, service, t)
+                  return (
+                    <li key={connection.id} className={cx(s.connection, connection.needsSignIn && s.needs)}>
+                      <span className={s.who}>
+                        <span className={s.first} title={first}>
+                          {first}
+                        </span>
+                        {then !== undefined && (
+                          <span className={s.then} title={then}>
+                            {then}
+                          </span>
+                        )}
+                      </span>
+                      <span className={s.actions}>
+                        <ActionButton
+                          aria-label={t.disconnectOne(which)}
+                          {...(connection.needsSignIn ? {} : { flush: 'end' as const })}
+                          onClick={() => onDisconnect(connection.id)}
+                        >
+                          {t.disconnect}
+                        </ActionButton>
+                        {connection.needsSignIn && (
+                          <ActionButton
+                            aria-label={t.signInAgainTo(which)}
+                            tone="strong"
+                            flush="end"
+                            onClick={() => onSignInAgain(connection.id)}
+                          >
+                            {t.signInAgain}
+                          </ActionButton>
+                        )}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </li>
         )
       })}

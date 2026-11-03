@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { SignInWay, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
@@ -33,8 +34,8 @@ export type AccountSignInStep =
   | { kind: 'choose' }
   /** The agent's sign-in is open in the browser, waiting on `host`. `link`: to open it elsewhere. `paste`: it takes a code the page shows when the browser can't reach back. */
   | { kind: 'browser'; host: string; link?: string; paste?: boolean; pasteError?: ReactNode }
-  /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in. */
-  | { kind: 'terminal'; line: string; opened: boolean; notYet?: boolean }
+  /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in; `unclear`: the agent answered something Althar couldn't read; `checking`: reading again. */
+  | { kind: 'terminal'; line: string; opened: boolean; notYet?: boolean; unclear?: boolean; checking?: boolean }
   /** A one-time code to type on `page`. `lasts`: how long it still works, as the person reads it. */
   | { kind: 'code'; code: string; page: string; lasts: string; opened?: boolean }
   /** A key to paste. */
@@ -94,6 +95,8 @@ export interface AccountSignInText {
   inTerminal: string
   runIt: string
   notYet: string
+  unclear: string
+  checkingAgain: string
   terminalAgain: string
   checkAgain: string
   finishTerminal: string
@@ -134,8 +137,8 @@ export const accountSignInText: AccountSignInText = {
   code: 'A code',
   key: (name) => name,
   console: (name) => name,
-  folder: 'A folder on this computer',
-  holds: (who) => `The browser may still be signed in as ${who}. To add someone else, use another browser profile, or a code.`,
+  folder: `A folder on ${device.this}`,
+  holds: (who) => `The browser may still be signed in as ${who}: use another profile, or a code.`,
   approveOn: (host) => `Approve on ${host} in your browser`,
   copyLink: 'Copy the link',
   pasteCode: 'Paste a code',
@@ -146,9 +149,11 @@ export const accountSignInText: AccountSignInText = {
   inTerminal: 'Finish signing in from the terminal',
   runIt: 'Run this in a terminal to sign in',
   notYet: 'Not signed in yet.',
+  unclear: 'Couldn’t tell if it signed in.',
+  checkingAgain: 'Checking…',
   terminalAgain: 'Open the terminal again',
   checkAgain: 'Check again',
-  finishTerminal: 'Come back here when it’s done, and Althar checks that it signed in.',
+  finishTerminal: 'Then come back here.',
   enterAt: (page) => `Enter the code at ${page}`,
   waitingCode: 'Waiting for the code',
   copyCode: 'Copy the code',
@@ -157,7 +162,7 @@ export const accountSignInText: AccountSignInText = {
   keyField: (name) => name,
   addKey: 'Add key',
   emptyKey: 'Paste the key first',
-  keyBilled: 'Billed per use to the key’s account, after your plans.',
+  keyBilled: 'Billed per use to the key’s account',
   choose: 'Another folder…',
   addIt: 'Add it',
   checking: (agent) => `Checking who ${agent} signed in as…`,
@@ -167,7 +172,7 @@ export const accountSignInText: AccountSignInText = {
   add: 'Add account',
   done: 'Done',
   same: (name) => `That’s ${name} again`,
-  sameHow: 'The browser signed in as an account already here. Sign in from another browser profile, or use a code.',
+  sameHow: 'Use another browser profile, or a code.',
   stopped: (agent) => `${agent} stopped:`,
   tryAgain: 'Try again',
 }
@@ -392,7 +397,7 @@ function Under({
         <div className={s.under}>
           {step.opened ? (
             <p className={s.hint}>
-              {step.notYet && <span className={s.notYet}>{t.notYet} </span>}
+              {step.notYet && <span className={s.notYet}>{step.unclear ? t.unclear : t.notYet} </span>}
               {t.finishTerminal}
             </p>
           ) : (
@@ -402,7 +407,11 @@ function Under({
             </div>
           )}
           <div className={s.row}>
-            {onCheck && <LinkButton onClick={onCheck}>{t.checkAgain}</LinkButton>}
+            {onCheck && (
+              <LinkButton onClick={onCheck} disabled={step.checking}>
+                {step.checking ? t.checkingAgain : t.checkAgain}
+              </LinkButton>
+            )}
             {step.opened && onOpen && <LinkButton onClick={onOpen}>{t.terminalAgain}</LinkButton>}
             {another}
           </div>

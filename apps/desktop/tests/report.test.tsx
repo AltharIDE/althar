@@ -195,7 +195,7 @@ describe('Report a problem', () => {
     )
     render(<ReportDialog host={fakeHost({ report: host })} />)
     await ask({ kind: 'failed', taskId: 'task_1', projectId: 'proj_1', threadId: 'thr_1', what: 'the stuck Implement step' })
-    expect(await screen.findByText(/About the stuck Implement step\. Althar saves the report in Downloads/)).toBeTruthy()
+    expect(await screen.findByText(/About the stuck Implement step\. Saved to Downloads/)).toBeTruthy()
     // The email given last time is there again.
     expect(screen.getByRole('textbox', { name: 'Email, if you’d like a reply' })).toHaveProperty('value', 'dana@example.com')
     await userEvent.type(screen.getByRole('textbox', { name: 'What happened?' }), 'Stuck')
@@ -209,7 +209,7 @@ describe('Report a problem', () => {
     })
     render(<ReportDialog host={fakeHost({ report: host })} />)
     await ask({ kind: 'asked', from: 'settings' })
-    const box = await screen.findByRole('textbox', { name: 'What happened?' }, { timeout: 2_000 })
+    const box = await screen.findByRole('textbox', { name: 'What happened?' })
     await userEvent.type(box, 'Nothing opened')
     await userEvent.click(screen.getByRole('button', { name: /^Send/ }))
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Althar couldn’t reach its reports service.')

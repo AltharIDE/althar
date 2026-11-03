@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
-import { lstat, readdir, statfs } from 'node:fs/promises'
+import { existsSync, readdirSync } from 'node:fs'
+import { lstat, readdir, rmdir, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
+import { cleanUp, removeFully } from '@althar/provider-adapters'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
 
@@ -269,14 +270,14 @@ const gone = (path: string) => Effect.suspend(() => (existsSync(path) ? Effect.f
 
 /**
  * Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. Fails unless nothing of it is left.
- * Tried again a few times, over a second or so, where Windows says it is busy: a process that just ended, or a scanner
- * reading what was just written, still holds it a moment.
+ * Tried again over a second or so where Windows says it is busy (`removeFully`): a process that just ended, or a
+ * scanner reading what was just written, still holds it a moment.
  */
 const erase = (path: string) =>
-  Effect.try({
-    try: () => rmSync(path, { recursive: true, force: true, maxRetries: 5 }),
-    catch: () => new FolderStayed({ path }),
-  }).pipe(Effect.andThen(gone(path)))
+  removeFully(path).pipe(
+    Effect.mapError(() => new FolderStayed({ path })),
+    Effect.andThen(gone(path)),
+  )
 
 /** Removes a worktree, or, where git won't, whatever is in its folder. Fails unless nothing of it is left. */
 const removeWorktree = (repository: string, path: string) =>
@@ -298,14 +299,13 @@ const keep = (checkout: string, ref: string) =>
  * person sent its lead (`.althar/attachments`, ADR-064), goes with it.
  */
 const eraseEmpty = (path: string) =>
-  Effect.sync(() => {
-    try {
-      const own = join(path, '.althar')
-      if (existsSync(own) && readdirSync(path).length === 1) rmSync(own, { recursive: true, force: true })
-      if (existsSync(path) && readdirSync(path).length === 0) rmdirSync(path)
-    } catch {
-      // Something else is in it, or it went already: it stays.
-    }
+  Effect.gen(function* () {
+    const own = join(path, '.althar')
+    const alone = yield* Effect.try(() => existsSync(own) && readdirSync(path).length === 1).pipe(Effect.orElseSucceed(() => false))
+    if (alone) yield* cleanUp(own, "what Althar kept in a finished task's folder")
+    // Only an empty folder goes: one something else is in, or that went already, stays as it is, by design and unlogged.
+    // oxlint-disable-next-line althar/one-removal
+    yield* Effect.ignore(Effect.tryPromise(() => rmdir(path)))
   })
 
 export class FolderCleanup extends Context.Service<
@@ -421,7 +421,8 @@ export class FolderCleanup extends Context.Service<
         })
 
       /** Opened from Althar within the day. */
-      const openedLately = (candidate: Candidate) => candidate.opened !== null && Date.now() - candidate.opened < OPENED
+      const openedLately = (candidate: Candidate) =>
+        Effect.map(Clock.currentTimeMillis, (now) => candidate.opened !== null && now - candidate.opened < OPENED)
 
       /**
        * What of what is in a task's folders would be lost with them, the
@@ -486,7 +487,7 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const bytes = yield* sizeOfAll(candidate)
           const lost = yield* lostWith(candidate)
-          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: Date.now() }
+          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: yield* Clock.currentTimeMillis }
           facts.set(candidate.taskId, measured)
           return measured
         })
@@ -494,7 +495,8 @@ export class FolderCleanup extends Context.Service<
       /** Measures, in the background, the folders whose facts are missing or old; one round at a time. */
       const measureLater = (all: ReadonlyArray<Candidate>) =>
         Effect.gen(function* () {
-          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < Date.now() - KEPT_FOR)
+          const now = yield* Clock.currentTimeMillis
+          const stale = all.filter((candidate) => (facts.get(candidate.taskId)?.at ?? 0) < now - KEPT_FOR)
           if (stale.length === 0 || measuring) return
           measuring = true
           yield* Effect.forkIn(
@@ -524,7 +526,7 @@ export class FolderCleanup extends Context.Service<
             kind: candidate.kind,
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
-            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, openedLately(candidate)),
+            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, yield* openedLately(candidate)),
           })
         }
         return {
@@ -538,7 +540,7 @@ export class FolderCleanup extends Context.Service<
       const staysBy = (candidate: Candidate) =>
         Effect.gen(function* () {
           if (yield* runningFrom(candidate)) return true
-          if (holdOf(false, yield* lostWith(candidate), openedLately(candidate)) !== null) return true
+          if (holdOf(false, yield* lostWith(candidate), yield* openedLately(candidate)) !== null) return true
           return yield* unshippedOf(candidate)
         })
 
@@ -622,7 +624,7 @@ export class FolderCleanup extends Context.Service<
                 if (yield* runningFrom(now)) return new TaskRefused({ taskId: now.taskId, why: 'folder_in_use' })
                 if (lost !== null && (lost.why !== seen?.why || lost.count !== seen.count))
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
-              } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
+              } else if ((yield* runningFrom(now)) || holdOf(false, lost, yield* openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
               // What still runs from them, from before it settled, stops first.
               yield* launches.stopAll(now.projectId, now.taskId)
@@ -684,7 +686,7 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const chosen = yield* wait
           if (chosen === 'never') return
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const oldest = (yield* candidates).toSorted((a, b) => a.clock - b.clock)
           const up = oldest.filter((candidate) => candidate.clock + waitDays(chosen, candidate.kind) * DAY <= now)
           yield* removeAll(yield* free(up, 'wait', chosen), instance.systemId)

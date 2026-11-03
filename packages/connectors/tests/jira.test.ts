@@ -2,7 +2,16 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, priorityFor, siteOf } from '../src/jira'
+import {
+  categoryOf,
+  jiraLabelOf,
+  levelOf,
+  makeJiraCloud,
+  makeJiraDataCenter,
+  priorityFor,
+  siteOf,
+  withoutTrailingSlashes,
+} from '../src/jira'
 import type { Issue } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
@@ -19,7 +28,8 @@ const SITE = 'https://hibernate.atlassian.net'
 const CLOUD = `${SITE}/rest/api/3`
 const INSTANCE = 'https://issues.apache.org/jira'
 const DC = `${INSTANCE}/rest/api/2`
-const FIELDS = 'fields=summary,description,status,priority,assignee,labels,project,updated,resolution'
+const FIELDS =
+  'fields=summary,description,status,priority,assignee,labels,project,updated,resolution,fixVersions,components,parent,issuetype,duedate'
 const GATEWAY = 'https://api.atlassian.com/ex/jira/0aeb68bb-8040-48f1-9994-30e61701adb4/rest/api/3'
 
 const cloud = (routes: ReadonlyArray<Route>, webUrl = `${SITE}/`) => {
@@ -110,6 +120,10 @@ const cloudIssue = (fields: Record<string, unknown> = {}) => ({
     },
     updated: '2026-10-07T08:26:17.722-0700',
     resolution: null,
+    fixVersions: [],
+    components: [],
+    issuetype: { self: `${CLOUD}/issuetype/1`, id: '1', name: 'Bug', subtask: false },
+    duedate: null,
     ...fields,
   },
 })
@@ -159,6 +173,10 @@ const dcIssue = (fields: Record<string, unknown> = {}) => ({
     project: { self: `${DC}/project/12311720`, id: '12311720', key: 'KAFKA', name: 'Kafka', projectTypeKey: 'software' },
     updated: '2026-10-07T03:24:57.000+0000',
     resolution: null,
+    fixVersions: [],
+    components: [],
+    issuetype: { self: `${DC}/issuetype/1`, id: '1', name: 'Bug', subtask: false },
+    duedate: null,
     ...fields,
   },
 })
@@ -307,6 +325,11 @@ describe('Jira Cloud', () => {
         labels: ['good-first-issue'],
         container: 'Hibernate ORM',
         updatedAt: '2026-10-07T15:26:17.722Z',
+        milestone: null,
+        parent: null,
+        type: 'Bug',
+        due: null,
+        components: [],
       })
       assert.lengthOf(sent, 1)
     }),
@@ -338,6 +361,28 @@ describe('Jira Cloud', () => {
       )
       assert.strictEqual(siteOf(board), SITE)
       assert.strictEqual(siteOf('hibernate.atlassian.net/'), 'hibernate.atlassian.net')
+      assert.strictEqual(withoutTrailingSlashes('https://jira.acme.dev/jira///'), 'https://jira.acme.dev/jira')
+      assert.strictEqual(withoutTrailingSlashes('///'), '')
+      // A long run of slashes not at the end is quick to read past.
+      const slashes = `${'/'.repeat(100_000)}x`
+      const started = performance.now()
+      assert.strictEqual(siteOf(slashes), slashes)
+      assert.isBelow(performance.now() - started, 100)
+    }),
+  )
+
+  it.effect('on its own domain, calls its API and the gateway at its atlassian.net address, and links issues on its own', () =>
+    Effect.gen(function* () {
+      const own = 'https://hibernate.example.org'
+      const { fetch, sent } = stubFetch([
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 401, text: '' }],
+        ['GET', `${SITE}/_edge/tenant_info`, { json: { cloudId: '0aeb68bb-8040-48f1-9994-30e61701adb4' } }],
+        ['GET', `${GATEWAY}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      const credential = Effect.succeed<Credential>({ kind: 'basic', user: 'you@meridian.dev', token: 'ATATT3x' })
+      const tracker = makeJiraCloud({ fetch, apiUrl: CLOUD, webUrl: `${own}/browse/HHH-1`, credential })
+      assert.strictEqual((yield* tracker.issue('HHH-20844')).url, `${own}/browse/HHH-20844`)
+      assert.isTrue(sent.every((request) => new URL(request.url).origin !== own))
     }),
   )
 
@@ -769,8 +814,24 @@ describe('Jira Cloud', () => {
       { id: '5', name: 'Lowest' },
     ]
 
-    it('changes all but a project, which only Jira’s own Move changes', () => {
-      assert.deepStrictEqual(cloud([]).tracker.capabilities.changes, ['status', 'close', 'priority', 'assignee', 'labels', 'title'])
+    it('changes all but a project, a sprint and story points, files with all but a status, and has one assignee', () => {
+      const { capabilities } = cloud([]).tracker
+      assert.deepStrictEqual(capabilities.changes, [
+        'status',
+        'close',
+        'priority',
+        'assignee',
+        'labels',
+        'milestone',
+        'parent',
+        'type',
+        'components',
+        'due',
+        'title',
+        'description',
+      ])
+      assert.deepStrictEqual(capabilities.creates, ['assignee', 'milestone', 'parent', 'type', 'components', 'due'])
+      assert.strictEqual(capabilities.assignees, 'one')
     })
 
     it.effect('offers the statuses its workflow lets it go to now, and where it is; the label wanted, and its own', () =>
@@ -829,7 +890,7 @@ describe('Jira Cloud', () => {
           title: 'A new summary',
           priority: 'urgent',
           labels: { add: [{ id: 'needs-test', name: 'needs-test' }], remove: [{ id: 'triage', name: 'triage' }] },
-          assignee: { id: '557058:f1', name: 'Gavin King' },
+          assignee: { add: [{ id: '557058:f1', name: 'Gavin King' }], remove: [] },
           status: { id: 'In Review', name: 'in review' },
         })
         assert.strictEqual(changed.key, 'HHH-20844')
@@ -890,7 +951,355 @@ describe('Jira Cloud', () => {
           assert.isFalse(sent.some((request) => request.method !== 'GET'))
         }),
     )
+
+    it.effect('refuses a project, a sprint and story points in words an agent can pass on, before changing anything', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([])
+        const said = (failed: { readonly reason: string; readonly message: string }) => [failed.reason, failed.message]
+        assert.deepStrictEqual(said(yield* Effect.flip(tracker.update(issue(), { title: 'A new summary', project: null }))), [
+          'rejected',
+          'Althar can’t change an issue’s project here: Jira moves an issue to another project only by its own Move',
+        ])
+        assert.deepStrictEqual(said(yield* Effect.flip(tracker.update(issue(), { cycle: { id: '12', name: 'Sprint 12' } }))), [
+          'rejected',
+          'Althar can’t change an issue’s cycle here: Jira’s sprints belong to its boards: Althar can’t set one yet',
+        ])
+        assert.deepStrictEqual(said(yield* Effect.flip(tracker.update(issue(), { due: '2026-11-30', estimate: 3 }))), [
+          'rejected',
+          'Althar can’t change an issue’s estimate here: Jira’s story points are a field each site names: Althar can’t set them yet',
+        ])
+        for (const asked of [tracker.choices(issue(), 'cycle'), tracker.choicesIn('HHH', 'cycle'), tracker.choicesIn('HHH', 'project')])
+          assert.strictEqual((yield* Effect.flip(asked)).reason, 'rejected')
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('sets its description, due day, fix version, components, parent and type in one edit, and takes each off', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          ['PUT', `${CLOUD}/issue/HHH-20844`, { status: 204 }],
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+        ])
+        yield* tracker.update(issue(), {
+          description: 'Fails on **bootstrap**.',
+          due: '2026-11-30',
+          milestone: { id: '32100', name: '7.2.0' },
+          components: [
+            { id: '10220', name: 'hibernate-core' },
+            { id: '10221', name: 'hibernate-envers' },
+          ],
+          parent: { id: '115000', ref: 'HHH-20000', key: 'HHH-20000' },
+          type: { id: '10003', name: 'Task' },
+        })
+        assert.deepStrictEqual(sent[0]?.body, {
+          fields: {
+            description: {
+              type: 'doc',
+              version: 1,
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'Fails on ' },
+                    { type: 'text', text: 'bootstrap', marks: [{ type: 'strong' }] },
+                    { type: 'text', text: '.' },
+                  ],
+                },
+              ],
+            },
+            duedate: '2026-11-30',
+            components: [{ id: '10220' }, { id: '10221' }],
+            parent: { key: 'HHH-20000' },
+            issuetype: { id: '10003' },
+          },
+          // Added beside the fix versions it has, not in their place.
+          update: { fixVersions: [{ add: { id: '32100' } }] },
+        })
+        yield* tracker.update(issue(), { description: '', due: null, milestone: null, components: [], parent: null })
+        assert.deepStrictEqual(sent[2]?.body, {
+          fields: { description: null, duedate: null, fixVersions: [], components: [], parent: null },
+        })
+        // One read as having no parent is left as it is: Jira's edit fails taking off one it hasn't.
+        yield* tracker.update(issue({ parent: null }), { parent: null })
+        assert.deepStrictEqual(
+          sent.map((request) => request.method),
+          ['PUT', 'GET', 'PUT', 'GET', 'GET'],
+        )
+      }),
+    )
+
+    it.effect('puts its one assignee in place of whoever had it, takes off the one who has it, and leaves it for one who hasn’t', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          ['PUT', `${CLOUD}/issue/HHH-20844/assignee`, { status: 204 }],
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+        ])
+        const steve = { id: '557058:aafa', name: 'Steve Ebersole' }
+        const gavin = { id: '557058:f1', name: 'Gavin King' }
+        const assigned = issue({ assignees: [{ id: steve.id, login: steve.name, name: steve.name, bot: false }] })
+        yield* tracker.update(assigned, { assignee: { add: [{ id: '557058:f2', name: 'Yoann Rodière' }, gavin], remove: [steve] } })
+        yield* tracker.update(assigned, { assignee: { add: [], remove: [steve] } })
+        yield* tracker.update(assigned, { assignee: null })
+        // Gavin hasn't it: nothing is asked of Jira but the issue.
+        yield* tracker.update(assigned, { assignee: { add: [], remove: [gavin] } })
+        assert.deepStrictEqual(
+          sent.filter((request) => request.method === 'PUT').map((request) => request.body),
+          [{ accountId: '557058:f1' }, { accountId: null }, { accountId: null }],
+        )
+        assert.lengthOf(sent, 7)
+      }),
+    )
+
+    it.effect('lists what an issue filed in a project can be set to: its versions to come, components, types and statuses', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          [
+            'GET',
+            `${CLOUD}/project/HHH/versions`,
+            {
+              json: [
+                { self: `${CLOUD}/version/31900`, id: '31900', name: '7.0.0', archived: false, released: true, projectId: 10031 },
+                { self: `${CLOUD}/version/32000`, id: '32000', name: '6.6.99', archived: true, released: false, projectId: 10031 },
+                { self: `${CLOUD}/version/32100`, id: '32100', name: '7.2.0', archived: false, released: false, projectId: 10031 },
+              ],
+            },
+          ],
+          [
+            'GET',
+            `${CLOUD}/project/HHH/components`,
+            {
+              json: [
+                { self: `${CLOUD}/component/10220`, id: '10220', name: 'hibernate-core', isAssigneeTypeValid: false },
+                { self: `${CLOUD}/component/10221`, id: '10221', name: 'hibernate-envers', isAssigneeTypeValid: false },
+              ],
+            },
+          ],
+          [
+            'GET',
+            `${CLOUD}/issue/createmeta/HHH/issuetypes`,
+            {
+              json: {
+                issueTypes: [
+                  { id: '10002', name: 'Sub-task', subtask: true },
+                  { id: '1', name: 'Bug', subtask: false },
+                  { id: '10003', name: 'Task', subtask: false },
+                ],
+              },
+            },
+          ],
+          [
+            'GET',
+            `${CLOUD}/project/HHH/statuses`,
+            {
+              json: [
+                {
+                  self: `${CLOUD}/issuetype/1`,
+                  id: '1',
+                  name: 'Bug',
+                  subtask: false,
+                  statuses: [
+                    { name: 'Open', id: '1', statusCategory: { key: 'new' } },
+                    { name: 'In Progress', id: '3', statusCategory: { key: 'indeterminate' } },
+                    { name: 'Closed', id: '6', statusCategory: { key: 'done' } },
+                  ],
+                },
+                {
+                  id: '10003',
+                  name: 'Task',
+                  subtask: false,
+                  statuses: [
+                    { name: 'Open', id: '1' },
+                    { name: 'Waiting for review', id: '10002' },
+                    { name: 'closed', id: '6' },
+                  ],
+                },
+              ],
+            },
+          ],
+          [
+            'GET',
+            `${CLOUD}/user/assignable/search?project=HHH&maxResults=50&query=gavin`,
+            { json: [{ accountId: '557058:f1', displayName: 'Gavin King' }] },
+          ],
+        ])
+        assert.deepStrictEqual(yield* tracker.choicesIn('HHH', 'milestone'), [{ id: '32100', name: '7.2.0' }])
+        assert.deepStrictEqual(yield* tracker.choicesIn('HHH', 'components'), [
+          { id: '10220', name: 'hibernate-core' },
+          { id: '10221', name: 'hibernate-envers' },
+        ])
+        // Sub-tasks left out: each needs a parent.
+        assert.deepStrictEqual(yield* tracker.choicesIn('HHH', 'type'), [
+          { id: '1', name: 'Bug' },
+          { id: '10003', name: 'Task' },
+        ])
+        assert.deepStrictEqual(
+          (yield* tracker.choicesIn('HHH', 'status')).map((one) => one.name),
+          ['Open', 'In Progress', 'Closed', 'Waiting for review'],
+        )
+        assert.deepStrictEqual(yield* tracker.choicesIn('HHH', 'labels', 'good first issue'), [
+          { id: 'good-first-issue', name: 'good-first-issue' },
+        ])
+        assert.deepStrictEqual(yield* tracker.choicesIn('HHH', 'assignee', 'gavin'), [
+          { id: '557058:f1', name: 'Gavin King', also: ['Gavin King'] },
+        ])
+        // An issue's, by the project its key is in.
+        assert.deepStrictEqual(yield* tracker.choices(issue(), 'milestone'), [{ id: '32100', name: '7.2.0' }])
+        assert.strictEqual(sent.at(-1)?.url, `${CLOUD}/project/HHH/versions`)
+      }),
+    )
   })
+
+  it.effect('files an issue of the type chosen, with its assignee, fix version, components, parent and due day', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844' } }],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      yield* tracker.create('HHH', {
+        title: 'A summary',
+        body: '',
+        labels: [],
+        fields: {
+          type: { id: '1', name: 'Bug' },
+          assignee: { add: [{ id: '557058:f1', name: 'Gavin King' }], remove: [] },
+          milestone: { id: '32100', name: '7.2.0' },
+          components: [
+            { id: '10220', name: 'hibernate-core' },
+            { id: '10221', name: 'hibernate-envers' },
+          ],
+          parent: { id: '115000', ref: 'HHH-20000', key: 'HHH-20000' },
+          due: '2026-11-30',
+        },
+      })
+      // A type chosen needs no looking up.
+      assert.deepStrictEqual(
+        sent.map((request) => `${request.method} ${request.url}`),
+        [`POST ${CLOUD}/issue`, `GET ${CLOUD}/issue/HHH-20844?${FIELDS}`],
+      )
+      assert.deepStrictEqual(sent[0]?.body, {
+        fields: {
+          project: { key: 'HHH' },
+          issuetype: { id: '1' },
+          summary: 'A summary',
+          assignee: { accountId: '557058:f1' },
+          fixVersions: [{ id: '32100' }],
+          components: [{ id: '10220' }, { id: '10221' }],
+          parent: { key: 'HHH-20000' },
+          duedate: '2026-11-30',
+        },
+      })
+    }),
+  )
+
+  it.effect('reads an issue’s fix version, components, parent, type and due day', () =>
+    Effect.gen(function* () {
+      const { tracker } = cloud([
+        [
+          'GET',
+          `${CLOUD}/issue/HHH-20845?${FIELDS}`,
+          {
+            json: cloudIssue({
+              fixVersions: [
+                { self: `${CLOUD}/version/32100`, id: '32100', name: '7.2.0', archived: false, released: false },
+                { self: `${CLOUD}/version/32200`, id: '32200', name: '7.3.0', archived: false, released: false },
+              ],
+              components: [{ self: `${CLOUD}/component/10220`, id: '10220', name: 'hibernate-core' }],
+              parent: {
+                id: '115000',
+                key: 'HHH-20000',
+                self: `${CLOUD}/issue/115000`,
+                fields: { summary: 'Bootstrap fails for composite ids', status: { name: 'Open' }, issuetype: { name: 'Bug' } },
+              },
+              issuetype: { id: '10002', name: 'Sub-task', subtask: true },
+              duedate: '2026-11-30',
+            }),
+          },
+        ],
+      ])
+      const read = yield* tracker.issue('HHH-20845')
+      assert.deepStrictEqual(
+        [read.milestone, read.components, read.parent, read.type, read.due],
+        [
+          { id: '32100', name: '7.2.0' },
+          ['hibernate-core'],
+          { key: 'HHH-20000', title: 'Bootstrap fails for composite ids' },
+          'Sub-task',
+          '2026-11-30',
+        ],
+      )
+    }),
+  )
+
+  it.effect('finds issues through /search/jql, by project, where their work stands, the account’s and words', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([['GET', /\/rest\/api\/3\/search\/jql\?/, { json: { issues: [cloudIssue()], isLast: true } }]])
+      assert.deepStrictEqual(
+        (yield* tracker.find({ state: 'open', limit: 10 })).map((found) => found.key),
+        ['HHH-20844'],
+      )
+      assert.strictEqual(jqlOf(sent[0]?.url), 'statusCategory != Done ORDER BY updated DESC')
+      assert.include(sent[0]?.url, `&maxResults=10&${FIELDS}`)
+      yield* tracker.find({ container: 'HHH', state: 'closed', mine: true, text: ' bootstrap "MapKey" ', limit: 5 })
+      assert.strictEqual(
+        jqlOf(sent[1]?.url),
+        'project = "HHH" AND statusCategory = Done AND assignee = currentUser() AND text ~ "bootstrap \\"MapKey\\"" ORDER BY updated DESC',
+      )
+      yield* tracker.find({ container: 'HHH', state: 'all', text: '  ', limit: 20 })
+      assert.strictEqual(jqlOf(sent[2]?.url), 'project = "HHH" ORDER BY updated DESC')
+      // Narrowed by nothing, which Cloud refuses: every issue in a project.
+      yield* tracker.find({ state: 'all', limit: 20 })
+      assert.strictEqual(jqlOf(sent[3]?.url), 'project IS NOT EMPTY ORDER BY updated DESC')
+    }),
+  )
+
+  it.effect('reads an issue’s latest comments, oldest first, from ADF', () =>
+    Effect.gen(function* () {
+      const paragraph = (...content: ReadonlyArray<Record<string, unknown>>) => ({
+        type: 'doc',
+        version: 1,
+        content: [{ type: 'paragraph', content }],
+      })
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          `${CLOUD}/issue/HHH-20844/comment?orderBy=-created&maxResults=2`,
+          {
+            json: {
+              startAt: 0,
+              maxResults: 2,
+              total: 5,
+              comments: [
+                {
+                  self: `${CLOUD}/issue/115161/comment/10005`,
+                  id: '10005',
+                  author: { accountId: '557058:f1', displayName: 'Gavin King', accountType: 'atlassian' },
+                  body: paragraph({ type: 'text', text: 'Fixed in ' }, { type: 'text', text: 'main', marks: [{ type: 'strong' }] }),
+                  created: '2026-10-07T09:00:00.000-0700',
+                  updated: '2026-10-07T09:00:00.000-0700',
+                },
+                {
+                  self: `${CLOUD}/issue/115161/comment/10004`,
+                  id: '10004',
+                  author: { accountId: '557058:app', accountType: 'app' },
+                  body: paragraph({ type: 'text', text: 'Picked up.' }),
+                  created: '2026-10-07T08:00:00.000-0700',
+                },
+              ],
+            },
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.comments(issue(), 2), [
+        { author: { id: '557058:app', login: '557058:app', name: null, bot: true }, body: 'Picked up.', at: '2026-10-07T15:00:00.000Z' },
+        {
+          author: { id: '557058:f1', login: 'Gavin King', name: 'Gavin King', bot: false },
+          body: 'Fixed in **main**',
+          at: '2026-10-07T16:00:00.000Z',
+        },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
 
   it.effect('files an issue at the site’s priority of its level, and without it where the project’s screen takes none', () =>
     Effect.gen(function* () {
@@ -1108,6 +1517,11 @@ describe('Jira Data Center', () => {
         labels: [],
         container: 'Kafka',
         updatedAt: '2026-10-07T03:24:57.000Z',
+        milestone: null,
+        parent: null,
+        type: 'Bug',
+        due: null,
+        components: [],
       })
     }),
   )
@@ -1251,6 +1665,104 @@ describe('Jira Data Center', () => {
       assert.deepStrictEqual(sent[2]?.body, {
         fields: { project: { key: 'KAFKA' }, issuetype: { id: '3' }, summary: 'A summary', description: 'Caches {{LoginManager}}.' },
       })
+    }),
+  )
+
+  it.effect('files one with its assignee by user name, and edits its description in wiki markup', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = dataCenter([
+        ['GET', `${DC}/issue/createmeta/KAFKA/issuetypes`, { json: { values: [{ id: '3', name: 'Task', subtask: false }] } }],
+        ['POST', `${DC}/issue`, { status: 201, json: { id: '13665242', key: 'KAFKA-21043' } }],
+        ['PUT', `${DC}/issue/KAFKA-21043`, { status: 204 }],
+        ['GET', `${DC}/issue/KAFKA-21043?${FIELDS}`, { json: dcIssue() }],
+      ])
+      const filed = yield* tracker.create('KAFKA', {
+        title: 'A summary',
+        body: '',
+        labels: [],
+        fields: {
+          assignee: { add: [{ id: 'chia7712', name: 'Chia-Ping Tsai' }], remove: [] },
+          milestone: { id: '12354100', name: '4.2.0' },
+        },
+      })
+      assert.deepStrictEqual(sent[1]?.body, {
+        fields: {
+          project: { key: 'KAFKA' },
+          issuetype: { id: '3' },
+          summary: 'A summary',
+          assignee: { name: 'chia7712' },
+          fixVersions: [{ id: '12354100' }],
+        },
+      })
+      yield* tracker.update(filed, { description: 'Caches `LoginManager`.', components: [{ id: '12313200', name: 'clients' }] })
+      assert.deepStrictEqual(sent[3]?.body, {
+        fields: { description: 'Caches {{LoginManager}}.', components: [{ id: '12313200' }] },
+      })
+    }),
+  )
+
+  it.effect('takes off the one assignee it has by their user name', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = dataCenter([
+        ['PUT', `${DC}/issue/KAFKA-21043/assignee`, { status: 204 }],
+        ['GET', `${DC}/issue/KAFKA-21043?${FIELDS}`, { json: dcIssue() }],
+      ])
+      const assigned = issue({
+        ref: 'KAFKA-21043',
+        key: 'KAFKA-21043',
+        assignees: [{ id: 'JIRAUSER314554', login: 'seokmoyoo', name: 'Seokmo Yoo', bot: false }],
+      })
+      yield* tracker.update(assigned, { assignee: { add: [], remove: [{ id: 'seokmoyoo', name: 'Seokmo Yoo' }] } })
+      assert.deepStrictEqual(sent[0]?.body, { name: null })
+    }),
+  )
+
+  it.effect('finds issues through /search, and reads an issue’s comments from wiki markup', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = dataCenter([
+        ['GET', /\/rest\/api\/2\/search\?/, { json: { startAt: 0, maxResults: 50, total: 1, issues: [dcIssue()] } }],
+        [
+          'GET',
+          `${DC}/issue/KAFKA-21043/comment?orderBy=-created&maxResults=10`,
+          {
+            json: {
+              startAt: 0,
+              maxResults: 10,
+              total: 2,
+              comments: [
+                {
+                  self: `${DC}/issue/13665242/comment/18000001`,
+                  id: '18000001',
+                  body: 'Thanks!',
+                  created: '2026-10-08T10:00:00.000+0000',
+                },
+                {
+                  self: `${DC}/issue/13665242/comment/18000000`,
+                  id: '18000000',
+                  author: { name: 'chia7712', key: 'JIRAUSER1', displayName: 'Chia-Ping Tsai' },
+                  body: 'Opened [a draft|https://github.com/apache/kafka/pull/1] for {{LoginManager}}.',
+                  created: '2026-10-07T03:24:57.000+0000',
+                },
+              ],
+            },
+          },
+        ],
+      ])
+      const found = yield* tracker.find({ container: 'KAFKA', state: 'open', mine: true, limit: 50 })
+      assert.isTrue(sent[0]?.url.startsWith(`${DC}/search?jql=`))
+      assert.strictEqual(
+        jqlOf(sent[0]?.url),
+        'project = "KAFKA" AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC',
+      )
+      const said = yield* tracker.comments(found[0] ?? issue(), 10)
+      assert.deepStrictEqual(said, [
+        {
+          author: { id: 'JIRAUSER1', login: 'chia7712', name: 'Chia-Ping Tsai', bot: false },
+          body: 'Opened [a draft](https://github.com/apache/kafka/pull/1) for `LoginManager`.',
+          at: '2026-10-07T03:24:57.000Z',
+        },
+        { author: null, body: 'Thanks!', at: '2026-10-08T10:00:00.000Z' },
+      ])
     }),
   )
 })

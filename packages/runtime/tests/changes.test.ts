@@ -18,9 +18,9 @@ import { Projects } from '../src/Projects'
 import { taskShown } from '../src/evidence'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { HOST, hosted, items, until } from './support'
+import { HOST, hosted, items, notices, until } from './support'
 
-import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
+import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, withoutReview } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -48,21 +48,24 @@ describe('a task that ends in a pull request', () => {
       const [planned] = yield* until(cards(projectId), (all) => all[0]?.plan !== null && all.length === 1)
       assert.strictEqual(planned?.plan?.end, 'draft')
 
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const change = ready?.change
       assert.strictEqual(change?.number, 1)
       assert.strictEqual(change?.state, 'open')
       assert.isTrue(change?.draft)
       assert.strictEqual(`${change?.short} ${change?.prefix}${change?.number}`, 'PR #1')
 
-      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review.
+      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review but
+      // what Althar adds of it, its seal at the head and the review folded after.
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
-      assert.isTrue(opened?.body.startsWith(`${DESCRIBED}\n\n`))
+      assert.isTrue(opened?.body.startsWith('<picture>'))
+      assert.include(opened?.body, '<summary>Reviewed by ')
+      assert.isTrue(withoutReview(opened?.body ?? '').startsWith(`${DESCRIBED}\n\n`))
       assert.notInclude(opened?.body, BUILT)
-      assert.notMatch(opened?.body ?? '', /review/i)
+      assert.notMatch(withoutReview(opened?.body ?? ''), /review/i)
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
@@ -146,7 +149,7 @@ describe('a task that ends in a pull request', () => {
 
       // Merged, the task is settled, and nothing listens any more.
       github.mergeByHand(1)
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
       const after = yield* arrivals(threadId)
       assert.deepStrictEqual(
         after.filter((arrival) => arrival.kind === 'comment').map((arrival) => arrival.from),
@@ -175,13 +178,13 @@ describe('a task that ends in a pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass]')
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
       // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's line below.
       assert.strictEqual(
-        opened?.body,
-        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
+        withoutReview(opened?.body ?? ''),
+        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\nOpened by [Althar](https://github.com/AltharIDE/althar).`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -199,8 +202,8 @@ describe('a task that ends in a pull request', () => {
       yield* connect('github', HOST)
       // The description is written finishing; settling then changes the work, and says again what it built.
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
-      const body = github.changes[0]?.body ?? ''
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const body = withoutReview(github.changes[0]?.body ?? '')
       assert.isTrue(body.startsWith('## What changed\n\nDid the task, in the template.'))
       assert.notInclude(body, BUILT_SETTLED)
       assert.notInclude(body, BUILT)
@@ -217,16 +220,15 @@ describe('a task that ends in a pull request', () => {
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix]',
       )
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       github.setChecks(1, [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts\nExpected 30, got "Thu"' }])
       // The lead fixes and commits it; nothing goes up until the person pushes it.
-      const [fixed] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      const [fixed] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
       assert.notInclude(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
       // Its plan done, it says again what the task built, and that is how the task now ends.
       const [shown] = yield* until(
         Effect.map(taskShown(fixed?.threadId ?? ''), (now) => [now]),
         ([now]) => now?.built === BUILT_FIXED,
-        Duration.seconds(20),
       )
       assert.strictEqual(shown?.built, BUILT_FIXED)
       const changes = yield* Changes
@@ -243,7 +245,7 @@ describe('a task that ends in a pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.isNull(ready?.change)
       assert.lengthOf(github.changes, 0)
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
@@ -269,10 +271,10 @@ describe('a task that ends in a pull request', () => {
       const projects = yield* Projects
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const [repository] = yield* projects.repositories(project.projectId)
-      assert.deepStrictEqual(repository?.fork, { fork: 'you/api', upstream: 'meridian/api', target: 'fork' })
+      assert.deepInclude(repository?.fork, { fork: 'you/api', upstream: 'meridian/api', target: 'fork', offered: false })
       yield* projects.setRepository({ projectId: project.projectId, repositoryId: repository?.id ?? '', changeTarget: 'upstream' })
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
       assert.strictEqual(github.forkOf(1), 'you/api')
       assert.strictEqual(github.changes[0]?.target, 'trunk')
@@ -283,7 +285,6 @@ describe('a task that ends in a pull request', () => {
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 2,
-        Duration.seconds(20),
       )
       assert.strictEqual(github.changes[1]?.url, 'https://github.com/you/api/pull/2')
       assert.isNull(github.forkOf(2))
@@ -299,7 +300,7 @@ describe('a task that ends in a pull request', () => {
       // Opened some other way, before Althar got to it.
       yield* github.openChange(repository, { title: 'By hand', body: '', source: 'althar/add-a-retry', target: 'main', draft: false })
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.lengthOf(github.changes, 1)
       assert.strictEqual(ready?.change?.title, 'By hand')
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -312,7 +313,7 @@ describe('a task that ends in a pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const changes = yield* Changes
       const taskId = ready?.taskId ?? ''
       const head = ready?.change?.head ?? ''
@@ -324,9 +325,9 @@ describe('a task that ends in a pull request', () => {
         threadId: ready?.threadId ?? '',
         body: 'Name it better. [lead:wait]',
       })
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(5))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'running')
       yield* sessions.interrupt(ready?.threadId ?? '')
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(5))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       // The host says no: its words come back, and nothing changed.
       github.failNext('merge', 'rejected')
       const refused = yield* Effect.flip(changes.merge(taskId, head))
@@ -338,10 +339,7 @@ describe('a task that ends in a pull request', () => {
       // Asked to merge a head that isn't the one there now, it doesn't try.
       const tried = github.calls.filter((call) => call === 'merge').length
       const stale = yield* Effect.flip(changes.merge(taskId, 'an-older-head'))
-      assert.strictEqual(
-        words(stale, String).message,
-        'The pull request changed since you looked at it. Have another look before you accept it.',
-      )
+      assert.strictEqual(words(stale, String).message, 'The pull request changed since you looked. Look again, then accept it.')
       assert.lengthOf(
         github.calls.filter((call) => call === 'merge'),
         tried,
@@ -349,7 +347,7 @@ describe('a task that ends in a pull request', () => {
       // At the head the person saw, it is merged, a draft marked ready first, and the task settles at once.
       yield* changes.merge(taskId, head)
       assert.deepInclude(github.changes[0], { state: 'merged', draft: false })
-      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(5))
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
       assert.strictEqual(settled?.change?.state, 'merged')
       // Merged, there is nothing more to merge.
       yield* changes.merge(taskId, head)
@@ -367,7 +365,7 @@ describe('a task that ends in a pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const changes = yield* Changes
       // For a moment after a merge, GitHub can still answer the pull request as open: its merge's own answer is what counts.
       github.lagReads()
@@ -398,7 +396,7 @@ describe('a task that ends in a pull request', () => {
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const changes = yield* Changes
       // Taken, as Bitbucket answers one that takes long, but not landed yet: it isn't settled.
       github.landLater()
@@ -413,7 +411,7 @@ describe('a task that ends in a pull request', () => {
         (since) => since.includes('change'),
       )
       github.mergeByHand(ready?.change?.number ?? 0)
-      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(8))
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
       assert.strictEqual(settled?.change?.state, 'merged')
       yield* Effect.sleep(Duration.seconds(3))
       assert.lengthOf(
@@ -423,6 +421,121 @@ describe('a task that ends in a pull request', () => {
       // Listening as ever, every minute here, isn't what heard it.
     }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
   })
+
+  it.live(
+    'puts a pull request in its branch’s merge queue, says when the queue takes it out, and settles it once the queue merges it',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const number = ready?.change?.number ?? 0
+        const changes = yield* Changes
+        const said = Effect.map(notices(ready?.threadId ?? ''), (all) => all.map((notice) => notice.title ?? ''))
+        const card = Effect.map(cards(projectId), (all) => all[0])
+        // Accepted, it goes in the queue: open, in it, and its thread says so. It isn't settled: its host merges it later.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        const queued = yield* card
+        assert.deepInclude(queued?.change, { state: 'open', queued: true })
+        assert.strictEqual(queued?.phase, 'ready')
+        assert.include(yield* said, 'PR #1 is in the merge queue for main.')
+        // Accepted again while in it, as a second press does, it is in it still, said once.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        assert.lengthOf(
+          (yield* said).filter((title) => title.includes('is in the merge queue')),
+          1,
+        )
+        // The queue takes it out, its checks failed there: the thread says so, and it is the person's to merge again.
+        github.dequeue(number, 'checks')
+        yield* changes.refresh(taskId)
+        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
+        assert.strictEqual(back?.change?.state, 'open')
+        assert.include(yield* said, 'The merge queue took PR #1 out: its checks failed.')
+        // Accepted again at the same head, it goes in again: another merge, not the first one's answer kept.
+        yield* changes.merge(taskId, back?.change?.head ?? '')
+        assert.lengthOf(
+          github.calls.filter((call) => call === 'merge'),
+          2,
+        )
+        assert.isTrue((yield* card)?.change?.queued)
+        // Out of the queue as it merges, while a read still says open: in it still, and nothing said.
+        github.dequeue(number, 'merged')
+        const asked = github.calls.length
+        yield* changes.refresh(taskId)
+        yield* until(
+          Effect.sync(() => github.calls.slice(asked)),
+          (since) => since.includes('activity'),
+        )
+        assert.isTrue((yield* card)?.change?.queued)
+        // The queue merges it, and it settles.
+        github.mergeByHand(number)
+        yield* changes.refresh(taskId)
+        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
+        assert.strictEqual(settled?.change?.state, 'merged')
+        assert.lengthOf(
+          (yield* said).filter((title) => title.includes('merge queue took')),
+          1,
+        )
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+    },
+  )
+
+  it.live(
+    'hears a pull request put in its merge queue outside Althar, keeps Accept and merge from merging it again, and settles it once merged',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const number = ready?.change?.number ?? 0
+        const changes = yield* Changes
+        const said = Effect.map(notices(ready?.threadId ?? ''), (all) => all.map((notice) => notice.title ?? ''))
+        const card = Effect.map(cards(projectId), (all) => all[0])
+        const inQueue = Effect.map(said, (all) => all.filter((title) => title.includes('is in the merge queue')))
+        assert.notStrictEqual(ready?.change?.queued, true)
+        // Put in the queue on GitHub's site, it is heard so on the next turn: in it, at work still, and its thread says so.
+        github.enqueueByHand(number)
+        yield* changes.refresh(taskId)
+        const [queued] = yield* until(cards(projectId), (all) => all[0]?.change?.queued === true)
+        assert.deepInclude(queued?.change, { state: 'open', queued: true })
+        assert.strictEqual(queued?.phase, 'ready')
+        assert.include(yield* said, 'PR #1 is in the merge queue for main.')
+        // Heard again, it isn't said again.
+        yield* changes.refresh(taskId)
+        assert.lengthOf(yield* inQueue, 1)
+        // Accept and merge, pressed on it as it sits in the queue, merges nothing: it is in the queue still, said once.
+        yield* changes.merge(taskId, ready?.change?.head ?? '')
+        assert.notInclude(github.calls, 'merge')
+        assert.isTrue((yield* card)?.change?.queued)
+        assert.lengthOf(yield* inQueue, 1)
+        // The queue takes it out, its checks failed there: the thread says so, and it is the person's again.
+        github.dequeue(number, 'checks')
+        yield* changes.refresh(taskId)
+        const [back] = yield* until(cards(projectId), (all) => all[0]?.change?.queued !== true)
+        assert.strictEqual(back?.change?.state, 'open')
+        assert.include(yield* said, 'The merge queue took PR #1 out: its checks failed.')
+        // Put in again from outside, and merged by the queue, it settles.
+        github.enqueueByHand(number)
+        yield* changes.refresh(taskId)
+        yield* until(cards(projectId), (all) => all[0]?.change?.queued === true)
+        github.mergeByHand(number)
+        yield* changes.refresh(taskId)
+        const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
+        assert.strictEqual(settled?.change?.state, 'merged')
+        assert.lengthOf(yield* inQueue, 2)
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+    },
+  )
 
   it.live('pushes the branch only, when that is how the task ends', () => {
     const { working, bare } = hosted()
@@ -455,7 +568,7 @@ describe('a task that ends in a pull request', () => {
       // Changed before it starts, it keeps its ending and its reason.
       yield* plans.change(planId, [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }], instance.personId)
       yield* plans.start(planId, instance.personId)
-      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.lengthOf(github.changes, 0)
       assert.include(git(bare, 'ls-tree', '--name-only', created.branch), 'change.txt')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', created.branch), 'Change it')

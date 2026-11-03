@@ -1,16 +1,26 @@
-import { cleanup } from '@testing-library/react'
+import { deadline } from '@althar/testing'
+import { cleanup, configure } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { setProjectAnnotations } from '@storybook/react-vite'
-import { afterEach, beforeAll, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, vi } from 'vitest'
 
 import preview from '../.storybook/preview'
+
+/*
+ * A findBy or waitFor gives up where every other wait does, near the test's own time (@althar/testing), not after
+ * testing-library's one second: what takes a second here can take four on a slower machine.
+ */
+beforeEach(() => {
+  configure({ asyncUtilTimeout: Math.max(0, deadline() - Date.now()) })
+})
 
 /*
  * jsdom lacks what the components lean on in a browser. Each stand-in is the
  * least that lets them run: a resize observer that never fires, an
  * intersection observer that sees everything it is given (a story is on
  * screen), a media query that matches nothing, pointer capture that is a
- * no-op (Radix calls it), and a 2D context that draws nothing.
+ * no-op (Radix calls it), a 2D context that draws nothing, and SVG text
+ * that measures (mermaid lays labels out by it).
  */
 class NoObserver {
   observe() {}
@@ -53,6 +63,14 @@ window.matchMedia ??= (query: string) =>
 const missing = { hasPointerCapture: () => false, setPointerCapture: () => {}, releasePointerCapture: () => {}, scrollIntoView: () => {} }
 for (const [name, value] of Object.entries(missing)) {
   if (!(name in Element.prototype)) Object.defineProperty(Element.prototype, name, { value, configurable: true })
+}
+/* jsdom lays no text out, so mermaid measures every label as the same box: enough for it to draw a diagram */
+const measures = {
+  getBBox: () => ({ x: 0, y: 0, width: 80, height: 16 }),
+  getComputedTextLength: () => 80,
+}
+for (const [name, value] of Object.entries(measures)) {
+  if (!(name in SVGElement.prototype)) Object.defineProperty(SVGElement.prototype, name, { value, configurable: true })
 }
 HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as HTMLCanvasElement['getContext']
 

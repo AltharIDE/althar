@@ -57,7 +57,7 @@ export const TurningItOff: Story = {
     await expect(onChange).toHaveBeenCalledWith(false)
     await expect(c.getByText('Althar is free, and we have no marketing budget.')).toBeInTheDocument()
     await expect(c.getByRole('figure', { name: 'A commit as GitHub shows it' })).toHaveTextContent('dana-k committed 12 minutes ago')
-    await expect(c.getByText('Your commits and pull requests go out with only your name.')).toBeInTheDocument()
+    await expect(c.getByText('Only your name goes out.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Put Althar back on your commits' }))
     await expect(it).toHaveAttribute('aria-checked', 'true')
     await expect(c.queryByText(/no marketing budget/)).toBeNull()
@@ -75,7 +75,7 @@ export const LeavingItOff: Story = {
     await userEvent.click(within(ask).getByRole('button', { name: 'Leave it off' }))
     await expect(c.queryByRole('region', { name: /no marketing budget/ })).toBeNull()
     await expect(c.getByRole('switch', { name: 'Althar as co-author' })).toHaveAttribute('aria-checked', 'false')
-    await expect(c.getByText('Your commits and pull requests go out with only your name.')).toHaveFocus()
+    await expect(c.getByText('Only your name goes out.')).toHaveFocus()
   },
 }
 
@@ -85,7 +85,7 @@ export const OffAlready: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByText(/no marketing budget/)).toBeNull()
-    await expect(c.getByText('Your commits and pull requests go out with only your name.')).toBeInTheDocument()
+    await expect(c.getByText('Only your name goes out.')).toBeInTheDocument()
   },
 }
 

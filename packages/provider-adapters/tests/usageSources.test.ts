@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { claudeKeychainItems, extractString, readClaudeKeychainField, readTokenField } from '../src/credentialStore'
 import { agents } from '../src/registry'
-import { buildUsageReader, MIN_INTERVAL, type UsagePolicy, usageReader } from '../src/usageRead'
+import { buildUsageReader, MIN_INTERVAL, type UsageAccount, type UsagePolicy, usageReader } from '../src/usageRead'
 import {
   allowedEndpoints,
   chatGptUsageWindows,
@@ -20,7 +20,9 @@ import {
   noReadingOf,
   openCodeCannotList,
   openCodeCredentials,
+  openCodeGoUsage,
   readOpenCodeCredentials,
+  readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsagePair,
   usagePairs,
@@ -74,7 +76,6 @@ describe('every agent’s plan', () => {
       'opencode/github-copilot',
       'opencode/google',
       'opencode/openai',
-      'opencode/opencode',
       'qwen-code/qwen',
     ])
     for (const pair of unread) expect(noReadingOf(pair), `${pair.agent}/${pair.provider}`).toMatch(/^[A-Z].+\.$/)
@@ -179,8 +180,12 @@ const server = (reply: Reply | (() => Reply)) => {
 }
 
 const codex = (home: string) => ({ agent: 'codex' as const, provider: 'openai', home, named: true })
-const reader = (policy: UsagePolicy = {}, patch: Partial<EndpointSource> = {}) =>
-  buildUsageReader({
+/** A reader of the registry's sources, patched as a test says, asked at the time `now` gives: the system's, unless a test says. */
+const reader = (
+  { now = () => new Date(), ...policy }: UsagePolicy & { readonly now?: () => Date } = {},
+  patch: Partial<EndpointSource> = {},
+) => {
+  const built = buildUsageReader({
     pairs: usagePairs.map((pair) => ({
       ...pair,
       sources: pair.sources.map((source) => (source.kind === 'endpoint' ? { ...source, ...patch } : source)),
@@ -188,6 +193,8 @@ const reader = (policy: UsagePolicy = {}, patch: Partial<EndpointSource> = {}) =
     keychain: async () => null,
     ...policy,
   })
+  return { read: (sourceId: string, account: UsageAccount) => built.read(sourceId, account, now) }
+}
 
 describe('the usage reader', () => {
   it('makes one GET to the allowlisted host and path, carrying the token and the account it is for, and reads the windows', async () => {
@@ -325,6 +332,32 @@ describe('the usage reader', () => {
     expect(endpointSources().find((source) => source.id === 'claude-oauth')?.every).toBe(5 * 60_000)
   })
 
+  it('says again inside the interval what the last read said, where it read no windows: never a wait the provider didn’t ask for', async () => {
+    for (const [reply, said] of [
+      [{ status: 500 }, { kind: 'fault', fault: 'unreachable', message: 'The provider answered with an error.' }],
+      [{ throws: true }, { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' }],
+      [{ status: 401 }, { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }],
+      [{ status: 429 }, { kind: 'fault', fault: 'unreachable', message: 'The provider asked Althar to wait before reading again.' }],
+    ] as const) {
+      let time = Date.parse('2026-10-15T12:00:00Z')
+      const { seen, fetch } = server(reply)
+      const r = reader({ fetch, now: () => new Date(time) })
+      const home = fakeHome()
+      expect(await r.read('codex-chatgpt', codex(home))).toMatchObject(said)
+      time += MIN_INTERVAL - 1
+      expect(await r.read('codex-chatgpt', codex(home)), JSON.stringify(reply)).toEqual(said)
+      expect(seen).toHaveLength(1)
+    }
+    // An account with no sign-in to read is one still, not one waiting.
+    const { seen, fetch } = server({})
+    const r = reader({ fetch })
+    const missing = mkdtempSync(join(tmpdir(), 'althar-usage-'))
+    homes.push(missing)
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(await r.read('codex-chatgpt', codex(missing))).toEqual({ kind: 'none' })
+    expect(seen).toHaveLength(0)
+  })
+
   it('makes one call for readers asking together, and none inside the minute after', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
@@ -346,6 +379,26 @@ describe('the usage reader', () => {
     expect(seen).toHaveLength(1)
   })
 
+  it('stamps the windows with when it asked, not when they came, and gives that time again while it waits as a 429 asked', async () => {
+    let time = Date.parse('2026-10-15T12:00:00Z')
+    const asked = new Date(time).toISOString()
+    let reply: Reply = {}
+    const answer = server(() => reply).fetch
+    // Each answer takes two seconds to come.
+    const fetch: typeof answer = async (url, init) => {
+      time += 2000
+      return answer(url, init)
+    }
+    const r = reader({ fetch, now: () => new Date(time) })
+    const home = fakeHome()
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: false, usage: { observedAt: asked } })
+    time += MIN_INTERVAL
+    reply = { status: 429, retryAfter: '3600' }
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', last: { observedAt: asked } })
+    time += 60_000
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true, usage: { observedAt: asked } })
+  })
+
   it('waits as long as a 429 asks, or longer each time where it doesn’t say, showing the last windows meanwhile', async () => {
     let time = Date.parse('2026-10-15T12:00:00Z')
     let reply: Reply = {}
@@ -355,16 +408,25 @@ describe('the usage reader', () => {
     await r.read('codex-chatgpt', codex(home))
     time += MIN_INTERVAL
     reply = { status: 429 }
-    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'fault', fault: 'unreachable', last: { source: 'endpoint' } })
+    // Each time it is asked to wait, it says what the provider sent and when it asks again, for the log.
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      kind: 'fault',
+      fault: 'unreachable',
+      last: { source: 'endpoint' },
+      waiting: { retryAfter: null, until: new Date(time + MIN_INTERVAL * 2).toISOString() },
+    })
     time += MIN_INTERVAL + 1
     expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true })
     expect(seen).toHaveLength(2)
     time += MIN_INTERVAL * 2
     reply = { status: 429, retryAfter: '3600' }
-    await r.read('codex-chatgpt', codex(home))
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({
+      waiting: { retryAfter: '3600', until: new Date(time + 3_600_000).toISOString() },
+    })
     expect(seen).toHaveLength(3)
     time += 59 * 60_000
-    await r.read('codex-chatgpt', codex(home))
+    // Waiting, it isn't asked: the last windows, and nothing to log.
+    expect(await r.read('codex-chatgpt', codex(home))).not.toHaveProperty('waiting')
     expect(seen).toHaveLength(3)
     time += 61_000
     reply = {}
@@ -684,7 +746,7 @@ describe('every OpenCode sign-in lands on a declared pair', () => {
     openCodeCredentials(JSON.stringify([{ id: provider, name: provider, connections: [{ type: 'credential', method, label: 'x' }] }]))![0]!
 
   it('covers the plan providers the registry declares, and a key as a key', () => {
-    for (const provider of ['openai', 'opencode', 'github-copilot', 'google']) {
+    for (const provider of ['openai', 'opencode-go', 'github-copilot', 'google']) {
       const pair = usagePairs.find((p) => p.agent === 'opencode' && p.provider === provider)!
       expect(pair.sources.length).toBeGreaterThan(0)
       expect(resolveOpenCodeCredential({ provider, pays: 'plan' })).toMatchObject({ kind: 'covered', pair: { provider } })
@@ -708,6 +770,19 @@ describe('OpenCode: plan or key per provider, from auth list', () => {
       { provider: 'openai', pays: 'plan' },
       { provider: 'x', pays: 'unknown' },
     ])
+  })
+
+  it('takes OpenCode Go for a plan and Zen for per use, whatever their sign-in is', () => {
+    // Go's sign-in is a key, and Zen's a key or an OpenCode Console sign-in (2.2.5, 3 November 2026).
+    expect(openCodeCredentials(output(['opencode-go', 'key'], ['opencode', 'key'], ['opencode', 'oauth']))).toEqual([
+      { provider: 'opencode-go', pays: 'plan' },
+      { provider: 'opencode', pays: 'key' },
+      { provider: 'opencode', pays: 'key' },
+    ])
+    expect(resolveOpenCodeCredential({ provider: 'opencode-go', pays: 'plan' })).toMatchObject({
+      kind: 'covered',
+      pair: { provider: 'opencode-go', pays: 'plan' },
+    })
   })
 
   it('has nothing for output that is not that shape, which 1.x’s count is', () => {
@@ -753,5 +828,92 @@ describe('listing an OpenCode account’s sign-ins', () => {
     expect(agents.opencode.signIn.credentials?.('node').args).toEqual(['auth', 'list', '--standalone', '--format', 'json'])
     expect(agents['claude-code'].signIn.credentials).toBeUndefined()
     expect(agents.codex.signIn.credentials).toBeUndefined()
+  })
+})
+
+describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
+  const now = new Date('2026-11-03T18:00:00Z')
+  // As 2.2.5 answered on 3 November 2026 for an account signed in to OpenCode Console with Go, its workspace's ids made up.
+  const answer = (go: unknown) =>
+    JSON.stringify({
+      location: { directory: '/tmp' },
+      data: {
+        workspace: { id: 'wrk_x', name: 'Mine', usageURL: 'https://opencode.ai/workspace/wrk_x' },
+        ...(go === undefined ? {} : { go }),
+        budgets: [],
+      },
+    })
+
+  it('reads the rolling five hours, the week and the month, each with its reset', () => {
+    const read = openCodeGoUsage(
+      answer({
+        rolling: { percent: 12, limited: false, resetsAt: Date.parse('2026-11-03T22:54:00Z') },
+        weekly: { percent: 40, limited: false, resetsAt: Date.parse('2026-11-09T00:00:00Z') },
+        monthly: { percent: 3, limited: false, resetsAt: '2026-12-03T10:19:39.000Z' },
+      }),
+      now,
+    )
+    expect(read).toEqual({
+      kind: 'usage',
+      usage: {
+        source: 'agent',
+        plan: 'OpenCode Go',
+        observedAt: now.toISOString(),
+        windows: [
+          { kind: 'five_hour', minutes: 300, usedPercent: 12, resetsAt: '2026-11-03T22:54:00.000Z' },
+          { kind: 'weekly', usedPercent: 40, resetsAt: '2026-11-09T00:00:00.000Z' },
+          { kind: 'monthly', usedPercent: 3, resetsAt: '2026-12-03T10:19:39.000Z' },
+        ],
+      },
+    })
+  })
+
+  it('takes a rate-limited window for out, however much it says is used', () => {
+    const read = openCodeGoUsage(
+      answer({ rolling: { percent: 97, status: 'rate-limited', resetsAt: Date.parse('2026-11-03T20:00:00Z') } }),
+      now,
+    )
+    expect(read).toMatchObject({ kind: 'usage', usage: { windows: [{ kind: 'five_hour', usedPercent: 100 }] } })
+  })
+
+  it('has no reading without an OpenCode Console sign-in, or a workspace without Go', () => {
+    expect(openCodeGoUsage(JSON.stringify({ location: { directory: '/tmp' }, data: null }), now)).toEqual({ kind: 'none' })
+    expect(openCodeGoUsage(answer(undefined), now)).toEqual({ kind: 'none' })
+  })
+
+  it('is a fault for an answer of another shape, never a quiet zero', () => {
+    expect(openCodeGoUsage('Error: not found', now)).toMatchObject({ kind: 'failed' })
+    expect(openCodeGoUsage('{"other":1}', now)).toMatchObject({ kind: 'failed' })
+    expect(openCodeGoUsage(answer({ weekly: { status: 'ok' } }), now)).toMatchObject({ kind: 'failed' })
+  })
+
+  const limits = (script: string) => ({ ...agents.opencode, usageLimits: () => ({ command: 'bun', args: ['-e', script] }) })
+
+  it('asks again where OpenCode’s server didn’t start in time, as its listing of sign-ins does', async () => {
+    const tries = join(mkdtempSync(join(tmpdir(), 'althar-started-')), 'tries')
+    const once = (answer: string) =>
+      `const fs = require('fs'); if (!fs.existsSync(${JSON.stringify(tries)})) { fs.writeFileSync(${JSON.stringify(tries)}, 'x'); console.error('Location plugins did not finish activating'); process.exit(1) } console.log(${JSON.stringify(answer)})`
+    expect(await readOpenCodeGoUsage(limits(once('{"data":null}')), { now: () => now })).toEqual({ kind: 'none' })
+    rmSync(tries)
+    const listing = {
+      ...agents.opencode,
+      signIn: { ...agents.opencode.signIn, credentials: () => ({ command: 'bun', args: ['-e', once('[]')] }) },
+    }
+    expect(await readOpenCodeCredentials(listing)).toEqual({ kind: 'credentials', credentials: [] })
+  })
+
+  it('asks OpenCode in the account’s home, and says why where it couldn’t', async () => {
+    const script = `console.log(JSON.stringify({ data: process.env.XDG_DATA_HOME === '/accounts/a' ? { go: { weekly: { percent: 5, resetsAt: 1794182400000 } } } : null }))`
+    expect(await readOpenCodeGoUsage(limits(script), { home: { XDG_DATA_HOME: '/accounts/a' }, now: () => now })).toMatchObject({
+      kind: 'usage',
+      usage: { windows: [{ kind: 'weekly', usedPercent: 5 }] },
+    })
+    expect(await readOpenCodeGoUsage(limits(script), { now: () => now })).toEqual({ kind: 'none' })
+    expect(await readOpenCodeGoUsage(limits(`console.error('Error: no server'); process.exit(1)`), { now: () => now })).toEqual({
+      kind: 'failed',
+      message: 'OpenCode couldn’t read Go’s usage: Error: no server.',
+    })
+    expect(await readOpenCodeGoUsage(agents.codex, { now: () => now })).toEqual({ kind: 'none' })
+    expect(agents.opencode.usageLimits?.('node').args).toEqual(['api', '--standalone', 'experimental.usage.limits'])
   })
 })

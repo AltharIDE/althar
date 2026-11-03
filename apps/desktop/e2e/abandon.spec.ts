@@ -29,8 +29,8 @@ test('offers to close an abandoned task’s pull request, says it is still open 
     await connectGitHub(page)
 
     await say(page, 'Prototype the settled lane. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
 
     // The dialog offers to close it on GitHub, on; its branch there to delete, off.
     await page.getByRole('button', { name: /Open task/ }).click()
@@ -53,7 +53,7 @@ test('offers to close an abandoned task’s pull request, says it is still open 
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
-    await expect(work.getByText('PR #1 still open')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 still open')).toBeVisible()
     await expect(work.getByText('PR #1 closed')).toHaveCount(0)
     const closing = work.getByRole('button', { name: 'Close PR #1' })
     await expect(closing).toBeVisible()
@@ -62,7 +62,7 @@ test('offers to close an abandoned task’s pull request, says it is still open 
 
     // One press closes it on GitHub, and the row says so.
     await closing.click()
-    await expect(work.getByText('PR #1 closed')).toBeVisible({ timeout: 10_000 })
+    await expect(work.getByText('PR #1 closed')).toBeVisible()
     await expect(closing).toHaveCount(0)
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/abandoned-closed.png', animations: 'disabled' })

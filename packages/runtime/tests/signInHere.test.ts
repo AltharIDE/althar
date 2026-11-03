@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Schedule } from 'effect'
+import { Effect, Layer } from 'effect'
+import { until } from '@althar/testing/effect'
 
 import { Accounts } from '../src/Accounts'
-import { AccountSignIns, type AccountSignInState } from '../src/AccountSignIns'
+import { AccountSignIns } from '../src/AccountSignIns'
 import { type AgentEntry, Agents } from '../src/Config'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
@@ -62,9 +63,6 @@ const layer = Runtime.layer({
   secrets: Secrets.memory(),
   connectors: fakeConnectors({}),
 })
-
-const until = (read: Effect.Effect<AccountSignInState>, done: (state: AccountSignInState) => boolean) =>
-  read.pipe(Effect.repeat({ until: done, schedule: Schedule.spaced(Duration.millis(20)) }), Effect.timeout(Duration.seconds(10)))
 
 describe('signing in where nothing opens a browser', () => {
   it.live('shows the page to open, for the person to open it', () =>

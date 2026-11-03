@@ -2,8 +2,10 @@ import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
+import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
+import { makeGitHubReleases } from './githubReleases'
 import type {
   Account,
   Activity,
@@ -14,20 +16,25 @@ import type {
   Check,
   CheckState,
   Choice,
+  ChosenField,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueComment,
   IssueField,
+  IssueQuery,
   ListedChange,
   Person,
+  BranchUpdate,
   Repository,
   Review,
   ReviewEvent,
   Tracker,
+  TrackerCapabilities,
   Verdict,
 } from './model'
-import { branchPath, cantChange, lacking, leftAsItIs, stillOpen, unchangeable } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, mergedForGood, noPictures, notOpen, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -105,12 +112,18 @@ const PullAnswer = Schema.Struct({
 })
 type PullAnswer = typeof PullAnswer.Type
 
+/** How far a commit is behind the base it is compared with, in commits. */
+const Behind = Schema.Struct({ behind_by: Schema.Number })
+
 const CheckRuns = Schema.Struct({
   check_runs: Schema.Array(
     Schema.Struct({
       id: Schema.Number,
       name: Schema.String,
       status: Schema.String,
+      check_suite: Schema.optional(Schema.Struct({ id: Schema.Number })),
+      started_at: Schema.optional(Schema.NullOr(Schema.String)),
+      completed_at: Schema.optional(Schema.NullOr(Schema.String)),
       conclusion: Schema.optional(Schema.NullOr(Schema.String)),
       html_url: Schema.optional(Schema.NullOr(Schema.String)),
       details_url: Schema.optional(Schema.NullOr(Schema.String)),
@@ -165,6 +178,7 @@ const ReviewAnswer = Schema.Struct({
 
 const IssueAnswer = Schema.Struct({
   id: Schema.Number,
+  node_id: Schema.String,
   number: Schema.Number,
   title: Schema.String,
   body: Schema.optional(Schema.NullOr(Schema.String)),
@@ -175,11 +189,23 @@ const IssueAnswer = Schema.Struct({
   labels: Schema.optional(
     Schema.Array(Schema.Union([Schema.String, Schema.Struct({ name: Schema.optional(Schema.NullOr(Schema.String)) })])),
   ),
+  milestone: Schema.optional(Schema.NullOr(Schema.Struct({ number: Schema.Number, title: Schema.String }))),
+  // GitHub's issue types, an organisation's; Enterprise Server before them says nothing of one.
+  type: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+  // How many comments it has.
+  comments: Schema.optional(Schema.Number),
   pull_request: Schema.optional(Schema.Unknown),
   repository_url: Schema.optional(Schema.String),
   updated_at: Schema.String,
 })
 type IssueAnswer = typeof IssueAnswer.Type
+
+/** A comment on an issue, as GitHub lists them: who wrote it, what it says, and when. */
+const IssueCommentAnswer = Schema.Struct({
+  user: Schema.NullOr(User),
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+  created_at: Schema.String,
+})
 
 /** Whether GitHub says an author can write to the repository: its owner, a member of its organisation, or a collaborator. */
 const memberOf = (association: string | undefined) => association === 'OWNER' || association === 'MEMBER' || association === 'COLLABORATOR'
@@ -377,6 +403,74 @@ const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', requ
 /** What GitHub answers a merge: whether it merged, and its commit. */
 const MergeAnswer = Schema.Struct({ merged: Schema.optional(Schema.Boolean), sha: Schema.optional(Schema.NullOr(Schema.String)) })
 
+/** Whether a pull request's target branch merges through a merge queue, whether it is in it, and why the queue last took it out. */
+const QUEUE = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      isMergeQueueEnabled
+      isInMergeQueue
+      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } }
+    }
+  }
+}`
+
+const QueueAnswer = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      pullRequest: Schema.NullOr(
+        Schema.Struct({
+          isMergeQueueEnabled: Schema.Boolean,
+          isInMergeQueue: Schema.Boolean,
+          timelineItems: Schema.Struct({
+            nodes: Schema.Array(Schema.NullOr(Schema.Struct({ reason: Schema.optional(Schema.NullOr(Schema.String)) }))),
+          }),
+        }),
+      ),
+    }),
+  ),
+})
+
+/** Puts a pull request in its merge queue, only at the head Althar last saw where it saw one. */
+const ENQUEUE = `mutation($id: ID!, $head: GitObjectID) {
+  enqueuePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head }) { mergeQueueEntry { position } }
+}`
+
+/** Takes a pull request out of its merge queue before it merges. */
+const DEQUEUE = `mutation($id: ID!) {
+  dequeuePullRequest(input: { id: $id }) { mergeQueueEntry { id } }
+}`
+
+/** Whether a branch merges through a merge queue, which GraphQL alone says. */
+const BRANCH_QUEUE = `query($owner: String!, $name: String!, $branch: String!) {
+  repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } }
+}`
+
+const BranchQueueAnswer = Schema.Struct({
+  repository: Schema.NullOr(Schema.Struct({ mergeQueue: Schema.NullOr(Schema.Struct({ id: Schema.String })) })),
+})
+
+const BranchAnswer = Schema.Struct({ commit: Schema.Struct({ sha: Schema.String }) })
+const CompareAnswer = Schema.Struct({ behind_by: Schema.Number })
+
+/** Why GitHub's merge queue took a pull request out, in Althar's words: its checks there failed, it conflicted, someone took it out, or it merged. */
+export const leftQueueOf = (reason: string | null | undefined): NonNullable<ChangeRequest['leftQueue']> | null => {
+  switch (reason?.toLowerCase()) {
+    case undefined:
+    case '':
+      return null
+    case 'merged':
+      return 'merged'
+    case 'failed_checks':
+      return 'checks'
+    case 'merge_conflict':
+      return 'conflict'
+    case 'manual':
+      return 'removed'
+    default:
+      return 'other'
+  }
+}
+
 const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
@@ -414,11 +508,114 @@ export const tail = (log: string): string => {
 /** What every call to GitHub's API carries: its media type, and the version of the API it is written against. */
 const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
 
+/** What GitHub says of a picture it took for a repository's conversations: where it is served from. */
+const AssetAnswer = Schema.Struct({ url: Schema.String })
+
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
 
-/** What GitHub changes of an issue: all but its priority, which GitHub's issues haven't (a project board's field is the board's own). */
-const ISSUE_CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'project', 'title']
+/**
+ * What GitHub is as a tracker: it has no links, nor a status of its own for
+ * work under way; it changes all but the fields GitHub's issues haven't
+ * (`NO_FIELD`), files one with its people, milestone and type, and takes
+ * several people on an issue.
+ */
+const TRACKING: TrackerCapabilities = {
+  links: false,
+  starts: false,
+  changes: ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description'],
+  creates: ['assignee', 'milestone', 'type'],
+  assignees: 'many',
+}
+
+/** Why GitHub refuses a field its issues haven't, in words an agent can pass on: a project board's fields are the board's own. */
+const NO_FIELD: Partial<Record<IssueField, string>> = {
+  priority: 'GitHub’s issues have no priority; a project board’s field is the board’s own',
+  cycle: 'GitHub’s issues have no cycles; a project board’s iteration field is the board’s own',
+  estimate: 'GitHub’s issues have no estimate; a project board’s number field is the board’s own',
+  components: 'GitHub’s issues have no components; labels are the nearest it has',
+  due: 'GitHub’s issues have no due date; a project board’s date field is the board’s own',
+}
+
+/** Why an issue isn't taken out of its parent: GitHub's REST API says nothing of an issue's parent to take it from. */
+const PARENT_KEPT = 'it can put a GitHub issue under another, but not yet take one out of its parent'
+
+/** The open project boards of a repository's owner, a user's or an organisation's: GraphQL alone lists them. */
+const PROJECTS = `query($owner: String!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner { projectsV2(first: 100) { nodes { id title closed } } }
+  }
+}`
+
+const ProjectsAnswer = Schema.Struct({
+  repositoryOwner: Schema.NullOr(
+    Schema.Struct({
+      projectsV2: Schema.optional(
+        Schema.Struct({
+          nodes: Schema.Array(Schema.NullOr(Schema.Struct({ id: Schema.String, title: Schema.String, closed: Schema.Boolean }))),
+        }),
+      ),
+    }),
+  ),
+})
+
+/** Puts an issue on a project board; one already on it is the item it has. */
+const ADD_TO_PROJECT = `mutation($project: ID!, $content: ID!) {
+  addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } }
+}`
+
+/** The project boards an issue is on, by its item on each. */
+const PROJECT_ITEMS = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) { projectItems(first: 100) { nodes { id project { id } } } }
+  }
+}`
+
+const ProjectItemsAnswer = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      issue: Schema.NullOr(
+        Schema.Struct({
+          projectItems: Schema.Struct({
+            nodes: Schema.Array(Schema.NullOr(Schema.Struct({ id: Schema.String, project: Schema.Struct({ id: Schema.String }) }))),
+          }),
+        }),
+      ),
+    }),
+  ),
+})
+
+/** Takes an issue's item off a project board. */
+const DELETE_PROJECT_ITEM = `mutation($project: ID!, $item: ID!) {
+  deleteProjectV2Item(input: { projectId: $project, itemId: $item }) { deletedItemId }
+}`
+
+/** An organisation's issue type, and whether it is turned on. */
+const IssueTypeAnswer = Schema.Struct({ name: Schema.String, is_enabled: Schema.optional(Schema.Boolean) })
+
+/**
+ * What GitHub's search is asked for issues: issues alone, in a repository,
+ * or else those that involve the account, as GitHub has no bound of its own;
+ * narrowed as the query says. Each word of the text is quoted, so none of it
+ * is read as a qualifier.
+ */
+export const issueSearchOf = (query: IssueQuery, login: string): string => {
+  const words = (query.text ?? '')
+    .replaceAll('"', ' ')
+    .split(/\s+/)
+    .filter((word) => word !== '')
+  return [
+    'is:issue',
+    // Those assigned to the account are bound already.
+    query.container !== undefined ? `repo:${query.container}` : query.mine === true ? '' : `involves:${login}`,
+    { open: 'is:open', closed: 'is:closed', all: '' }[query.state],
+    query.mine === true ? 'assignee:@me' : '',
+    ...words.map((word) => `"${word}"`),
+    words.length === 0 ? '' : 'in:title,body',
+  ]
+    .filter((word) => word !== '')
+    .join(' ')
+}
 
 /** An issue's statuses on GitHub: open, or closed as done or as not planned, by the state reason each closes with. */
 const ISSUE_STATES: ReadonlyArray<Choice> = [
@@ -444,17 +641,37 @@ const Listed = Schema.Struct({
  */
 export const LISTING_KEPT_MS = 60_000
 
+/**
+ * How long a branch found to have no merge queue is taken to have none: its
+ * pull requests aren't asked about one meanwhile, so a repository without a
+ * queue costs one GraphQL call an hour per branch, and one that turns its
+ * queue on is heard within the hour. One with a queue is asked each turn.
+ */
+export const NO_QUEUE_KEPT_MS = 60 * 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
-  const graphqlUrl = api.endsWith('/api/v3') ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /** Enterprise Server: its API is under its own address, at /api/v3. */
+  const server = api.endsWith('/api/v3')
+  const graphqlUrl = server ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /*
+   * Where a picture for a conversation is uploaded: GitHub's uploads host,
+   * beside its own (github.com's, or a ghe.com tenant's), as its own CLI
+   * attaches one (gh 2.99, --attach). Enterprise Server takes none.
+   */
+  const uploads = server ? null : `https://uploads.${new URL(options.webUrl).host}/user-attachments/assets`
   /** Listings by their search, with when each was asked. */
   const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
+  /** Whether each `owner/name branch` merges through a merge queue, as GitHub last said, and when. */
+  const queues = new Map<string, { readonly at: number; readonly enabled: boolean }>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
     authorization: Effect.map(options.credential, authorizationOf),
     headers: HEADERS,
+    // GitHub leaves a 304 out of what it counts against the account.
+    freeWhenUnchanged: true,
   })
   const repo = (repository: Repository | ReadonlyArray<string>) =>
     `${api}/repos/${('path' in repository ? repository.path : repository).map(encodeURIComponent).join('/')}`
@@ -464,6 +681,32 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     login: user.login,
     name: user.name ?? null,
   }))
+
+  /** Where a pull request stands with its target branch's merge queue, as GraphQL alone says: asked only where that matters. */
+  const queueOf = (repository: Repository, number: number, target: string) =>
+    Effect.gen(function* () {
+      const answer = yield* http.graphql(QueueAnswer, graphqlUrl, QUEUE, { owner: repository.path[0], name: repository.path[1], number })
+      const pull = answer.repository?.pullRequest
+      if (pull == null)
+        return yield* new ConnectorFailed({
+          product,
+          reason: 'not_found',
+          message: `No pull request #${number} in ${repository.path.join('/')}`,
+        })
+      queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
+      return pull
+    })
+  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
+  const madeFrom = (repository: Repository, sha: string, from: string) =>
+    Effect.map(
+      http.json(
+        Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
+        'GET',
+        `${repo(repository)}/commits/${encodeURIComponent(sha)}`,
+      ),
+      (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
+    )
+  const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
   const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
@@ -512,7 +755,26 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     }),
     container: `${owner}/${name}`,
     updatedAt: issue.updated_at,
+    // Absent where GitHub says nothing of them, as Enterprise Server before issue types.
+    ...(issue.milestone === undefined
+      ? {}
+      : { milestone: issue.milestone === null ? null : { id: String(issue.milestone.number), name: issue.milestone.title } }),
+    ...(issue.type === undefined ? {} : { type: issue.type?.name ?? null }),
   })
+
+  /** An issue GitHub listed, in the repository its `repository_url` names. */
+  const listedIssueOf = (issue: IssueAnswer, container?: string) => {
+    const [owner = '', name = ''] = container?.split('/') ?? issue.repository_url?.split('/').slice(-2) ?? []
+    return issueOf(issue, owner, name)
+  }
+
+  /** `owner/name` as a repository, or the words for what isn't one. */
+  const parseRepository = (container: string) => {
+    const match = repositoryRef.exec(container)
+    return match === null
+      ? Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitHub repository: ${container}` }))
+      : Effect.succeed({ owner: match[1] ?? '', name: match[2] ?? '' })
+  }
 
   const parseRef = (ref: string) => {
     const match = issueRef.exec(ref)
@@ -530,9 +792,9 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       })),
     )
 
-  const issueChoices: Tracker['choices'] = (issue, field) =>
+  /** What a field of an issue in a repository can be set to: the same for one filed there already as for one about to be. */
+  const choicesOf = (owner: string, name: string, field: ChosenField) =>
     Effect.gen(function* () {
-      const { owner, name } = yield* parseRef(issue.ref)
       const at = repo([owner, name])
       switch (field) {
         case 'status':
@@ -550,28 +812,83 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             also: [user.login],
           }))
         // A milestone, still open, is where GitHub groups an issue's work.
-        case 'project':
+        case 'milestone':
           return (yield* everyPage(Schema.Struct({ number: Schema.Number, title: Schema.String }), `${at}/milestones?state=open`)).map(
             (milestone): Choice => ({ id: String(milestone.number), name: milestone.title }),
           )
+        // The owner's boards still open: a repository's issue goes on any of its owner's.
+        case 'project': {
+          const answer = yield* http.graphql(ProjectsAnswer, graphqlUrl, PROJECTS, { owner })
+          return (answer.repositoryOwner?.projectsV2?.nodes ?? []).flatMap((project): ReadonlyArray<Choice> =>
+            project === null || project.closed ? [] : [{ id: project.id, name: project.title }],
+          )
+        }
+        // An organisation's types, those turned on; a user has none, and GitHub says it has no such organisation.
+        case 'type':
+          return yield* http.json(Schema.Array(IssueTypeAnswer), 'GET', `${api}/orgs/${encodeURIComponent(owner)}/issue-types`).pipe(
+            Effect.map((types) =>
+              types.flatMap((type): ReadonlyArray<Choice> => (type.is_enabled === false ? [] : [{ id: type.name, name: type.name }])),
+            ),
+            Effect.catchIf(
+              (error) => error.reason === 'not_found',
+              () =>
+                Effect.fail(
+                  cantChange(
+                    product,
+                    'type',
+                    `GitHub’s issue types are an organisation’s, and ${owner} isn’t one: its repositories’ issues have none`,
+                  ),
+                ),
+            ),
+          )
+        case 'cycle':
+        case 'components':
+          return yield* cantChange(product, field, NO_FIELD[field] ?? '')
       }
+    })
+
+  /** Puts an issue on a project board, by the issue's node id; one already on it stays as it is. */
+  const onBoard = (at: string, project: Choice) =>
+    Effect.gen(function* () {
+      const { node_id } = yield* http.json(IssueAnswer, 'GET', at)
+      yield* http.graphql(Schema.Unknown, graphqlUrl, ADD_TO_PROJECT, { project: project.id, content: node_id })
+    })
+
+  /** Takes an issue off every project board it is on. */
+  const offBoards = (owner: string, name: string, number: number) =>
+    Effect.gen(function* () {
+      const answer = yield* http.graphql(ProjectItemsAnswer, graphqlUrl, PROJECT_ITEMS, { owner, name, number })
+      for (const item of answer.repository?.issue?.projectItems.nodes ?? [])
+        if (item !== null) yield* http.graphql(Schema.Unknown, graphqlUrl, DELETE_PROJECT_ITEM, { project: item.project.id, item: item.id })
     })
 
   const changeIssue: Tracker['update'] = (issue, wanted) =>
     Effect.gen(function* () {
-      const refused = unchangeable({ links: false, starts: false, changes: ISSUE_CHANGES }, wanted)
-      if (refused !== undefined) return yield* cantChange(product, refused, 'GitHub’s issues have no priority')
+      const refused = unchangeable(TRACKING, wanted)
+      if (refused !== undefined) return yield* cantChange(product, refused, NO_FIELD[refused] ?? 'GitHub’s issues haven’t the field')
+      if (wanted.parent === null) return yield* cantChange(product, 'parent', PARENT_KEPT)
       const { owner, name, number } = yield* parseRef(issue.ref)
+      // A parent that isn't a GitHub issue is said before anything changes.
+      const parent = wanted.parent === undefined ? undefined : yield* parseRef(wanted.parent.ref)
       const at = `${repo([owner, name])}/issues/${number}`
       // Open, or closed with a reason: done, or not planned.
       const state = wanted.close === true && wanted.status === undefined ? 'completed' : wanted.status?.id
       const edit = {
         ...(wanted.title === undefined ? {} : { title: wanted.title }),
+        ...(wanted.description === undefined ? {} : { body: wanted.description }),
         ...(state === undefined ? {} : state === 'open' ? { state: 'open' } : { state: 'closed', state_reason: state }),
-        ...(wanted.assignee === undefined ? {} : { assignees: wanted.assignee === null ? [] : [wanted.assignee.id] }),
-        ...(wanted.project === undefined ? {} : { milestone: wanted.project === null ? null : Number(wanted.project.id) }),
+        // Everyone off at once; people put on or taken off go one way each, below, so others stay.
+        ...(wanted.assignee === null ? { assignees: [] } : {}),
+        ...(wanted.milestone === undefined ? {} : { milestone: wanted.milestone === null ? null : Number(wanted.milestone.id) }),
+        ...(wanted.type === undefined ? {} : { type: wanted.type.name }),
       }
       if (Object.keys(edit).length > 0) yield* http.json(Schema.Unknown, 'PATCH', at, edit)
+      // One already on, or already off, is left as it is.
+      const people = wanted.assignee ?? { add: [], remove: [] }
+      if (people.add.length > 0)
+        yield* http.json(Schema.Unknown, 'POST', `${at}/assignees`, { assignees: people.add.map((person) => person.id) })
+      if (people.remove.length > 0)
+        yield* http.json(Schema.Unknown, 'DELETE', `${at}/assignees`, { assignees: people.remove.map((person) => person.id) })
       const add = wanted.labels?.add ?? []
       if (add.length > 0) yield* http.json(Schema.Unknown, 'POST', `${at}/labels`, { labels: add.map((label) => label.name) })
       // One already off is nothing to take off.
@@ -582,13 +899,107 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             () => Effect.void,
           ),
         )
+      // A board is one more it is on: GitHub's issue can be on several, and the others stay.
+      if (wanted.project !== undefined) yield* wanted.project === null ? offBoards(owner, name, number) : onBoard(at, wanted.project)
+      // Under the parent, in place of any it had; the parent may be in another of the owner's repositories.
+      if (parent !== undefined)
+        yield* http
+          .json(Schema.Unknown, 'POST', `${repo([parent.owner, parent.name])}/issues/${parent.number}/sub_issues`, {
+            sub_issue_id: Number(issue.id),
+            replace_parent: true,
+          })
+          .pipe(
+            // One under it already is where it was asked to be.
+            Effect.catchIf(
+              (error) => error.reason === 'rejected' && /duplicate sub-issues/i.test(error.message),
+              () => Effect.void,
+            ),
+          )
       return issueOf(yield* http.json(IssueAnswer, 'GET', at), owner, name)
+    })
+
+  /** The files a pull request's branch would conflict in with its base, found by merging in a copy; none where that can't be done. */
+  const filesConflicting = (repository: Repository, now: PullAnswer) =>
+    Effect.gen(function* () {
+      const headPath = (now.head.repo?.full_name ?? repository.path.join('/')).split('/')
+      const [into, from] = yield* Effect.all([pushTarget({ ...repository, path: headPath }), pushTarget(repository)])
+      const merged = yield* (options.merge ?? mergeInCopy)({
+        into: { target: into, branch: now.head.ref, head: now.head.sha },
+        from: { target: from, branch: now.base.ref },
+        push: false,
+      })
+      return merged.outcome === 'conflict' ? merged.files : []
+    }).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+
+  /** The web address without trailing slashes, trimmed by hand: a pattern for it backtracks on a long run of them. */
+  const webBase = (() => {
+    let end = options.webUrl.length
+    while (end > 0 && options.webUrl[end - 1] === '/') end--
+    return options.webUrl.slice(0, end)
+  })()
+
+  const pushTarget = (repository: Repository) =>
+    Effect.map(options.credential, (credential) => ({
+      url: `${webBase}/${repository.path.join('/')}.git`,
+      header: `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`,
+    }))
+
+  /*
+   * An issue's latest comments, oldest first. GitHub lists them oldest first,
+   * a hundred to a page at most, so the issue's count of them says which
+   * pages hold the latest: at most two, for at most a hundred.
+   */
+  const issueComments: Tracker['comments'] = (issue, limit) =>
+    Effect.gen(function* () {
+      const { owner, name, number } = yield* parseRef(issue.ref)
+      const at = `${repo([owner, name])}/issues/${number}`
+      const wanted = Math.min(Math.max(Math.floor(limit), 0), 100)
+      const count = (yield* http.json(IssueAnswer, 'GET', at)).comments ?? 0
+      if (wanted === 0 || count === 0) return []
+      const first = Math.floor((count - Math.min(wanted, count)) / 100) + 1
+      const last = Math.ceil(count / 100)
+      const pages = yield* Effect.forEach(
+        Array.from({ length: last - first + 1 }, (_, index) => first + index),
+        (page) => http.json(Schema.Array(IssueCommentAnswer), 'GET', `${at}/comments?per_page=100&page=${page}`),
+      )
+      return pages
+        .flat()
+        .slice(-wanted)
+        .map((comment): IssueComment => ({
+          author: comment.user === null ? null : personOf(comment.user),
+          body: comment.body ?? '',
+          at: comment.created_at,
+        }))
+    })
+
+  const findIssues: Tracker['find'] = (query) =>
+    Effect.gen(function* () {
+      if (query.container !== undefined) yield* parseRepository(query.container)
+      const login = query.container === undefined && query.mine !== true ? (yield* account).login : ''
+      const n = Math.min(Math.max(Math.floor(query.limit), 1), 100)
+      const search = new URLSearchParams({ q: issueSearchOf(query, login), sort: 'updated', order: 'desc', per_page: String(n) })
+      const { items } = yield* http.json(
+        Schema.Struct({ items: Schema.Array(IssueAnswer) }),
+        'GET',
+        `${api}/search/issues?${search.toString()}`,
+      )
+      return items.filter((issue) => issue.pull_request === undefined).map((issue) => listedIssueOf(issue, query.container))
     })
 
   return {
     product,
+    ...makeGitHubReleases({ http, repo }),
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false, changes: ISSUE_CHANGES },
+    capabilities: {
+      drafts: true,
+      checkLogs: true,
+      threads: true,
+      reviews: true,
+      pictures: uploads !== null,
+      reopen: true,
+      rerun: true,
+      ...TRACKING,
+    },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -624,7 +1035,34 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
               ),
           ),
         ),
-    change: (repository, number) => Effect.map(http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`), changeOf),
+    change: (repository, number, ask) =>
+      Effect.gen(function* () {
+        const change = changeOf(yield* http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`))
+        if (ask?.queue !== true || change.state !== 'open') return change
+        // Its branch known to have no queue, it is in none: out of one it was in, retargeted, or since the queue was turned off.
+        const outside: ChangeRequest = { ...change, queued: false, leftQueue: null }
+        // Asked only where its branch has a queue, or may: one found without, a while ago, isn't asked again until it's due.
+        const known = queues.get(queueKey(repository, change.target))
+        if (known !== undefined && !known.enabled && (yield* Clock.currentTimeMillis) - known.at < NO_QUEUE_KEPT_MS) return outside
+        const queue = yield* queueOf(repository, number, change.target).pipe(
+          Effect.catch((error) =>
+            known?.enabled === true
+              ? Effect.fail(error)
+              : // Where GitHub refuses the question itself, as a GitHub Enterprise without queues does, it isn't asked again for a
+                // while. Failing otherwise (unreachable, rate limited), the next turn asks again. Either way the read stands
+                // without, saying nothing of a queue: listening isn't stopped by a question it didn't need.
+                error.reason === 'rejected' || error.reason === 'forbidden'
+                ? Effect.map(Clock.currentTimeMillis, (at) => {
+                    queues.set(queueKey(repository, change.target), { at, enabled: false })
+                    return null
+                  })
+                : Effect.succeed(null),
+          ),
+        )
+        if (queue === null) return change
+        if (!queue.isMergeQueueEnabled) return outside
+        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
+      }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
         const q = searchOf(repository.path, query)
@@ -648,6 +1086,22 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         listings.set(key, { at: now, list })
         return list
       }),
+    // REST, not the search: its list has an ETag, so a quiet repository answers 304 for nothing.
+    openChanges: (repository) =>
+      Effect.map(
+        http.cached(Schema.Array(PullAnswer), `${repo(repository)}/pulls?state=open&sort=updated&direction=desc&per_page=100`),
+        (pulls) =>
+          pulls.map((pull): ListedChange => {
+            const change = changeOf(pull)
+            return {
+              ...change,
+              forkOwner: change.headRepository == null ? null : (change.headRepository[0] ?? ''),
+              reviewDecision: null,
+              checks: null,
+            }
+          }),
+      ).pipe(Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)'))),
+    allowance: () => http.allowance(),
     markReady: (repository, change) =>
       http
         .graphql(
@@ -658,23 +1112,97 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         )
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
     // Merged, as GitHub answers, it is: read back at once, it can still say open for a moment, and reading it takes as long again.
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       Effect.gen(function* () {
+        // GitHub's auto-merge isn't Althar's merge: without a queue, Althar's own line merges each in turn (ADR-081).
+        if (how?.auto === true)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Althar doesn’t turn on GitHub’s auto-merge' })
         const { conflicts: _, ...seen } = change
-        const answer = yield* http.json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
-          merge_method: repository.merges[0] ?? 'merge',
-          // Only the head Althar last saw: a push since then isn't merged unseen.
-          ...(change.headSha === null ? {} : { sha: change.headSha }),
-        })
+        const answer = yield* http
+          .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+            merge_method: how?.method ?? repository.merges[0] ?? 'merge',
+            // Only the head Althar last saw: a push since then isn't merged unseen.
+            ...(change.headSha === null ? {} : { sha: change.headSha }),
+          })
+          .pipe(
+            // A branch that merges through a merge queue refuses a merge as one it can't make (405), in words that vary: asked,
+            // GitHub says which, and the pull request goes in the queue, which merges it once the queue's checks pass.
+            Effect.catchIf(
+              (error) => error.status === 405,
+              (refused) =>
+                Effect.gen(function* () {
+                  const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
+                  if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
+                  if (!queue.isInMergeQueue)
+                    yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+                  return null
+                }),
+            ),
+          )
+        if (answer === null)
+          return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         if (answer.merged === true)
           return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
       }),
+    mergeWays: (repository, target) =>
+      Effect.gen(function* () {
+        const answer = yield* http
+          .graphql(BranchQueueAnswer, graphqlUrl, BRANCH_QUEUE, { owner: repository.path[0], name: repository.path[1], branch: target })
+          .pipe(
+            // A GitHub Enterprise Server without merge queues refuses the question itself: it has none.
+            Effect.catchIf(
+              (error) => error.reason === 'rejected',
+              () => Effect.succeed(null),
+            ),
+          )
+        const enabled = answer?.repository?.mergeQueue != null
+        queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled })
+        return { queue: enabled ? 'merge_queue' : null, autoMerge: false, server: null } as const
+      }),
+    // Only at the head Althar read: GitHub refuses to queue a head that moved since.
+    enqueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOf(repository, change.number, change.target)
+        if (!queue.isMergeQueueEnabled)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: `${change.target} has no merge queue` })
+        if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+        return { ...change, state: 'open', queued: true, leftQueue: null } as const
+      }),
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOf(repository, change.number, change.target)
+        if (queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, DEQUEUE, { id: change.id })
+        return { ...change, queued: false }
+      }),
+    branchHead: (repository, branch) =>
+      Effect.map(http.json(BranchAnswer, 'GET', `${repo(repository)}/branches/${branchPath(branch)}`), (answer) => answer.commit.sha),
+    // Behind by nothing: every commit of `sha` is in the branch already.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              CompareAnswer,
+              'GET',
+              `${repo(repository)}/compare/${encodeURIComponent(sha)}...${encodeURIComponent(change.headSha)}`,
+            ),
+            (answer) => answer.behind_by === 0,
+          ),
+    madeFrom: (repository, change, from) => (change.headSha === null ? Effect.succeed(false) : madeFrom(repository, change.headSha, from)),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
         if (now.state !== 'open') return changeOf(now)
         return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'closed' }))
+      }),
+    reopenChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state === 'open') return changeOf(now)
+        if (changeOf(now).state === 'merged')
+          return yield* mergedForGood(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'open' }))
       }),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
@@ -700,19 +1228,74 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         )
       }),
+    updateBranch: (repository, change, ask) =>
+      Effect.gen(function* () {
+        const at = `${repo(repository)}/pulls/${change.number}`
+        const now = yield* http.json(PullAnswer, 'GET', at)
+        const seen = changeOf(now)
+        if (seen.state !== 'open')
+          return yield* notOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number, seen.state)
+        // A push since the caller read it: not merged unseen. GitHub checks it too (`expected_head_sha`), for a push in between.
+        if (now.head.sha !== ask.expectedHead) return { outcome: 'moved', head: now.head.sha } satisfies BranchUpdate
+        const compared = yield* http.json(
+          Behind,
+          'GET',
+          `${repo(repository)}/compare/${encodeURIComponent(now.base.ref)}...${encodeURIComponent(now.head.sha)}`,
+        )
+        if (compared.behind_by === 0) return { outcome: 'current' } satisfies BranchUpdate
+        const own = seen.headRepository === null || seen.headRepository === undefined
+        // Its merge, not a rebase: GitHub's update-branch does either, as it is told.
+        const done = yield* http
+          .json(Schema.Unknown, 'PUT', `${at}/update-branch`, { expected_head_sha: ask.expectedHead, update_method: 'merge' })
+          .pipe(
+            Effect.map((): BranchUpdate | null => null),
+            Effect.catchIf(
+              (error) => error.reason === 'rejected' || error.reason === 'forbidden',
+              (error): Effect.Effect<BranchUpdate, ConnectorFailed> => {
+                if (/merge conflict/i.test(error.message))
+                  // GitHub says only that it conflicts: the files are read in a copy of Althar's own, which pushes nothing.
+                  return filesConflicting(repository, now).pipe(Effect.map((files) => ({ outcome: 'conflict', files })))
+                if (/expected head sha|head sha didn/i.test(error.message))
+                  return Effect.map(http.json(PullAnswer, 'GET', at), (read) => ({ outcome: 'moved', head: read.head.sha }))
+                // A fork's branch that GitHub won't let the account push to: the author didn't allow maintainers to, or the fork is private.
+                if (!own) return Effect.succeed({ outcome: 'no_access', reason: error.message })
+                return Effect.fail(error)
+              },
+            ),
+          )
+        if (done !== null) return done
+        // GitHub answers 202 and merges in the background: the branch may not have moved yet.
+        const after = yield* http.json(PullAnswer, 'GET', at)
+        return { outcome: 'updated', head: after.head.sha === now.head.sha ? null : after.head.sha } satisfies BranchUpdate
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
-        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${sha}/check-runs?per_page=100`).pipe(
+        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100`).pipe(
           Effect.catchIf(
             (error) => error.reason === 'forbidden',
             () => Effect.succeed<typeof CheckRuns.Type>({ check_runs: [] }),
           ),
         )
-        const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${sha}/status`)
+        const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${encodeURIComponent(sha)}/status`)
+        const workflows = yield* runs.check_runs.some((run) => run.app?.slug === 'github-actions' && run.check_suite !== undefined)
+          ? http
+              .cached(
+                Schema.Struct({
+                  workflow_runs: Schema.Array(Schema.Struct({ check_suite_id: Schema.Number, name: Schema.NullOr(Schema.String) })),
+                }),
+                `${repo(repository)}/actions/runs?${/^[0-9a-f]{40,64}$/i.test(sha) ? 'head_sha' : 'branch'}=${encodeURIComponent(sha)}&per_page=100`,
+              )
+              .pipe(Effect.orElseSucceed(() => ({ workflow_runs: [] })))
+          : Effect.succeed({ workflow_runs: [] })
         const fromRuns: ReadonlyArray<Check> = runs.check_runs.map((run) => ({
           id: `run:${run.id}:${run.app?.slug ?? ''}`,
           name: run.name,
+          ...(run.started_at === undefined ? {} : { startedAt: run.started_at }),
+          ...(run.completed_at === undefined ? {} : { completedAt: run.completed_at }),
+          ...(run.check_suite === undefined
+            ? {}
+            : { workflow: workflows.workflow_runs.find((workflow) => workflow.check_suite_id === run.check_suite?.id)?.name ?? null }),
           state: checkRunState(run.status, run.conclusion),
           url: run.html_url ?? run.details_url ?? null,
           summary: run.output?.title ?? null,
@@ -733,6 +1316,37 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       if (match === null) return Effect.succeed(null)
       return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(Effect.map((log) => (whole ? log : tail(log))))
     },
+    checkAnnotations: (repository, check) => {
+      const match = /^run:(\d+):/.exec(check.id)
+      if (match === null) return Effect.succeed([])
+      return http
+        .json(
+          Schema.Array(Schema.Struct({ path: Schema.String, start_line: Schema.Number, message: Schema.String })),
+          'GET',
+          `${repo(repository)}/check-runs/${match[1]}/annotations?per_page=100`,
+        )
+        .pipe(Effect.map((rows) => rows.map((row) => ({ path: row.path, line: row.start_line, message: row.message }))))
+    },
+    checkArtifacts: (repository, check) =>
+      Effect.gen(function* () {
+        const match = /^run:(\d+):github-actions$/.exec(check.id)
+        if (match === null) return []
+        const job = yield* http.json(Schema.Struct({ run_id: Schema.Number }), 'GET', `${repo(repository)}/actions/jobs/${match[1]}`)
+        const result = yield* http.json(
+          Schema.Struct({
+            artifacts: Schema.Array(
+              Schema.Struct({ id: Schema.Number, name: Schema.String, size_in_bytes: Schema.Number, expired: Schema.Boolean }),
+            ),
+          }),
+          'GET',
+          `${repo(repository)}/actions/runs/${job.run_id}/artifacts?per_page=100`,
+        )
+        return result.artifacts
+          .filter((row) => !row.expired)
+          .map((row) => ({ id: String(row.id), name: row.name, size: row.size_in_bytes }))
+      }),
+    checkArtifact: (repository, id, maxBytes) =>
+      http.bytes(`${repo(repository)}/actions/artifacts/${encodeURIComponent(id)}/zip`, maxBytes),
     checkReport: (repository, check) => {
       // A check run from another service (CodeQL, CircleCI's app) keeps its log there, but says what it found in its output.
       const match = /^run:(\d+):/.exec(check.id)
@@ -805,11 +1419,44 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         }),
         (posted) => ({ id: String(posted.id), url: posted.html_url ?? null }),
       ),
-    pushTarget: (repository) =>
-      Effect.map(options.credential, (credential) => ({
-        url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
-        header: `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`,
-      })),
+    uploadPicture: (repository, picture) =>
+      Effect.gen(function* () {
+        if (uploads === null) return yield* noPictures(product)
+        // By the repository's own number, so it is served to those who can see the repository: its id, as GitHub gave it.
+        const query = new URLSearchParams({ name: picture.name, content_type: picture.mediaType, repository_id: repository.id })
+        const asset = yield* http.upload(AssetAnswer, `${uploads}?${query.toString()}`, picture.bytes, 'application/octet-stream')
+        // It is shown by its address in a comment anyone with the repository reads: never one off GitHub's own.
+        const at = URL.parse(asset.url)
+        if (
+          at === null ||
+          at.protocol !== 'https:' ||
+          !(at.host === new URL(options.webUrl).host || at.host.endsWith('.githubusercontent.com'))
+        )
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'invalid_response',
+            message: `GitHub gave the picture an address off GitHub: ${asset.url}`,
+          })
+        return asset.url
+      }).pipe(
+        // GitHub answers a token that can't write to the repository as if it weren't there.
+        Effect.mapError((error) =>
+          error.reason === 'not_found'
+            ? new ConnectorFailed({
+                product,
+                reason: 'forbidden',
+                ...(error.status === undefined ? {} : { status: error.status }),
+                message: 'Uploading a picture needs write access to the repository',
+              })
+            : error,
+        ),
+      ),
+    editComment: (repository, _number, commentId, body) =>
+      Effect.map(
+        http.json(CommentAnswer, 'PATCH', `${repo(repository)}/issues/comments/${encodeURIComponent(commentId)}`, { body }),
+        (comment) => commentOf(comment, false),
+      ),
+    pushTarget,
     issue: (ref) =>
       Effect.gen(function* () {
         const { owner, name, number } = yield* parseRef(ref)
@@ -828,13 +1475,10 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
                 'GET',
                 `${repo(options.container.split('/'))}/issues?assignee=${encodeURIComponent(me.login)}&state=open&sort=updated&per_page=${limit}`,
               )
-        return issues
-          .filter((issue) => issue.pull_request === undefined)
-          .map((issue) => {
-            const [owner = '', name = ''] = options.container?.split('/') ?? issue.repository_url?.split('/').slice(-2) ?? []
-            return issueOf(issue, owner, name)
-          })
+        return issues.filter((issue) => issue.pull_request === undefined).map((issue) => listedIssueOf(issue, options.container))
       }),
+    find: findIssues,
+    comments: issueComments,
     comment: (issue, body) =>
       Effect.gen(function* () {
         const { owner, name, number } = yield* parseRef(issue.ref)
@@ -861,19 +1505,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       ),
     create: (container, issue) =>
       Effect.gen(function* () {
-        const match = repositoryRef.exec(container)
-        if (match === null)
-          return yield* new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitHub repository: ${container}` })
-        const [, owner = '', name = ''] = match
-        // GitHub sets labels only for someone who can push, and drops them silently for anyone else; it makes those the repository lacks.
+        const { owner, name } = yield* parseRepository(container)
+        const people = issue.fields?.assignee?.add ?? []
+        const milestone = issue.fields?.milestone
+        const type = issue.fields?.type
+        /*
+         * GitHub sets labels, people and a milestone only for someone who can
+         * push, and drops them silently for anyone else; it makes the labels
+         * the repository lacks.
+         */
         const filed = yield* http.json(IssueAnswer, 'POST', `${repo([owner, name])}/issues`, {
           title: issue.title,
           body: issue.body,
           ...(issue.labels.length === 0 ? {} : { labels: issue.labels }),
+          ...(people.length === 0 ? {} : { assignees: people.map((person) => person.id) }),
+          ...(milestone == null ? {} : { milestone: Number(milestone.id) }),
+          ...(type === undefined ? {} : { type: type.name }),
         })
         return issueOf(filed, owner, name)
       }),
-    choices: issueChoices,
+    choices: (issue, field) => Effect.flatMap(parseRef(issue.ref), ({ owner, name }) => choicesOf(owner, name, field)),
+    choicesIn: (container, field) => Effect.flatMap(parseRepository(container), ({ owner, name }) => choicesOf(owner, name, field)),
     update: changeIssue,
   }
 }

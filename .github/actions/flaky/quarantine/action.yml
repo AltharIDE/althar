@@ -1,0 +1,15 @@
+name: Quarantined tests
+description: >-
+  Reads which tests are quarantined: those with an open issue labelled flaky (packages/testing/src/quarantine.ts). For
+  the rest of the job such a test still runs, but when it fails, on its retry too, it doesn't fail the job; the Flaky
+  tests step (.github/actions/flaky) puts the failure on its issue and lists it in the job's summary. Every other test
+  gates as before, and a test whose issue is closed gates again. Use it as a step before a job's tests, after Bun is
+  set up. If the issues can't be read, nothing is quarantined, and it says so; it never fails the job.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: bun "$GITHUB_WORKSPACE/packages/testing/src/quarantine.ts" read

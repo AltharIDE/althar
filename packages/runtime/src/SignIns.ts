@@ -1,5 +1,5 @@
 import { adapterNode, planPairOf, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
-import { Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -34,6 +34,22 @@ export interface SignedIn {
 export const anyOf = (statuses: ReadonlyArray<SignInStatus>): SignInStatus =>
   statuses.includes('signed_in') ? 'signed_in' : statuses.includes('unknown') || statuses.length === 0 ? 'unknown' : 'signed_out'
 
+/**
+ * For each provider a model goes through, when its latest turn that said whether its sign-in works was refused, or null where it went
+ * through. `turns` are newest first; one cancelled or failed another way says nothing, and isn't among them.
+ */
+export const latestRefusals = (
+  turns: ReadonlyArray<{ readonly model: string; readonly endedAt: string; readonly errorClass: string | null }>,
+  providerOf: (model: string) => string | undefined,
+): ReadonlyMap<string, string | null> => {
+  const latest = new Map<string, string | null>()
+  for (const turn of turns) {
+    const id = providerOf(turn.model)
+    if (id !== undefined && !latest.has(id)) latest.set(id, turn.errorClass === 'auth_required' ? turn.endedAt : null)
+  }
+  return latest
+}
+
 export class SignIns extends Context.Service<
   SignIns,
   {
@@ -41,6 +57,17 @@ export class SignIns extends Context.Service<
     of(agentId: string, recheck?: boolean): Effect.Effect<SignInStatus>
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
+    /**
+     * For an agent whose providers each have a sign-in (OpenCode): the ones its listing has as signed in, and any whose last turn
+     * was refused, when. A refusal is let go when a later turn on the provider went through, or its sign-in changed since.
+     */
+    providers(
+      account: Account,
+      check: SignInCheck,
+    ): Effect.Effect<
+      | ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null; readonly pays?: 'plan' | 'key' }>
+      | undefined
+    >
     /** Each agent as it is found signed in, or signed in, from now on. */
     readonly signedIn: Stream.Stream<SignedIn>
   }
@@ -68,20 +95,83 @@ export class SignIns extends Context.Service<
       const account = (of: Account, recheck = false) =>
         Effect.gen(function* () {
           const last = known.get(of.id)
-          if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return yield* paid(of, last.check)
+          if (!recheck && last !== undefined && (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(TTL))
+            return yield* paid(of, last.check)
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
           yield* accounts.prepare(of)
           const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
-          known.set(of.id, { check: checked, at: Date.now() })
+          known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
           if (checked.status === 'signed_in') {
             const how: SignedIn['how'] | null = before === 'signed_out' ? 'signed_in' : found.has(of.agentId) ? null : 'found'
             found.add(of.agentId)
             if (how !== null) yield* PubSub.publish(arrived, { agentId: of.agentId, how })
           }
           return yield* paid(of, checked)
+        })
+      /** What an account's sign-in looked like when a refusal was first seen in Settings: another since means it was put right. */
+      const refusals = new Map<string, { readonly at: string; readonly connections: string }>()
+      /** Since when the agent itself has said a provider's sign-in must be done again (OpenCode's `needs_auth`). */
+      const needing = new Map<string, string>()
+      const providers = (of: Account, check: SignInCheck) =>
+        Effect.gen(function* () {
+          const spec = agents.list.find((candidate) => candidate.definition.id === of.agentId)?.definition.signIn.providers
+          if (spec === undefined) return undefined
+          // The latest turn of each provider that said whether its sign-in works; a cancelled or failed-otherwise one says nothing.
+          const turns = yield* sql<{ model: string; endedAt: string; errorClass: string | null }>`
+            SELECT t.model, t.ended_at, t.error_class FROM turn_deliveries t
+            JOIN provider_sessions s ON s.id = t.provider_session_id
+            WHERE s.account_id = ${of.id} AND t.model IS NOT NULL AND t.ended_at IS NOT NULL
+              AND (t.error_class = 'auth_required' OR (t.error_class IS NULL AND t.state = 'completed'))
+            ORDER BY t.ended_at DESC LIMIT 300`.pipe(Effect.orElseSucceed(() => []))
+          const latest = latestRefusals(turns, spec.of)
+          const listed = check.providers ?? []
+          const refusedAt = (id: string): string | null => {
+            const at = latest.get(id) ?? null
+            const key = `${of.id}\u0000${id}`
+            if (at === null) {
+              refusals.delete(key)
+              return null
+            }
+            const connections = listed.find((each) => each.id === id)?.connections ?? ''
+            const seen = refusals.get(key)
+            if (seen === undefined || seen.at !== at) {
+              refusals.set(key, { at, connections })
+              return at
+            }
+            return seen.connections === connections ? at : null
+          }
+          // One the agent itself says needs signing in again counts as refused, from when it first said so, until it doesn't.
+          const now = new Date(yield* Clock.currentTimeMillis).toISOString()
+          const needs = (id: string, says: boolean): string | null => {
+            const key = `${of.id}\u0000${id}`
+            if (!says) {
+              needing.delete(key)
+              return null
+            }
+            const since = needing.get(key) ?? now
+            needing.set(key, since)
+            return since
+          }
+          const rows = listed.map((each) => {
+            const needed = needs(each.id, each.needsSignIn === true)
+            return {
+              id: each.id,
+              name: each.name,
+              refusedAt: refusedAt(each.id) ?? needed,
+              ...(each.pays === undefined ? {} : { pays: each.pays }),
+            }
+          })
+          // One refused whose sign-in is gone from the listing is still one to sign in to, by the name the person knows.
+          const gone = [...latest.keys()].filter((id) => !listed.some((each) => each.id === id))
+          return [
+            ...rows,
+            ...gone.flatMap((id) =>
+              refusedAt(id) === null ? [] : [{ id, name: spec.name?.(id) ?? id, refusedAt: latest.get(id) ?? null }],
+            ),
+          ]
         })
       /** Each of the agent's accounts, checked; none where its accounts can't be read. */
       const checks = (agentId: string, recheck = false) =>
@@ -92,6 +182,7 @@ export class SignIns extends Context.Service<
       return SignIns.of({
         of: (agentId, recheck = false) => Effect.map(checks(agentId, recheck), (all) => anyOf(all.map((check) => check.status))),
         account,
+        providers,
         signedIn: Stream.fromPubSub(arrived),
       })
     }),

@@ -36,6 +36,8 @@ export interface Outward<A, E, R> {
   readonly request: unknown
   readonly retryable: boolean
   readonly perform: Effect.Effect<A, E, R>
+  /** A host may accept work that finishes later; keep that receipt uncertain until read back. */
+  readonly confirmed?: (answer: A) => boolean
   /** What the record keeps of the answer, and reads back. */
   readonly encode: (answer: A) => unknown
   readonly decode: (kept: unknown) => A | undefined
@@ -108,14 +110,15 @@ export const outward = <A, E, R>(action: Outward<A, E, R>) =>
       Effect.gen(function* () {
         const at = yield* timestamp
         const failure = exit._tag === 'Failure' ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
-        const state = Exit.isSuccess(exit) ? 'confirmed' : lost(failure) ? 'uncertain' : 'failed'
+        const confirmed = Exit.isSuccess(exit) && (action.confirmed?.(exit.value) ?? true)
+        const state = Exit.isSuccess(exit) ? (confirmed ? 'confirmed' : 'uncertain') : lost(failure) ? 'uncertain' : 'failed'
         const revision = yield* change('mutation_receipts', begun.receiptId, {
           state,
           response: Exit.isSuccess(exit) ? JSON.stringify(action.encode(exit.value)) : null,
-          confirmedAt: Exit.isSuccess(exit) ? at : null,
+          confirmedAt: confirmed ? at : null,
         })
         yield* change('work_items', begun.workItemId, {
-          state: Exit.isSuccess(exit) ? 'done' : state,
+          state: confirmed ? 'done' : state,
           claimedByInstanceId: null,
           leaseExpiresAt: null,
           lastError: failure === undefined ? null : String(failure instanceof Error ? failure.message : failure).slice(0, 500),

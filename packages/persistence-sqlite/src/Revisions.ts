@@ -9,6 +9,8 @@ import { RevisionConflict, RowNotFound } from './errors'
  * checks this list against the schema.
  */
 export const revisionedTables = [
+  'errands',
+  'followed_pulls',
   'projects',
   'project_settings',
   'project_notes',

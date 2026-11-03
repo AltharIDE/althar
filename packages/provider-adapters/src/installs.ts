@@ -193,11 +193,13 @@ export const usingLocated = (
           : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
       ...(signIn.status === undefined ? {} : { status: pointed(signIn.status) }),
+      ...(signIn.statusFallback === undefined ? {} : { statusFallback: pointed(signIn.statusFallback) }),
       ...(signIn.credentials === undefined ? {} : { credentials: pointed(signIn.credentials) }),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },
     ...(definition.version === undefined ? {} : { version: pointed(definition.version) }),
     ...(definition.usage === undefined ? {} : { usage: { ...definition.usage, run: pointed(definition.usage.run) } }),
+    ...(definition.usageLimits === undefined ? {} : { usageLimits: pointed(definition.usageLimits) }),
   }
 }

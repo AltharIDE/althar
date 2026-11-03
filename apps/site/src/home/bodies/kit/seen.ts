@@ -25,6 +25,17 @@ export function useSeen(ref: RefObject<Element | null>, share = 0.35) {
   return seen
 }
 
+/** Whether the page is shown: false while its tab is in the background, where what plays by a clock should rest rather than skip ahead. */
+export function usePageShown() {
+  const [shown, setShown] = useState(true)
+  useEffect(() => {
+    const sync = () => setShown(!document.hidden)
+    document.addEventListener('visibilitychange', sync)
+    return () => document.removeEventListener('visibilitychange', sync)
+  }, [])
+  return shown
+}
+
 /** Whether `ref` is on screen now (by `share` of itself): for what loops only while it is watched. */
 export function useInView(ref: RefObject<Element | null>, share = 0.3) {
   const [on, setOn] = useState(false)

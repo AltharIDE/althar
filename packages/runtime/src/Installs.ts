@@ -21,12 +21,14 @@ import type { Fetch } from '@althar/connectors'
 import {
   type AgentDefinition,
   type AgentDownload,
+  cleanUp,
   isMusl,
   type LaunchSpec,
   locate,
   type Located,
   type PinnedDownload,
   programName,
+  removeFully,
 } from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 import { Unzip, UnzipInflate } from 'fflate'
@@ -93,7 +95,7 @@ export interface InstallsOptions {
   /** A Linux on musl, as Alpine is, which takes the release's musl build where it has one. */
   readonly musl?: boolean
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
-  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
+  readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> } | undefined
   /**
    * The device outside a sandbox that cannot see it (a Flatpak): the person's
    * own commands are found and run out there, before any copy that is here;
@@ -261,31 +263,46 @@ export class Installs extends Context.Service<
           return outThere(cli.name)
         }
 
-        /** The agent's latest release, and its file for this device with the digest GitHub gives it. */
+        /** The agent's latest release, or the newest on its line, and its file for this device with the digest GitHub gives it. */
         const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload>) =>
           Effect.gen(function* () {
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
+            const line = install.line
             const response = yield* Effect.tryPromise({
               try: () =>
-                fetch(`https://api.github.com/repos/${install.repository}/releases/latest`, {
+                fetch(`https://api.github.com/repos/${install.repository}/releases${line === undefined ? '/latest' : '?per_page=30'}`, {
                   headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' },
                 }),
               catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
             })
             if (!response.ok)
               return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
-            const body = (yield* Effect.tryPromise({
+            const answer = yield* Effect.tryPromise({
               try: () => response.json() as Promise<unknown>,
               catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
-            })) as {
+            })
+            type Answer = {
               readonly tag_name?: unknown
+              readonly draft?: unknown
+              readonly prerelease?: unknown
               readonly assets?: ReadonlyArray<{
                 readonly name?: unknown
                 readonly browser_download_url?: unknown
                 readonly digest?: unknown
               }>
             }
+            // Newest first, as GitHub lists them: the first published release on the line.
+            const body: Answer =
+              line === undefined
+                ? (answer as Answer)
+                : ((Array.isArray(answer) ? (answer as ReadonlyArray<Answer>) : []).find(
+                    (each) =>
+                      each.draft !== true &&
+                      each.prerelease !== true &&
+                      typeof each.tag_name === 'string' &&
+                      each.tag_name.startsWith(line),
+                  ) ?? {})
             const found = body.assets?.find((each) => each.name === asset)
             const digest = typeof found?.digest === 'string' ? /^sha256:([0-9a-f]{64})$/.exec(found.digest)?.[1] : undefined
             if (typeof body.tag_name !== 'string' || !/^[\w.-]{1,40}$/.test(body.tag_name) || found === undefined)
@@ -374,7 +391,9 @@ export class Installs extends Context.Service<
               const { release, command, whole } = yield* download(definition, cli.name, spec, folder)
               // The version's folder holds the command alone, or all a pinned archive held; `current` moves to it in one step.
               const version = join(home, release.tag)
-              rmSync(version, { recursive: true, force: true })
+              yield* removeFully(version).pipe(
+                Effect.mapError((failed) => fail(definition.id, `${definition.name} couldn't be kept on this computer.`, failed.reason)),
+              )
               if (whole !== undefined) renameSync(whole, version)
               else {
                 mkdirSync(version)
@@ -385,20 +404,19 @@ export class Installs extends Context.Service<
               if (platform === 'win32') symlinkSync(version, next, 'junction')
               else symlinkSync(release.tag, next)
               // Windows can't rename over a junction, so the old one goes first; elsewhere the rename replaces it in one step.
+              // The link alone, never recursively, so nothing of the version it points at goes with it; a step of the install's own.
+              // oxlint-disable-next-line althar/one-removal
               if (platform === 'win32') rmSync(join(home, 'current'), { force: true })
               renameSync(next, join(home, 'current'))
-              // Versions before the one in use go, with what any earlier download left.
+              // Versions before the one in use go, with what any earlier download left; one an agent still runs from stays.
               for (const entry of readdirSync(home))
-                if (entry !== release.tag && entry !== 'current') rmSync(join(home, entry), { recursive: true, force: true })
+                if (entry !== release.tag && entry !== 'current')
+                  yield* cleanUp(join(home, entry), `an earlier ${definition.name} Althar downloaded`)
             }).pipe(
               Effect.catchDefect((defect) =>
                 Effect.fail(fail(definition.id, `${definition.name} couldn't be kept on this computer.`, defect)),
               ),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  if (existsSync(folder)) rmSync(folder, { recursive: true, force: true })
-                }),
-              ),
+              Effect.ensuring(cleanUp(folder, `where ${definition.name} was downloaded`)),
               Effect.ensuring(Ref.update(installing, (now) => new Set([...now].filter((id) => id !== definition.id)))),
             )
           })

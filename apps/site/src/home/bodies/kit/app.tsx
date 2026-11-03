@@ -4,49 +4,48 @@ import {
   BoardColumn,
   BoardLane,
   BoardList,
-  Button,
   CallCard,
-  ChromeButton,
-  Composer,
   EdgeSheet,
-  IconButton,
   Island,
   type IslandSaying,
-  NeedLine,
   NextRow,
-  ProjectHead,
   ProjectTabs,
-  Review,
-  Room,
-  RoomSwitch,
   SettledRow,
   TaskLaunch,
   type LaunchStep,
-  Turn,
-  Verdict,
-  FindingState,
+  type ModelInfo,
+  TaskStatus,
   WorkCard,
-  WorkStatus,
-  You,
+  type WorkCardProps,
   ModelPick,
 } from '@althar/ui'
-import { Home } from '@althar/ui/screens'
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
-// Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
-import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
-import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
-import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
-import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
-import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
-import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
-import { CODEX, GEMINI_PRO, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import s from './app.module.css'
+import {
+  CALLS,
+  CODEX,
+  GEMINI_PRO,
+  OPUS,
+  QWEN,
+  SONNET,
+  EDGE_NEEDS,
+  EDGE_WORK,
+  edgeLineOf,
+  FROM_231,
+  MARKED,
+  NEXT,
+  NOTCH,
+  PLAN_432,
+  PROJECT,
+  READY_TWO_REPOS,
+  SETTLED,
+} from './world'
 
 /*
  * The app, as the pictures show it: whole windows and single pieces, drawn
- * by @althar/ui's own components with the kit's demo world (Meridian, a
- * payments API, and task 432, the refunds backfill from Linear's MER-231),
+ * by @althar/ui's own components with the kit's demo world (Tally, a
+ * payments API, and task 432, the refunds backfill from Linear's TAL-231),
  * touched up where a picture wants it.
  */
 
@@ -61,111 +60,7 @@ export function Tabs({ current, only = false, end }: { current: string | null; o
   return <ProjectTabs tabs={tabs} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" end={end} />
 }
 
-/* ---- the home: what needs you across every project in the middle, the projects beside it ---- */
-
-export function HomeWindow({
-  className,
-  style,
-  looked = '3 h ago',
-  narrow = false,
-}: {
-  className?: string
-  style?: CSSProperties
-  looked?: string
-  /** Laid out for a narrow window: what needs you alone. */
-  narrow?: boolean
-}) {
-  const needs = [
-    {
-      key: 'publish',
-      project: PUBLISH.project,
-      line: (
-        <NeedLine
-          kind={PUBLISH.kind}
-          project={PUBLISH.project}
-          task={PUBLISH.task}
-          title={PUBLISH.title}
-          command={PUBLISH.command}
-          actions={
-            <>
-              <Button size="small">Deny</Button>
-              <Button size="small" variant="signal">
-                Allow once
-              </Button>
-            </>
-          }
-        />
-      ),
-    },
-    {
-      key: 'accept',
-      project: READY.project,
-      line: (
-        <NeedLine
-          kind={READY.kind}
-          project={READY.project}
-          task={READY.task}
-          title={READY.title}
-          brief={`${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`}
-          actions={<Button size="small">Review</Button>}
-        />
-      ),
-    },
-    {
-      key: 'decision',
-      project: DECISION.project,
-      line: (
-        <NeedLine
-          kind={DECISION.kind}
-          project={DECISION.project}
-          task={DECISION.task}
-          title={DECISION.title}
-          brief={DECISION.options.map((option) => option.label).join(' or ')}
-          actions={<Button size="small">Decide</Button>}
-        />
-      ),
-    },
-  ]
-  return (
-    <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
-      {!narrow && <Tabs current={null} end={<IconButton icon="gear" label="Settings" kbd="⌘," size="small" />} />}
-      <div className={s.body}>
-        <Home
-          waiting={3}
-          needs={needs}
-          running={RUNNING}
-          since={SINCE}
-          looked={looked}
-          projects={PROJECT_LIST}
-          onOpenEvent={none}
-          onOpenProject={none}
-          onTalk={none}
-          onNewProject={none}
-        />
-      </div>
-    </div>
-  )
-}
-
 /* ---- the lead's plan for task 432: its team, step by step ---- */
-
-/** The plan, put together a step at a time when `assemble` is set, as the lead does it. */
-export function useAssembling(assemble: boolean, plan: readonly LaunchStep[] = PLAN_432) {
-  const [shown, setShown] = useState(assemble ? 0 : plan.length)
-  useEffect(() => {
-    // With motion reduced, the plan is simply there.
-    if (!assemble || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return setShown(plan.length)
-    setShown(0)
-    let n = 0
-    const timer = window.setInterval(() => {
-      n += 1
-      setShown(n)
-      if (n >= plan.length) window.clearInterval(timer)
-    }, 520)
-    return () => window.clearInterval(timer)
-  }, [assemble, plan])
-  return plan.slice(0, shown)
-}
 
 export function Launch({
   steps,
@@ -225,145 +120,155 @@ export function Growing({ children, whole }: { children: ReactNode; whole: React
   )
 }
 
-/* ---- a project, its conversation beside its board, as Both shows it ---- */
+/* ---- at work: Tally's board with four tasks running at once, each led by another lab ---- */
 
-const ASK = 'Backfill idempotency keys on the refunds made before PR 1184. MER-231 has the details.'
-
-export function ProjectWindow({
-  conversation,
-  thread,
-  talkOnly = false,
-  centered = false,
-  meta = 'Payments API · 3 repositories',
-  className,
-  style,
-}: {
-  /** What the conversation shows under your ask; by default, the lead's plan. */
-  conversation?: ReactNode
-  /** The whole conversation, in place of your ask, the reply and `conversation`. */
-  thread?: ReactNode
-  /** Only the conversation, as on a narrow window. */
-  talkOnly?: boolean
-  /** Only the conversation, in a column down the middle of a wide window. */
-  centered?: boolean
-  meta?: string
-  className?: string
-  style?: CSSProperties
-}) {
-  return (
-    <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${centered ? s.centered : ''} ${className ?? ''}`} style={style}>
-      <Tabs
-        current="meridian"
-        only={talkOnly}
-        end={
-          talkOnly ? (
-            <ChromeButton icon="plus" label="New task" />
-          ) : (
-            <>
-              <RoomSwitch value={centered ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
-              <WorkStatus yours={2} />
-              <ChromeButton icon="more" label="More for this project" compact />
-              <ChromeButton icon="plus" label="New task" />
-            </>
-          )
-        }
-      />
-      <div className={s.rooms}>
-        <div className={s.talk}>
-          <ProjectHead title="Meridian" meta={meta} side={!centered} />
-          <div className={s.thread}>
-            {thread ?? (
-              <>
-                <You at="11:01">{ASK}</You>
-                <Turn voice="Meridian’s coordinator" at="11:01">
-                  <p className={s.said}>One task. It writes to money records, so your security review applies, and a second lab reviews.</p>
-                </Turn>
-                {conversation ?? <Launch />}
-              </>
-            )}
-          </div>
-          <div className={s.composer}>
-            <Composer value="" onChange={none} onSubmit={none} placeholder="Tell Meridian what you want done" hint="⌘L" />
-          </div>
-        </div>
-        {!talkOnly && !centered && (
-          <div className={s.board}>
-            <MeridianBoard />
-          </div>
-        )}
-      </div>
-    </div>
-  )
+/** A task running, and how it goes on: a step every `every` beats, and a minute a beat. One on Claude Code `movesTo` another lab when it runs out of usage. */
+interface AtWork extends Omit<WorkCardProps, 'elapsed' | 'onOpen' | 'text' | 'current'> {
+  minutes: number
+  every: number
+  movesTo?: ModelInfo
 }
 
-/* ---- Meridian's board ---- */
+const AT_WORK: readonly AtWork[] = [
+  {
+    task: '433',
+    kind: 'Delivery',
+    title: 'Rotate the webhook signing secrets',
+    steps: ['Requirements', 'Implement', 'Review', 'Repair', 'Security review', 'Verify'],
+    at: 2,
+    minutes: 6,
+    lead: OPUS,
+    onStep: [SONNET],
+    added: 1,
+    every: 3,
+    movesTo: GEMINI_PRO,
+  },
+  {
+    task: '419',
+    kind: 'Delivery',
+    title: 'Migrate billing webhooks to the v2 endpoint',
+    steps: ['Requirements', 'Implement', 'Review', 'Verify'],
+    at: 1,
+    minutes: 22,
+    lead: CODEX,
+    every: 4,
+  },
+  {
+    task: '424',
+    kind: 'Session',
+    title: 'Find a shape for webhook queue sharding',
+    steps: ['Frame', 'Spike A', 'Spike B', 'Spike C', 'Replay', 'Note'],
+    at: 3,
+    minutes: 14,
+    lead: GEMINI_PRO,
+    every: 5,
+  },
+  {
+    task: '435',
+    kind: 'Delivery',
+    title: 'Retry ledger exports on a 503',
+    steps: ['Implement', 'Review', 'Verify'],
+    at: 0,
+    minutes: 3,
+    lead: QWEN,
+    every: 6,
+  },
+]
 
-export function MeridianBoard() {
+/** How long a task has run, as the board says it: 6m, 1h 12m. */
+const ran = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`)
+
+/**
+ * A task the board follows on its way through, as a phone shows it: in Up
+ * next until it starts, then first in the lane it has reached, drawn as
+ * `card`. Arriving, its place there is held unseen while it travels in.
+ * Where one comes in, the rest slide down to make room.
+ */
+export interface BoardStory {
+  task: string
+  lane: BoardLane
+  card?: ReactNode
+  arriving?: boolean
+  /** Its card's class, in the lane it has reached. */
+  className?: string
+}
+
+/** Why a task on Claude Code stands still, while it is out of usage. */
+export const OUT_OF_USAGE = 'Claude Code is out of usage'
+
+/** Claude Code out of usage, for the tasks on it: paused, then moved on to another lab. */
+export type UsageOut = 'paused' | 'moved'
+
+/**
+ * Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. While
+ * Claude Code is `out`, the tasks on it pause, then move on, each to another lab, with Codex on a review.
+ */
+export function BoardAtWork({ beat, story, out }: { beat: number; story?: BoardStory; out?: UsageOut }) {
+  // With a story, each card is keyed by its task, so it slides when one comes in above it.
+  const keyed = (task: string, item: ReactNode) => (story ? <div data-move={task}>{item}</div> : item)
+  const first = (lane: BoardLane) =>
+    story && story.lane === lane && lane !== BoardLane.Next ? (
+      <div
+        key="story"
+        data-story={story.arriving ? 'arriving' : ''}
+        className={story.className}
+        style={story.arriving ? { visibility: 'hidden' } : undefined}
+      >
+        {story.card}
+      </div>
+    ) : null
+  const next = story && story.lane !== BoardLane.Next ? NEXT.filter((x) => x.task !== story.task) : NEXT
+  const extra = (lane: BoardLane) => (story?.lane === lane && lane !== BoardLane.Next ? 1 : 0)
   return (
-    <Board label="Meridian’s work">
-      <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
+    <Board label="Tally’s work">
+      <BoardColumn lane={BoardLane.Next} count={next.length}>
         <BoardList>
-          {NEXT.map((x, i) => (
-            <NextRow key={x.task} {...x} place={i + 1} />
-          ))}
+          {next.map((x, i) =>
+            story?.task === x.task ? (
+              <div key={x.task} data-story="">
+                <NextRow {...x} place={i + 1} />
+              </div>
+            ) : (
+              <Fragment key={x.task}>{keyed(x.task, <NextRow {...x} place={i + 1} />)}</Fragment>
+            ),
+          )}
         </BoardList>
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Running} count={BOARD_RUNNING.length}>
-        {BOARD_RUNNING.map((x) => (
-          <WorkCard key={x.task} {...x} />
-        ))}
+      <BoardColumn lane={BoardLane.Running} count={AT_WORK.length + extra(BoardLane.Running)}>
+        {first(BoardLane.Running)}
+        {AT_WORK.map(({ minutes, every, movesTo, ...x }) => {
+          const at = Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)
+          const elapsed = ran(minutes + beat)
+          const { onStep, ...own } = x
+          const card =
+            !movesTo || !out ? (
+              <WorkCard {...x} at={at} elapsed={elapsed} />
+            ) : out === 'paused' ? (
+              <WorkCard {...own} at={at} elapsed={elapsed} status={TaskStatus.Paused} note={OUT_OF_USAGE} />
+            ) : (
+              <WorkCard {...own} at={at} elapsed={elapsed} lead={movesTo} {...(onStep ? { onStep: [CODEX] } : {})} />
+            )
+          return <Fragment key={x.task}>{keyed(x.task, movesTo ? <div data-out={out}>{card}</div> : card)}</Fragment>
+        })}
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
-        <AcceptCard {...READY_TWO_REPOS} />
+      <BoardColumn lane={BoardLane.Yours} count={CALLS.length + extra(BoardLane.Yours)}>
+        {first(BoardLane.Yours)}
+        {keyed(READY_TWO_REPOS.task, <AcceptCard {...READY_TWO_REPOS} />)}
         {CALLS.slice(0, 2).map((x) => (
-          <CallCard key={x.title} {...x} />
+          <Fragment key={x.title}>{keyed(x.title, <CallCard {...x} />)}</Fragment>
         ))}
       </BoardColumn>
-      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length}>
+      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length + extra(BoardLane.Settled)}>
         <BoardList>
-          {SETTLED.map((x) => (
-            <SettledRow key={x.task} {...x} />
-          ))}
+          {[
+            first(BoardLane.Settled),
+            ...SETTLED.map((x) => <Fragment key={x.task}>{keyed(x.task, <SettledRow {...x} />)}</Fragment>),
+          ].filter((row) => row !== null)}
         </BoardList>
       </BoardColumn>
     </Board>
   )
 }
-
-/* ---- two labs' review of the lead's work ---- */
-
-/** The usual review, simpler: two findings the lead fixed on the second round, and the one the reviewers disagree on, which is yours. */
-const FINDINGS_ONE_YOURS = FINDINGS.map((f) =>
-  f.id === 'f2'
-    ? {
-        ...f,
-        state: FindingState.Yours,
-        ask: 'Sonnet and Gemini disagree, and nothing on the task settles it. One budget, or a bucket for refunds?',
-      }
-    : { ...f, state: FindingState.Fixed, round: 2 },
-)
-
-export function TwoLabReview() {
-  return (
-    <Review
-      n={3}
-      of={6}
-      reviewers={[{ model: SONNET }, { model: GEMINI_PRO }]}
-      verdict={Verdict.Changes}
-      took="4m 20s"
-      thread={STEPS.review}
-      instructions={{ path: '.althar/review.md', ...reviewDoc }}
-      defaultFindings={FINDINGS_ONE_YOURS}
-      defaultOpen
-    />
-  )
-}
-
-/** The docs task the coordinator hands out beside 432: small, Codex writes, Sonnet reads it over. */
-export const DOCS_PLAN: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [CODEX], why: 'a docs change; Codex has room', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [SONNET], why: 'a different lab from the lead', optional: true },
-]
 
 /* ---- the island, round the notch, and what drops from it ---- */
 

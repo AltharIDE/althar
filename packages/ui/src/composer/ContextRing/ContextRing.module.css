@@ -73,3 +73,9 @@
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
+/* what the task, or the day, used of each account: its own part, under the context */
+.usage {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}

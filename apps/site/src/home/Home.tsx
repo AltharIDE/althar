@@ -6,9 +6,9 @@ import s from './Home.module.css'
 import { Hero } from './Hero'
 
 /*
- * The developer page: the lens for a nav, the first screen in Althar's
- * light, the systems it runs on, the product shown (bodies/desktop), and
- * the footer (shared/footer).
+ * The developer page: the lens for a nav, the first screen coming in from
+ * orbit (Hero), the systems it runs on, the product shown (bodies/desktop),
+ * and the footer (shared/footer).
  */
 
 export function Home() {

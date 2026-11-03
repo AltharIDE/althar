@@ -1,7 +1,7 @@
 import { type Mutation, useMutation, useMutationState } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { BoardTask } from '@althar/contracts'
+import type { BoardTask, ChangeSummary } from '@althar/contracts'
 
 import { messageOf } from './client'
 import { useServices } from './services'
@@ -14,7 +14,10 @@ import { useServices } from './services'
  * the board says Merging, out of Needs you, and is settled once the runtime
  * says so. Merged, it stays merging until the board reads it so: its host
  * can take a merge and land it a moment later, and the runtime asks again
- * meanwhile, for a minute (`LANDS_WITHIN`).
+ * meanwhile, for a minute (`LANDS_WITHIN`). Put in its branch's merge queue
+ * instead, it is in the merge queue for as long as the runtime reads it so:
+ * its host merges it once the queue's checks pass, or the queue takes it
+ * out and it is the person's again.
  */
 
 const KEY = ['merge'] as const
@@ -95,16 +98,37 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
 /** The step a task being merged shows it is on, as a step after its plan's. */
 export const MERGING_STEP = 'merging'
 
+/** The step a task shows while its pull requests wait in their merge queues. */
+export const MERGE_QUEUE_STEP = 'merge_queue'
+
+/** Whether every pull request of a task's still open is in its merge queue: its host merges them, and none is the person's meanwhile. */
+export const inMergeQueue = (changes: ReadonlyArray<Pick<ChangeSummary, 'state' | 'queued'>>): boolean => {
+  const open = changes.filter((change) => change.state === 'open')
+  return open.length > 0 && open.every((change) => change.queued === true)
+}
+
+const queuedOf = (task: BoardTask) => task.change !== null && inMergeQueue([task.change])
+
 /**
  * Tasks as the board and the home place them: one ready whose merge is under
- * way is at work, merging, out of Needs you, until it is settled.
+ * way, or whose pull request is in its merge queue, is at work, out of Needs
+ * you, until it is settled or the queue takes it out.
  */
 export const asMerging = <T extends BoardTask>(tasks: ReadonlyArray<T>, merging: ReadonlySet<string>): ReadonlyArray<T> =>
-  merging.size === 0
+  merging.size === 0 && !tasks.some(queuedOf)
     ? tasks
     : tasks.map((task) =>
-        task.phase === 'ready' && merging.has(task.taskId)
-          ? // Althar's at work on it, not an agent: nothing waits for a place or a reset.
-            { ...task, phase: 'running', step: MERGING_STEP, queued: null, waits: null, reconnects: null, continues: false, inLine: false }
+        task.phase === 'ready' && (queuedOf(task) || merging.has(task.taskId))
+          ? // Althar's at work on it, or its host, not an agent: nothing waits for a place or a reset.
+            {
+              ...task,
+              phase: 'running',
+              step: queuedOf(task) ? MERGE_QUEUE_STEP : MERGING_STEP,
+              queued: null,
+              waits: null,
+              reconnects: null,
+              continues: false,
+              inLine: false,
+            }
           : task,
       )

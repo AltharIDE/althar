@@ -161,7 +161,7 @@ describe('the agent’s own login, as it is asked', () => {
     act(() => result.current.reopen())
     expect(open).toHaveBeenCalledWith('https://auth.openai.com/codex/device', '_blank')
     // Asked again a second later, as the window asks while it shows.
-    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await waitFor(() => expect(getAccountSignIn).toHaveBeenCalledTimes(2))
     expect(result.current.signingIn?.step).toMatchObject({ kind: 'code', opened: true })
     open.mockRestore()
   })
@@ -259,6 +259,23 @@ describe('signing in in Terminal', () => {
     expect(result.current.signingIn?.step).toBe(step)
   })
 
+  it('says it couldn’t tell where the agent answered something unreadable, and shows it is checking again', async () => {
+    const { client } = fakeClient()
+    const start = startOf(codexWith([], usualCodex), 1)
+    let done = () => {}
+    const recheck = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { result, rerender } = signInOf(client, { ...start, recheck })
+    act(() => result.current.add('codex'))
+    act(() => result.current.way(SignInWay.Terminal))
+    await waitFor(() => expect(result.current.signingIn?.step).toEqual({ kind: 'terminal', line: 'codex login', opened: true }))
+    act(() => result.current.check())
+    expect(result.current.signingIn?.step).toMatchObject({ kind: 'terminal', checking: true })
+    const made = { ...usual('acc_added', 'unknown'), name: 'Account 2', home: '/Users/me/accounts/acc_added' }
+    rerender({ start: { ...start, recheck, status: codexWith([], usualCodex, made), checkedAt: 2 } })
+    await act(async () => done())
+    expect(result.current.signingIn?.step).toMatchObject({ notYet: true, unclear: true, checking: false })
+  })
+
   it('drops what Terminal says, opened or not, once the sign-in was left', async () => {
     const answers: Array<{ resolve: (value: { line: string; opened: boolean }) => void; reject: (failure: unknown) => void }> = []
     const { client } = fakeClient({
@@ -341,5 +358,46 @@ describe('Settings opened to sign an agent in again, from its error', () => {
     await waitFor(() => expect(document.activeElement?.contains(again)).toBe(true))
     expect(screen.getByRole('tab', { name: /Codex/, selected: true })).toBeTruthy()
     expect(client.addAccount).not.toHaveBeenCalled()
+  })
+
+  it('signs in again the account whose provider refused its sign-in, not the first, where none is signed out', async () => {
+    // Go's key refused on the second account (OpenCode Go from the popover's row); the first signed in and fine.
+    const refused = {
+      ...usual('acc_work', 'signed_in'),
+      name: 'work',
+      providers: [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z', pays: 'plan' as const }],
+    }
+    const { client } = fakeClient({ status: vi.fn(async () => codexWith([], usualCodex, refused)) })
+    function Asked() {
+      return <SettingsPage start={useStart()} section="agents" onSection={() => {}} signIn="codex" />
+    }
+    withServices(<Asked />, client)
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_work'))
+    expect(client.signInAccount).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a new OpenCode account, signed in', () => {
+  it('says the providers it signed in to, as Settings does, not the account’s one word', async () => {
+    const opencode = (...accounts: AgentStatus['accounts']): Status => ({
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: [{ ...agents[1]!, id: 'opencode', name: 'OpenCode', ways: [], accounts }],
+    })
+    const { client } = fakeClient()
+    const start = startOf(opencode(usualCodex), 1)
+    const { result, rerender } = signInOf(client, start)
+    act(() => result.current.add('opencode'))
+    act(() => result.current.way(SignInWay.Terminal))
+    await waitFor(() => expect(result.current.signingIn?.step).toMatchObject({ kind: 'terminal' }))
+    // Read again, the new account is signed in to Go: named with Go on its plan, not as its keys are paid, per use.
+    const made = {
+      ...usual('acc_added', 'signed_in'),
+      name: 'Account 2',
+      paidBy: 'key' as const,
+      providers: [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: null, pays: 'plan' as const }],
+    }
+    rerender({ start: { ...start, status: opencode(usualCodex, made), checkedAt: 2 } })
+    await waitFor(() => expect(result.current.signingIn?.step).toEqual({ kind: 'named', name: 'Account 2', paid: 'OpenCode Go on a plan' }))
   })
 })

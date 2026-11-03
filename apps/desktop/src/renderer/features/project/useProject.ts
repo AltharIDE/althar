@@ -42,7 +42,7 @@ const GATHER = 25
 
 export interface ProjectModel {
   readonly project: ProjectSummary | null
-  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  /** Its repositories as this Mac has them, each with its remote: what its header says it is made of. */
   readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
@@ -94,6 +94,8 @@ export interface ProjectModel {
   readonly discardIssueDraft: (draftId: string) => Promise<void>
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator. */
+  readonly preferIssueCards: (atOnce: boolean) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -403,6 +405,7 @@ export const useProject = (projectId: string): ProjectModel => {
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
+    preferIssueCards: (atOnce) => act(() => (threadId === null ? Promise.resolve() : client.preferIssueCards(threadId, atOnce))),
     dismissError: () => setError(null),
   }
 }

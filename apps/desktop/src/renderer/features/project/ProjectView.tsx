@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
@@ -14,13 +15,14 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  ProjectFront,
-  type ProjectFrontProps,
+  ProjectHeader,
+  keys,
+  modKey,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
-import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
+import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -45,31 +47,35 @@ import { BoardView } from '../board/BoardView'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
-import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
+import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { ProjectSettingsPage } from '../projectSettings/ProjectSettingsPage'
 import { FIRST_PROJECT_SECTION, type ProjectSection } from '../projectSettings/sections'
 import { connectionsNeedYou } from '../projectSettings/standing'
+import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { TaskAskOf } from './TaskAskOf'
+import { FirstConnectionsView } from './FirstConnectionsView'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
-import { nextRoom, ProjectBar } from './ProjectBar'
+import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
+import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 
 /*
- * A project: its front page across the top, then the conversation with its
- * coordinator, the board of its work, or both side by side, the conversation
- * as wide as the person drags it (b steps through them); or its automations,
- * or its settings, in their place, a violet dot in the bar on Automations
- * where one paused itself, and on Settings where a connection waits on the
- * person. The front page says how the project stands (what needs you:
- * pointed at, what it is; clicked, the first of it) and what it is made of.
+ * A project: its header across the top, the bar a task has, then the
+ * conversation with its coordinator, the board of its work, or both side by
+ * side, the conversation as wide as the person drags it (b steps through
+ * them); or its automations, or its settings, in their place, a violet dot on
+ * Automations where one paused itself, and on Settings where a connection
+ * waits on the person. The header says how the project stands (what needs
+ * you: pointed at, what it is; clicked, the first of it), holds its views,
+ * runs it, and lists what it is made of under ⋯.
  * The coordinator answers questions itself and turns changes into tasks:
  * there is no task to start without it. What you open from the board opens
  * its task.
@@ -83,15 +89,16 @@ export const text = {
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
-  empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   keep: (from: string) => `Keep ${from}`,
-  queued: 'Queued · the coordinator reads it next',
-  queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
+  queued: 'Queued',
+  queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
-  signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
+  /** Whose usage the composer's ring says, under the context. */
+  usageHeading: 'Today',
+  signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
@@ -139,13 +146,6 @@ const useBothWidth = () => {
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
-}
-
-/** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
-function Front({ lanes, ...front }: Omit<ProjectFrontProps, 'last'> & { lanes: Lanes | null }) {
-  const now = useNow(true, 60_000)
-  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
-  return <ProjectFront {...front} {...(last === undefined ? {} : { last })} />
 }
 
 /** The project's settings, and where they lead out of the project. */
@@ -264,6 +264,7 @@ export function ProjectView({
   const coordinator = model.coordinator
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
+  const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   const now = useNow(
     (coordinator?.session?.turnRunning ?? false) ||
@@ -309,10 +310,12 @@ export function ProjectView({
     onFile: (draftId) => void model.fileIssueDraft(draftId),
     onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
   const changesActions: ChangesActions = {
     onApply: (changesId) => void model.applyIssueChanges(changesId),
     onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
 
   // The agent what the person says goes to, and whether it takes images.
@@ -404,6 +407,7 @@ export function ProjectView({
             </>
           ) : null
         }
+        above={offer.offering !== null && <ForkOffer offer={offer} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}
@@ -413,9 +417,9 @@ export function ProjectView({
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        text={{ queued: text.queue, sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact)}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -434,16 +438,33 @@ export function ProjectView({
 
   const talking = room !== Room.Board
   const boarding = room !== Room.Talk
+  /** Into the coordinator's composer, from an empty board: the conversation beside the board where it wasn't on screen. */
+  const talkToCoordinator = () => {
+    if (room === Room.Board) setRoom(Room.Both)
+    requestAnimationFrame(() => voice.inputRef.current?.focus())
+  }
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
     if (first !== null) onTask(first)
   }
 
-  // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
+  // The header: its name and ink as the person last chose them, how it stands, its views, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
-  const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
+  const read = reads(useServices().client)
+  const binding = useQuery(read.projectTracker(projectId)).data ?? null
+  const teams = useQuery({
+    ...read.containers(binding?.connectionId ?? ''),
+    enabled: binding?.container != null && binding.gone == null,
+  }).data
+  const containerKey = teams?.find((team) => team.id === binding?.container?.id)?.key ?? null
+  const trackers = trackersWithBinding(
+    lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list),
+    binding,
+    connections.list,
+    containerKey,
+  )
   const settingsNeedYou = connectionsNeedYou(model.repositories, trackers, connections.list)
   // Its automations: a dot on their view where one paused itself; and what its cards in the conversation do.
   const automations = useAutomations(projectId)
@@ -453,15 +474,18 @@ export function ProjectView({
     setAutomation(id)
     setRoom(Room.Automations)
   }
-  const front = (
-    <Front
-      lanes={lanes}
+  const header = (
+    <ProjectHeader
       name={kept.name ?? name}
       seed={projectId}
       ink={kitInk(kept.ink ?? model.project?.ink ?? 'clay')}
-      yours={yours}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
+      // Until the board is read, where it stands isn't said, rather than said wrong.
+      {...(lanes === null ? {} : { yours, needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
       onYours={openYours}
+      room={room}
+      onRoom={setRoom}
+      settingsNeedYou={settingsNeedYou}
+      automationsNeedYou={automations.needsYou}
       parts={partsOf({
         repositories: model.repositories,
         names: model.project?.repositories ?? [],
@@ -469,7 +493,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, where it is picked to (ADR-070).
+      // What the project runs, with no agent, where it is picked to (ADR-089).
       {...(coordinator === null
         ? {}
         : {
@@ -499,8 +523,7 @@ export function ProjectView({
 
   return (
     <div className={s.window}>
-      <ProjectBar room={room} onRoom={setRoom} settingsNeedYou={settingsNeedYou} automationsNeedYou={automations.needsYou} />
-      {front}
+      {header}
       {room === Room.Automations ? (
         <AutomationsView
           projectId={projectId}
@@ -550,6 +573,15 @@ export function ProjectView({
                   {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                 >
                   <Thread label={text.conversation} busy={busy}>
+                    {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
+                    {coordinator.items.length === 0 && !coordinator.earlier && (
+                      <FirstConnectionsView
+                        projectId={projectId}
+                        project={model.project?.name ?? coordinator.project.name}
+                        model={connections}
+                        className={s.firstConnections}
+                      />
+                    )}
                     {coordinator.earlier && (
                       <ThreadDivider
                         icon="up"
@@ -559,7 +591,6 @@ export function ProjectView({
                         {text.earlier}
                       </ThreadDivider>
                     )}
-                    {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks
@@ -594,6 +625,7 @@ export function ProjectView({
                             onOpen={openAutomation}
                           />
                         )}
+                        taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
                         changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
                         run={(run) => (
                           <RunOf
@@ -655,6 +687,7 @@ export function ProjectView({
                     line={board.line}
                     folds={folds}
                     onFoldsChange={setFolds}
+                    onTalk={talkToCoordinator}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

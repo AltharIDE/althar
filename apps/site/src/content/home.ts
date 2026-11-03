@@ -11,30 +11,17 @@ import { Agent } from './agents'
 export const BRAND = 'Althar'
 
 export const HERO = {
-  kicker: 'Open source · desktop app',
-  /**
-   * "You pay for Claude. Use them all at once.", with the name swapping through
-   * the agents that speak ACP, each drawn with its mark. With reduced motion
-   * it stands still on the first three, as a list.
-   */
-  pay: 'You pay for',
-  names: [
-    { agent: Agent.Claude, word: 'Claude' },
-    { agent: Agent.Codex, word: 'Codex' },
-    { agent: Agent.Gemini, word: 'Gemini' },
-    { agent: Agent.OpenCode, word: 'OpenCode' },
-    { agent: Agent.Copilot, word: 'Copilot' },
-    { agent: Agent.Cursor, word: 'Cursor' },
-    { agent: Agent.Qwen, word: 'Qwen' },
-    { agent: Agent.Kimi, word: 'Kimi' },
-    { agent: Agent.Mistral, word: 'Mistral' },
-  ],
-  /** "Use them all at once.", on two lines. */
-  use: ['Use them all', 'at once.'],
-  lead: 'Althar runs Claude Code, Codex and OpenCode side by side, on the plans you already have. One hits its limit, the next takes over. One gets it wrong, another catches it.',
-  /** The lead on a phone, where the first screen has less room. */
-  short: 'Claude Code, Codex and OpenCode side by side, on the plans you already have.',
-  fine: 'Free and open source. No account, and no API key of its own.',
+  /** "Building software has never felt so fast.": a line, then its last word, large, forged in the fire as the capsule comes in. */
+  title: 'Building software has never felt so',
+  last: 'fast.',
+  /** The subhead: open source and independence from the labs, in one sentence (the positioning's second and third messages). */
+  lead: 'Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
+  /** The flight deck: its readouts in the window's top corners, and the console under the lead. */
+  velocity: 'Velocity',
+  altitude: 'Altitude',
+  agents: 'Agents',
+  agentsName: 'The agents Althar runs',
+  install: 'Install',
 } as const
 
 export const PLANS = {

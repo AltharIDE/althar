@@ -98,7 +98,7 @@ export const Downloading: Story = {
   args: { runtimes: [OPENCODE_MISSING], onInstall: fn() },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/latest release from GitHub, about 45 MB/)).toBeInTheDocument()
+    await expect(c.getByText(/latest release, from GitHub, about 45 MB/)).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Download' }))
     await expect(args.onInstall).toHaveBeenCalledWith('opencode')
   },

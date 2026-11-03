@@ -19,11 +19,23 @@ import { StartView } from '../src/renderer/features/start/StartView'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { coordinatorSnapshot, fakeClient, fakeHost, items } from './fixtures'
 import { useSettingsOf, withServices } from './render'
+import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
 /*
  * The window off a Mac, on Linux here: every key it names is the system's,
  * Ctrl in place of ⌘, and those keys do what they say.
  */
+
+/* The kit reads its system once, from the preload, as it loads: say Linux before it does. */
+vi.hoisted(() => {
+  ;(window as { althar?: { platform?: string } }).althar = { platform: 'linux' }
+})
+
+vi.mock('@althar/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@althar/ui')>()
+  const { keysFor } = await import('./mockKeys')
+  return { ...actual, ...keysFor('linux') }
+})
 
 vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
@@ -48,8 +60,10 @@ describe('the first screen off a Mac', () => {
       })),
     })
     const host = fakeHost()
+    seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
-    const add = await screen.findByRole('button', { name: /Add a folder/ })
+    await toTheProject()
+    const add = await screen.findByRole('button', { name: /Choose a folder/ })
     expect(add.textContent).toContain('Ctrl+N')
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     expect(host.pickFolder).not.toHaveBeenCalled()
@@ -58,6 +72,7 @@ describe('the first screen off a Mac', () => {
     await screen.findByRole('list', { name: 'Repositories for the project' })
     expect(screen.getByRole('button', { name: /Make the project/ }).textContent).toContain('Ctrl+Enter')
     fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true })
+    await openTheProject()
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
   })
 })

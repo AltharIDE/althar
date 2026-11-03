@@ -17,15 +17,15 @@ import { PublishedReport, ReviewReport } from './Reports'
 
 export const graphFaceText = {
   show: 'Show in the conversation',
-  question: 'It waits for your answer in the conversation.',
-  now: (took: string | undefined) => (took === undefined ? 'At work now.' : `At work for ${took}.`),
-  held: 'It waits for a free agent, and starts as soon as one is.',
-  limit: 'It waits for its agent’s usage limit to reset.',
-  next: 'Still to come.',
-  added: 'Added by a change to its steps; it runs once the steps before it are done.',
-  stopped: 'Stopped before it finished.',
-  proposed: 'A change to its steps, waiting for your say.',
-  waiting: 'It waits for you in the conversation.',
+  question: 'Waiting for your answer.',
+  now: (took: string | undefined) => (took === undefined ? 'At work.' : `At work for ${took}.`),
+  held: 'Waiting for a free agent.',
+  limit: 'Waiting for usage to reset.',
+  next: 'Not started.',
+  added: 'Added to the plan.',
+  stopped: 'Stopped.',
+  proposed: 'Proposed, waiting for you.',
+  waiting: 'Waiting for you.',
   done: 'Done.',
   dismiss: 'Dismiss',
 }
@@ -38,13 +38,15 @@ export interface GraphFaceProps {
   permissions: (calls: ReadonlyArray<AttentionRequest>) => ReactNode
   /** Goes to an item of the conversation by its id; with none, to the conversation as it is. */
   onShow: (itemId: string | undefined) => void
+  /** Opens a review's findings in the code, by its report: a review card that found something opens there, not in a popover. */
+  onReview?: (review: string) => void
   /** What went wrong with the last thing done in the window, an answer given here among them; and its dismissal. */
   error?: string | null
   onDismissError?: () => void
   className?: string
 }
 
-export function GraphFace({ graph, stuck, permissions, onShow, error = null, onDismissError, className }: GraphFaceProps) {
+export function GraphFace({ graph, stuck, permissions, onShow, onReview, error = null, onDismissError, className }: GraphFaceProps) {
   const [open, setOpen] = useState<string | null>(null)
   const failure = error === null ? null : <Failure error={error} {...(onDismissError === undefined ? {} : { onDismiss: onDismissError })} />
   // Where a step's popover is open, it says so there, by what was answered; else on the face.
@@ -56,7 +58,20 @@ export function GraphFace({ graph, stuck, permissions, onShow, error = null, onD
         rounds={graph.rounds}
         steps={graph.steps}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(id) => {
+          // A review that found something opens in the code, each finding under its line; one waiting on the person still opens its call.
+          const facts = id === null ? undefined : graph.facts.get(id)
+          const report = facts?.report
+          if (
+            onReview !== undefined &&
+            facts?.step.key === 'review' &&
+            facts.calls.length === 0 &&
+            report != null &&
+            report.content.findings.length > 0
+          )
+            onReview(report.id)
+          else setOpen(id)
+        }}
         onRound={(id) => onShow(graph.saidAt.get(id))}
         detail={(id) => {
           const facts = graph.facts.get(id)

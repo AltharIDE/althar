@@ -1,9 +1,22 @@
-import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { deadline } from '@althar/testing'
+import { cleanup, configure } from '@testing-library/react'
+import { afterEach, beforeEach } from 'vitest'
 
+import { forgetFolds } from '../src/renderer/features/board/folds'
+import { forgetHiddenCards } from '../src/renderer/features/project/FirstConnectionsView'
+import { welcome } from '../src/renderer/features/start/welcome'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
+import { forgetUsageOpen } from '../src/renderer/shared/usage'
+
+/*
+ * A findBy or waitFor gives up where every other wait does, near the test's own time (@althar/testing), not after
+ * testing-library's one second: what takes a second here can take four on a slower machine.
+ */
+beforeEach(() => {
+  configure({ asyncUtilTimeout: Math.max(0, deadline() - Date.now()) })
+})
 
 /*
  * jsdom lacks what the kit's components lean on in a browser; each stand-in
@@ -37,10 +50,15 @@ if (typeof window !== 'undefined') {
   }
   afterEach(() => {
     cleanup()
-    // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window keeps by thread.
+    // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window
+    // keeps by thread, the lanes and project cards it keeps where storage wouldn't take them, and a welcome left on show.
     window.localStorage.clear()
     forgetChosenFaces()
+    forgetFolds()
     forgetDrafts()
     forgetSessions()
+    forgetHiddenCards()
+    forgetUsageOpen()
+    welcome.end()
   })
 }

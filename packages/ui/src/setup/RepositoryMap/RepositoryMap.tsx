@@ -1,5 +1,6 @@
 import { type ReactNode, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -22,7 +23,8 @@ import s from './RepositoryMap.module.css'
  * folders on this device on the left, the code hosts their remotes are on
  * on the right, and a hairline from each folder to its remote. A fork has
  * two: it pushes to the fork, and its pull requests open on the repository
- * it forks, or on the fork, as the person says. A host Althar isn't
+ * it forks, or on the fork, as the person says; or, where its host says they
+ * can push to the repository it forks, its branches go there too. A host Althar isn't
  * connected to sits apart, its wires dashed, with what connecting adds. A
  * folder being read waits on the left until its repositories are known.
  */
@@ -40,8 +42,11 @@ export interface MapRepository {
   tasks: number
   /** Where its work goes: the host, by its id among the hosts, its path there, and its page. Without it, the work stays here. */
   remote?: { host: string; path: string; href?: string }
-  /** The fork it is: the repository it forks, on the same host, by its path there, and where its pull requests open. */
-  fork?: { upstream: string; target: ChangeTarget }
+  /**
+   * The fork it is: the repository it forks, on the same host, by its path there, where its work goes, and whether its host
+   * says the person can push to the repository it forks. Without that, it hasn't said.
+   */
+  fork?: { upstream: string; target: ChangeTarget; canPush?: boolean }
 }
 
 /** A code host the repositories' work goes to. */
@@ -78,7 +83,6 @@ export interface RepositoryMapText {
   leaveOut: string
   /** What leaving one out keeps: its tasks under way keep it. */
   keeps: (tasks: number) => string
-  untouched: string
   reading: string
   /** Where tasks work; the folder comes as code. */
   worktrees: (folder: ReactNode) => ReactNode
@@ -108,23 +112,26 @@ export interface RepositoryMapText {
   goes: (path: string, host: string) => string
   forkGoes: (fork: string, pullRequests: string, host: string) => string
   staysHere: string
+  /** The choice of a fork's branches going to the repository it forks, beside its pull requests. */
+  upstreamBranches: (upstream: string) => string
+  /** Where the host says the person can't push to the repository it forks. */
+  noPush: (upstream: string) => string
 }
 
 export const repositoryMapText: RepositoryMapText = {
-  here: 'On this computer',
+  here: `On ${device.this}`,
   there: 'Where the work goes',
   roles: repositoryRoleText,
   role: (name) => `Role of ${name}`,
   branch: 'Checked out:',
-  elsewhere: 'Not on this computer',
+  elsewhere: `Not on ${device.this}`,
   more: (name) => `More for ${name}`,
   open: (host) => `Open on ${host}`,
   leaveOut: 'Leave out of the project',
   keeps: (tasks) => (tasks === 1 ? 'The task using it keeps it' : `The ${tasks} tasks using it keep it`),
-  untouched: 'Nothing in its folder changes',
-  reading: 'Reading it. Nothing in it changes',
+  reading: 'Reading…',
   worktrees: (folder) => <>Tasks work in their own worktrees, in {folder}</>,
-  worktreesUnmade: 'Tasks work in their own worktrees, never in these folders',
+  worktreesUnmade: 'Tasks work in their own worktrees',
   pushes: 'pushes',
   pullRequests: 'pull requests',
   both: 'pushes, pull requests',
@@ -139,19 +146,20 @@ export const repositoryMapText: RepositoryMapText = {
     unknown: 'Not a host Althar connects to',
   },
   what: {
-    [HostReach.Connected]: 'Althar opens the pull requests here, and brings their checks and reviews back',
-    [HostReach.NotConnected]:
-      'Branches push with your own git; you open the pull request. Connected, Althar does, and brings its checks and reviews back',
-    [HostReach.SignInAgain]: 'Branches push with your own git until you sign in again',
-    [HostReach.Unknown]: 'Branches push with your own git; you open the pull request',
+    [HostReach.Connected]: 'Althar opens the pull requests',
+    [HostReach.NotConnected]: 'You open the pull requests until it’s connected',
+    [HostReach.SignInAgain]: 'You open the pull requests until you sign in again',
+    [HostReach.Unknown]: 'You open the pull requests',
   },
   connect: (host) => `Connect ${host}`,
   signInAgain: (host) => `Sign in to ${host} again`,
   nowhere: 'No remote',
-  stays: 'Stays on this computer',
+  stays: `Stays on ${device.this}`,
   goes: (path, host) => `Its work goes to ${path} on ${host}.`,
   forkGoes: (fork, pullRequests, host) => `It pushes to ${fork} on ${host}, and its pull requests open on ${pullRequests}.`,
-  staysHere: 'Its work stays on this computer.',
+  staysHere: `Its work stays on ${device.this}.`,
+  upstreamBranches: (upstream) => `${upstream}, branches too`,
+  noPush: (upstream) => `You can’t push to ${upstream} yet. Its owners can give you access.`,
 }
 
 export type RepositoryMapProps = RootProps<
@@ -269,13 +277,20 @@ const reachWords = (host: MapHost, t: RepositoryMapText) => {
   }
 }
 
+/** Whether a fork's branches go to the repository it forks: chosen, and its host hasn't since said the person can't, which keeps them on the fork. */
+const branchesUpstream = (fork: NonNullable<MapRepository['fork']>) => fork.target === ChangeTarget.UpstreamBranch && fork.canPush !== false
+
 /** Where a repository's work goes, in words, for those who can't see the wires. */
 const goesWords = (repository: MapRepository, hostOf: (id: string) => MapHost | undefined, t: RepositoryMapText) => {
   const { remote, fork } = repository
   if (remote === undefined) return t.staysHere
   const host = hostOf(remote.host)?.name ?? remote.host
   if (fork === undefined) return t.goes(remote.path, host)
-  return t.forkGoes(remote.path, fork.target === ChangeTarget.Fork ? remote.path : fork.upstream, host)
+  return t.forkGoes(
+    branchesUpstream(fork) ? fork.upstream : remote.path,
+    fork.target === ChangeTarget.Fork ? remote.path : fork.upstream,
+    host,
+  )
 }
 
 /** What the host's button does: connect it, sign in to it again, or nothing for a host Althar doesn't connect to. */
@@ -326,13 +341,16 @@ export function RepositoryMap({
     if (remote === undefined) return []
     const dashed = !connected(remote.host)
     if (repository.fork === undefined) return [{ id: repository.id, from: repository.id, to: repository.id, dashed }]
-    // A fork's pull requests open where the person said: on the repository it forks, or on the fork it pushes to.
+    // A fork's pull requests open where the person said: on the repository it forks, or on the fork it pushes to; its branches
+    // go to the repository it forks only where the person said that too, and can.
+    const upstream = { id: `${repository.id}:upstream`, from: repository.id, to: `${repository.id}:upstream`, dashed }
+    if (branchesUpstream(repository.fork)) return [{ ...upstream, label: t.both }]
     const fork = { id: `${repository.id}:fork`, from: repository.id, to: `${repository.id}:fork`, dashed }
     return repository.fork.target === ChangeTarget.Fork
       ? [{ ...fork, label: t.both }]
       : [
           { ...fork, label: t.pushes },
-          { id: `${repository.id}:upstream`, from: repository.id, to: `${repository.id}:upstream`, dashed, label: t.pullRequests },
+          { ...upstream, label: t.pullRequests },
         ]
   })
   // What moves a wire: which there are, how each is drawn, and anything that changes where the cards and remotes sit.
@@ -580,11 +598,16 @@ function Remotes({
           options={[
             { value: ChangeTarget.Upstream, label: fork.upstream },
             { value: ChangeTarget.Fork, label: remote.path },
+            // Offered where its host says the person can push there; chosen before and no longer so, it shows what was chosen.
+            ...(fork.canPush === true || fork.target === ChangeTarget.UpstreamBranch
+              ? [{ value: ChangeTarget.UpstreamBranch, label: t.upstreamBranches(fork.upstream) }]
+              : []),
           ]}
           value={fork.target}
           onChange={(target) => onTargetChange(repository.id, target)}
         />
       </div>
+      {fork.canPush === false && <p className={s.noPush}>{t.noPush(fork.upstream)}</p>}
     </>
   )
 }
@@ -626,7 +649,7 @@ function RepositoryMenu({
         <MenuItem
           icon="close"
           tone="danger"
-          description={repository.tasks > 0 ? t.keeps(repository.tasks) : t.untouched}
+          {...(repository.tasks > 0 ? { description: t.keeps(repository.tasks) } : {})}
           onSelect={() => onLeaveOut(repository.id)}
         >
           {t.leaveOut}

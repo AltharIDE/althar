@@ -6,7 +6,7 @@ import { hostNameOf, type Tracker } from '../project/front'
  * Where Althar stands with what a project's work goes to: on a product's
  * server, connected there as someone, never connected, or signed out; and
  * whether any of it waits on the person, which the project's Settings say
- * with a dot, in the window's bar and beside Code and issues.
+ * with a dot, on Settings in its header and beside Code and issues.
  */
 
 export type Standing =

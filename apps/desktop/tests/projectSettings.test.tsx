@@ -4,7 +4,15 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type ProjectTracker, type Service } from '@althar/contracts'
+import {
+  ApiError,
+  type BoardTask,
+  type ConnectionSummary,
+  type ProjectSummary,
+  type ProjectTracker,
+  type RepositorySetup,
+  type Service,
+} from '@althar/contracts'
 
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -71,7 +79,7 @@ const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}
       <RouterProvider router={router} />
     </ServicesProvider>,
   )
-  return { ...fake, router }
+  return { ...fake, router, cache: services.cache }
 }
 
 /** A project's tab, by its name, in the window's tabs. */
@@ -100,7 +108,9 @@ const descriptionOf = (control: HTMLElement) =>
     .join(' ')
 
 /** The ink the front page's wash is drawn in. */
-const washOf = (name: string) => screen.getByRole('heading', { level: 1, name }).closest('header')?.getAttribute('style')
+/** The ink of the project's mark in its header, beside its name. */
+const inkOf = (name: string) =>
+  screen.getByRole('heading', { level: 1, name }).closest('header')?.querySelector('[data-ink]')?.getAttribute('data-ink')
 
 /** A task on the board, from an issue on Linear, read through a connection where it names one. */
 const taskFrom = (key: string, connectionId?: string): BoardTask => ({
@@ -166,6 +176,117 @@ describe('a project’s settings', () => {
     expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
   })
 
+  it('shows how each repository’s new task folders get ready, in Running, and keeps a change as the person leaves the lines', async () => {
+    const { client } = windowAt('/projects/p1?room=settings&section=running')
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    expect(commands).toHaveProperty('value', 'bun install --frozen-lockfile')
+    expect(screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })).toHaveProperty('value', '.env')
+    expect(screen.getByText('~/code/meridian-api')).toBeTruthy()
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nbunx playwright install chromium')
+    await userEvent.tab()
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryId: repositories[0]?.id,
+        setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
+      }),
+    )
+    // A repository no lead has set up yet says who fills it in.
+    await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
+    expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
+      'placeholder',
+      'The first task’s lead fills this in.',
+    )
+  })
+
+  it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    const { cache } = windowAt('/projects/p1?room=settings&section=running', {
+      setRepository,
+      getRepositories: vi.fn(async () => kept),
+    })
+    const commands = await screen.findByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(commands)
+    await userEvent.type(commands, '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    const files = screen.getByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n.env.local')
+    await userEvent.tab()
+    // A read while the first is on its way says what was kept before; the newest change still shows.
+    await act(() => cache.refetchQueries({ queryKey: ['repositories', 'p1'] }))
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty('value', 'bun install --frozen-lockfile\nmake')
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(2))
+    expect(setRepository).toHaveBeenLastCalledWith({
+      projectId: 'p1',
+      repositoryId: repositories[0]?.id,
+      setup: { copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] },
+    })
+    await waitFor(() =>
+      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] }),
+    )
+    expect(files).toHaveProperty('value', '.env\n.env.local')
+  })
+
+  it('keeps a repository’s changes to its setup in order across leaving Running and coming back', async () => {
+    let kept = repositories
+    let release = () => {}
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+      if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
+      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=running', { setRepository, getRepositories: vi.fn(async () => kept) })
+    const commandsOf = () => screen.getByRole('textbox', { name: 'meridian-api: commands' })
+    await userEvent.click(await screen.findByRole('textbox', { name: 'meridian-api: commands' }))
+    await userEvent.type(commandsOf(), '{End}\nmake')
+    await userEvent.tab()
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(1))
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake test')
+    await userEvent.tab()
+    const side = screen.getByRole('navigation', { name: 'Project settings' })
+    await userEvent.click(within(side).getByRole('button', { name: 'General' }))
+    await userEvent.click(within(side).getByRole('button', { name: 'Running' }))
+    // Back in Running, the change still on its way is what shows, and the next one waits behind it.
+    expect(await screen.findByRole('textbox', { name: 'meridian-api: commands' })).toHaveProperty(
+      'value',
+      'bun install --frozen-lockfile\nmake\nmake test',
+    )
+    await userEvent.click(commandsOf())
+    await userEvent.type(commandsOf(), '{End}\nmake lint')
+    await userEvent.tab()
+    expect(setRepository).toHaveBeenCalledTimes(1)
+    act(() => release())
+    await waitFor(() => expect(setRepository).toHaveBeenCalledTimes(3))
+    expect(setRepository.mock.calls.map(([input]) => input.setup?.commands.at(-1))).toEqual(['make', 'make test', 'make lint'])
+    await waitFor(() => expect(kept[0]?.setup?.commands.at(-1)).toBe('make lint'))
+    expect(commandsOf()).toHaveProperty('value', 'bun install --frozen-lockfile\nmake\nmake test\nmake lint')
+  })
+
+  it('says why a change to a setup didn’t hold', async () => {
+    windowAt('/projects/p1?room=settings&section=running', {
+      setRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'ProjectRefused', message: 'Name each file from the repository’s root.' })
+      }),
+    })
+    const files = await screen.findByRole('textbox', { name: 'meridian-api: files copied from your checkout' })
+    await userEvent.click(files)
+    await userEvent.type(files, '{End}\n../secrets')
+    await userEvent.tab()
+    expect((await screen.findByRole('alert')).textContent).toBe('Name each file from the repository’s root.')
+    await waitFor(() => expect(files).toHaveProperty('value', '.env'))
+  })
+
   it('renames the project in place: its front page and its tab take the new name, without a restart', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
@@ -181,17 +302,17 @@ describe('a project’s settings', () => {
   it('draws the project in another ink, at once and everywhere; another project’s ink says whose it is', async () => {
     const { client } = windowAt('/projects/p1')
     await screen.findByRole('heading', { level: 1, name: 'meridian' })
-    expect(washOf('meridian')).toContain('--project-teal')
+    expect(inkOf('meridian')).toBe('teal')
     await openSettings()
     const general = sheet('General')
     expect(general.getByRole('radio', { name: 'Teal' })).toHaveProperty('ariaChecked', 'true')
     expect(general.getByRole('radio', { name: 'Clay, Halyard’s' })).toBeTruthy()
     await userEvent.click(general.getByRole('radio', { name: 'Rose' }))
-    expect(washOf('meridian')).toContain('--project-rose')
+    expect(inkOf('meridian')).toBe('rose')
     await waitFor(() => expect(client.setProjectInk).toHaveBeenCalledWith('p1', 'rose'))
     // The projects are read again, so the tabs and the home draw it in its new ink too.
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
-    expect(washOf('meridian')).toContain('--project-rose')
+    expect(inkOf('meridian')).toBe('rose')
   })
 
   it('puts the name back and says why when a rename doesn’t hold', async () => {
@@ -215,7 +336,7 @@ describe('a project’s settings', () => {
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(conflicts)).toBe('When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.')
+    expect(descriptionOf(conflicts)).toBe('')
     await userEvent.click(conflicts)
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
@@ -223,7 +344,7 @@ describe('a project’s settings', () => {
     // On, every open task can be looked at now, rather than as each default branch moves.
     await userEvent.click(tasks.getByRole('button', { name: 'Look for conflicts now' }))
     expect(client.lookForConflicts).toHaveBeenCalledWith('p1')
-    expect(descriptionOf(conflicts)).toContain('Looking at each open task now.')
+    expect(descriptionOf(conflicts)).toContain('Looking…')
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
@@ -236,9 +357,7 @@ describe('a project’s settings', () => {
       name: 'Move issues along with their tasks',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toBe(
-      'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
-    )
+    expect(descriptionOf(move)).toBe('To In Progress, In Review, then Done')
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
@@ -246,17 +365,43 @@ describe('a project’s settings', () => {
     expect(move.getAttribute('aria-checked')).toBe('false')
   })
 
-  it('lets changes to issues apply without a card once switched on, off until then', async () => {
+  it('pushes the lead’s commits by itself unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
-    const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
-    expect(change.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(change)).toBe(
-      'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
+    const push = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Push the lead’s commits automatically',
+    })
+    expect(push.getAttribute('aria-checked')).toBe('true')
+    expect(descriptionOf(push)).toBe(
+      'When a lead’s turn ends, what it committed goes up to its pull request, even after you’ve looked. If someone else pushed there, it waits for you.',
     )
-    await userEvent.click(change)
-    expect(change.getAttribute('aria-checked')).toBe('true')
-    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
+    await userEvent.click(push)
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
+  })
+
+  it('posts a task’s screenshots to its pull request by itself once switched on, off until then', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const post = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
+      name: 'Post screenshots to pull requests automatically',
+    })
+    expect(post.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(post)).toBe(
+      'A task’s Outputs screenshots go in one comment on its pull request, updated as they change. Off, you post them from Outputs.',
+    )
+    await userEvent.click(post)
+    expect(post.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', postScreenshots: true }))
+  })
+
+  it('has no switch for changing issues without asking: an issue card’s Always file at once says it, kept as a note', async () => {
+    windowAt('/projects/p1')
+    await openSettings('Rules')
+    const may = within(await screen.findByRole('region', { name: 'Agents may' }))
+    expect(may.getAllByRole('switch').map((one) => one.getAttribute('aria-label') ?? one.textContent)).toHaveLength(1)
+    expect(may.getByRole('switch', { name: 'Leads can reach the web' })).toBeTruthy()
+    expect(may.queryByRole('switch', { name: 'Change issues without asking' })).toBeNull()
   })
 
   it('switches back, saying why under the one that didn’t hold, and the other says nothing of it', async () => {
@@ -363,7 +508,7 @@ describe('a project’s settings', () => {
     await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Remove meridian from Althar?' }))
     expect(dialog.getByText(/Its task under way stops/)).toBeTruthy()
-    expect(dialog.getByText(/stay in ~\/Althar\/meridian/)).toBeTruthy()
+    expect(dialog.getByText(/Its folders, worktrees and branches stay/)).toBeTruthy()
     expect(client.removeProject).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Remove project' }))
     await waitFor(() => expect(client.removeProject).toHaveBeenCalledWith('p1'))
@@ -634,6 +779,153 @@ describe('a project’s trackers, in its settings', () => {
     await waitFor(() => expect(goTo.textContent).toContain('Where its issues are'))
   })
 
+  describe('with a tracker bound', () => {
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'Blushh' } }
+    const signedOut: ConnectionSummary = { ...fnt, state: 'reauth_required' }
+    const binding: ProjectTracker = { connectionId: 'conn_fnt', container: { id: 'team-f', name: 'Blushh Core' } }
+    const withBoard = (tasks: ReadonlyArray<BoardTask>, connection: ConnectionSummary, bound: ProjectTracker | null) => ({
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, connection] })),
+      getProjectTracker: vi.fn(async () => bound),
+      listContainers: vi.fn(async () => [{ id: 'team-f', key: 'FNT', name: 'Blushh Core' }]),
+    })
+
+    it('bound by hand with no issue yet, never says there is no tracker, and shows who it is connected as and a link', async () => {
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+      windowAt('/projects/p1', withBoard([], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Connected as mate')).toBeTruthy()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+      expect(trackers.queryByRole('button', { name: 'Connect a tracker' })).toBeNull()
+      expect(trackers.getByRole('button', { name: 'Connect another' })).toBeTruthy()
+      await userEvent.click(trackers.getByRole('button', { name: 'Open on Linear' }))
+      expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
+      opened.mockRestore()
+    })
+
+    it('shows the bound tracker in the project’s header, opening its workspace', async () => {
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+      windowAt('/projects/p1', withBoard([], fnt, binding))
+      await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
+      const made = await screen.findByRole('menu', { name: 'Made of' })
+      await userEvent.click(within(made).getByRole('menuitem', { name: 'Linear issues' }))
+      expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
+      opened.mockRestore()
+    })
+
+    it('asks to sign in again where the bound connection is not ready', async () => {
+      windowAt('/projects/p1', withBoard([], signedOut, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      // Its page is still there to open beside it.
+      expect(trackers.getByRole('button', { name: 'Open on Linear' })).toBeTruthy()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('bound to a workspace alone, with two teams learned, takes neither for the bound one and does not say drafts go to either', async () => {
+      windowAt(
+        '/projects/p1',
+        withBoard([taskFrom('MER-12', 'conn_fnt'), taskFrom('FNT-3', 'conn_fnt')], fnt, { connectionId: 'conn_fnt', container: null }),
+      )
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('FNT issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+      expect(trackers.getAllByText(/the bound workspace is above/)).toHaveLength(2)
+    })
+
+    it('bound to a signed-out workspace whose team cannot be read, keeps the sign-in prompt and does not take another team for the bound one', async () => {
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12', 'conn_fnt')], signedOut, binding),
+        listContainers: vi.fn(async () => {
+          throw new Error('signed out')
+        }),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect((await trackers.findAllByText('Signed out as mate')).length).toBeGreaterThan(0)
+      expect(trackers.getAllByRole('button', { name: 'Sign in again' }).length).toBeGreaterThan(0)
+      expect(trackers.getByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+
+    it('bound through a ready account of a workspace where another account is signed out, says it is connected', async () => {
+      const other = { ...fnt, id: 'conn_other', state: 'reauth_required' as const, account: { login: 'sam', name: 'Sam' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('FNT-12', 'conn_other'), taskFrom('FNT-13', 'conn_fnt')], fnt, binding),
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, fnt, other] })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Connected as mate')).toBeTruthy()
+      expect(trackers.queryByRole('button', { name: 'Sign in again' })).toBeNull()
+      expect(trackers.getAllByText(/issues · Linear/)).toHaveLength(1)
+    })
+
+    it('learned and not bound, lists it as before, with Connect a tracker', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, null))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Connect a tracker' })).toBeTruthy()
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+    })
+
+    it('learned and bound to the same team, lists it once', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('FNT-12', 'conn_fnt')], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('FNT issues · Linear')).toBeTruthy()
+      expect(trackers.getAllByText(/issues · Linear/)).toHaveLength(1)
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('learned on another team of the bound workspace, lists both, the bound first, and says drafts go to the bound one', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+
+    it('bound to a workspace that needs signing in, keeps that sign-in prompt where another workspace has an issue with no connection', async () => {
+      const other = { ...linear('ready', 'conn_other', 'sam'), workspace: { key: 'other', name: 'other' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12')], signedOut, binding),
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          connections: [githubConnection, signedOut, other],
+        })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      expect(trackers.getByText('MER issues · Linear')).toBeTruthy()
+    })
+
+    it('learned on one workspace and bound to another, lists both and says where drafts do not go', async () => {
+      const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12', 'conn_althar')], fnt, binding),
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, fnt, althar] })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+  })
+
   it('says none has been named yet, offers to connect one, and leads to Althar’s own connections', async () => {
     const { router } = windowAt('/projects/p1')
     await openSettings('Code and issues')
@@ -696,11 +988,7 @@ describe('what a project runs, in its settings', () => {
     windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
     await openSettings('Running')
     const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
-    expect(
-      await where.findByText(
-        'Leave it on its branch. Nothing goes to GitHub until Althar is connected there. Then it opens a draft pull request.',
-      ),
-    ).toBeTruthy()
+    expect(await where.findByText('Leave it on its branch. GitHub isn’t connected.')).toBeTruthy()
     expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
     await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
     expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
@@ -862,12 +1150,12 @@ describe('a project’s repositories, in its settings', () => {
     const { region } = await openRepositories()
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(host.pickFolder).toHaveBeenCalledWith('project')
-    expect(await screen.findByText('Reading it. Nothing in it changes')).toBeTruthy()
+    expect(await screen.findByText('Reading…')).toBeTruthy()
     expect(screen.getByText('~/code/meridian-docs')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_docs'))
     added()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
 
     // Dropped on them, each folder is granted and added the same way.
     const folder = new File([], 'meridian-docs')
@@ -933,7 +1221,7 @@ describe('a project’s repositories, in its settings', () => {
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBe('true')
     await waitFor(() => expect(client.addRepositories).toHaveBeenLastCalledWith('p1', 'meridian-sdk'))
     pending[1]?.()
-    await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Reading…')).toBeNull())
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBeNull()
   })
 
@@ -996,4 +1284,13 @@ describe('a project’s repositories, in its settings', () => {
     await openSettings('Code and issues')
     expect(await sheet('Code and issues').findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
   })
+})
+
+it('keeps the project web switch, default on, with the privacy trade-off visible', async () => {
+  const { client } = windowAt('/projects/p1?room=settings&section=rules')
+  const toggle = await screen.findByRole('switch', { name: 'Leads can reach the web' })
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  expect(descriptionOf(toggle)).toContain('Pages could steer a lead into sending private code in a URL')
+  await userEvent.click(toggle)
+  await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', leadsReachWeb: false }))
 })

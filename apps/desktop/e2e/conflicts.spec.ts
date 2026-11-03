@@ -6,15 +6,15 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, startTask, still, toConversation } from './support'
 
 /*
  * A conflict is never left without a word (ADR-030), in a real window with
  * the fake agent: a task's branch stops merging with main, the project's
  * leads are told to resolve conflicts from its settings, which then offer to
  * look at every task again; its lead can't resolve it (`[lead:resolve-fails]`),
- * and its card and its task say why, each with Resolve now, which asks the
- * lead again though nothing moved. The screenshots it takes are this
+ * and its card and its task say why; its task, which the card opens, with
+ * Resolve now, which asks the lead again though nothing moved (DEV-173). The screenshots it takes are this
  * change's own evidence (test-results/conflicts-*.png).
  */
 
@@ -44,22 +44,22 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await conflicts.click()
     await expect(conflicts).toBeChecked()
     await page.getByRole('button', { name: 'Look for conflicts now' }).click()
-    await expect(page.getByText('Looking at each open task now.')).toBeVisible()
+    await expect(page.getByText('Looking…')).toBeVisible()
     // The innermost of what holds both the switch and its note: the setting's row.
     await page
-      .locator('*', { has: conflicts, hasText: 'Looking at each open task now.' })
+      .locator('*', { has: conflicts, hasText: 'Looking…' })
       .last()
       .screenshot({ path: 'test-results/conflicts-settings.png', animations: 'disabled', scale: 'css' })
     await backToWork(page)
 
-    // The lead couldn't resolve it: the card says why, with Resolve now.
+    // The lead couldn't resolve it: the card says why, and opens its task, as asking again from it asks what the lead couldn't do.
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
     const card = work.getByRole('article').filter({ hasText: 'Add a retry' })
-    await expect(card.getByText('Merge conflict')).toBeVisible({ timeout: 30_000 })
+    await expect(card.getByText('Merge conflict')).toBeVisible()
     await expect(card.getByText(/The lead couldn’t resolve the conflict with main/)).toBeVisible()
-    await expect(card.getByRole('button', { name: 'Resolve now' })).toBeVisible()
-    await page.waitForTimeout(400)
+    await expect(card.getByRole('button', { name: 'Resolve now' })).toHaveCount(0)
+    await still(page)
     await card.screenshot({ path: 'test-results/conflicts-card.png', animations: 'disabled', scale: 'css' })
 
     // In its task, over the composer, the same, with Resolve now.
@@ -67,14 +67,14 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await toConversation(page)
     const line = page.getByText(/The lead couldn’t resolve the conflict with main/).last()
     await expect(line).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/conflicts-task.png', animations: 'disabled', scale: 'css' })
 
     // Resolve now asks the lead again, though neither main nor the branch moved: it can't, and says so once more.
     const said = page.getByText(/^Couldn.t settle the conflict: both sides change the same lines\.$/)
     const before = await said.count()
     await page.getByRole('button', { name: 'Resolve now' }).click()
-    await expect.poll(() => said.count(), { timeout: 30_000 }).toBeGreaterThan(before)
+    await expect.poll(() => said.count()).toBeGreaterThan(before)
   } finally {
     await electronApp.close()
   }

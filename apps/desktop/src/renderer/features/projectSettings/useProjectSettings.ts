@@ -21,7 +21,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'moveIssues' | 'changeIssues'
+export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues'
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -44,13 +44,17 @@ export interface ProjectSettingsModel {
   readonly noteFailed: string | null
   /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
+  /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
+  readonly setPushCommits: (on: boolean) => void
+  /** Allows native web reads for new lead and reviewer sessions (ADR-078). */
+  /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
+  readonly setPostScreenshots: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
   readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
-  readonly setChangeIssues: (on: boolean) => void
   /** Which switch didn't hold, and why. */
   readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
@@ -142,8 +146,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setLooked('asked')
     client.lookForConflicts(projectId).catch((failure: unknown) => setLooked({ failed: messageOf(failure) }))
   }, [client, projectId])
+  const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
+  const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
-  const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -220,10 +225,11 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     editNote,
     noteFailed,
     setResolveConflicts,
+    setPushCommits,
+    setPostScreenshots,
     lookForConflicts,
     looked,
     setMoveIssues,
-    setChangeIssues,
     ruleFailed,
     removing,
     askRemove,

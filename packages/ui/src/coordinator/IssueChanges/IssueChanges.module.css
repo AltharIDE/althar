@@ -21,13 +21,36 @@
   color: var(--t-3);
 }
 .why {
+  display: flex;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .why::before {
   content: '·';
   margin-right: 6px;
+}
+/* the task's title gives way; the pull request it links to stays */
+.task {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task::after {
+  content: '·';
+  margin: 0 6px;
+}
+.pr {
+  flex: none;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+.pr:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
+.arrow {
+  color: var(--t-3);
 }
 
 .issues {
@@ -197,4 +220,10 @@ a.key:hover {
 .struck {
   text-decoration: line-through;
   text-decoration-color: var(--t-4);
+}
+
+/* on changes made at once: ask first next time, at the line's end */
+.lineAsk {
+  flex: none;
+  margin-left: auto;
 }

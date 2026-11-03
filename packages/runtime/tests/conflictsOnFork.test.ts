@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -47,12 +47,12 @@ describe('a conflict on a pull request from a fork into the repository it came f
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
       assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
       const threadId = ready?.threadId ?? ''
       // Upstream's main moves on, conflicting with the task's change.
       moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
       assert.include(note, 'merge upstream/main into it')
       assert.strictEqual(execFileSync('git', ['merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'], { cwd: bare }).toString(), '')

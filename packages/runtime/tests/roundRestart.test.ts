@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Plans } from '../src/Plans'
@@ -58,7 +58,7 @@ describe('a round of work a restart stopped', () => {
           end: null,
         })
         yield* plans.start(planId, actor)
-        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded', Duration.seconds(20))
+        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
         // The person asks its lead something: a round of work opens, and its lead looks around.
         const body = 'What does the retry do? [lead:explore]'
         yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: created.threadId, body })
@@ -81,9 +81,7 @@ describe('a round of work a restart stopped', () => {
           SELECT a.state, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
           JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL`
         assert.deepStrictEqual([attempt?.state, JSON.parse(attempt?.output ?? '{}')], ['succeeded', { quiet: true }])
-        assert.isFalse(
-          (yield* notices(task.threadId)).some((notice) => notice.title === 'Althar restarted; the step carried on from here.'),
-        )
+        assert.isFalse((yield* notices(task.threadId)).some((notice) => notice.title === 'Carried on after Althar restarted.'))
       }).pipe(Effect.provide(withQueries(file)))
     }),
   )

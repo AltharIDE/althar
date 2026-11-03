@@ -1,7 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT } from '../../fixtures/plan'
+import {
+  CLAUDE_PLENTY,
+  CLAUDE_TWO,
+  CLAUDE_UNREAD,
+  CODEX_NEARLY,
+  CODEX_PLENTY,
+  CODEX_SIGNED_OUT,
+  OPENCODE_GO,
+  OPENCODE_GO_CONNECTED,
+  OPENCODE_GO_SIGN_IN,
+} from '../../fixtures/plan'
 import { LOAD_BUSY, LOAD_SLOTS } from '../../fixtures/load'
 import { LoadMeter } from '../LoadMeter/LoadMeter'
 import { PlanGauge } from './PlanGauge'
@@ -81,10 +91,63 @@ export const AllSignedOut: Story = {
   },
 }
 
+/** Claude Code's windows all reset since it was read: no figure, never all of its plan left, and its detail says why it wasn't read again. */
+export const Unread: Story = {
+  args: { agents: [CODEX_PLENTY, CLAUDE_UNREAD], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await expect(within(canvasElement).getByRole('button', { name: /^Plan usage: Codex has / })).toBeInTheDocument()
+    await expect(page.getByText('Not read since reset')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: /Claude Code/ }))
+    await expect(page.getByText('read 2 days ago')).toBeInTheDocument()
+    await expect(page.getByText(/Its sign-in has expired/)).toBeInTheDocument()
+  },
+}
+
+/** Every agent read unread since its reset: the gauge unlit, and the peek says which. */
+export const AllUnread: Story = {
+  args: { agents: [CLAUDE_UNREAD], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code not read since reset' })).toBeInTheDocument()
+  },
+}
+
 /** Nothing read yet: the gauge unlit, and the peek says so. */
 export const NothingRead: Story = {
   args: { agents: [], defaultOpen: true },
   play: async () => {
     await expect(within(document.body).getByText('Nothing read yet')).toBeInTheDocument()
+  },
+}
+
+/** OpenCode Go beside the others, its tightest window its figure, as any plan's. */
+export const OpenCodeGo: Story = {
+  args: { agents: [OPENCODE_GO, CODEX_PLENTY], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByText('Weekly limit · until Mon 01:00')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: /^OpenCode Go/ }))
+    await expect(page.getByText('Month')).toBeInTheDocument()
+  },
+}
+
+/** OpenCode Go signed in with its key alone: connected, with no bar, and why in its detail. */
+export const OpenCodeGoConnected: Story = {
+  args: { agents: [CLAUDE_PLENTY, OPENCODE_GO_CONNECTED], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByText('Plenty left')).toBeInTheDocument()
+    await expect(page.getByText('Connected')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: /^OpenCode Go/ }))
+    await expect(page.getByText(/only through an OpenCode Console sign-in/)).toBeInTheDocument()
+  },
+}
+
+/** OpenCode Go's key refused: its row's button signs it in again. */
+export const OpenCodeGoSignIn: Story = {
+  args: { agents: [CLAUDE_PLENTY, OPENCODE_GO_SIGN_IN], defaultOpen: true, onSignIn: fn() },
+  play: async ({ args }) => {
+    await userEvent.click(within(document.body).getByRole('button', { name: 'Sign in again' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith('opencode')
   },
 }

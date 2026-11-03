@@ -101,7 +101,7 @@ export function EditorWindow({ className, style }: { className?: string; style?:
           <i />
           <i />
         </span>
-        <span className={s.editorTitle}>router.ts — meridian-api</span>
+        <span className={s.editorTitle}>router.ts — tally-api</span>
       </div>
       <div className={s.editorBody}>
         <div className={s.files}>
@@ -128,7 +128,7 @@ export function EditorWindow({ className, style }: { className?: string; style?:
 export function BrowserWindow({
   className,
   style,
-  url = 'github.com/meridian/meridian-api/pull/1191',
+  url = 'github.com/tally/tally-api/pull/1191',
 }: {
   className?: string
   style?: CSSProperties
@@ -142,7 +142,7 @@ export function BrowserWindow({
           <i />
           <i />
         </span>
-        <span className={cx(s.tab, s.tabOn)}>Pull request #1191 · meridian-api</span>
+        <span className={cx(s.tab, s.tabOn)}>Pull request #1191 · tally-api</span>
         <span className={s.tab}>Refunds · Stripe Docs</span>
         <span className={s.tab}>Partner dashboard</span>
       </div>
@@ -187,7 +187,7 @@ export function TerminalWindow({ className, style }: { className?: string; style
           <i />
           <i />
         </span>
-        <span className={s.editorTitle}>meridian-api — zsh</span>
+        <span className={s.editorTitle}>tally-api — zsh</span>
       </div>
       <div className={s.termBody}>
         {lines.map(([p, l], i) => (

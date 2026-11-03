@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import { type MessageSender, Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
 import {
   type AgentDefinition,
   AgentExited,
@@ -14,12 +14,14 @@ import {
   OptionUnavailable,
   TurnInProgress,
 } from '@althar/provider-adapters'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { ToolServer } from '../src/ToolServer'
+import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -39,6 +41,8 @@ import {
   TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
+import { Projects } from '../src/Projects'
+import * as Runtime from '../src/Runtime'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
@@ -47,6 +51,7 @@ import { type Failure, Failures } from '../src/Failures'
 import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
+import { until } from '@althar/testing/effect'
 
 import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
@@ -58,6 +63,7 @@ const opened: Array<string> = []
 /** The runtime serving the API on one end of a channel, and a client on the other, as the app's window has it. */
 const connected = (
   options: {
+    readonly sender?: MessageSender
     readonly countdown?: Duration.Duration
     readonly signedOut?: ReadonlyArray<string>
     readonly connectors?: Layer.Layer<Connectors>
@@ -98,7 +104,14 @@ const connected = (
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          options.sender ?? { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     /** A folder the person chose, as the app's main process allows it. */
@@ -132,16 +145,6 @@ const reported = <R>(context: Context.Context<R>) =>
     return heard
   })
 
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
-  })
-
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
@@ -153,19 +156,19 @@ describe('the API', () => {
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Run the server' })
         yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.streams, disposition: 'after_current' })
-        const running = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+        const running = yield* until(client.GetThread({ threadId: task.threadId }), (thread) =>
           thread.items.some((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev'),
         )
         const run = running.items.find((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev')
         // A window that opens now reads what it printed before it looked.
-        const soFar = yield* eventually(client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' }), (read) =>
+        const soFar = yield* until(client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' }), (read) =>
           read.text.includes('ready in 3 ms'),
         )
         assert.isTrue(soFar.text.startsWith('ready in 1 ms'))
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
-        const stopped = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+        const stopped = yield* until(client.GetThread({ threadId: task.threadId }), (thread) =>
           thread.items.some((item) => item.id === run?.id && item.kind === 'tool_call' && item.content.output !== null),
         )
         const ended = stopped.items.find((item) => item.id === run?.id)
@@ -194,9 +197,9 @@ describe('the API', () => {
         )
         yield* Effect.sleep('50 millis')
         yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.handsBack, disposition: 'after_current' })
-        const thread = yield* eventually(
+        const thread = yield* until(
           client.GetThread({ threadId: task.threadId }),
           (value) => idle(value) && value.items.some((item) => item.kind === 'agent_message' && item.content.text.includes('charges')),
         )
@@ -326,9 +329,9 @@ describe('the API', () => {
         const sessionId = yield* client.StartSession(starting)
         // A retried start is the same start.
         assert.strictEqual(yield* client.StartSession(starting), sessionId)
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.hello, disposition: 'after_current' })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) => texts(value).at(-1) === 'Hello')
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) => texts(value).at(-1) === 'Hello')
         assert.isAbove(thread.cursor, listed.cursor)
         assert.strictEqual(thread.task.title, 'Say hello')
         assert.strictEqual(thread.session?.agentId, 'codex')
@@ -350,7 +353,7 @@ describe('the API', () => {
         // What the agent already has can't be taken back.
         assert.strictEqual(
           (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: newest.items[0]?.id ?? '' }))).message,
-          "The agent already has that message, so it can't be taken back.",
+          'The agent already has that message.',
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
@@ -358,7 +361,7 @@ describe('the API', () => {
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.tool, disposition: 'after_current' })
-        const tooled = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const tooled = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           value.items.some((item) => item.kind === 'tool_call' && item.content.status === 'completed'),
         )
         const tool = tooled.items.find((item) => item.kind === 'tool_call')
@@ -407,7 +410,7 @@ describe('the API', () => {
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.updates, disposition: 'after_current' })
         const [usage] = (yield* Fiber.join(contexts)) as ReadonlyArray<WatchEvent>
         assert.deepStrictEqual(usage, { _tag: 'Context', threadId: task.threadId, used: 1200, size: 200_000 })
-        const full = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
+        const full = yield* until(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
         assert.deepStrictEqual(full.session?.context, { used: 1200, size: 200_000 })
         // The plan windows the agent reports with its usage reach the account's usage as the window watches, and each model's room.
         const watched = yield* Effect.forkChild(
@@ -488,7 +491,7 @@ describe('the API', () => {
             ['opencode', 'signed_in', ['signed_in'], null],
           ],
         )
-        const [failure] = yield* eventually(
+        const [failure] = yield* until(
           Effect.sync(() => heard),
           (list) => list.length > 0,
         )
@@ -521,7 +524,7 @@ describe('the API', () => {
         assert.deepStrictEqual([claude?.signIn, claude?.problem, codex?.signIn, codex?.problem], ['signed_in', null, 'signed_in', null])
         assert.deepInclude(opencode, { id: 'opencode', signIn: 'unknown', accounts: [], version: null, installed: true, download: null })
         assert.strictEqual(opencode?.problem, "Althar couldn't check Fake opencode. Its log has the details.")
-        const [failure] = yield* eventually(
+        const [failure] = yield* until(
           Effect.sync(() => heard),
           (list) => list.some((each) => each.where === 'Status.agent'),
         )
@@ -546,7 +549,7 @@ describe('the API', () => {
         const heard = yield* reported(context)
         const error = yield* Effect.flip(client.Status({}))
         assert.deepStrictEqual([error.reason, error.message], ['Unknown', "Althar's runtime couldn't do that. Its log has the details."])
-        const failures = yield* eventually(
+        const failures = yield* until(
           Effect.sync(() => heard),
           (list) => list.some((each) => each.where === 'Status'),
         )
@@ -563,22 +566,25 @@ describe('the API', () => {
     ),
   )
 
-  it.live('hears a change as soon as it is written, not at the next poll', () =>
+  it.effect('hears a change as soon as it is written, not at the next poll', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const { cursor } = yield* client.ListProjects()
-        const heard = yield* Effect.forkChild(
-          Stream.runHead(Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed')),
+        // What the watch hears changed, as it hears it.
+        const heard = yield* Queue.unbounded<string>()
+        yield* Effect.forkChild(
+          Stream.runForEach(client.Watch({ since: cursor }), (event) =>
+            event._tag === 'Changed' ? Queue.offer(heard, event.aggregateId) : Effect.void,
+          ),
         )
-        // Let the watch reach its wait, so only a wake-up can bring the change in time.
-        yield* Effect.sleep('100 millis')
-        const started = Date.now()
-        yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Quick' })
-        yield* Fiber.join(heard)
-        // The fallback read is a second away; the signal brings it far sooner.
-        assert.isBelow(Date.now() - started, 500)
+        const hears = (id: string): Effect.Effect<void> =>
+          Effect.flatMap(Queue.take(heard), (got) => (got === id ? Effect.void : hears(id)))
+        // Once it hears the first, it is listening, and reads again only when woken.
+        yield* hears((yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'First' })).id)
+        // The test's clock stands still, so the feed's fallback read never comes: only the store's signal brings this.
+        yield* hears((yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Quick' })).id)
       }),
     ),
   )
@@ -590,12 +596,12 @@ describe('the API', () => {
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         const switching = { commandId: commandId(), threadId: task.threadId, agentId: 'opencode', body: 'Take it from here' }
         yield* client.SwitchAgent(switching)
         // Sent again, it is the same switch: the message isn't said twice.
         yield* client.SwitchAgent(switching)
-        const after = yield* eventually(
+        const after = yield* until(
           client.GetThread({ threadId: task.threadId }),
           (thread) => idle(thread) && thread.session?.agentId === 'opencode',
         )
@@ -607,10 +613,12 @@ describe('the API', () => {
     ),
   )
 
-  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () =>
-    Effect.scoped(
+  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () => {
+    // Its answer is held until the test has read the turn running.
+    const coordinator = holds()
+    return Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant } = yield* connected()
+        const { client, grant } = yield* connected({ agents: fakeAgents({ holds: coordinator }) })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
         const sent = Date.now()
@@ -620,7 +628,7 @@ describe('the API', () => {
           body: 'Why is checkout slow? [answers-after:1s]',
           disposition: 'after_current',
         })
-        const thinking = yield* eventually(
+        const thinking = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => snapshot.session?.turnRunning === true,
         )
@@ -629,7 +637,8 @@ describe('the API', () => {
         assert.isAtMost(started, Date.now())
         // Before its first turn ends, none has.
         assert.isNull(thinking.session?.turnEndedAt)
-        const answered = yield* eventually(
+        coordinator.open('[answers-after:1s]')
+        const answered = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => snapshot.session !== null && !snapshot.session.turnRunning,
         )
@@ -637,8 +646,8 @@ describe('the API', () => {
         // Between turns, when the last ended: what was said before it has been answered.
         assert.isAtLeast(Date.parse(answered.session?.turnEndedAt ?? ''), started)
       }),
-    ),
-  )
+    )
+  })
 
   it.live('asks the person, and takes their answer', () =>
     Effect.scoped(
@@ -647,14 +656,14 @@ describe('the API', () => {
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Deploy' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         yield* client.Send({
           commandId: commandId(),
           threadId: task.threadId,
           body: scenarios.commandChoices,
           disposition: 'after_current',
         })
-        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        const waiting = yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         assert.deepStrictEqual(
           { title: waiting.attention[0]?.title, reason: waiting.attention[0]?.reason, command: waiting.attention[0]?.command },
           { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'make deploy' },
@@ -669,10 +678,7 @@ describe('the API', () => {
         yield* client.Answer(answering)
         // Answered twice by a retry, it is answered once.
         yield* client.Answer(answering)
-        const after = yield* eventually(
-          client.GetThread({ threadId: task.threadId }),
-          (thread) => idle(thread) && thread.attention.length === 0,
-        )
+        const after = yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.attention.length === 0)
         assert.strictEqual(after.attention.length, 0)
         // What the person turned down says so.
         const deploy = after.items.find((item) => item.kind === 'tool_call')
@@ -756,28 +762,28 @@ describe('the API', () => {
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
         const run = (command: string) =>
           client.Send({ commandId: commandId(), threadId: task.threadId, body: `${scenarios.run}${command}`, disposition: 'after_current' })
 
         yield* run('git status')
-        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        const waiting = yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         assert.deepStrictEqual(waiting.attention[0]?.always?.allow, ['exact', 'prefix'])
         yield* client.Answer({ commandId: commandId(), attentionId: waiting.attention[0]?.id ?? '', decision: 'allow', always: 'prefix' })
         const rules = yield* client.GetProjectRules({ projectId: project.id })
         assert.deepStrictEqual(rules.commands, [{ pattern: 'git status', decision: 'allow' }])
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.attention.length === 0)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.attention.length === 0)
 
         // Taken off on the rules screen, the next asks; put back there, the call waiting is answered by it.
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [] })
         yield* run('git status -s')
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         yield* client.SetProjectRules({
           commandId: commandId(),
           projectId: project.id,
           commands: [{ pattern: 'git status -s', decision: 'allow', match: 'exact' }],
         })
-        const after = yield* eventually(
+        const after = yield* until(
           client.GetThread({ threadId: task.threadId }),
           (thread) =>
             idle(thread) && thread.attention.length === 0 && thread.items.filter((item) => item.kind === 'tool_call').length === 2,
@@ -846,10 +852,7 @@ describe('the API', () => {
         const plain = mkdtempSync(join(tmpdir(), 'althar-plain-'))
         const error = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: yield* grant(plain) }))
         assert.instanceOf(error, ApiError)
-        assert.deepStrictEqual(
-          [error.reason, error.message],
-          ['NotARepository', `${plain} isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.`],
-        )
+        assert.deepStrictEqual([error.reason, error.message], ['NotARepository', `${plain} isn't a git repository. Choose another folder.`])
         // The window can't name a folder the person didn't choose.
         assert.strictEqual(
           (yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: 'grant_made_up' }))).message,
@@ -858,21 +861,21 @@ describe('the API', () => {
         assert.strictEqual((yield* Effect.flip(client.GetThread({ threadId: 'thr_missing' }))).message, "That task isn't there any more.")
         assert.strictEqual(
           (yield* Effect.flip(client.StopSession({ commandId: commandId(), threadId: 'thr_missing' }))).message,
-          'No agent is working on this task.',
+          'The task isn’t running.',
         )
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Nothing' })
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
+          ['SessionFailed', `missing couldn't start. althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
+          description: `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -926,10 +929,7 @@ describe('accounts, through the API', () => {
           yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: null })
           assert.isNull((yield* client.ListProjects()).projects.find((each) => each.id === project.id)?.onlyAccounts)
           const refused = yield* Effect.flip(client.RemoveAccount({ commandId: commandId(), accountId: codex?.accounts[0]?.id ?? '' }))
-          assert.deepStrictEqual(
-            [refused.reason, refused.message],
-            ['AccountRefused', "That's the agent's usual sign-in, its first account: it stays."],
-          )
+          assert.deepStrictEqual([refused.reason, refused.message], ['AccountRefused', "That's the agent's usual sign-in: it stays."])
           // Where nothing can open Terminal, the person is given the line to run.
           const { client: plain } = yield* connected({ noTerminal: true })
           const [main] = (yield* plain.Status({})).agents.find((agent) => agent.id === 'codex')?.accounts ?? []
@@ -1074,6 +1074,15 @@ describe('finished tasks’ folders, through the API', () => {
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
         yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
+        const before = yield* client.GetSettings({})
+        assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3 })
+        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2 })
+        yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
+        const after = yield* client.GetSettings({})
+        assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2 })
+        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
@@ -1087,7 +1096,7 @@ describe('finished tasks’ folders, through the API', () => {
               sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 86_400_000).toISOString()} WHERE id = ${task.id}`,
           ),
         )
-        const listed = yield* eventually(client.GetTaskFolders({}), (folders) => !folders.measuring && folders.folders.length === 1)
+        const listed = yield* until(client.GetTaskFolders({}), (folders) => !folders.measuring && folders.folders.length === 1)
         assert.deepStrictEqual(
           listed.folders.map((folder) => [folder.taskId, folder.threadId, folder.title, folder.kind, folder.held]),
           [[task.id, task.threadId, 'Add a retry', 'merged', null]],
@@ -1113,7 +1122,7 @@ describe('finished tasks’ folders, through the API', () => {
           ['You removed its folder', 'Folder back from its branch'],
         )
         // Opened today, it is held back.
-        const again = yield* eventually(client.GetTaskFolders({}), (folders) => folders.folders.length === 1)
+        const again = yield* until(client.GetTaskFolders({}), (folders) => folders.folders.length === 1)
         assert.strictEqual(again.folders[0]?.held?.why, 'opened')
       }),
     ),
@@ -1154,19 +1163,23 @@ describe('project rules, through the API', () => {
           commands: [],
           end: null,
           resolveConflicts: false,
+          pushCommits: true,
+          postScreenshots: false,
+          leadsReachWeb: true,
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
-          changeIssues: false,
           // A repository with no packages, on no host: only what every lead runs outside its sandbox.
           sandbox: {
             commands: ['ps', 'env -i'],
             hosts: [],
             edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
           },
+          // Nothing asked or was refused yet.
+          tally: [],
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1181,6 +1194,7 @@ describe('project rules, through the API', () => {
           commands: [{ pattern: 'terraform *', decision: 'ask' }],
           end: 'ready',
           resolveConflicts: true,
+          leadsReachWeb: false,
           usageLimit: 'wait',
           rotateAccounts: true,
           onlyAccounts: { codex: ['acc_x'] },
@@ -1192,6 +1206,7 @@ describe('project rules, through the API', () => {
             changed.commands,
             changed.end,
             changed.resolveConflicts,
+            changed.leadsReachWeb,
             changed.usageLimit,
             changed.rotateAccounts,
             changed.onlyAccounts,
@@ -1202,6 +1217,7 @@ describe('project rules, through the API', () => {
             [{ pattern: 'terraform *', decision: 'ask' }],
             'ready',
             true,
+            false,
             'wait',
             true,
             { codex: ['acc_x'] },
@@ -1276,10 +1292,7 @@ describe('project rules, through the API', () => {
         )
         assert.deepStrictEqual(
           [allowed.reason, allowed.message],
-          [
-            'RuleOnAnotherList',
-            'Commands starting “bun test” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
-          ],
+          ['RuleOnAnotherList', 'Commands starting “bun test” are on “Never”. Take them off “Never” first.'],
         )
         assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
           { pattern: 'bun test', decision: 'never' },
@@ -1538,7 +1551,7 @@ describe('a project’s menu, through the API', () => {
         assert.strictEqual(
           (yield* Effect.flip(client.LeaveOutRepository({ commandId: commandId(), projectId: project.id, repositoryId: api?.id ?? '' })))
             .message,
-          'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
+          'A project needs a repository. Add another first.',
         )
 
         // Added again, it comes back as it was; a fork comes with where its pull requests open.
@@ -1557,7 +1570,14 @@ describe('a project’s menu, through the API', () => {
           ],
         )
         const docs = again[2]
-        assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
+        // GitHub isn't connected, so whether the person can push to the repository it was forked from isn't known, and nothing is offered.
+        assert.deepStrictEqual(docs?.fork, {
+          fork: 'you/refund-docs',
+          upstream: 'meridian/refund-docs',
+          target: 'fork',
+          canPush: null,
+          offer: false,
+        })
         // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
         assert.deepStrictEqual(docs?.host, {
           product: 'github',
@@ -1623,7 +1643,7 @@ describe('a project’s menu, through the API', () => {
             { key: 'review', agentId: 'claude-code', model: null, skipped: true },
           ],
         })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session?.turnRunning === true)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.session?.turnRunning === true)
         const coordinator = yield* client.GetCoordinator({ projectId: project.id })
         yield* client.Send({
           commandId: commandId(),
@@ -1631,7 +1651,7 @@ describe('a project’s menu, through the API', () => {
           body: 'Add docs. [coordinator:plan]',
           disposition: 'after_current',
         })
-        const planned = yield* eventually(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+        const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
           snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null && item.content.phase === 'planned'),
         )
         const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
@@ -1650,8 +1670,8 @@ describe('a project’s menu, through the API', () => {
           [other.id],
         )
         // The lead and the coordinator stop.
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.session === null)
-        yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) => snapshot.session === null)
+        yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.session === null)
+        yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) => snapshot.session === null)
         // A window that hadn't heard can't start its plan, a task, an agent, or the coordinator again.
         assert.strictEqual(
           (yield* Effect.flip(client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'One more' }))).message,
@@ -1689,6 +1709,72 @@ describe('a project’s menu, through the API', () => {
   )
 })
 
+describe('a fork’s branches upstream, through the API', () => {
+  /** A fork of meridian/api, with GitHub connected, whose pull requests open on meridian/api from the fork's branches. */
+  const forkOpened = (can: boolean, target: 'upstream' | 'fork' = 'upstream') =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'api'])
+      github.addRepository(['meridian', 'api'])
+      github.letPush(['meridian', 'api'], can)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ api: [`origin=${HOST}/you/api.git`, `upstream=${HOST}/meridian/api.git`] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'api')) })
+      const [repository] = yield* client.GetRepositories({ projectId: project.id })
+      const repositoryId = repository?.id ?? ''
+      yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId, changeTarget: target })
+      const fork = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one?.fork)
+      return { client, github, projectId: project.id, repositoryId, fork }
+    })
+
+  it.live('says plainly the person can’t push there yet, offers nothing, and keeps its branches on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, repositoryId, fork } = yield* forkOpened(false)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: false, offer: false })
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.message, "You can't push to the repository it was forked from yet. Its owners can give you access.")
+        assert.deepInclude(yield* fork, { target: 'upstream' })
+      }),
+    ),
+  )
+
+  it.live('offers the same to one whose pull requests open on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fork } = yield* forkOpened(true, 'fork')
+        assert.deepInclude(yield* fork, { target: 'fork', canPush: true, offer: true })
+      }),
+    ),
+  )
+
+  it.live('offers once to push upstream when the host says the person can, and not again after not now or a choice', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, github, projectId, repositoryId, fork } = yield* forkOpened(true)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: true })
+        // Not now: the offer goes, and where the work goes stays.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, notNow: true })
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: false })
+        // Still a choice in its settings: its branches go upstream, and back to the fork, with no offer after.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' })
+        assert.deepInclude(yield* fork, { target: 'upstream_branch', offer: false })
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream' })
+        assert.deepInclude(yield* fork, { target: 'upstream', offer: false })
+        // The host is asked again as it is chosen: access taken away since, it isn't.
+        github.letPush(['meridian', 'api'], false)
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+})
+
 describe('the coordinator, through the API', () => {
   it.live('plans what the person asks for, and takes their changes to the plan', () =>
     Effect.scoped(
@@ -1703,7 +1789,7 @@ describe('the coordinator, through the API', () => {
           body: 'Add a retry. [coordinator:plan]',
           disposition: 'after_current',
         })
-        const planned = yield* eventually(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+        const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
           snapshot.items.some((item) => item.kind === 'task'),
         )
         const card = planned.items.find((item) => item.kind === 'task')
@@ -1733,7 +1819,7 @@ describe('the coordinator, through the API', () => {
           ],
         )
         yield* client.StartPlan({ commandId: commandId(), planId })
-        const started = yield* eventually(
+        const started = yield* until(
           client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' }),
           (item) => item.kind === 'task' && item.content.phase === 'running',
         )
@@ -1771,7 +1857,7 @@ describe('the coordinator, through the API', () => {
         // Sent again by a retry, it starts once.
         assert.strictEqual((yield* client.StartTask(starting)).id, task.id)
         yield* client.StartTask({ ...starting, commandId: commandId(), title: 'No description', description: undefined })
-        const snapshot = yield* eventually(client.GetCoordinator({ projectId: project.id }), (coordinator) =>
+        const snapshot = yield* until(client.GetCoordinator({ projectId: project.id }), (coordinator) =>
           coordinator.items.some((item) => item.kind === 'task' && item.content.phase === 'ready'),
         )
         const card = snapshot.items.find((item) => item.kind === 'task' && item.content.phase === 'ready')
@@ -1808,7 +1894,7 @@ describe('the coordinator, through the API', () => {
           description: '[lead:finish]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
-        const both = yield* eventually(
+        const both = yield* until(
           client.GetBoard({ projectId: project.id }),
           (board) => board.tasks.length === 2 && board.tasks.every((one) => one.phase === 'ready'),
         )
@@ -1862,7 +1948,7 @@ describe('the coordinator, through the API', () => {
           description: '[lead:finish] [lead:edit] [lead:resolve]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
-        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+        yield* until(client.GetBoard({ projectId: project.id }), (board) =>
           board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
         )
         // The default branch moves on, conflicting with what it changed; nobody merges, so nothing finds it.
@@ -1886,10 +1972,7 @@ describe('the coordinator, through the API', () => {
         yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: null })
         // The project turns its leads resolving conflicts on: the lead resolves it now, with no Merge pressed.
         yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: true })
-        const after = yield* eventually(
-          Effect.andThen(Effect.sleep('80 millis'), client.GetThread({ threadId: task.threadId })),
-          resolvedIn,
-        )
+        const after = yield* until(Effect.andThen(Effect.sleep('80 millis'), client.GetThread({ threadId: task.threadId })), resolvedIn)
         assert.deepStrictEqual(after.task.resolveConflicts, { task: null, project: true })
         assert.isFalse(resolvedIn(before))
       }),
@@ -1909,7 +1992,7 @@ describe('the coordinator, through the API', () => {
           description: '[lead:finish] [lead:edit] [lead:resolve-wait]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
-        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+        yield* until(client.GetBoard({ projectId: project.id }), (board) =>
           board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
         )
         const git = (...args: Array<string>) =>
@@ -1935,7 +2018,7 @@ describe('the coordinator, through the API', () => {
           )
         // The task has its lead resolve what conflicts, which it works at.
         yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: true })
-        yield* eventually(
+        yield* until(
           Effect.andThen(Effect.sleep('40 millis'), client.GetThread({ threadId: task.threadId, limit: 0 })),
           (thread) => thread.session?.turnRunning === true,
         )
@@ -1948,7 +2031,7 @@ describe('the coordinator, through the API', () => {
         const [interrupted] = yield* rounds()
         assert.strictEqual(interrupted?.state, 'failed')
         assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
         assert.isTrue(
           thread.items.some(
             (item) => item.kind === 'notice' && item.content.title?.startsWith('The lead couldn’t resolve the conflict with main') === true,
@@ -1995,7 +2078,7 @@ describe('the coordinator, through the API', () => {
           description: '[lead:wait]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
-        const working = yield* eventually(
+        const working = yield* until(
           client.GetThread({ threadId: task.threadId, limit: 0 }),
           (thread) => thread.session?.turnRunning === true,
         )
@@ -2034,7 +2117,7 @@ describe('the coordinator, through the API', () => {
         assert.deepStrictEqual([stopped.task.phase, stopped.task.actions, stopped.session], ['stopped', ['resume', 'abandon'], null])
         assert.deepStrictEqual(yield* stateOf(checking), [{ state: 'resolved' }])
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
-        const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        const resumed = yield* until(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
         // Renamed by the person, even now; a retry is one rename, and an empty title is refused.
         const rename = { commandId: commandId(), taskId: task.id, title: ' Retry the checkout ' }
@@ -2053,7 +2136,7 @@ describe('the coordinator, through the API', () => {
         assert.deepStrictEqual([reopened.task.state, reopened.task.actions], ['open', ['resume', 'abandon']])
         // Resumed with its last lead.
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
-        const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        const again = yield* until(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(again.session?.agentId, 'codex')
         // So does stopping its lead alone.
         const checkingAgain = yield* waiting()
@@ -2062,7 +2145,7 @@ describe('the coordinator, through the API', () => {
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
-        const picked = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        const picked = yield* until(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(picked.session?.agentId, 'claude-code')
         assert.strictEqual(
           (yield* Effect.flip(client.AbandonTask({ commandId: commandId(), taskId: 'task_missing' }))).message,
@@ -2083,7 +2166,7 @@ describe('the coordinator, through the API', () => {
           title: 'Nobody home',
           steps: [{ key: 'implement', agentId: 'missing', model: null, skipped: false }],
         })
-        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        const waiting = yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
         const call = waiting.attention[0]
         assert.deepStrictEqual(
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
@@ -2100,7 +2183,7 @@ describe('the coordinator, through the API', () => {
         yield* client.AnswerStuck(answering)
         // Sent again by a retry, it is answered once.
         yield* client.AnswerStuck(answering)
-        const after = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 0)
+        const after = yield* until(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 0)
         assert.strictEqual(after.session?.agentId, 'codex')
         // Answered, it leaves the board.
         assert.notInclude(
@@ -2109,7 +2192,7 @@ describe('the coordinator, through the API', () => {
         )
         assert.strictEqual(
           (yield* Effect.flip(client.AnswerStuck({ ...answering, commandId: commandId() }))).message,
-          'That call was already answered, or the agent took it back.',
+          'That call is closed.',
         )
       }),
     ),
@@ -2133,15 +2216,12 @@ describe('the coordinator, through the API', () => {
         )
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          [
-            'CoordinatorUnavailable',
-            "Fake claude-code isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.",
-          ],
+          ['CoordinatorUnavailable', "Fake claude-code isn't signed in. Sign it in, or pick another agent for the coordinator."],
         )
         // Started on another agent, it waits for what the person says.
         yield* client.StartSession({ commandId: commandId(), threadId: snapshot.threadId, agentId: 'codex', model: 'large', effort: 'low' })
         yield* client.Send({ commandId: commandId(), threadId: snapshot.threadId, body: 'Hello', disposition: 'after_current' })
-        const answered = yield* eventually(
+        const answered = yield* until(
           client.GetCoordinator({ projectId: project.id }),
           (coordinator) => coordinator.items.filter((item) => item.kind === 'agent_message').length > 0,
         )
@@ -2150,9 +2230,9 @@ describe('the coordinator, through the API', () => {
         assert.deepStrictEqual([suggested?.model, suggested?.effort], ['large', 'low'])
         // Stopped, it starts again on the same agent and model when the person next says something.
         yield* client.StopSession({ commandId: commandId(), threadId: snapshot.threadId })
-        yield* eventually(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session === null)
+        yield* until(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session === null)
         yield* client.Send({ commandId: commandId(), threadId: snapshot.threadId, body: 'Again', disposition: 'after_current' })
-        const again = yield* eventually(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session !== null)
+        const again = yield* until(client.GetCoordinator({ projectId: project.id }), (coordinator) => coordinator.session !== null)
         assert.deepStrictEqual([again.session?.agentId, again.session?.model, again.session?.effort], ['codex', 'large', 'low'])
       }),
     ),
@@ -2268,7 +2348,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', `gh isn't signed in to github.test on ${thisDevice()}.`])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
@@ -2287,7 +2367,7 @@ describe('code hosts and trackers, through the API', () => {
           issue: 'MER-231',
         })
         assert.strictEqual(started.branch, 'althar/mer-231-rate-limit-refunds')
-        const thread = yield* eventually(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
+        const thread = yield* until(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
         assert.strictEqual(thread.task.issue?.key, 'MER-231')
         assert.deepInclude(thread.task.changes[0], { number: 1, draft: true, state: 'open', short: 'PR', prefix: '#' })
         // What it changed, as the accept view lists it, and a file's diff, read from git when asked for.
@@ -2350,13 +2430,13 @@ describe('words', () => {
         { _tag: 'InstallFailed', agentId: 'opencode', summary: 'GitHub couldn’t be reached to find OpenCode.' },
         'GitHub couldn’t be reached to find OpenCode.',
       ],
-      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule for this request. Answer it once instead."],
+      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule. Answer it once."],
       [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
-      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more: it carried on, or was stopped."],
+      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more."],
       [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
       [
         { _tag: 'SignOutFailed', line: 'codex logout' },
-        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+        `Couldn't sign this account out. Try again, or remove it anyway: its sign-in may stay on ${thisDevice()}.`,
       ],
       [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
       [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
@@ -2372,7 +2452,7 @@ describe('words', () => {
       ],
       [
         { _tag: 'RuleOnAnotherList', exact: true, pattern: 'rm -rf build', list: 'ask' },
-        '“rm -rf build” is on “Always ask me”, which comes first, so nothing changed. Take it off “Always ask me” first.',
+        '“rm -rf build” is on “Always ask me”. Take it off “Always ask me” first.',
       ],
       [
         { _tag: 'PushRefused', remote: 'origin', why: 'refused', said: 'pre-receive hook declined.' },
@@ -2380,19 +2460,19 @@ describe('words', () => {
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: 'src/a.ts' },
-        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them or clear them away, then open the pull request again.',
+        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: '' },
-        'The lead left changes it didn’t commit. Ask it to commit them or clear them away, then open the pull request again.',
+        'The lead left changes it didn’t commit. Ask it to commit them, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'conflicts', detail: 'README.md' },
-        'The new commits don’t apply on the default branch as it is now: they conflict in README.md. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+        'It conflicts with the default branch, in README.md. Ask the lead to merge the default branch in, then open the pull request again.',
       ],
       [
         { _tag: 'NoChangeToOpen', why: 'conflicts', detail: '' },
-        'The new commits don’t apply on the default branch as it is now: they conflict. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+        'It conflicts with the default branch. Ask the lead to merge the default branch in, then open the pull request again.',
       ],
       // A reason added since, with no words of its own yet: the general sentence for its kind.
       [{ _tag: 'ProjectRefused', reason: 'new_reason' }, "Althar can't change the project that way."],
@@ -2407,10 +2487,7 @@ describe('words', () => {
 
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
-    assert.strictEqual(
-      said(new NotARepository({ path: '/tmp/x' })),
-      "/tmp/x isn't a git repository, in one, or a folder with one directly inside it. Choose another folder.",
-    )
+    assert.strictEqual(said(new NotARepository({ path: '/tmp/x' })), "/tmp/x isn't a git repository. Choose another folder.")
     assert.strictEqual(
       said(new RepositoriesNeeded({ unknown: [], choices: ['api', 'web'] })),
       "Say which of the project's repositories the task changes: api, web.",
@@ -2422,7 +2499,7 @@ describe('words', () => {
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
     assert.strictEqual(
       said(new NothingToWaitFor({ attentionId: 'a' })),
-      "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again.",
+      "The agent didn't say when its limit resets. Pick another model, or try again.",
     )
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
@@ -2447,21 +2524,21 @@ describe('words', () => {
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
     assert.strictEqual(
       said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: "The agent doesn't offer huge." })),
-      "Codex is still on its old model. The agent doesn't offer huge.",
+      "Codex’s model didn't change. The agent doesn't offer huge.",
     )
-    assert.strictEqual(said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: '' })), 'Codex is still on its old model.')
+    assert.strictEqual(said(new ModelUnchanged({ agentId: 'codex', model: 'huge', summary: '' })), "Codex’s model didn't change.")
     assert.strictEqual(
       said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: 'It offers no choice of effort.' })),
-      'Codex still thinks as hard as it did. It offers no choice of effort.',
+      "Codex’s effort didn't change. It offers no choice of effort.",
     )
-    assert.strictEqual(said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: '' })), 'Codex still thinks as hard as it did.')
-    assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call was already answered, or the agent took it back.')
+    assert.strictEqual(said(new EffortUnchanged({ agentId: 'codex', effort: 'max', summary: '' })), "Codex’s effort didn't change.")
+    assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
       "git worktree didn't work: fatal: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
-    assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'That request was already used for something else. Try again.')
+    assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')
     assert.strictEqual(said({ _tag: 'DatabaseInUse' }), 'Another copy of Althar is using this profile.')
     assert.strictEqual(said(new TurnInProgress({ sessionId: 's' })), 'The lead is still on its last turn.')
     // What a code host or tracker said, or why it couldn't be asked.
@@ -2470,7 +2547,7 @@ describe('words', () => {
     assert.strictEqual(host('forbidden', 'Resource not accessible'), "GitHub won't let this account do that: Resource not accessible.")
     assert.strictEqual(host('forbidden'), "GitHub won't let this account do that.")
     assert.strictEqual(host('not_found'), "GitHub can't find it any more.")
-    assert.strictEqual(host('rate_limited'), 'GitHub is asking Althar to slow down. Try again in a little while.')
+    assert.strictEqual(host('rate_limited'), 'GitHub is rate limiting. Try again in a little while.')
     assert.strictEqual(host('unreachable'), "Althar couldn't reach GitHub. Try again in a moment.")
     assert.strictEqual(host('invalid_response'), "GitHub answered in a way Althar didn't understand.")
     assert.strictEqual(host('rejected', 'Pull Request is not mergeable'), 'GitHub said no: Pull Request is not mergeable.')
@@ -2485,35 +2562,48 @@ describe('words', () => {
     )
     assert.strictEqual(
       said(new OutwardUncertain({ operation: 'merge' })),
-      "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again.",
+      'That may have gone through. Check on the host before trying again.',
     )
     assert.strictEqual(
       said(new ChangedSinceSeen({ taskId: 't' })),
-      'The pull request changed since you looked at it. Have another look before you accept it.',
+      'The pull request changed since you looked. Look again, then accept it.',
     )
     assert.deepStrictEqual(
-      (['working', 'stopped', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
-      [
-        "The task's work isn't done yet. Its pull request opens when it is.",
-        'The task’s work stopped before it was done, so it has no pull request to open.',
-        'The task is settled, so its branch stays as it is.',
-      ],
+      (['working', 'settled'] as const).map((why) => said(new NoChangeToOpen({ taskId: 't', why }))),
+      ["The task's work isn't done yet.", 'The task is settled.'],
     )
+    // A refused merge says it in a few words: no path on this computer, a couple of files by name and the rest counted.
     assert.deepStrictEqual(
       (
         [
-          ['untracked', 'new.ts in /code/web'],
-          ['moved', 'web’s main'],
+          ['busy', { into: 'main', files: ['middleware.ts'] }],
+          ['busy', { into: 'main', files: ['middleware.ts', 'app/hooks/useAuth.ts', 'a.ts', 'b.ts'] }],
+          ['busy', { into: 'web’s main', files: [] }],
+          ['untracked', { into: 'web’s main', files: ['src/new.ts'] }],
+          ['untracked', { into: 'main', files: ['a.ts', 'b.ts', 'c.ts'] }],
+          ['conflicts', { into: 'main', files: ['README.md', 'src/a.ts'] }],
+          ['submodule', { into: 'main', files: ['vendor/library'] }],
         ] as const
-      ).map(([why, detail]) => said(new CantMerge({ taskId: 't', why, detail }))),
+      ).map(([why, more]) => said(new CantMerge({ taskId: 't', why, detail: '/code/web', ...more }))),
       [
-        'The merge would overwrite files git doesn’t track: new.ts in /code/web. Move them away, then merge again.',
-        'web’s main moved while Althar was merging, so nothing was merged. Merge again.',
+        'Your main checkout has uncommitted changes to middleware.ts.',
+        'Your main checkout has uncommitted changes to middleware.ts, useAuth.ts and 2 more.',
+        'Your web’s main checkout has changes in the way.',
+        'Your web’s main checkout has an untracked file in the way: new.ts.',
+        'Your main checkout has untracked files in the way: a.ts, b.ts and 1 more.',
+        'It conflicts with main in README.md and a.ts.',
+        'Submodule vendor/library has uncommitted changes, or isn’t at the commit recorded for it.',
       ],
     )
-    assert.strictEqual(
-      said({ _tag: 'NoChangeToOpen', why: 'something new' }),
-      "The task's work isn't done yet. Its pull request opens when it is.",
+    assert.strictEqual(said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })), 'web’s main moved meanwhile. Merge again.')
+    assert.strictEqual(said({ _tag: 'NoChangeToOpen', why: 'something new' }), "The task's work isn't done yet.")
+    // A pull request with nowhere to push to says so, and no branch is made for it.
+    assert.deepStrictEqual(
+      (['fork_gone', 'unplaced'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'PR #1' }))),
+      [
+        'PR #1’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.',
+        'The host doesn’t say where PR #1’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.',
+      ],
     )
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
@@ -2537,19 +2627,15 @@ describe('words', () => {
     // Refused without a word why: just that it was.
     assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
     // A task's course: a merged task stays done, and one whose worktree and branch went can't be reopened.
-    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged, so it stays done.')
-    assert.strictEqual(
-      said(new TaskRefused({ taskId: 't', why: 'branch_gone' })),
-      'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
-    )
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged.')
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'branch_gone' })), 'The task’s worktree and branch are gone.')
     assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'abandoned' })), 'The task is abandoned. Reopen it to carry on.')
     // One with a reason these words don't know says only that it can't be done.
     assert.strictEqual(said({ _tag: 'TaskRefused', why: 'something new' }), "Althar can't change the task that way.")
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
-      message:
-        'It conflicts with the default branch, in README.md. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.',
+      message: 'It conflicts with the default branch in README.md.',
       why: 'conflicts',
       detail: 'README.md',
     })
@@ -2569,6 +2655,17 @@ describe('words', () => {
       'The agent stopped: out of memory.',
     )
     assert.strictEqual(agentSaid(new AgentExited({ code: 1, signal: null, stderr: '' })), 'The agent stopped.')
+    // OpenCode 1.x on a data folder OpenCode 2 has moved on, as 1.18.31 said it: what's wrong and the way out, never the bare SQLite error.
+    assert.strictEqual(
+      agentSaid(
+        new AgentExited({
+          code: 1,
+          signal: null,
+          stderr: '\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nno such column: project_id\n',
+        }),
+      ),
+      'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.',
+    )
     const failed = (failure: AgentRequestFailed['failure'], resetsAt?: string) =>
       agentSaid(
         new AgentRequestFailed({
@@ -2582,6 +2679,8 @@ describe('words', () => {
     assert.strictEqual(failed('usage_limit'), "The agent's usage limit is reached.")
     assert.strictEqual(failed('usage_limit', '15:00'), "The agent's usage limit is reached until 15:00.")
     assert.strictEqual(failed('context_full'), "The agent's context is full.")
+    // Claude Code's "Resource not found", for a session its adapter had dropped: what happened, never the bare words.
+    assert.strictEqual(failed('session_lost'), 'The agent had lost this conversation.')
     assert.strictEqual(failed('unknown'), 'Something odd.')
     assert.strictEqual(
       agentSaid(new OptionUnavailable({ configId: 'model', value: 'huge', available: [] })),
@@ -2642,6 +2741,12 @@ describe('steps that need the person', () => {
     for (const why of ['no_report', 'session_ended', 'restarted', 'transient', 'signed_out']) assert.strictEqual(stuckOf({ why }).why, why)
     // A service that kept failing keeps its name, for the call to say whose.
     assert.strictEqual(stuckOf({ why: 'transient', service: 'Anthropic' }).service, 'Anthropic')
+    // A sign-in one provider within the agent refused keeps the model and the provider, for the call to name them.
+    assert.deepInclude(stuckOf({ why: 'signed_out', model: 'opencode-go/deepseek-v4.1-flash', provider: 'opencode-go' }), {
+      model: 'opencode-go/deepseek-v4.1-flash',
+      provider: 'opencode-go',
+    })
+    assert.notProperty(stuckOf({ why: 'signed_out' }), 'provider')
     assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
     assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })
@@ -2806,4 +2911,157 @@ describe('thread items', () => {
       },
     )
   })
+})
+
+describe('connection authority', () => {
+  for (const sender of [{ kind: 'window' }, { kind: 'paired_device', deviceId: 'phone-1' }] as const) {
+    it.live(`keeps ${sender.kind} as the source when the person tells a stuck lead what to do`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, grant, context, store } = yield* connected({ sender })
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+          const task = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: 'Tell the lead',
+            description: 'Nothing to say.',
+            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          })
+          const waiting = yield* until(client.GetThread({ threadId: task.threadId }), (thread) =>
+            thread.attention.some((a) => a.kind === 'stuck'),
+          )
+          yield* client.AnswerStuck({
+            commandId: commandId(),
+            attentionId: waiting.attention.find((a) => a.kind === 'stuck')!.id,
+            answer: { kind: 'tell', note: scenarios.slow },
+          })
+          const rows = yield* until(
+            store(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                return yield* sql<{
+                  senderKind: string
+                  senderDeviceId: string | null
+                  sessionId: string
+                  origin: string
+                }>`SELECT i.sender_kind, i.sender_device_id, d.provider_session_id AS session_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.thread_id = ${task.threadId} AND i.body = ${scenarios.slow} AND d.state = 'delivered'`
+              }),
+            ),
+            (rows) => rows.length === 1,
+          )
+          assert.strictEqual(rows[0]?.senderKind, sender.kind)
+          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.origin, 'person')
+          const turn = JSON.parse(
+            yield* Effect.provideContext(
+              callTool(
+                { role: 'lead', projectId: project.id, threadId: task.threadId, taskId: task.id, sessionId: rows[0]!.sessionId },
+                'read_turn',
+              ),
+              context,
+            ),
+          ) as { byPerson: boolean }
+          assert.isTrue(turn.byPerson)
+        }),
+      ),
+    )
+  }
+
+  for (const sender of [{ kind: 'window' }, { kind: 'paired_device', deviceId: 'phone-1' }, { kind: 'socket' }] as const) {
+    it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, context, store } = yield* connected({ sender })
+          // Seed the project internally, since a socket is not allowed to open folders on the person's behalf.
+          const project = yield* Effect.provideContext(
+            Effect.gen(function* () {
+              const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+              const created = yield* (yield* Projects).createTask({
+                envelope: yield* Runtime.envelope('task.create', {}),
+                projectId: opened.projectId,
+                title: 'Connection authority',
+              })
+              return { ...created, projectId: opened.projectId }
+            }),
+            context,
+          )
+          yield* client.StartSession({ commandId: commandId(), threadId: project.threadId, agentId: 'codex' })
+          yield* until(
+            client.GetThread({ threadId: project.threadId }),
+            (thread) =>
+              thread.session !== null && !thread.session.turnRunning && thread.items.some((item) => item.kind === 'agent_message'),
+          )
+          const id = commandId()
+          yield* client.Send({ commandId: id, threadId: project.threadId, body: scenarios.slow, disposition: 'after_current' })
+          yield* until(client.GetThread({ threadId: project.threadId }), (thread) => thread.session?.turnRunning === true)
+          const rows = yield* store(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return yield* sql<{
+                inputId: string
+                sessionId: string
+                senderKind: string
+                senderDeviceId: string | null
+                origin: string
+              }>`SELECT i.id AS input_id, d.provider_session_id AS session_id, i.sender_kind, i.sender_device_id, d.origin FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id WHERE i.command_id = ${id}`
+            }),
+          )
+          assert.isNotEmpty(rows)
+          assert.isTrue(
+            rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
+          )
+          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          // The message travelled over RPC and Sessions opened this live delivery; no turn rows are seeded.
+          let acts = 0
+          const first = rows[0]!
+          const answer = yield* Effect.provideContext(
+            Effect.gen(function* () {
+              yield* (yield* ToolServer).serve('lead', [
+                {
+                  name: 'test_connection_asked',
+                  kind: 'asked-for',
+                  description: 'Test only.',
+                  input: { type: 'object' },
+                  action: () =>
+                    Effect.succeed({
+                      messageId: first.inputId,
+                      target: 'connection-test',
+                      request: {},
+                      read: Effect.succeed({ state: 'ready' as const }),
+                      act: () =>
+                        Effect.sync(() => {
+                          acts++
+                          return 'Acted on the live word.'
+                        }),
+                    }),
+                },
+              ])
+              return yield* callTool(
+                {
+                  role: 'lead',
+                  projectId: project.projectId,
+                  taskId: project.taskId,
+                  threadId: project.threadId,
+                  sessionId: first.sessionId,
+                },
+                'test_connection_asked',
+              )
+            }),
+            context,
+          )
+          if (sender.kind === 'socket') assert.match(answer, /window or a paired device/)
+          else assert.strictEqual(answer, 'Acted on the live word.')
+          assert.strictEqual(acts, sender.kind === 'socket' ? 0 : 1)
+          if (sender.kind === 'socket') {
+            const denied = yield* Effect.exit(
+              client.SetTaskAllowEverything({ commandId: commandId(), taskId: project.taskId, allowEverything: true }),
+            )
+            assert.isTrue(denied._tag === 'Failure')
+            if (denied._tag === 'Failure')
+              assert.strictEqual(Option.getOrUndefined(Cause.findErrorOption(denied.cause))?.reason, 'PersonRequired')
+          }
+        }),
+      ),
+    )
+  }
 })

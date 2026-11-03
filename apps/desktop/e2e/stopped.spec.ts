@@ -23,10 +23,10 @@ test('a stopped task waits in Needs you with Carry on, and goes back to Running 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, 'Keep the session alive', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'More for this task' }).click()
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
-    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
 
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
@@ -39,7 +39,7 @@ test('a stopped task waits in Needs you with Carry on, and goes back to Running 
     await work.screenshot({ path: 'test-results/stopped-needs-you.png', scale: 'css' })
 
     await yours.getByRole('button', { name: 'Carry on' }).click()
-    await expect(running.getByText('Keep the session alive')).toBeVisible({ timeout: 30_000 })
+    await expect(running.getByText('Keep the session alive')).toBeVisible()
     await expect(yours.getByText('Keep the session alive')).toHaveCount(0)
     await work.screenshot({ path: 'test-results/stopped-carried-on.png', scale: 'css' })
   } finally {

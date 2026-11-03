@@ -4,14 +4,16 @@ import { DATE } from '../content/sheet'
 import { useCurrent } from '../lib/useCurrent'
 import { useNarrow } from '../home/bodies/kit/Narrow'
 import { Footer } from '../shared/footer/Footer'
-import { Lit } from '../shared/Lit'
 import { Nav } from '../shared/Nav'
+import { Night, night as n, Readout, Window } from '../shared/night/Night'
 import { block, compile } from './prose'
 import s from './Thesis.module.css'
 
 /*
- * The thesis, compiled from THESIS.md at build time. Its title stands in
- * the site's light; the hypothesis and the numbered sections share one
+ * The thesis, compiled from THESIS.md at build time. It opens on the night
+ * window the other pages do, its revision, its date and its sections along
+ * the top and its title in the middle; the document itself stays on cream
+ * paper under it, as a document is. The hypothesis and the numbered sections share one
  * reading column under it, with the contents beside it; narrower, the
  * contents fold shut over the column. Each section opens with its number
  * and its title, the claims stand large, and figures in the sections are
@@ -21,6 +23,13 @@ import s from './Thesis.module.css'
 export const THESIS_SOURCE = source
 const THESIS = compile(THESIS_SOURCE)
 const IDS = THESIS.parts.map((p) => p.id)
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
+/** A day as the readouts write it: 28 Sep 2026. */
+const dated = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return `${d} ${MONTHS[(m ?? 1) - 1]} ${y}`
+}
 
 export function Thesis() {
   const current = useCurrent(IDS)
@@ -32,7 +41,32 @@ export function Thesis() {
       <Nav />
 
       <main id="main" tabIndex={-1}>
-        <Lit kicker={<>Thesis · Rev C · {DATE}</>} title={THESIS.title} lead="A working thesis. A draft, and expected to change." />
+        <Night head>
+          <Window
+            className={s.window}
+            deck={
+              <>
+                <Readout label="Revision" href={LINKS.thesis}>
+                  <b>C</b>
+                </Readout>
+                <Readout label="Dated" href={LINKS.thesis} at="mid">
+                  <b>{dated(DATE)}</b>
+                </Readout>
+                <Readout label="Sections" href={`#${IDS[0] ?? 'main'}`} at="end">
+                  <b>{THESIS.parts.length}</b>
+                </Readout>
+              </>
+            }
+          >
+            <div className={n.head}>
+              <p className={n.over}>
+                <span className={n.overLit}>Thesis</span>
+                <span>A working draft, expected to change</span>
+              </p>
+              <h1 className={n.headline}>{THESIS.title}</h1>
+            </div>
+          </Window>
+        </Night>
         <div className={s.sheet}>
           <details className={s.contents} open={!narrow || undefined} key={narrow ? 'folded' : 'open'}>
             <summary className={s.contentsHead}>

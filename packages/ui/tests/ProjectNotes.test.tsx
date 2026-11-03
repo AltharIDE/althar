@@ -36,7 +36,7 @@ describe('a project’s notes', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' }))
     expect(screen.queryByRole('list')).toBeNull()
-    expect(document.activeElement).toBe(screen.getByText(/^None yet\./))
+    expect(document.activeElement).toBe(screen.getByText('None yet'))
   })
 
   it('say one in other words where it is: Enter keeps them on one line, Escape puts them back, and focus goes back to its pencil', () => {

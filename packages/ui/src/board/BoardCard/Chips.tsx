@@ -6,12 +6,10 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { commandGlance } from '../../lib/commandGlance'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
-import { Button } from '../../primitives/Button/Button'
 import { Code } from '../../primitives/Code/Code'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import b from '../Board/Board.module.css'
 import s from './Chips.module.css'
 
 /*
@@ -288,61 +286,6 @@ export function FactLine({ children, className, stacked: forced, ...rest }: Fact
           {fact}
         </span>
       ))}
-    </span>
-  )
-}
-
-export type NextStepProps = RootProps<
-  'span',
-  {
-    children: ReactNode
-    /**
-     * Does the step right here, without opening the task: the words become a
-     * button of their own, above the card's. Without it, the words are a
-     * link: they are the card's, and pressing them opens its task.
-     */
-    onPress?: () => void
-    /** What a screen reader hears in place of the words: Push 13 commits to #189. */
-    label?: string
-    /** The step is under way: the button says `doing` and ignores presses, but stays focusable. */
-    busy?: boolean
-    /** The words while it is under way: Pushing 13 commits. */
-    doing?: ReactNode
-    /** Violet, for the person's own to do (push, merge); the quiet button otherwise. */
-    signal?: boolean
-  }
->
-
-/**
- * The one next thing to do, at the end of a card's foot: Push 3 commits,
- * Accept and merge. Where it can be done from the card it is a button
- * (`onPress`), which does it and leaves the card where it is; where it
- * needs the lead (Ask the lead to fix it), it is words with an arrow, a
- * link into the task, which the card itself opens.
- */
-export function NextStep({ children, className, onPress, label, busy = false, doing, signal = false, ...rest }: NextStepProps) {
-  if (onPress === undefined)
-    return (
-      <span className={cx(b.go, className)} {...rest}>
-        {children}
-        <Icon name="arrow" size={11} />
-      </span>
-    )
-  return (
-    <span className={cx(s.act, className)} {...rest}>
-      <Button
-        size="small"
-        {...(signal ? { variant: 'signal' as const } : {})}
-        busy={busy}
-        {...(label === undefined ? {} : { 'aria-label': label })}
-        onClick={(e) => {
-          // The card is the button to the task, and this isn't.
-          e.stopPropagation()
-          onPress()
-        }}
-      >
-        {busy && doing !== undefined ? doing : children}
-      </Button>
     </span>
   )
 }

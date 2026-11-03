@@ -1,3 +1,4 @@
+import { budget, waitFor } from '@althar/testing'
 import { spawn } from 'node:child_process'
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -284,7 +285,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         yield* Effect.sleep('200 millis')
         assert.isFalse(isAlive(serverPid))
       }),
-    120_000,
+    budget.large,
   )
 
   it.live(
@@ -300,7 +301,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         assert.strictEqual(visible, 'False')
         assert.deepStrictEqual(yield* stopProcessGroup(root, '200 millis'), { signal: 'SIGKILL', survivors: false })
       }),
-    120_000,
+    budget.large,
   )
 
   it.live(
@@ -312,10 +313,17 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         const launcher = `const s = ${node(server)}; s.unref(); process.stdout.write(s.pid + '\\n', () => process.exit(0))`
         const { root, said } = yield* started(launcher)
         const [serverPid = 0] = said
-        yield* Effect.sleep('1 second')
+        // The keeper lets the job go as the launcher it waited for exits, which Windows takes a moment over: wait for both
+        // to be gone rather than assume a second is always enough.
+        yield* Effect.promise(() =>
+          waitFor(
+            () => [isAlive(root), isAlive(serverPid)] as const,
+            ([launcherAlive, serverAlive]) => !launcherAlive && !serverAlive,
+          ),
+        )
         assert.isFalse(isAlive(root))
         assert.isFalse(isAlive(serverPid))
       }),
-    120_000,
+    budget.large,
   )
 })

@@ -62,11 +62,7 @@ describe('a step a usage limit stopped', () => {
   it('lets a review be skipped, beside picking another model and waiting', async () => {
     const limit: Limit = { accountId: 'acc_claude', resetsAt: BACK, choices: [{ agentId: 'codex', accountId: 'acc_codex', model: null }] }
     const { onAnswer } = showCall(limit, { step: 'review' })
-    expect(
-      await screen.findByText(
-        `Claude Code (main) ran out of usage during the review. It's back at ${clock(BACK)}. Pick another model to carry on now, wait until then, or skip the review.`,
-      ),
-    ).toBeTruthy()
+    expect(await screen.findByText(`Claude Code (main) is out of usage until ${clock(BACK)}.`)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Skip the review' }))
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'abandon' })
     expect(await screen.findByText('Skipped the review')).toBeTruthy()
@@ -83,7 +79,7 @@ describe('a step a usage limit stopped', () => {
     const limit: Limit = { accountId: null, resetsAt: null, choices: [{ agentId: 'codex', accountId: 'acc_codex', model: null }] }
     showCall(limit, { agentId: null, agentName: () => '' })
     // An agent it can't name is the agent.
-    expect(await screen.findByText(/^The agent ran out of usage while working on the task and didn't say when it's back\./)).toBeTruthy()
+    expect(await screen.findByText(/^The agent is out of usage\.$/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Continue with/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Try .+ again$/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Wait until/ })).toBeNull()
@@ -141,11 +137,7 @@ describe('a step held for a usage limit', () => {
 
   it('says it waits as the person said, and offers every other account where its hold kept none', async () => {
     const { onHandOver } = showHeld({ agentId: 'claude-code', until: BACK, accountId: 'acc_claude', why: 'asked' })
-    expect(
-      await screen.findByText(
-        `Claude Code (main) ran out of usage while working on the task. The work waits until ${clock(BACK)}, as you said. To carry on now, pick another model.`,
-      ),
-    ).toBeTruthy()
+    expect(await screen.findByText(`Claude Code (main) is out of usage until ${clock(BACK)}.`)).toBeTruthy()
     // Every account but the one out: Claude Code’s other one and Codex; OpenCode is signed out.
     await userEvent.click(screen.getByRole('button', { name: 'Choose another model' }))
     const offered = within(await screen.findByRole('menu')).getAllByRole('menuitemradio')
@@ -160,11 +152,7 @@ describe('a step held for a usage limit', () => {
 
   it('leaves out every account of the agent out, where its hold doesn’t say which account, and says only when it is back', async () => {
     showHeld({ agentId: 'claude-code', until: BACK }, 'implement', () => '')
-    expect(
-      await screen.findByText(
-        `The agent ran out of usage while working on the task. The work waits until ${clock(BACK)}, when it's back. To carry on now, pick another model.`,
-      ),
-    ).toBeTruthy()
+    expect(await screen.findByText(`The agent is out of usage until ${clock(BACK)}.`)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Choose another model' }))
     const offered = within(await screen.findByRole('menu')).getAllByRole('menuitemradio')
     expect(offered.map((item) => item.textContent)).toEqual([expect.stringContaining('via Codex')])
@@ -201,16 +189,10 @@ describe('a usage limit, in words', () => {
 
 describe('a new step on an agent nearly out', () => {
   it('says how little it has left, not that it ran out, with the agent itself among the ways on', () => {
-    expect(limitText.what('Codex', '14:00', 'review', 3.4)).toBe(
-      "Codex is nearly out of usage, with 3% left. It's back in full at 14:00. Pick a model to carry on now, Codex too, wait until then, or skip the review.",
-    )
-    expect(limitText.what('Codex', null, 'implement', 2)).toBe(
-      'Codex is nearly out of usage, with 2% left. Pick a model to carry on now, Codex too, or try Codex again.',
-    )
-    expect(limitText.held('Codex', '14:00', 'review', 'waits', 3)).toBe(
-      'Codex is nearly out of usage, with 3% left. This project waits for usage to reset, so the review waits until 14:00. To carry on now, pick another model, or skip the review.',
-    )
+    expect(limitText.what('Codex', '14:00', 3.4)).toBe('Codex has 3% of its usage left, until 14:00.')
+    expect(limitText.what('Codex', null, 2)).toBe('Codex has 2% of its usage left.')
+    expect(limitText.held('Codex', '14:00', 3)).toBe('Codex has 3% of its usage left, until 14:00.')
     // Out, as before.
-    expect(limitText.held('Codex', '14:00', 'review', 'waits')).toMatch(/^Codex ran out of usage during the review\./)
+    expect(limitText.held('Codex', '14:00')).toBe('Codex is out of usage until 14:00.')
   })
 })

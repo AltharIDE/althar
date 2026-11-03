@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
+- **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): where a lead's sandbox can start, its session doesn't start without it, and what it holds runs without Althar reading it; what crosses meets the rules, and git's guard stops what can't be undone.
 - **Owner:** Repository maintainers
 - **Context:** A lead's agent works in its sandbox (ADR-007, ADR-043): it
   writes only in its worktree, and much of what a lead needs fails there. A

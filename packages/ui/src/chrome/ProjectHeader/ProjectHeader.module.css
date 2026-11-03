@@ -1,0 +1,36 @@
+/* The bar a task has (TitleBar), under the window's: one row, the name giving way first. */
+.bar {
+  flex: none;
+}
+
+/* Where a task has its way back and title: the mark, then the name */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding-left: 4px;
+}
+.mark {
+  flex: none;
+}
+.name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a part on a host Althar doesn't know: an empty place where its mark would be */
+.noMark {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px dashed var(--line-3);
+  border-radius: 3px;
+}

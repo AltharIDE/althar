@@ -10,6 +10,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Context, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
+import { until } from '@althar/testing/effect'
 
 import { artifactPath } from '../src/Artifacts'
 import { connection, services } from '../src/Api'
@@ -61,21 +62,18 @@ const connected = (
         artifactsRoot: options.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
       }),
     )
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(channel.port1, (data) => data))).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     return { client, grant, sql: Context.get(context, SqlClient.SqlClient) }
-  })
-
-const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
-  Effect.gen(function* () {
-    for (let tries = 0; tries < 250; tries += 1) {
-      const value = yield* Effect.orDie(effect)
-      if (check(value)) return value
-      yield* Effect.sleep('20 millis')
-    }
-    return yield* Effect.die(new Error('Timed out'))
   })
 
 const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.session.turnRunning
@@ -89,7 +87,7 @@ const taskWithLead = (setup: Effect.Success<ReturnType<typeof connected>>, agent
     const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
     const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Fix the layout' })
     yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId })
-    yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+    yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
     return { project, task }
   })
 
@@ -102,7 +100,7 @@ describe('images sent with a message', () => {
         const { task } = yield* taskWithLead(setup)
         const send = { commandId: commandId(), threadId: task.threadId, body: 'What is off here?', disposition: 'after_current' as const }
         yield* client.Send({ ...send, images: [png, jpeg] })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: What is off here?')),
         )
         assert.include(said(thread.items).join('\n'), `saw images: image/png ${PNG.length} B, image/jpeg ${JPEG.length} B`)
@@ -143,7 +141,7 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [{ digest: digest(PNG), name: 'shot.png' }],
         })
-        const again = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const again = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: And now?')),
         )
         assert.include(said(again.items).join('\n'), `saw images: image/png ${PNG.length} B\n`)
@@ -153,7 +151,7 @@ describe('images sent with a message', () => {
         )
         // Images alone are a message too.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: '', disposition: 'after_current', images: [jpeg] })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.startsWith(`saw images: image/jpeg ${JPEG.length} B\n\necho: `)),
         )
       }),
@@ -173,7 +171,7 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [png],
         })
-        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const heard = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           said(snapshot.items).some((text) => text.includes('saw images')),
         )
         assert.include(said(heard.items).join('\n'), `saw images: image/png ${PNG.length} B`)
@@ -195,17 +193,17 @@ describe('images sent with a message', () => {
           disposition: 'after_current',
           images: [png, jpeg],
         })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.startsWith('echo: Look')),
         )
         assert.include(said(thread.items), "echo: Look\n\n(The person sent 2 images with this, which Althar couldn't pass on to you.)")
         assert.notInclude(said(thread.items).join('\n'), 'saw images')
         const notices = thread.items.flatMap((item) => (item.kind === 'notice' ? [item.content.title] : []))
-        assert.include(notices, "Fake codex doesn't take images, so the 2 images you sent weren't passed on to it.")
+        assert.include(notices, "Fake codex doesn't take images. The 2 images you sent weren't passed on.")
         // The message keeps them all the same.
         assert.lengthOf(messages(thread.items)[0]?.content.pictures ?? [], 2)
         // The window knows which agents take images, from what each said when it started or was asked.
-        const catalog = yield* eventually(client.GetModels({}), (all) => all.every((agent) => !agent.probing))
+        const catalog = yield* until(client.GetModels({}), (all) => all.every((agent) => !agent.probing))
         assert.deepStrictEqual(
           catalog.map((agent) => [agent.agentId, agent.images]),
           [
@@ -236,13 +234,10 @@ describe('images sent with a message', () => {
             (error) => error.message,
           )
         const svg = { data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64'), name: 'logo.svg' }
-        assert.strictEqual(yield* refused([png, svg]), "logo.svg isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.")
+        assert.strictEqual(yield* refused([png, svg]), "logo.svg isn't a PNG, JPEG, GIF or WebP image.")
         const huge = Buffer.alloc(5 * 1024 * 1024 + 1)
         PNG.copy(huge)
-        assert.strictEqual(
-          yield* refused([{ data: huge.toString('base64'), name: null }]),
-          "An image is larger than 5 MB, so it can't be sent.",
-        )
+        assert.strictEqual(yield* refused([{ data: huge.toString('base64'), name: null }]), 'An image is over 5 MB.')
         assert.strictEqual(yield* refused([{ digest: 'f'.repeat(64), name: 'old.png' }]), "old.png isn't kept any more. Add it again.")
         // More than a message carries doesn't leave the window.
         const many = yield* Effect.exit(
@@ -287,7 +282,7 @@ describe('images sent with a message', () => {
           const before = yield* client.GetThread({ threadId })
           assert.strictEqual(messages(before.items)[0]?.content.pictures[0]?.name, 'photo.jpg')
           yield* client.StartSession({ commandId: commandId(), threadId, agentId: 'codex' })
-          const thread = yield* eventually(client.GetThread({ threadId }), (value) =>
+          const thread = yield* until(client.GetThread({ threadId }), (value) =>
             said(value.items).some((text) => text.includes('saw images')),
           )
           assert.include(said(thread.items).join('\n'), `saw images: image/jpeg ${JPEG.length} B`)
@@ -351,11 +346,11 @@ describe('a message that was dictated', () => {
         const { task } = yield* taskWithLead(setup)
         const send = { threadId: task.threadId, disposition: 'after_current' as const }
         yield* client.Send({ ...send, commandId: commandId(), body: 'Fix the Alpha settings', dictated: true })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: Fix the Alpha settings')),
         )
         yield* client.Send({ ...send, commandId: commandId(), body: 'And the Althar menu' })
-        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+        const thread = yield* until(client.GetThread({ threadId: task.threadId }), (value) =>
           said(value.items).some((text) => text.includes('echo: And the Althar menu')),
         )
         assert.include(said(thread.items), `echo: Fix the Alpha settings\n\n${DICTATED}`)
@@ -385,7 +380,7 @@ describe('a message that was dictated', () => {
           disposition: 'after_current',
           dictated: true,
         })
-        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+        const heard = yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
           said(snapshot.items).some((text) => text.includes('Ask the alter lead')),
         )
         assert.include(said(heard.items).join('\n'), `Ask the alter lead\n\n${DICTATED}`)

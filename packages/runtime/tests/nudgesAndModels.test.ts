@@ -1,6 +1,6 @@
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -59,7 +59,6 @@ describe('a lead’s question', () => {
       const [nudge] = yield* until(
         Effect.sync(() => events.flatMap((event) => (event._tag === 'Nudge' ? [event] : []))),
         (found) => found.length > 0,
-        Duration.seconds(20),
       )
       assert.deepInclude(nudge, { kind: 'call', title: 'Pick the cache', threadId: task.threadId })
       yield* Fiber.interrupt(fiber)

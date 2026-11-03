@@ -1,0 +1,158 @@
+/* A line for each account: its name with its mark, the models and tokens quieter under it, its figure centred on both at the end. */
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.heading {
+  font-size: 11.5px;
+  line-height: 14px;
+  color: var(--t-3);
+}
+
+ul.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lines li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 2px;
+  line-height: 18px;
+}
+.name {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.name > svg {
+  flex: none;
+}
+.name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.what {
+  grid-column: 1;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.what[data-marked] {
+  padding-left: 19px;
+}
+.figure {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  font-weight: 600;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Outputs: a card under the pull request's, one row opening as its checks do */
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 18px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0 -8px;
+  padding: 2px 8px;
+  box-sizing: content-box;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toggle:hover {
+  background: var(--hover-faint);
+}
+.toggle > :last-child {
+  flex: none;
+  color: var(--t-3);
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.glance {
+  display: flex;
+  gap: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 160ms var(--ease);
+}
+/* open, the lines under it say the same */
+.card[data-state='open'] .glance {
+  opacity: 0;
+}
+.glance > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.glance svg {
+  color: var(--t-2);
+}
+.body {
+  padding: 8px 0 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .glance {
+    transition: none;
+  }
+}
+
+/* A "—" that says why: a dotted underline, as text with more to it on hover. */
+.figure[data-why] {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: default;
+  text-decoration: underline dotted var(--t-3);
+  text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.figure[data-why]:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 2px;
+}

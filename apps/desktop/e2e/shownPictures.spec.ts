@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * Pictures a lead shows in its thread once its task is done, with no step
@@ -37,7 +37,7 @@ test('shows the pictures a lead shows after its task is done, captioned, opening
     expect(await before.getByRole('img').getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)
     await expect(page.getByText(/No step is waiting/)).toHaveCount(0)
     await round.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(400)
+    await still(page)
     // The set runs wider than the round's words: the shot takes both.
     const boxes = await Promise.all([round.boundingBox(), before.locator('xpath=ancestor::figure/..').boundingBox()])
     const x = Math.min(...boxes.map((box) => box?.x ?? 0)) - 8
@@ -53,7 +53,7 @@ test('shows the pictures a lead shows after its task is done, captioned, opening
     await expect(page.getByRole('dialog', { name: 'before.png' })).toBeVisible()
     await page.keyboard.press('ArrowRight')
     await expect(page.getByRole('dialog', { name: 'after.png' })).toBeVisible()
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/shown-lightbox.png', scale: 'css' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)

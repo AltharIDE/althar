@@ -220,12 +220,3 @@
   font-weight: 600;
   color: var(--t-1);
 }
-
-/* A next step that is a button of its own, at the foot's end: above the card's, whose title is stretched over it. */
-.act {
-  position: relative;
-  display: inline-flex;
-}
-.act button:focus:not(:focus-visible) {
-  outline: none;
-}

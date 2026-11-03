@@ -227,16 +227,6 @@ export enum TaskStatus {
   Stopped = 'stopped',
 }
 
-/** What a task has going, for what stops when it is abandoned. */
-export enum TaskActivity {
-  /** Agents are on it, or its run waits on a step. */
-  Working = 'working',
-  /** Its plan waits to start. */
-  Planned = 'planned',
-  /** Nothing runs or waits to start. */
-  Still = 'still',
-}
-
 /**
  * What a task makes, read from what it has (DEV-96): a change ends in a pull
  * request of its own, or has commits; a review reads someone else's; any
@@ -518,6 +508,8 @@ export enum ChangeState {
   /** Every check passed; waiting for you to accept it. */
   Ready = 'ready',
   Merged = 'merged',
+  /** Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass. */
+  Queued = 'queued',
   /** Ended on its branch, with no pull request: it merges on this Mac when you accept it. */
   Branch = 'branch',
 }
@@ -601,12 +593,14 @@ export enum RepositoryRole {
   Other = 'other',
 }
 
-/** Where a fork's tasks open their pull requests. */
+/** Where a fork's tasks' work goes. */
 export enum ChangeTarget {
-  /** On the repository it was forked from. */
+  /** Pull requests on the repository it was forked from, from the fork's branches. */
   Upstream = 'upstream',
-  /** On the fork itself. */
+  /** Branches and pull requests on the fork itself. */
   Fork = 'fork',
+  /** Branches and pull requests on the repository it was forked from, where the person can push there. */
+  UpstreamBranch = 'upstream_branch',
 }
 
 /** Whether Althar reaches the code host a repository's work goes to, as the person's sign-in there stands. */

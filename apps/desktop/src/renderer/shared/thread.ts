@@ -80,6 +80,7 @@ export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
 export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
+export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content']
 
 export type Block =
   | {
@@ -136,6 +137,8 @@ export type Block =
   | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
   /** An automation the coordinator proposed or changed, or asks the person to resume or run now: turned on, undone or answered where it is. */
   | { readonly kind: 'automation'; readonly id: string; readonly automation: AutomationCardContent }
+  /** The coordinator asking the person to stop, hold, restart or settle a task: answered where it is. */
+  | { readonly kind: 'task_ask'; readonly id: string; readonly ask: TaskAskContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -147,12 +150,12 @@ export type Block =
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
 const RESTARTED = 'Althar restarted.'
 
-/** What Althar says as it carries a step on after a restart, under a new turn of its lead's. */
-const CARRIED_ON = 'Althar restarted; the step carried on from here.'
+/** What Althar says as it carries a step on after a restart, under a new turn of its lead's; and what earlier versions said. */
+const CARRIED_ON = new Set(['Carried on after Althar restarted.', 'Althar restarted; the step carried on from here.'])
 
 /** Whether a notice is Althar carrying a step on after a restart: the turn before it is over, whatever runs now. */
 export const carriedOn = (content: { readonly source: string; readonly title: string }): boolean =>
-  content.source === 'runtime' && content.title === CARRIED_ON
+  content.source === 'runtime' && CARRIED_ON.has(content.title)
 
 /** What the coordinator passed on to a lead, before notices had roles: by its title. */
 const RELAYED_TITLE = 'From the coordinator'
@@ -547,6 +550,9 @@ export const blocksOf = (
         continue
       case 'automation':
         blocks.push({ kind: 'automation', id: item.id, automation: item.content })
+        continue
+      case 'task_ask':
+        blocks.push({ kind: 'task_ask', id: item.id, ask: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

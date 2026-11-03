@@ -20,11 +20,27 @@ const MANY = [
   'Grok 5 Fast',
 ].map((name) => ({ id: name.toLowerCase().replaceAll(' ', '-'), name }))
 
+/* OpenCode's free models, as its list really runs: some names wrap at the panel's width. */
+const OPENCODE = [
+  'Qwen3.8 Flash',
+  'Qwen3.8 Max',
+  'Step 5 Preview',
+  'Beam Free',
+  'Big Pickle',
+  'DeepSeek V4.1 Flash Free',
+  'Flint 40B Free',
+  'GLM-5.3-Flash Free',
+  'MiMo-V2.6-Flash Free',
+  'Nemotron 3.5 Lightning Free',
+  'Nemotron 3.5 Super VL Free',
+  ...Array.from({ length: 27 }, (_, i) => `Open Model ${i + 1}${i % 4 === 0 ? ' Instruct Preview Free' : ''}`),
+].map((name) => ({ id: name.toLowerCase().replaceAll(' ', '-'), name }))
+
 const meta = {
   title: 'Setup/ModelSwitches',
   component: ModelSwitches,
   parameters: { layout: 'padded' },
-  decorators: [(Story) => <div style={{ maxWidth: 320 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ maxWidth: 260 }}>{Story()}</div>],
   args: { agent: 'Codex', models: CODEX_MODELS, off: ['gpt-5-mini'], onChange: fn() },
 } satisfies Meta<typeof ModelSwitches>
 export default meta
@@ -77,11 +93,28 @@ export const Many: Story = {
   },
 }
 
+/** Thirty-eight models, long names wrapping inside their rows, scrolled; the first row isn't cut under the field. */
+export const Long: Story = {
+  args: {
+    agent: 'OpenCode',
+    models: OPENCODE,
+    off: OPENCODE.filter((m) => m.name !== 'GLM-5.3-Flash Free' && m.name !== 'Big Pickle').map((m) => m.id),
+  },
+  render: (args) => <Kept {...args} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('2 of 38 used')).toBeInTheDocument()
+    c.getByRole('group', { name: 'OpenCode models' }).scrollTop = 120
+    await userEvent.click(c.getByRole('checkbox', { name: 'Nemotron 3.5 Super VL Free' }))
+    await expect(c.getByText('3 of 38 used')).toBeInTheDocument()
+  },
+}
+
 /** Before the agent says what it offers. */
 export const NotKnownYet: Story = {
   args: { models: [] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('It hasn’t said what it offers yet.')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('No models yet')).toBeInTheDocument()
   },
 }
 

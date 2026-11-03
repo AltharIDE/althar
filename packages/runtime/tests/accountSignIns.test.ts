@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Schedule } from 'effect'
+import { Effect, Layer } from 'effect'
+import { until } from '@althar/testing/effect'
 
 import { Accounts } from '../src/Accounts'
 import { AccountSignIns, type AccountSignInState, NoSignInHere } from '../src/AccountSignIns'
@@ -96,10 +97,6 @@ const layer = (finish: boolean, opened: string[], claude = definition('claude-co
 
 const settled = (state: AccountSignInState) => state.state !== 'starting'
 
-/** Asks how a sign-in stands until it says what the test waits for. */
-const until = (read: Effect.Effect<AccountSignInState>, done: (state: AccountSignInState) => boolean, within = Duration.seconds(5)) =>
-  read.pipe(Effect.repeat({ until: done, schedule: Schedule.spaced(Duration.millis(20)) }), Effect.timeout(within))
-
 describe('signing an account in inside Althar', () => {
   it.live('opens the page in the browser, says when it is done, and who signed in', () => {
     const opened: string[] = []
@@ -117,7 +114,7 @@ describe('signing an account in inside Althar', () => {
         refused: null,
       })
       assert.deepStrictEqual(opened, ['https://auth.openai.com/oauth/authorize?x=1'])
-      const done = yield* until(signIns.get(flowId), (state) => state.state === 'done', Duration.seconds(10))
+      const done = yield* until(signIns.get(flowId), (state) => state.state === 'done')
       assert.deepStrictEqual(done, { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' })
     }).pipe(Effect.provide(layer(true, opened)))
   })
@@ -195,23 +192,25 @@ describe('signing an account in inside Althar', () => {
           const [usual] = yield* accounts.of('claude-code')
           if (usual === undefined) return assert.fail('Claude Code has its usual account')
           yield* signIns.start({ accountId: usual.id, way: 'browser' })
-          yield* Effect.promise(async () => {
-            for (let tries = 0; tries < 100 && !existsSync(pidFile); tries++) await new Promise((r) => setTimeout(r, 20))
-          })
+          yield* until(
+            Effect.sync(() => existsSync(pidFile)),
+            Boolean,
+          )
         }).pipe(Effect.provide(layer(false, [], waiting()))),
       )
       const pid = Number(readFileSync(pidFile, 'utf8'))
       // Gone with the runtime: asking after it finds nothing.
-      yield* Effect.promise(async () => {
-        for (let tries = 0; tries < 100; tries++) {
+      yield* until(
+        Effect.sync(() => {
           try {
             process.kill(pid, 0)
+            return true
           } catch {
-            return
+            return false
           }
-          await new Promise((r) => setTimeout(r, 20))
-        }
-      })
+        }),
+        (alive) => !alive,
+      )
       assert.throws(() => process.kill(pid, 0))
     })
   })

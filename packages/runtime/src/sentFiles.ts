@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 
 import { MESSAGE_FILES, type SentFile } from '@althar/contracts'
-import type { PromptFile } from '@althar/provider-adapters'
+import { cleanUp, type PromptFile } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -137,8 +137,8 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
         } satisfies InputFile
       }),
     ).pipe(
-      // One that can't be copied refuses the message: what was copied for it goes.
-      Effect.tapError(() => Effect.sync(() => own !== null && rmSync(own, { recursive: true, force: true }))),
+      // One that can't be copied refuses the message: what was copied for it goes, as best it can, and the refusal stands.
+      Effect.tapError(() => (own === null ? Effect.void : cleanUp(own, 'what was copied for a message refused'))),
     )
   })
 

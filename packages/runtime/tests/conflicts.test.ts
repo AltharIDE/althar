@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -58,7 +58,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         false,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       moveMainOn(working)
       const refused = yield* Effect.flip(mergeHere(task?.taskId ?? ''))
       assert.deepStrictEqual(cantOf(refused), ['CantMerge', 'conflicts', 'change.txt'])
@@ -75,7 +75,7 @@ describe('a conflict merging here', () => {
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass] [lead:resolve]', true)
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       const reviews = sql<{ n: number }>`
@@ -96,7 +96,7 @@ describe('a conflict merging here', () => {
       assert.strictEqual(git(path, 'merge-base', '--is-ancestor', 'main', 'HEAD'), '')
       // No review round for it, and it waits on the person again.
       assert.strictEqual((yield* reviews)[0]?.n, reviewed?.n)
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       // Asked while it resolves, or merged after, nothing more is asked of it.
       yield* mergeHere(taskId)
       // Both sides hold, as the lead settled them.
@@ -115,7 +115,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       // Looked at while its branch merges cleanly, nothing is asked.
@@ -145,7 +145,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve-wait]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -171,7 +171,7 @@ describe('a conflict merging here', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve-fails]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       moveMainOn(working)
@@ -186,7 +186,7 @@ describe('a conflict merging here', () => {
         [['failed', 2]],
       )
       // Needs you, where the person's own press would leave it: merging again offers to ask the lead, and asks nothing itself.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'conflicts')
       assert.strictEqual((yield* asked(threadId)).length, 2)
       assert.strictEqual((yield* rounds(taskId)).length, 1)
@@ -214,7 +214,7 @@ describe('a conflict merging here', () => {
           'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
           true,
         )
-        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
         const taskId = task?.taskId ?? ''
         const threadId = task?.threadId ?? ''
         // Another task takes the one place: its lead works on until it is stopped.
@@ -243,10 +243,7 @@ describe('a conflict merging here', () => {
         // The round is kept, and says it waits; the lead isn't asked yet.
         yield* titled(threadId, 'It conflicts with main')
         const said = (yield* notices(threadId)).find((notice) => notice.title?.startsWith('It conflicts with main') === true)
-        assert.strictEqual(
-          said?.description,
-          'Althar asks the lead to resolve it, as the project’s rules say, once an agent is free on this computer.',
-        )
+        assert.strictEqual(said?.description, 'The lead resolves it once an agent is free.')
         assert.deepStrictEqual(
           (yield* rounds(taskId)).map((round) => round.state),
           ['resolving'],
@@ -440,7 +437,7 @@ describe('a task that says otherwise than its project', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         false,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       const threadId = task?.threadId ?? ''
       // The default branch moves on; nobody merges, so nothing has found it yet.
@@ -451,14 +448,14 @@ describe('a task that says otherwise than its project', () => {
       yield* taskSays(taskId, true)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
       const said = (yield* notices(threadId)).find((notice) => notice.title === 'It conflicts with main, in change.txt.')
-      assert.strictEqual(said?.description, 'Althar asked the lead to resolve it, as you said for this task.')
+      assert.strictEqual(said?.description, 'The lead is resolving it.')
       assert.deepStrictEqual(
         (yield* rounds(taskId)).map((round) => [round.state, round.url]),
         [['resolved', null]],
       )
       // Saying it again starts nothing more, and the person merges as ever.
       yield* taskSays(taskId, true)
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       yield* mergeHere(taskId)
       assert.strictEqual(git(working, 'show', 'main:change.txt'), 'change\nrate limits')
       assert.strictEqual((yield* asked(threadId)).length, 1)
@@ -480,7 +477,7 @@ describe('a task that says otherwise than its project', () => {
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
         true,
       )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       const taskId = task?.taskId ?? ''
       yield* taskSays(taskId, false)
       moveMainOn(working)
@@ -528,7 +525,7 @@ describe('a round’s words, and what git says of its branch', () => {
       const { root, conflict } = split()
       assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "main isn't merged into the branch.", uncommitted: false })
       mergeMain(root)
-      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt, b.txt still conflict.', uncommitted: false })
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: '2 files still conflict.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'add', 'b.txt')
       assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt still conflicts.', uncommitted: false })
@@ -540,7 +537,7 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
       assert.deepStrictEqual(yield* unresolved(root, conflict), {
-        why: 'a.txt, b.txt still have conflict markers in them.',
+        why: '2 files still have conflict markers in them.',
         uncommitted: false,
       })
       writeFileSync(join(root, 'a.txt'), 'task\nmain\n')
@@ -610,7 +607,7 @@ describe('a round’s words, and what git says of its branch', () => {
   it('says where several repositories conflict, and names a pull request it can’t find', () => {
     const one = { repository: 'web', name: 'web', branch: 'develop', ref: 'develop', target: 'a', from: 'b', files: ['README.md'] }
     const two = { repository: 'api', name: 'api', branch: 'main', ref: 'main', target: 'c', from: 'd', files: ['a.ts', 'b.ts'] }
-    assert.strictEqual(whereLine([one, two]), 'web’s develop, in README.md; api’s main, in a.ts, b.ts')
+    assert.strictEqual(whereLine([one, two]), 'the default branch in 2 repositories')
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
     assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")
@@ -642,7 +639,8 @@ describe('a round’s words, and what git says of its branch', () => {
     )
     assert.strictEqual(changeOf({ change: null }), 'the pull request')
     const fix = fixNoteFor({ change: null }, { failing: ['test'], logs: [] })
-    assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nFix what broke/)
+    assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nRead more with read_checks:/)
+    assert.include(fix, '\n\nFix what broke and commit the fix as one commit on top of the merge')
     assert.include(fix, 'Althar pushes it to the pull request too.')
   })
 })

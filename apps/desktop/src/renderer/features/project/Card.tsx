@@ -21,7 +21,7 @@ import s from './Card.module.css'
  * starts, where it stands, and a way in.
  */
 
-/** How long a plan waits before it starts on its own: the runtime's countdown. */
+/** How long a plan waits before it starts on its own where its card doesn't say: the runtime's countdown unless the person changed it. */
 export const COUNTDOWN = 25
 
 export const text = {
@@ -144,7 +144,7 @@ function PlanCard({
           )
         )
       }}
-      wait={COUNTDOWN}
+      wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
@@ -160,13 +160,10 @@ function PlanCard({
   )
 }
 
-/** Its pull requests in a few words: the latest, and those of its earlier rounds of work before it (ADR-034). */
-const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSummary>) => {
-  const name = (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`
-  return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
-}
+/** Its latest pull request; those of its earlier rounds of work (ADR-034) are on its own view. */
+const pullRequestOf = (latest: ChangeSummary) => `${latest.short} ${latest.prefix}${latest.number}`
 
-/** A task's card, with, while it waits for a free agent and is the newest to, who holds the places. */
+/** A task's card, with, while it waits for a free agent and is the newest to, the servers that keep a place. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const holders = card.queued?.holders
   if (holders === undefined || holders.length === 0 || (actions.holdersOn !== undefined && actions.holdersOn !== card.threadId))
@@ -190,8 +187,8 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
-  // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
-  const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
+  // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
+  const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
   const status =
@@ -222,6 +219,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
   return (
     <TaskCard
+      errands={card.errands}
       task={card.slug}
       title={card.title}
       status={status}
@@ -232,7 +230,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}
-      {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
+      {...(card.change === null ? {} : { pr: pullRequestOf(card.change) })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
     />

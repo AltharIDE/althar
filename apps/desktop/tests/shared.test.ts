@@ -4,7 +4,17 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf, inLineWords, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
-import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
+import {
+  isSending,
+  mergeItems,
+  newestReads,
+  queuedOf,
+  queueShown,
+  readingNow,
+  sending,
+  unsent,
+  waiting,
+} from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
@@ -225,11 +235,24 @@ describe('what the person sends', () => {
 })
 
 describe('the composer queue', () => {
+  it('leaves what the person is sending out of the queue, while what waited before it is there', () => {
+    const onItsWay = sending([{ ...items.you('Add a retry'), sequence: 4 }], {
+      text: 'Retry',
+      queued: true,
+      interrupting: false,
+    })
+    expect(queuedOf(onItsWay.items, true)).toEqual([])
+    const waited = { ...items.you('Also this'), id: 'i5', sequence: 5, input: { state: 'queued' as const, interrupting: false } }
+    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Also this'])
+  })
+
   it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
     expect(queueShown({ turnRunning: true }, false)).toBe(true)
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+    // What the person just sent goes straight to the thread though a turn runs, rather than flash in the queue.
+    expect(queueShown({ turnRunning: true }, true)).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {
@@ -258,6 +281,21 @@ describe('a task’s rounds of work after its plan (ADR-034)', () => {
     expect(stepIndex(stepNames(steps, true), 'implement')).toBe(0)
     expect(stepIndex(stepNames(steps, true), 'settle')).toBe(1)
     expect(trackFor(steps, 'review', false, true).map((step) => step.label)).toEqual(['Follow-up', 'Review'])
+  })
+
+  it('has every step done, none on, while no agent is on it: its checks run, its commits push, or it merges', () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    // Neither the step it was on, nor a step Althar or its code host does, is left as the one on.
+    expect(trackFor(steps, 'checks_running', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'pushing', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'merge_queue', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'merging', false).map((step) => step.state)).toEqual(['done', 'done'])
+    expect(trackFor(steps, 'publish', false).map((step) => step.state)).toEqual(['done', 'now'])
+    // A checks round is a lead's work, so its last step stays on.
+    expect(trackFor(steps, 'checks', false).map((step) => step.state)).toEqual(['done', 'now'])
   })
 
   it('shows its latest pull request in each repository, and the earlier ones newest first', () => {

@@ -204,7 +204,14 @@ describe('a call to a service', () => {
       assert.strictEqual(failure(yield* Effect.exit(slow.json(Thing, 'GET', 'https://api.test/thing')))?.reason, 'unreachable')
       const unreadable = makeHttp({
         product: 'github',
-        fetch: async () => ({ status: 200, headers: new Headers(), text: () => Promise.reject(new Error('reset')) }) as unknown as Response,
+        fetch: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error('reset'))
+              },
+            }),
+          ),
         authorization: Effect.succeed('Bearer t'),
       })
       assert.strictEqual(failure(yield* Effect.exit(unreadable.text('https://api.test/log')))?.reason, 'unreachable')
@@ -425,6 +432,77 @@ describe('a GraphQL call', () => {
         failure(yield* Effect.exit(refused.http.graphql(Schema.Unknown, 'https://api.test/graphql', 'query')))?.reason,
         'unreachable',
       )
+    }),
+  )
+})
+
+it.effect('caps streamed downloads even without content-length and preserves binary bytes', () =>
+  Effect.gen(function* () {
+    let cancelled = false
+    const http = makeHttp({
+      product: 'github',
+      authorization: Effect.succeed('Bearer secret'),
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([0, 255, 80]))
+              controller.enqueue(new Uint8Array(10))
+            },
+            cancel() {
+              cancelled = true
+            },
+          }),
+        ),
+    })
+    const error = yield* Effect.flip(http.bytes('https://api.test/file', 4))
+    assert.include(error.message, 'size cap')
+    assert.equal(error.reason, 'rejected')
+    assert.equal(error.sizeLimit, 4)
+    assert.isTrue(cancelled)
+    const binary = makeHttp({
+      product: 'github',
+      authorization: Effect.succeed('Bearer secret'),
+      fetch: async () => new Response(new Uint8Array([0, 255, 80])),
+    })
+    assert.deepEqual([...(yield* binary.bytes('https://api.test/file', 4))], [0, 255, 80])
+  }),
+)
+
+describe('what a service lets an account ask of it', () => {
+  const answers = (request: { readonly headers: Readonly<Record<string, string>> }) =>
+    request.headers['if-none-match'] === '"v1"'
+      ? { status: 304 }
+      : {
+          json: { name: 'a' },
+          headers: { etag: '"v1"', 'ratelimit-limit': '2000', 'ratelimit-remaining': '1500', 'ratelimit-reset': '600' },
+        }
+
+  it.effect('counts what the service counts: a 304 is free where the service does not count one, and counted where it does', () =>
+    Effect.gen(function* () {
+      for (const free of [true, false]) {
+        const { fetch } = stubFetch([['GET', 'https://api.test/thing', answers]])
+        const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t'), freeWhenUnchanged: free })
+        yield* http.cached(Thing, 'https://api.test/thing')
+        yield* http.cached(Thing, 'https://api.test/thing')
+        yield* http.cached(Thing, 'https://api.test/thing')
+        assert.strictEqual(http.allowance().counted, free ? 1 : 3)
+      }
+    }),
+  )
+
+  it.effect('reads the allowance from either name services use, and keeps it through an answer that says nothing', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([['GET', 'https://api.test/thing', answers]])
+      const http = makeHttp({ product: 'gitlab', fetch, authorization: Effect.succeed('Bearer t') })
+      assert.deepStrictEqual(http.allowance(), { counted: 0 })
+      yield* http.cached(Thing, 'https://api.test/thing')
+      const allowance = http.allowance()
+      assert.deepStrictEqual([allowance.limit, allowance.remaining], [2000, 1500])
+      assert.isString(allowance.resetAt)
+      // A 304 without the headers keeps what was last said.
+      yield* http.cached(Thing, 'https://api.test/thing')
+      assert.deepStrictEqual([http.allowance().limit, http.allowance().remaining, http.allowance().counted], [2000, 1500, 2])
     }),
   )
 })

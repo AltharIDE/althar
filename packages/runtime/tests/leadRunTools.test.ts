@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { Screenshot, Shot } from '../src/Config'
@@ -20,7 +20,7 @@ import { callTool, callToolWhole, items, listTools, repository, runtime, until }
  * What a lead does outside its sandbox through Althar, rather than around it:
  * its worktree's setup run again, as when the worktree was made (ADR-023);
  * the project run in its worktree and stopped, as the run the person sees in
- * Run's list (ADR-044, ADR-070); and a screenshot of a page on this computer,
+ * Run's list (ADR-044, ADR-089); and a screenshot of a page on this computer,
  * which the coordinator takes too.
  */
 
@@ -99,7 +99,7 @@ describe('install_dependencies', () => {
     () =>
       Effect.gen(function* () {
         const { task, lead } = yield* taskIn(repository(), SETUP)
-        yield* until(setUps(task.taskId), (rows) => rows.length > 0 && rows.every((row) => row !== null), Duration.seconds(30))
+        yield* until(setUps(task.taskId), (rows) => rows.length > 0 && rows.every((row) => row !== null))
         assert.strictEqual(readFileSync(join(task.worktree, 'installs.txt'), 'utf8'), '1')
 
         // As it ran when the worktree was made: the kept setup, which went through, with what it printed.
@@ -127,10 +127,10 @@ describe('install_dependencies', () => {
     Effect.gen(function* () {
       // Nothing to install: no setup kept, and no manifest.
       const bare = yield* taskIn(repository())
-      yield* until(setUps(bare.task.taskId), (rows) => rows.every((row) => row !== null), Duration.seconds(30))
+      yield* until(setUps(bare.task.taskId), (rows) => rows.every((row) => row !== null))
       assert.match(
         yield* callTool(bare.lead, 'install_dependencies', {}),
-        /^The repository has no setup kept, and nothing Althar can tell to install/,
+        /^The repository has no setup recorded, and nothing Althar can tell to install/,
       )
       // A repository named that the task hasn't.
       assert.match(
@@ -204,7 +204,7 @@ describe('run_project and stop_project, for a lead', () => {
       const ended = yield* callTool(lead, 'run_project', {})
       assert.match(
         ended,
-        /in your worktree ended at once, with exit code 1\. Its last lines:\n\nError: Cannot find module vite\n\nFix what stopped it/,
+        /in your worktree ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nError: Cannot find module vite\n\nFix what stopped it/,
       )
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'run_project', {}), 'This tool is for a task’s lead.')
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'stop_project', {}), 'This tool is for a task’s lead.')

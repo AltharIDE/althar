@@ -37,6 +37,10 @@ const FROM_THE_EXECUTOR = [
   'CODEX_HOME',
   'CODEX_CONFIG',
   'CLAUDE_CONFIG_DIR',
+  // Claude Code's launch: Node's fetch takes the proxy its sandbox names.
+  'NODE_USE_ENV_PROXY',
+  // Claude Code writes no auto memory into the person's own folder.
+  'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
   'XDG_DATA_HOME',
   'XDG_CONFIG_HOME',
   'OPENCODE_CONFIG_DIR',
@@ -55,6 +59,7 @@ const FROM_THE_EXECUTOR = [
   'COPILOT_HOME',
   'COPILOT_AUTO_UPDATE',
   'COPILOT_DISABLE_LOGIN_SHELL_ENV',
+  'GH_HOST',
   'JUNIE_HOME',
   'JUNIE_SKIP_UPDATE_CHECK',
   'JUNIE_CONFIG_DEFAULT_LOCATIONS',

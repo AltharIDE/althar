@@ -1,22 +1,27 @@
-import { Duration, Effect } from 'effect'
+import { Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
+import { type FakeReleaseControls, makeFakeReleases } from './fakeReleases'
 import type {
   Account,
+  BranchUpdate,
   ChangeList,
   ChangeRequest,
   ChangeState,
   ChangeToReview,
   Check,
   Choice,
+  ChosenField,
   CodeHost,
   Comment,
   Container,
   Issue,
   IssueChange,
+  IssueComment,
   IssueField,
   ListedChange,
+  MergeMethod,
   NewReview,
   Person,
   Product,
@@ -25,7 +30,20 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { cantChange, leftAsItIs, noListing, noReviews, stillOpen, unchangeable, unstarted } from '../model'
+import {
+  cantChange,
+  leftAsItIs,
+  mergedForGood,
+  noListing,
+  noPictures,
+  noReopen,
+  noReviews,
+  notOpen,
+  notOurBuild,
+  stillOpen,
+  unchangeable,
+  unstarted,
+} from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -60,6 +78,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
+  /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
+  readonly checksOn?: (sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** Whether it lists changes: true unless said, as every host Althar knows does. */
   readonly lists?: boolean
   /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
@@ -70,23 +90,60 @@ export interface FakeServiceOptions {
   readonly reruns?: boolean
   /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
   readonly reviews?: boolean
+  /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
+  readonly pictures?: boolean
   /** Whether reading a change says the repository its branch is on: it does, unless a test says, as a host that can't. */
   readonly saysHead?: boolean
   /** What of an issue it updates: as its product's adapter does, unless a test says. */
   readonly changes?: ReadonlyArray<IssueField>
-  /** How long each call takes, in milliseconds, by method, as a host far away answers: at once unless said. */
-  readonly latency?: (method: string) => number
+  /** What of those it sets as it files an issue, the rest left to `update` right after: as its product's adapter does, unless a test says. */
+  readonly creates?: ReadonlyArray<IssueField>
+  /**
+   * What each call waits for before it answers, by method, as a host far away takes its time: a gate the test opens when
+   * it has seen what it looks for meanwhile, never a time of the fake's. At once unless said.
+   */
+  readonly waitsFor?: (method: string) => Effect.Effect<void>
+  /** Whether the host merges a change by itself once asked to and its checks pass: as GitLab and Data Center do, unless said. */
+  readonly autoMerge?: boolean
 }
 
 /** What each product's adapter changes of an issue, as the fake takes them. */
 const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
   product === 'linear'
-    ? ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title']
+    ? [
+        'status',
+        'close',
+        'priority',
+        'assignee',
+        'labels',
+        'project',
+        'milestone',
+        'cycle',
+        'parent',
+        'estimate',
+        'due',
+        'title',
+        'description',
+      ]
     : product === 'jira_cloud' || product === 'jira_dc'
-      ? ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+      ? ['status', 'close', 'priority', 'assignee', 'labels', 'milestone', 'parent', 'type', 'components', 'due', 'title', 'description']
       : product === 'trello'
-        ? ['status', 'close', 'assignee', 'labels', 'title']
-        : ['status', 'close', 'assignee', 'labels', 'project', 'title']
+        ? ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description']
+        : product === 'gitlab'
+          ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
+          : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
+
+/** What of those each product's adapter sets as it files an issue. */
+const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
+  product === 'linear'
+    ? ['status', 'assignee', 'project', 'milestone', 'cycle', 'parent', 'estimate', 'due']
+    : product === 'jira_cloud' || product === 'jira_dc'
+      ? ['assignee', 'milestone', 'parent', 'type', 'components', 'due']
+      : product === 'trello'
+        ? ['assignee', 'due']
+        : product === 'gitlab'
+          ? ['assignee', 'milestone', 'estimate', 'type', 'due']
+          : ['assignee', 'milestone', 'type']
 
 /** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
 const STATUSES: ReadonlyArray<Issue['status']> = [
@@ -108,10 +165,20 @@ const OPEN_CLOSED: ReadonlyArray<Issue['status']> = [
 const LABELS = ['bug', 'docs', 'payments']
 const PEOPLE = [{ id: 'user-sam', login: 'sam', name: 'Sam Rivera' }]
 const PROJECTS = ['Q4 launch', 'Payments v2']
+/** Each project's milestones, by the project's name. */
+const MILESTONES: Readonly<Record<string, ReadonlyArray<string>>> = { 'Q4 launch': ['Beta', 'GA'], 'Payments v2': ['Design'] }
+const CYCLES = [
+  { name: 'Cycle 12', also: ['12', 'current'] },
+  { name: 'Cycle 13', also: ['13', 'next'] },
+]
+const TYPES = ['Task', 'Bug', 'Story']
+const COMPONENTS = ['API', 'Web']
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
   addRepository(path: ReadonlyArray<string>, defaultBranch?: string): Repository
+  /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
+  letPush(path: ReadonlyArray<string>, can: boolean): void
   addIssue(issue: {
     readonly ref: string
     readonly key?: string
@@ -157,6 +224,34 @@ export interface FakeControls {
   catchUp(): void
   /** Merges are taken but left open, as Bitbucket answers one that takes long, until `mergeByHand` lands it. */
   landLater(): void
+  /** GitHub's update-branch lands after its read-back, which so says null, as GitHub's does on a host under load. */
+  readBackLater(): void
+  /**
+   * Target branches merge through a merge queue, as GitHub's can: a merge
+   * puts a change in it, open and queued, until `mergeByHand` lands it or
+   * `dequeue` takes it out. GitLab's is its merge train; Bitbucket Cloud's
+   * refuses a plain merge and is entered only on its site (`enqueueByHand`).
+   */
+  mergeQueue(): void
+  /** Someone puts a change in the merge queue outside Althar, as on the host's site. */
+  enqueueByHand(number: number): void
+  /** The merge queue takes a change out unmerged, saying why. */
+  dequeue(number: number, why: NonNullable<ChangeRequest['leftQueue']>): void
+  /** Someone else writes to a branch of a repository (its first unless said), outside Althar: its new head. */
+  writeTo(branch: string, path?: ReadonlyArray<string>): string
+  /** Where a branch of a repository (its first unless said) is now. */
+  branchHeadOf(branch: string, path?: ReadonlyArray<string>): string
+  /** Someone pushes to a change's branch: its new head. */
+  pushTo(number: number): string
+  /** Every merge Althar asked for, in order: plain, auto-merge turned on, or into the queue or train, in the way asked and at the head it named. */
+  readonly merged: ReadonlyArray<{
+    readonly number: number
+    readonly how: 'merge' | 'auto' | 'queue'
+    readonly method: MergeMethod | null
+    readonly head: string | null
+  }>
+  /** Every change whose branch Althar brought up to date, in order. */
+  readonly updated: ReadonlyArray<number>
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
@@ -172,6 +267,8 @@ export interface FakeControls {
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
   /** The fork a change came from, by its path; null for one from the repository's own branch. */
   forkOf(number: number): string | null
+  /** The fork a pull request's branch is on is gone, as the host says of it from now on. */
+  loseFork(number: number): void
   /**
    * Someone opens a change on one of the fake's repositories, as Althar
    * reviews one it didn't open: its author one of the repository's people
@@ -197,6 +294,22 @@ export interface FakeControls {
     /** Whose review it asks for, by login. */
     readonly reviewers?: ReadonlyArray<string>
   }): ChangeRequest
+  /**
+   * The target branch moves on, so the change's branch is behind it. With
+   * `conflicts`, it changed those files too, so bringing it up to date would
+   * conflict in them.
+   */
+  fallBehind(number: number, conflicts?: ReadonlyArray<string>): void
+  /** Someone pushes to the change's branch on the host, so it is at a commit the caller hasn't read. */
+  pushByHand(number: number): void
+  /** The account may push to the branch of a change from a fork (an outside author's, which allows it): by default it may not. */
+  allowForkPush(number: number): void
+  /** Every branch brought up to date, in order, by the number of the change and the commit it is at after. */
+  readonly branchesUpdated: ReadonlyArray<{ readonly number: number; readonly head: string }>
+  /** Every picture uploaded, in order, with the address the host gave it. */
+  readonly uploads: ReadonlyArray<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }>
+  /** Someone deletes a comment on the host itself, Althar's included. */
+  deleteComment(number: number, id: string): void
   /** Every review posted, in order, with the change it is on. */
   readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
   /** Every branch `deleteBranch` deleted, by the number of the change it was the branch of, in order. */
@@ -210,7 +323,7 @@ export interface FakeControls {
  * repositories it has. `failNext('access', …)` makes the next check stop at
  * its account: refused where the reason is `unauthorized`.
  */
-export type FakeService = CodeHost & Tracker & FakeControls & { readonly access: Access }
+export type FakeService = CodeHost & Tracker & FakeControls & FakeReleaseControls & { readonly access: Access }
 
 const START = Date.parse('2026-10-01T09:00:00.000Z')
 
@@ -233,7 +346,13 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   /** Where each change's target branch is, by number, where a test says. */
   const bases = new Map<number, string>()
   const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
+  /** How far each change's branch is behind its target, in commits, and the files it would conflict in. */
+  const behind = new Map<number, { readonly commits: number; readonly conflicts: ReadonlyArray<string> }>()
+  /** Changes from a fork whose branch the account may push to. */
+  const pushable = new Set<number>()
+  const updated: Array<{ readonly number: number; readonly head: string }> = []
   const comments = new Map<number, Array<Comment>>()
+  const uploaded: Array<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }> = []
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
   const logs = new Map<string, string | ConnectorFailed | null>()
@@ -249,6 +368,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const created: Array<Issue> = []
   const issueChanges: Array<{ readonly ref: string; readonly change: IssueChange }> = []
   const changesHere = options.changes ?? CHANGES_OF(product)
+  const createsHere = (options.creates ?? CREATES_OF(product)).filter((field) => changesHere.includes(field))
+  const capabilitiesHere = {
+    links: true,
+    starts: true,
+    changes: changesHere,
+    creates: createsHere,
+    assignees: product === 'linear' || product === 'jira_cloud' || product === 'jira_dc' ? ('one' as const) : ('many' as const),
+  }
   /** Its statuses: a repository's issue is open or closed; any other has a team's. */
   const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
@@ -261,13 +388,50 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let lagged: ReadonlyArray<ChangeRequest> | null = null
   /** Whether a merge is taken but not landed yet. */
   let landsLater = false
+  let readsBackLater = false
+  /** Whether merges go through a merge queue; the changes in it, and why the queue last took each out. */
+  let queues = false
+  const inQueue = new Set<number>()
+  const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
+  /** Changes set to merge by themselves, as GitLab's and Data Center's auto-merge, until `mergeByHand` lands one. */
+  const autoMerging = new Set<number>()
+  const autoMerges = options.autoMerge ?? (product === 'gitlab' || product === 'bitbucket_dc')
+  /** Each branch's commits, oldest first, by repository and branch: its head is the last. */
+  const histories = new Map<string, Array<string>>()
+  /** The commit of its target each change's branch has, by number: where its target was when it opened, or was brought up to date. */
+  const upTo = new Map<number, string>()
+  const mergesAsked: Array<{ number: number; how: 'merge' | 'auto' | 'queue'; method: MergeMethod | null; head: string | null }> = []
+  const updates: Array<number> = []
+  let writes = 0
+  const historyOf = (repositoryId: string, branch: string) => {
+    const key = `${repositoryId} ${branch}`
+    const found = histories.get(key)
+    if (found !== undefined) return found
+    const started = [`${branch}-0`]
+    histories.set(key, started)
+    return started
+  }
+  const repositoryAt = (path?: ReadonlyArray<string>) => {
+    const found = path === undefined ? [...repositories.values()][0] : repositories.get(path.join('/').toLowerCase())
+    if (found === undefined) throw new Error(`No repository ${path?.join('/') ?? ''}`)
+    return found
+  }
+  /** Lands a change: it is merged, and its target moves on to its merge. */
+  const land = (number: number) => {
+    const change = changeNumbered(number)
+    inQueue.delete(number)
+    autoMerging.delete(number)
+    if (change.state !== 'open') return
+    update(number, { state: 'merged' })
+    historyOf(repositoryOf.get(number) ?? '', change.target).push(`merge-${number}`)
+  }
 
-  /** Records a call, taking as long as the test said, and fails it if a test asked. */
+  /** Records a call, held until what the test said it waits for, and fails it if a test asked. */
   const called = (method: string) =>
     Effect.suspend(() => {
       calls.push(method)
-      const takes = options.latency?.(method) ?? 0
-      return takes > 0 ? Effect.andThen(Effect.sleep(Duration.millis(takes)), failing(method)) : failing(method)
+      const waits = options.waitsFor?.(method)
+      return waits === undefined ? failing(method) : Effect.andThen(waits, failing(method))
     })
   const failing = (method: string) =>
     Effect.suspend(() => {
@@ -306,17 +470,120 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     ...containers.values(),
   ]
 
+  /** What a field can be set to on the fake, for an issue with these statuses. */
+  const choicesOf = (
+    field: ChosenField,
+    statuses: ReadonlyArray<Issue['status']>,
+  ): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
+    const allowed: IssueField = field
+    if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
+    const named = (prefix: string, names: ReadonlyArray<string>) =>
+      names.map((name): Choice => ({ id: `${prefix}-${name.toLowerCase().replace(/\s+/g, '-')}`, name }))
+    switch (field) {
+      case 'status':
+        return Effect.succeed(statuses.map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
+      case 'labels':
+        return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
+      case 'assignee':
+        return Effect.succeed([me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })))
+      case 'project':
+        return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
+      // A Linear milestone is its project's; a repository's are its own.
+      case 'milestone':
+        return Effect.succeed(
+          PROJECTS.flatMap((project) =>
+            (MILESTONES[project] ?? []).map((name): Choice => ({
+              id: `milestone-${name.toLowerCase()}`,
+              name,
+              ...(product === 'linear' ? { in: `project-${project.toLowerCase()}`, also: [`${project} / ${name}`] } : {}),
+            })),
+          ),
+        )
+      case 'cycle':
+        return Effect.succeed(CYCLES.map((cycle): Choice => ({ id: `cycle-${cycle.also[0] ?? ''}`, name: cycle.name, also: cycle.also })))
+      case 'type':
+        return Effect.succeed(named('type', TYPES))
+      case 'components':
+        return Effect.succeed(named('component', COMPONENTS))
+    }
+  }
+
+  /** An issue with a change made, as the fake's adapters make it; undefined for a status it hasn't. */
+  const changed = (found: Issue, wanted: IssueChange): Issue | undefined => {
+    const statuses = statusesOf(found)
+    const closed = statuses.find((status) => status.category === 'done')
+    const status =
+      wanted.status !== undefined
+        ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
+        : wanted.close === true
+          ? closed
+          : found.status
+    if (status === undefined) return undefined
+    const people: ReadonlyArray<Person> = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
+    const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
+    const assignees = (() => {
+      const asked = wanted.assignee
+      if (asked === undefined) return found.assignees
+      if (asked === null) return []
+      const added = people.filter((person) => asked.add.some((choice) => choice.id === person.id))
+      // One assignee, where the adapter has one: the one added is in place of whoever had it.
+      if (capabilitiesHere.assignees === 'one')
+        return added.length > 0
+          ? added.slice(-1)
+          : found.assignees.filter((person) => !asked.remove.some((choice) => choice.id === person.id))
+      const kept = found.assignees.filter((person) => !asked.remove.some((choice) => choice.id === person.id))
+      return [...kept, ...added.filter((person) => !kept.some((had) => had.id === person.id))]
+    })()
+    const parent = wanted.parent == null ? wanted.parent : (issues.get(wanted.parent.ref) ?? null)
+    return {
+      ...found,
+      status,
+      assignees,
+      ...(wanted.title === undefined ? {} : { title: wanted.title }),
+      ...(wanted.description === undefined ? {} : { body: wanted.description }),
+      ...(wanted.priority === undefined
+        ? {}
+        : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
+      ...(wanted.labels === undefined
+        ? {}
+        : {
+            labels: [
+              ...new Set([
+                ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
+                ...wanted.labels.add.map((label) => label.name),
+              ]),
+            ],
+          }),
+      ...(wanted.project === undefined
+        ? {}
+        : { project: wanted.project === null ? null : { id: wanted.project.id, name: wanted.project.name } }),
+      ...(wanted.milestone === undefined
+        ? {}
+        : { milestone: wanted.milestone === null ? null : { id: wanted.milestone.id, name: wanted.milestone.name } }),
+      ...(wanted.cycle === undefined ? {} : { cycle: wanted.cycle?.name ?? null }),
+      ...(parent === undefined ? {} : { parent: parent === null ? null : { key: parent.key, title: parent.title } }),
+      ...(wanted.estimate === undefined ? {} : { estimate: wanted.estimate }),
+      ...(wanted.type === undefined ? {} : { type: wanted.type.name }),
+      ...(wanted.components === undefined ? {} : { components: wanted.components.map((component) => component.name) }),
+      ...(wanted.due === undefined ? {} : { due: wanted.due }),
+      updatedAt: now(),
+    }
+  }
+
   const service: FakeService = {
     product,
+    ...makeFakeReleases({ product, called }),
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
       drafts: true,
       checkLogs: true,
       threads: true,
       reviews: options.reviews ?? product === 'github',
-      links: true,
-      starts: true,
-      changes: changesHere,
+      pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
+      // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
+      reopen: product !== 'bitbucket_cloud',
+      rerun: product !== 'bitbucket_dc',
+      ...capabilitiesHere,
     },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
@@ -366,10 +633,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         changes.push(opened)
         repositoryOf.set(number, repository.id)
+        upTo.set(number, historyOf(repository.id, change.target).at(-1) ?? '')
         if (change.from !== undefined) forks.set(number, change.from.path.join('/'))
         return Effect.succeed(opened)
       }),
-    change: (_repository, number) =>
+    change: (_repository, number, ask) =>
       Effect.andThen(called('change'), () => {
         const found = (lagged ?? changes).find((change) => change.number === number)
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
@@ -381,6 +649,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(head === null ? {} : { headSha: head }),
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+          ...(ask?.queue === true && queues && found.state === 'open'
+            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null }
+            : {}),
+          // GitLab says it on every read, Data Center when asked.
+          ...(autoMerges && (product === 'gitlab' || ask?.queue === true) ? { autoMerge: autoMerging.has(number) } : {}),
         })
       }),
     listChanges: (repository, query) =>
@@ -444,9 +717,13 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, { draft: false })
         return Effect.succeed(changeNumbered(change.number))
       }),
-    merge: (_repository, change) =>
+    merge: (repository, change, how) =>
       Effect.andThen(called('merge'), () => {
         const now = changeNumbered(change.number)
+        if (how?.method !== undefined && !repository.merges.includes(how.method))
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Merging by ${how.method} isn’t allowed here` }))
+        if (how?.auto === true && !autoMerges)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'This host has no auto-merge' }))
         // As GitHub: a draft, or a change already merged or closed, isn't merged; nor one whose head moved on.
         if (now.draft || now.state !== 'open')
           return Effect.fail(
@@ -458,13 +735,85 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           )
         if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
-        if (!landsLater) update(change.number, { state: 'merged' })
+        const method = how?.method ?? repository.merges[0] ?? null
+        if (how?.auto === true) {
+          mergesAsked.push({ number: change.number, how: 'auto', method, head: change.headSha })
+          autoMerging.add(change.number)
+          return Effect.succeed({ ...changeNumbered(change.number), autoMerge: true })
+        }
+        // As GitHub's and Bitbucket Cloud's, a merge on a branch with a queue puts it in the queue.
+        if (queues && (product === 'github' || product === 'bitbucket_cloud')) {
+          mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
+          inQueue.add(change.number)
+          return Effect.succeed({ ...changeNumbered(change.number), queued: true })
+        }
+        mergesAsked.push({ number: change.number, how: 'merge', method, head: change.headSha })
+        if (!landsLater) land(change.number)
         return Effect.succeed(changeNumbered(change.number))
       }),
+    mergeWays: () =>
+      Effect.andThen(called('mergeWays'), () =>
+        Effect.succeed({
+          queue:
+            queues && (product === 'github' || product === 'bitbucket_cloud')
+              ? 'merge_queue'
+              : queues && product === 'gitlab'
+                ? 'merge_train'
+                : null,
+          autoMerge: autoMerges,
+          server:
+            product === 'gitlab' ? 'GitLab 18.5 (the fake)' : product === 'bitbucket_dc' ? 'Bitbucket Data Center 9.4 (the fake)' : null,
+        } as const),
+      ),
+    enqueue: (_repository, change) =>
+      Effect.andThen(called('enqueue'), () => {
+        if (!queues || product === 'bitbucket_dc')
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'There is no merge queue here' }))
+        const now = changeNumbered(change.number)
+        if (now.state !== 'open' || now.draft)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'It can’t be queued as it is' }))
+        if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+        mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
+        inQueue.add(change.number)
+        leftQueue.delete(change.number)
+        if (product === 'gitlab') autoMerging.add(change.number)
+        return Effect.succeed({ ...now, queued: true })
+      }),
+    leaveQueue: (_repository, change) =>
+      Effect.andThen(called('leaveQueue'), () => {
+        if (inQueue.delete(change.number)) leftQueue.set(change.number, 'removed')
+        autoMerging.delete(change.number)
+        return Effect.succeed({ ...changeNumbered(change.number), queued: false, autoMerge: false })
+      }),
+    branchHead: (repository, branch) =>
+      Effect.andThen(called('branchHead'), () => Effect.succeed(historyOf(repository.id, branch).at(-1) ?? `${branch}-0`)),
+    contains: (repository, change, sha) =>
+      Effect.andThen(called('contains'), () => {
+        const history = historyOf(repository.id, change.target)
+        const has = upTo.get(change.number) ?? history[0] ?? ''
+        const at = history.indexOf(sha)
+        return Effect.succeed(at !== -1 && at <= history.indexOf(has))
+      }),
+    // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
+    ...(product === 'github'
+      ? {
+          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
+            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+        }
+      : {}),
     closeChange: (_repository, change) =>
       Effect.andThen(called('closeChange'), () => {
         // As GitHub: one merged or closed already stays as it is.
         if (changeNumbered(change.number).state === 'open') update(change.number, { state: 'closed' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
+    reopenChange: (_repository, change) =>
+      Effect.andThen(called('reopenChange'), () => {
+        if (product === 'bitbucket_cloud') return Effect.fail(noReopen(product, service.words, change.number))
+        const now = changeNumbered(change.number)
+        if (now.state === 'merged') return Effect.fail(mergedForGood(product, service.words, change.number))
+        if (now.state === 'closed') update(change.number, { state: 'open' })
         return Effect.succeed(changeNumbered(change.number))
       }),
     deleteBranch: (_repository, change) =>
@@ -473,12 +822,55 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (!deleted.includes(change.number)) deleted.push(change.number)
         return Effect.void
       }),
+    updateBranch: (repository, change, ask) =>
+      Effect.andThen(called('updateBranch'), (): Effect.Effect<BranchUpdate, ConnectorFailed> => {
+        const now = changeNumbered(change.number)
+        if (now.state !== 'open') return Effect.fail(notOpen(product, service.words, change.number, now.state))
+        // A push since the caller read it: never merged unseen, or overwritten.
+        const head = options.headOf?.(change.number) ?? now.headSha
+        if (head !== ask.expectedHead) return Effect.succeed({ outcome: 'moved', head } as const)
+        // A branch from a fork is the author's: the account pushes to it only where they allowed it.
+        if (forks.has(change.number) && !pushable.has(change.number))
+          return Effect.succeed({
+            outcome: 'no_access',
+            reason: `The account may not push to ${now.source} on the author’s fork.`,
+          } as const)
+        const behindBy = behind.get(change.number)
+        if (behindBy === undefined) {
+          // Unless a test said it fell behind, it is behind where its target moved on past what its branch has, as the merge line reads it.
+          const target = historyOf(repository.id, now.target).at(-1) ?? ''
+          if (target === '' || upTo.get(change.number) === target) return Effect.succeed({ outcome: 'current' } as const)
+          const made = `${head ?? 'head'}+${target}`
+          upTo.set(change.number, target)
+          update(change.number, { headSha: made })
+          updates.push(change.number)
+          updated.push({ number: change.number, head: made })
+          return Effect.succeed({ outcome: 'updated', head: product === 'github' && readsBackLater ? null : made } as const)
+        }
+        if (behindBy.commits === 0) return Effect.succeed({ outcome: 'current' } as const)
+        if (behindBy.conflicts.length > 0) return Effect.succeed({ outcome: 'conflict', files: behindBy.conflicts } as const)
+        const merged = `merge-${change.number}-${updated.length + 1}`
+        update(change.number, { headSha: merged })
+        behind.delete(change.number)
+        updated.push({ number: change.number, head: merged })
+        // GitHub merges in the background and says only that it will; the others, in a copy, know the commit they pushed.
+        return Effect.succeed({ outcome: 'updated', head: product === 'github' ? null : merged } as const)
+      }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
         const change =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
+        const elsewhere = change === undefined ? options.checksOn?.(sha) : undefined
+        if (elsewhere !== undefined)
+          return Effect.succeed(
+            elsewhere.map((check, index): Check => {
+              const id = `check-${sha}-${index}`
+              logs.set(id, check.log ?? null)
+              return { id, name: check.name, state: check.state, url: check.url ?? null, summary: null }
+            }),
+          )
         if (change === undefined || ran === undefined)
           return Effect.succeed(
             change === undefined
@@ -508,6 +900,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('rerun'), () => {
         const again = fixed.get(check.id)
         if (again instanceof ConnectorFailed) return Effect.fail(again)
+        if (product === 'bitbucket_dc') return Effect.fail(notOurBuild(product, { name: check.name, url: check.url }))
         if (options.reruns === false || again === false) return Effect.succeed(false)
         reran.push(check.id)
         starting.add(check.id)
@@ -537,6 +930,28 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         comments.set(number, [...(comments.get(number) ?? []), comment])
         return Effect.succeed(comment)
+      }),
+    uploadPicture: (repository, picture) =>
+      Effect.andThen(called('uploadPicture'), () => {
+        if (!service.capabilities.pictures) return Effect.fail(noPictures(product))
+        const url = `https://fake.example/${repository.path.join('/')}/assets/${nextId()}/${encodeURIComponent(picture.name)}`
+        uploaded.push({ name: picture.name, mediaType: picture.mediaType, bytes: picture.bytes.byteLength, url })
+        return Effect.succeed(url)
+      }),
+    editComment: (_repository, number, commentId, body) =>
+      Effect.andThen(called('editComment'), () => {
+        const said = comments.get(number) ?? []
+        const found = said.find((comment) => comment.id === commentId && comment.threadId === null)
+        if (found === undefined) return Effect.fail(missing(`comment ${commentId}`))
+        // As a host: only its author edits it.
+        if (found.author.id !== account.id)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', status: 403, message: 'Only its author edits a comment' }))
+        const edited: Comment = { ...found, body, at: now() }
+        comments.set(
+          number,
+          said.map((comment) => (comment.id === commentId ? edited : comment)),
+        )
+        return Effect.succeed(edited)
       }),
     changeToReview: (_repository, number) =>
       Effect.andThen(called('changeToReview'), () => {
@@ -605,62 +1020,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         return Effect.succeed({ moved: true, status })
       }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
-    choices: (issue, field) =>
-      Effect.andThen(called('choices'), (): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
-        const allowed: IssueField = field
-        if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
-        switch (field) {
-          case 'status':
-            return Effect.succeed(statusesOf(issue).map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
-          case 'labels':
-            return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
-          case 'assignee':
-            return Effect.succeed(
-              [me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })),
-            )
-          case 'project':
-            return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
-        }
-      }),
+    choices: (issue, field) => Effect.andThen(called('choices'), () => choicesOf(field, statusesOf(issue))),
+    choicesIn: (id, field) =>
+      Effect.andThen(called('choicesIn'), () =>
+        filable().some((candidate) => candidate.id === id)
+          ? choicesOf(field, repositories.has(id.toLowerCase()) ? OPEN_CLOSED : STATUSES)
+          : Effect.fail(missing(`container ${id}`)),
+      ),
     update: (issue, wanted) =>
       Effect.andThen(called('update'), () => {
-        const refused = unchangeable({ links: true, starts: true, changes: changesHere }, wanted)
+        const refused = unchangeable(capabilitiesHere, wanted)
         if (refused !== undefined) return Effect.fail(cantChange(product, refused, 'the fake has no such field'))
         const found = issues.get(issue.ref)
         if (found === undefined) return Effect.fail(missing(`issue ${issue.ref}`))
-        const statuses = statusesOf(found)
-        const closed = statuses.find((status) => status.category === 'done')
-        const status =
-          wanted.status !== undefined
-            ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
-            : wanted.close === true
-              ? closed
-              : found.status
-        if (status === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
-        const people = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
-        const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
-        const after: Issue = {
-          ...found,
-          status,
-          ...(wanted.title === undefined ? {} : { title: wanted.title }),
-          ...(wanted.priority === undefined
-            ? {}
-            : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
-          ...(wanted.assignee === undefined
-            ? {}
-            : { assignees: wanted.assignee === null ? [] : people.filter((person) => person.id === wanted.assignee?.id) }),
-          ...(wanted.labels === undefined
-            ? {}
-            : {
-                labels: [
-                  ...new Set([
-                    ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
-                    ...wanted.labels.add.map((label) => label.name),
-                  ]),
-                ],
-              }),
-          updatedAt: now(),
-        }
+        const after = changed(found, wanted)
+        if (after === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
         issues.set(found.ref, after)
         issueChanges.push({ ref: found.ref, change: wanted })
         return Effect.succeed(after)
@@ -669,13 +1043,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('create'), () => {
         const container = filable().find((candidate) => candidate.id === id)
         if (container === undefined) return Effect.fail(missing(`container ${id}`))
+        // As an adapter files only what it sets as it files: the rest is `update`'s, right after.
+        const beyond = Object.keys(draft.fields ?? {}).find((field) => !createsHere.includes(field as IssueField))
+        if (beyond !== undefined)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `The fake files no ${beyond}` }))
         // A repository's issues are numbered `owner/repo#1`, a team's by its key (MER-1).
         const refOf = (number: number) =>
           repositories.has(id.toLowerCase()) || container.key === null ? `${id}#${number}` : `${container.key}-${number}`
         let number = 1
         while (issues.has(refOf(number))) number += 1
         const ref = refOf(number)
-        const filed: Issue = {
+        const added: Issue = {
           ...service.addIssue({ ref, title: draft.title, body: draft.body, assigned: false }),
           labels: [...draft.labels],
           container: container.name,
@@ -685,10 +1063,36 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               ? null
               : { level: draft.priority, name: draft.priority === 'none' ? 'No priority' : draft.priority },
         }
+        const filed = changed(added, draft.fields ?? {}) ?? added
         issues.set(ref, filed)
         created.push(filed)
         return Effect.succeed(filed)
       }),
+    find: (query) =>
+      Effect.andThen(called('find'), () => {
+        const words = query.text?.trim().toLowerCase() ?? ''
+        const within = query.container === undefined ? undefined : filable().find((one) => one.id === query.container)
+        return Effect.succeed(
+          [...issues.values()]
+            .filter((issue) => {
+              const ended = issue.status.category === 'done' || issue.status.category === 'cancelled'
+              return (
+                (query.state === 'all' || (query.state === 'closed') === ended) &&
+                (query.mine !== true || issue.assignees.some((person) => person.id === me.id)) &&
+                (within === undefined || issue.container === within.name || issue.container === within.key) &&
+                (words === '' || `${issue.title}\n${issue.body}`.toLowerCase().includes(words))
+              )
+            })
+            .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+            .slice(0, query.limit),
+        )
+      }),
+    comments: (issue, limit) =>
+      Effect.andThen(called('comments'), () =>
+        Effect.succeed(
+          (issueComments.get(issue.ref) ?? []).slice(-limit).map((body): IssueComment => ({ author: me, body, at: issue.updatedAt })),
+        ),
+      ),
     access: (input) =>
       called('access').pipe(
         Effect.map(() => {
@@ -734,6 +1138,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }
       repositories.set(path.join('/').toLowerCase(), repository)
       return repository
+    },
+    letPush: (path, can) => {
+      const key = path.join('/').toLowerCase()
+      const found = repositories.get(key)
+      if (found !== undefined) repositories.set(key, { ...found, canPush: can })
     },
     addIssue: (input) => {
       const container = input.ref.includes('#') ? (input.ref.split('#')[0] ?? null) : (input.ref.split('-')[0] ?? null)
@@ -802,13 +1211,38 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }),
       )
     },
-    mergeByHand: (number) => update(number, { state: 'merged' }),
+    mergeByHand: (number) => land(number),
     close: (number) => update(number, { state: 'closed' }),
     reopen: (number) => update(number, { state: 'open' }),
     readyByHand: (number) => update(number, { draft: false }),
     lagReads: () => void (lagged = [...changes]),
     catchUp: () => void (lagged = null),
     landLater: () => void (landsLater = true),
+    readBackLater: () => void (readsBackLater = true),
+    mergeQueue: () => void (queues = true),
+    enqueueByHand: (number) => void inQueue.add(number),
+    dequeue: (number, why) => {
+      inQueue.delete(number)
+      autoMerging.delete(number)
+      leftQueue.set(number, why)
+    },
+    writeTo: (branch, path) => {
+      const head = `other-${(writes += 1)}`
+      historyOf(repositoryAt(path).id, branch).push(head)
+      return head
+    },
+    branchHeadOf: (branch, path) => historyOf(repositoryAt(path).id, branch).at(-1) ?? `${branch}-0`,
+    pushTo: (number) => {
+      const head = `${changeNumbered(number).headSha ?? 'head'}+push-${(writes += 1)}`
+      update(number, { headSha: head })
+      return head
+    },
+    get merged() {
+      return [...mergesAsked]
+    },
+    get updated() {
+      return [...updates]
+    },
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {
         reason,
@@ -828,9 +1262,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       return [...issueChanges]
     },
     commentsOn: (number) => comments.get(number) ?? [],
+    get uploads() {
+      return uploaded
+    },
+    deleteComment: (number, id) => {
+      comments.set(
+        number,
+        (comments.get(number) ?? []).filter((comment) => comment.id !== id),
+      )
+    },
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
     forkOf: (number) => forks.get(number) ?? null,
+    loseFork: (number) => {
+      forks.set(number, '')
+    },
     addPullRequest: (input) => {
       const repository = repositories.get(input.path.join('/').toLowerCase())
       if (repository === undefined) throw new Error(`No repository ${input.path.join('/')}`)
@@ -854,11 +1300,23 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }
       changes.push(opened)
       repositoryOf.set(number, repository.id)
+      upTo.set(number, historyOf(repository.id, opened.target).at(-1) ?? '')
       if (input.fork !== undefined) forks.set(number, input.fork.join('/'))
       if (input.member === false) outsiders.add(number)
       if (input.baseSha !== undefined) bases.set(number, input.baseSha)
       if (input.reviewers !== undefined) asked.set(number, input.reviewers)
       return opened
+    },
+    fallBehind: (number, conflicts = []) => {
+      changeNumbered(number)
+      behind.set(number, { commits: (behind.get(number)?.commits ?? 0) + 1, conflicts })
+    },
+    pushByHand: (number) => update(number, { headSha: `${changeNumbered(number).headSha ?? 'head'}-pushed` }),
+    allowForkPush: (number) => {
+      pushable.add(number)
+    },
+    get branchesUpdated() {
+      return [...updated]
     },
     get reviewsPosted() {
       return [...posted]

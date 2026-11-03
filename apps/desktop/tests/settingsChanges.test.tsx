@@ -15,6 +15,7 @@ import { useAppIcon } from '../src/renderer/features/settings/useAppIcon'
 import { useCoAuthor } from '../src/renderer/features/settings/useCoAuthor'
 import { useEdgePlace } from '../src/renderer/features/settings/useEdgePlace'
 import { usePostTeamReviews } from '../src/renderer/features/settings/usePostTeamReviews'
+import { useReviewSeal } from '../src/renderer/features/settings/useReviewSeal'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { fakeClient, fakeHost, home, withoutOpenCode } from './fixtures'
 import { servicesFor, withServices } from './render'
@@ -51,6 +52,18 @@ describe('a setting changed twice quickly', () => {
       'setPostTeamReviews',
       () => usePostTeamReviews(),
       (model: ReturnType<typeof usePostTeamReviews>, n: number) => model?.set(n === 0),
+    ],
+    [
+      'the review seal',
+      'setReviewSeal',
+      () => useReviewSeal(),
+      (model: ReturnType<typeof useReviewSeal>, n: number) => model?.set(n === 0),
+    ],
+    [
+      'the review seal’s look',
+      'setReviewSealStyle',
+      () => useReviewSeal(),
+      (model: ReturnType<typeof useReviewSeal>, n: number) => model?.choose(n === 0 ? 'wax' : 'colophon'),
     ],
     [
       'how many agents run at once',
@@ -126,10 +139,10 @@ describe('where the edge is, as the main process says', () => {
 describe('how many agents run at once, in words', () => {
   const machine = { count: 4, memory: 16, cores: 10 }
 
-  it('says one at a time is the calmest, fewer than it could carry, and well past what it suggests', () => {
-    expect(text.atOnceNote(1, machine)).toBe('1: one at a time. The calmest this Mac can be.')
-    expect(text.atOnceNote(3, machine)).toBe('3: fewer than this Mac could carry.')
-    expect(text.atOnceNote(9, machine)).toBe('9: well past what this Mac’s 16 GB suggests. Expect it to run hot.')
+  it('says what the default comes from, and what going past it does', () => {
+    expect(text.atOnceNote(4, machine)).toBe('Default for 16 GB and 10 cores')
+    expect(text.atOnceNote(1, machine)).toBe('Below the default')
+    expect(text.atOnceNote(9, machine)).toBe('May run hot')
   })
 })
 
@@ -183,7 +196,7 @@ describe('the Settings tab', () => {
     })
     withServices(<Settings at="appearance" />, client)
     const places = await screen.findByRole('radiogroup', { name: 'In other apps' })
-    await waitFor(() => expect(screen.queryByText('With nothing under way yet, here is how a busy moment would look.')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('An example, until work is under way')).toBeNull())
     expect(screen.getByText(text.edgeNote)).toBeTruthy()
     expect(places.textContent).toContain('Spike the cache')
   })

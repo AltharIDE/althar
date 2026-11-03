@@ -33,7 +33,12 @@ export const text = {
   on: (project: string, host: string) => `${project}’s code is on ${host}`,
   reading: 'Reading the connections',
   backToList: 'Back to code hosts and trackers',
+  /** Back from a walk in, to one kind's list. */
+  backTo: { hosts: 'Back to code hosts', trackers: 'Back to trackers' },
 }
+
+/** One kind of service: the code hosts, or the trackers. */
+export type ServiceKind = 'hosts' | 'trackers'
 
 /** A walk in to open: a service, a connection to sign in again, or a company's own server. */
 export interface Connecting {
@@ -92,19 +97,27 @@ export interface ConnectionsViewProps {
   columns?: boolean
   /** Opens a walk in where the host has a place for it; without it, the walk opens here, in place of the list. */
   onConnect?: (connecting: Connecting) => void
+  /** Only one kind, as one list: the code hosts, or the trackers, as a step of the welcome asks. */
+  only?: ServiceKind
 }
 
 /**
  * The services, in one list, or with `columns` the code hosts beside the
  * trackers, each saying what that kind is for, so its services needn't.
  */
-export function ConnectionsView({ model, columns = false, onConnect }: ConnectionsViewProps) {
+export function ConnectionsView({ model, columns = false, onConnect, only }: ConnectionsViewProps) {
   const [here, setHere] = useState<Connecting | null>(null)
   const open = onConnect ?? setHere
-  if (here !== null) return <ConnectingHere connecting={here} onClose={() => setHere(null)} />
+  if (here !== null)
+    return (
+      <ConnectingHere connecting={here} back={only === undefined ? text.backToList : text.backTo[only]} onClose={() => setHere(null)} />
+    )
   const list = model.list
   if (list === null) return model.error === null ? <PartPending label={text.reading} /> : <p role="alert">{model.error}</p>
-  const services = servicesOf(list, { what: !columns })
+  // Under a heading that says what they are for, a row says only where the projects' code is.
+  const services = servicesOf(list, { what: !columns && only === undefined }).filter(
+    (service) => only === undefined || (isService(service.id) && hostsCode(service.id) === (only === 'hosts')),
+  )
   const listOf = (label: string, shown: ReadonlyArray<ServiceOption>) => (
     <Connections
       label={label}
@@ -147,7 +160,7 @@ export function ConnectionsView({ model, columns = false, onConnect }: Connectio
           ))}
         </div>
       ) : (
-        listOf(text.label, services)
+        listOf(only === undefined ? text.label : text.columns[only].title, services)
       )}
       {model.error !== null && (
         <p className={s.error} role="alert">
@@ -159,14 +172,12 @@ export function ConnectionsView({ model, columns = false, onConnect }: Connectio
 }
 
 /** A walk in, in place of the list, with the way back to it. */
-function ConnectingHere({ connecting, onClose }: { connecting: Connecting; onClose: () => void }) {
+function ConnectingHere({ connecting, back, onClose }: { connecting: Connecting; back: string; onClose: () => void }) {
   const flow = useConnect({ ...connecting, onClose })
   return (
     <div className={s.here}>
-      <LinkButton onClick={onClose}>{text.backToList}</LinkButton>
-      <div className={s.card}>
-        <ConnectFlow model={flow} />
-      </div>
+      <LinkButton onClick={onClose}>{back}</LinkButton>
+      <ConnectFlow model={flow} align="start" />
     </div>
   )
 }

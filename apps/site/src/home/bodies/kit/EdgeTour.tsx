@@ -2,8 +2,6 @@ import { EdgeSheet, Logo } from '@althar/ui'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source.
-import { EDGE_NEEDS, EDGE_WORK, edgeLineOf } from '../../../../../../packages/ui/src/fixtures/edge'
-import { HALYARD, MERIDIAN } from '../../../../../../packages/ui/src/fixtures/home'
 import { IslandOpen } from './app'
 import { BrowserWindow, Desktop, EditorWindow, TerminalWindow, type Wallpaper } from './Mac'
 import { useNarrow } from './Narrow'
@@ -13,6 +11,7 @@ import { cx } from '../../../lib/cx'
 import { useInView, useSeen } from './seen'
 import { Shot } from './Shot'
 import s from './EdgeTour.module.css'
+import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, HALYARD, TALLY } from './world'
 import t from './type.module.css'
 
 /*
@@ -119,7 +118,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
         label="A pull request ready for you, said round the notch over a browser"
         wallpaper="light"
         app="Chrome"
-        island={<IslandOpen open={false} saying={{ project: MERIDIAN, kind: 'Ready to accept' }} />}
+        island={<IslandOpen open={false} saying={{ project: TALLY, kind: 'Ready to accept' }} />}
         window={(style) => <BrowserWindow style={style} />}
         at={{ left: 90, top: 40, width: 1260, height: 800 }}
       />
@@ -166,7 +165,8 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
 
 /*
  * The menu bar, for a Mac without a notch: the top right corner of a screen
- * at the size it is, a terminal behind. The pointer comes up to Althar's
+ * at the size it is, a terminal behind; on a phone, nearer, only the part
+ * the list drops into. The pointer comes up to Althar's
  * mark, clicks, and the same list drops from it; it reads down it, clicks
  * the mark again, and it closes, round and round while it is on screen.
  */
@@ -196,6 +196,8 @@ function MenuBarNote() {
         <Shot
           w={620}
           h={600}
+          // On a phone, the corner the list drops into, from the mark down to where the pointer comes from, so the list is whole and reads.
+          phone={{ x: 192, y: 0, w: 428, h: 470 }}
           maxScale={1}
           label="Althar in the menu bar: its mark clicked, and the list dropped open under it"
           frame={s.sceneFrame}

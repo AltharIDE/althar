@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { CHANGES_IN_REVIEW, CHANGES_LINEAR, COMMENTED_LINEAR } from '../../fixtures/coordinator'
+import { CHANGES_DONE, CHANGES_IN_REVIEW, CHANGES_LINEAR, COMMENTED_LINEAR } from '../../fixtures/coordinator'
+import { Brand } from '../../foundations/brands/brands'
 import { IssueChangesState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -26,7 +27,7 @@ export const Pending: Story = {
     // Each change, a name and the value it takes.
     const change = (text: string) =>
       c.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === text && node.childElementCount > 0)
-    await expect(change('Status Done')).toBeInTheDocument()
+    await expect(change('In Progress → Done')).toBeInTheDocument()
     await expect(change('Priority Low')).toBeInTheDocument()
     await expect(change('Labels +perf −bug')).toBeInTheDocument()
     await expect(change('Assignee Ana Ruiz')).toBeInTheDocument()
@@ -36,12 +37,55 @@ export const Pending: Story = {
   },
 }
 
+/** Every field a tracker has: a milestone, a parent, people added and taken off, a due date and a new description. */
+export const EveryField: Story = {
+  args: {
+    onAlwaysAtOnce: fn(),
+    issues: [
+      {
+        mark: Brand.Linear,
+        source: 'Linear',
+        key: 'DEV-67',
+        href: 'https://linear.app/meridian/issue/DEV-67',
+        title: 'Refunds skip the rate limiter',
+        changes: [
+          { field: 'milestone', to: 'Beta' },
+          { field: 'parent', to: 'DEV-60' },
+          { field: 'assignees', add: ['Ana Ruiz'], remove: ['Sam Rivera'] },
+          { field: 'due', to: '2026-11-30' },
+          { field: 'description', to: 'Steps to reproduce…' },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const change = (text: string) =>
+      c.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === text && node.childElementCount > 0)
+    await expect(change('Milestone Beta')).toBeInTheDocument()
+    await expect(change('Part of DEV-60')).toBeInTheDocument()
+    await expect(change('Assignees +Ana Ruiz −Sam Rivera')).toBeInTheDocument()
+    await expect(change('Due 2026-11-30')).toBeInTheDocument()
+    await expect(c.getByText('New description')).toBeInTheDocument()
+  },
+}
+
+/** Always change at once applies these, and has every later change to an issue made at once. */
+export const AlwaysChangeAtOnce: Story = {
+  args: { onAlwaysAtOnce: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always change at once' }))
+    await expect(args.onAlwaysAtOnce).toHaveBeenCalled()
+  },
+}
+
 /** Althar's offer, as a task's pull request opened, to move its issue to review. */
 export const ToReview: Story = {
   args: CHANGES_IN_REVIEW,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('PR #212 opened.')).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: /PR #212 opened/ })).toHaveAttribute('href', 'https://github.com/meridian/api/pull/212')
+    await expect(c.getByText('In Progress')).toBeInTheDocument()
     await expect(c.getByText('In Review')).toBeInTheDocument()
   },
 }
@@ -74,14 +118,34 @@ export const Failed: Story = {
   },
 }
 
+/** A move that applied at once as its pull request merged: one quiet line, from where the issue was to where it is, and why. */
+export const MovedWithItsPullRequest: Story = {
+  args: { ...CHANGES_DONE, state: IssueChangesState.Applied },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/In Review → Done/)).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: /PR #212 merged/ })).toBeInTheDocument()
+    await expect(c.queryByRole('button')).not.toBeInTheDocument()
+  },
+}
+
 /** Applied: one line with each issue and what changed on it. */
 export const Applied: Story = {
   args: { state: IssueChangesState.Applied },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Changed')).toBeInTheDocument()
+    await expect(c.getByText(/DEV-67/)).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /DEV-142/ })).toBeInTheDocument()
     await expect(c.queryByRole('button')).not.toBeInTheDocument()
+  },
+}
+
+/** Changed at once, as you prefer: its line is the record, and says it can ask first next time. */
+export const AppliedAtOnce: Story = {
+  args: { state: IssueChangesState.Applied, onAlwaysAsk: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always ask first' }))
+    await expect(args.onAlwaysAsk).toHaveBeenCalled()
   },
 }
 
@@ -126,7 +190,7 @@ export const ApplyingFolds: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Apply' }))
-    await expect(c.getByText('Changed')).toBeInTheDocument()
+    await expect(c.getByText(/Backlog → Done|In Progress → Done/)).toBeInTheDocument()
     await waitFor(() => expect(c.getByRole('article')).toHaveFocus())
   },
 }
@@ -168,6 +232,7 @@ export const AllStates: Story = {
             />
           ),
         },
+        { state: 'moved with its pull request', node: <IssueChanges {...args} {...CHANGES_DONE} state={IssueChangesState.Applied} /> },
         { state: 'applied', node: <IssueChanges {...args} state={IssueChangesState.Applied} /> },
         { state: 'commented', node: <IssueChanges {...args} {...COMMENTED_LINEAR} state={IssueChangesState.Applied} /> },
         { state: 'discarded', node: <IssueChanges {...args} state={IssueChangesState.Discarded} /> },

@@ -20,7 +20,7 @@ test('renames a task from its header, and the new title shows everywhere', async
   try {
     await openFirstProject(electronApp, page, repository(home))
     await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     const title = page.getByRole('heading', { name: 'Keep the session alive', level: 1 })
     await expect(title).toBeVisible()

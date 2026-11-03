@@ -8,6 +8,7 @@ import {
   AgentsAtOnce,
   Api,
   ApiError,
+  ClientAuthority,
   AtOnceCount,
   CommandId,
   FOUND_MOST,
@@ -459,6 +460,8 @@ describe('the API', () => {
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
+              PlaceRepository: () => Effect.die('unused'),
+              MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
@@ -483,6 +486,7 @@ describe('the API', () => {
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
+              GetTaskFindings: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
               GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
@@ -518,6 +522,8 @@ describe('the API', () => {
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
               SetPostTeamReviews: () => Effect.die('unused'),
+              SetReviewSeal: () => Effect.die('unused'),
+              SetReviewSealStyle: () => Effect.die('unused'),
               GetAutomations: () => Effect.die('unused'),
               GetAutomation: () => Effect.die('unused'),
               MakeAutomation: () => Effect.die('unused'),
@@ -526,11 +532,14 @@ describe('the API', () => {
               PauseAutomation: () => Effect.die('unused'),
               RunAutomationNow: () => Effect.die('unused'),
               DeleteAutomation: () => Effect.die('unused'),
+              AnswerTaskAsk: () => Effect.die('unused'),
               UndoAutomationChange: () => Effect.die('unused'),
               SetAutomationPostsReviews: () => Effect.die('unused'),
               SetAutomationsPaused: () => Effect.die('unused'),
               SetAgentsAtOnce: () => Effect.die('unused'),
               SetFolderWait: () => Effect.die('unused'),
+              SetPlansAndReviews: () => Effect.die('unused'),
+              SetNewProjectDefaults: () => Effect.die('unused'),
               GetTaskFolders: () => Effect.die('unused'),
               CleanUpFolders: () => Effect.die('unused'),
               RemoveTaskFolder: () => Effect.die('unused'),
@@ -578,6 +587,7 @@ describe('the API', () => {
               AbandonTask: () => Effect.void,
               MarkTaskDone: () => Effect.void,
               KeepTaskForLater: () => Effect.void,
+              SettledWithOnePress: () => Effect.void,
               RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
@@ -610,6 +620,7 @@ describe('the API', () => {
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
+              PostScreenshots: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
               GetProjectNotes: () => Effect.succeed([]),
@@ -651,6 +662,8 @@ describe('the API', () => {
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
               ClearLaunch: () => Effect.void,
+              PreferIssueCards: () => Effect.void,
+              SetTaskIssuePart: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({
                   _tag: 'Changed' as const,
@@ -665,7 +678,11 @@ describe('the API', () => {
         )
         yield* Effect.forkScoped(
           Layer.launch(
-            RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data)))),
+            RpcServer.layer(Api).pipe(
+              Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
+              Layer.provide(handlers),
+              Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data))),
+            ),
           ),
         )
         const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))

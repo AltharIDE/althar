@@ -83,13 +83,6 @@ interface Waiting {
   released: boolean
 }
 
-/**
- * The question in a line, for the call's title: what it asks first. An
- * agent asking several at once says little in its message ("Please answer
- * the following questions."), so the first question names them.
- */
-export const questionTitle = (payload: Pick<QuestionPayload, 'message' | 'fields'>) => payload.fields[0]?.question ?? payload.message
-
 /** Markdown's marks taken off, as a line shows words: code, emphasis, headings, list marks, links. */
 const plain = (text: string) =>
   text
@@ -100,6 +93,38 @@ const plain = (text: string) =>
     .replace(/^\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/gm, '')
     .replace(/\s+/g, ' ')
     .trim()
+
+/** How long a card's headline may be: a decision in a few words, not a paragraph. */
+const HEADLINE_LENGTH = 110
+
+/**
+ * A question as a card says it: its first sentence, plain, cut at a word
+ * where even that runs long. An agent that asks in one line is shown as it
+ * wrote it; one that sends a paragraph gets a headline, and the whole of it
+ * is in the thread.
+ */
+export const headlineOf = (asked: string): string => {
+  const words = plain(asked)
+  const first = /^.*?[.?!](?=\s|$)/.exec(words)?.[0] ?? words
+  if (first.length <= HEADLINE_LENGTH) return first
+  const cut = first.slice(0, HEADLINE_LENGTH - 1)
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 0 ? cut.lastIndexOf(' ') : cut.length).replace(/[,;:\s]+$/, '')}…`
+}
+
+/** What a question says after its headline: the background a card clamps. Nothing where the headline was all of it. */
+export const backgroundOf = (asked: string): string => {
+  const words = plain(asked)
+  const head = headlineOf(asked)
+  return head.endsWith('…') ? words : words.slice(head.length).trim()
+}
+
+/**
+ * The question in a line, for the call's title: what it asks first, as a
+ * headline. An agent asking several at once says little in its message
+ * ("Please answer the following questions."), so the first question names them.
+ */
+export const questionTitle = (payload: Pick<QuestionPayload, 'message' | 'fields'>) =>
+  headlineOf(payload.fields[0]?.question ?? payload.message)
 
 /** How long a why may be: a line or two under the question. */
 const WHY_LENGTH = 200

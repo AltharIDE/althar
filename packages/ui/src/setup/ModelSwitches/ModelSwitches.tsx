@@ -35,7 +35,7 @@ export const modelSwitchesText: ModelSwitchesText = {
   list: (agent) => `${agent} models`,
   search: 'Find a model',
   none: 'No model matches',
-  empty: 'It hasn’t said what it offers yet.',
+  empty: 'No models yet',
 }
 
 /** A list this long is found in by name. */

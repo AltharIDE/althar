@@ -112,13 +112,11 @@ describe('a name without its lines', () => {
     expect(withoutLines('model.ts')).toBe('model.ts')
   })
 
-  it('reads a long run of what looks like lines at once, not again from each place', () => {
-    const started = performance.now()
-    // What a pattern tried again from each place, failing at the end, takes seconds over.
+  it('reads a long run of what looks like lines', () => {
+    // How long these take is the performance run's (Code.bench.ts): a pattern tried again from each place took seconds.
     expect(withoutLines(`a${':9'.repeat(40_000)}\n!`)).toBe('a')
     expect(withoutLines(`a${':'.repeat(100_000)}`)).toBe(`a${':'.repeat(100_000)}`)
     expect(withoutLines(`a${'#'.repeat(100_000)}`)).toBe(`a${'#'.repeat(100_000)}`)
-    expect(performance.now() - started).toBeLessThan(100)
   })
 })
 
@@ -143,8 +141,8 @@ describe('a file’s lines', () => {
       return <div data-testid="lines">{lines?.[0] ?? 'plain'}</div>
     }
     render(<Coloured />)
-    await waitFor(() => expect(screen.getByText('const')).toHaveStyle({ color: 'var(--syn-keyword)' }), { timeout: 10_000 })
-    expect(screen.getByText('20')).toHaveStyle({ color: 'var(--syn-string)' })
+    await waitFor(() => expect(screen.getByText('const')).toHaveStyle({ color: 'var(--code-keyword, var(--syn-keyword))' }))
+    expect(screen.getByText('20')).toHaveStyle({ color: 'var(--code-string, var(--syn-string))' })
     expect(screen.getByText(/a minute/)).toHaveStyle({ fontStyle: 'italic' })
   })
 

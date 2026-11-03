@@ -1,11 +1,11 @@
 import { Brand } from '@althar/ui'
 
 import type { AGENTS } from './facts'
-import { NOTES } from './meridian'
+import { NOTES } from './tally'
 
 /*
  * The building site's cast, shared by the site concepts: six tasks in
- * Meridian, which agent ran each, and the note each one left. The notes are
+ * Tally, which agent ran each, and the note each one left. The notes are
  * the floors, rooms or words the cranes set down. Three are your decisions,
  * shown in violet wherever they appear.
  */

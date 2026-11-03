@@ -134,32 +134,29 @@ describe('push_tag, where the tag doesn’t go up at once', () => {
       return yield* Fiber.join(pushing)
     })
 
-  it.live(
-    'returns while the person hasn’t answered, and tells the lead once they have',
-    () =>
-      Effect.gen(function* () {
-        const { access, worktree, remote } = yield* leadWithRemote()
-        tagged(worktree, 'v3.0.0')
-        const head = git(worktree, 'rev-parse', 'HEAD')
-        // Unanswered for as long as an agent waits for a tool: the call says so, and nothing has gone up.
-        assert.strictEqual(
-          yield* callTool(access, 'push_tag', { tag: 'v3.0.0' }),
-          "Asked the person to allow pushing v3.0.0 to origin. Nothing goes up until they do; you'll be told when it's pushed, or if it isn't.",
-        )
-        assert.strictEqual(git(remote, 'tag', '--list'), '')
-        yield* answer((yield* card).id, 'allow')
-        const sql = yield* SqlClient.SqlClient
-        yield* until(
-          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`,
-          (rows) => rows.length === 1,
-        )
-        const [told] = yield* sql<{
-          body: string
-        }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`
-        assert.strictEqual(told?.body, `Pushed v3.0.0, on ${head.slice(0, 8)}, to origin.`)
-        assert.strictEqual(git(remote, 'rev-parse', 'v3.0.0^{commit}'), head)
-      }).pipe(Effect.provide(runtime())),
-    60_000,
+  it.live('returns while the person hasn’t answered, and tells the lead once they have', () =>
+    Effect.gen(function* () {
+      const { access, worktree, remote } = yield* leadWithRemote()
+      tagged(worktree, 'v3.0.0')
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      // Unanswered for as long as an agent waits for a tool: the call says so, and nothing has gone up.
+      assert.strictEqual(
+        yield* callTool(access, 'push_tag', { tag: 'v3.0.0' }),
+        "Asked the person to allow pushing v3.0.0 to origin. Nothing goes up until they do; you'll be told when it's pushed, or if it isn't.",
+      )
+      assert.strictEqual(git(remote, 'tag', '--list'), '')
+      yield* answer((yield* card).id, 'allow')
+      const sql = yield* SqlClient.SqlClient
+      yield* until(
+        sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`,
+        (rows) => rows.length === 1,
+      )
+      const [told] = yield* sql<{
+        body: string
+      }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`
+      assert.strictEqual(told?.body, `Pushed v3.0.0, on ${head.slice(0, 8)}, to origin.`)
+      assert.strictEqual(git(remote, 'rev-parse', 'v3.0.0^{commit}'), head)
+    }).pipe(Effect.provide(runtime())),
   )
 
   it.live('says there is nowhere to push it in a repository with no remote, and asks nothing', () =>
@@ -175,12 +172,12 @@ describe('push_tag, where the tag doesn’t go up at once', () => {
   it.live('tells the lead what the remote said where it refuses the tag, and what git said where the push failed otherwise', () =>
     Effect.gen(function* () {
       const { access, worktree, remote } = yield* leadWithRemote()
-      // The remote turns tags down, as a protected one does.
+      // The remote turns tags down, as a protected one does: its own words, not git's "pre-receive hook declined".
       const hook = join(remote, 'hooks', 'pre-receive')
       writeFileSync(hook, '#!/bin/sh\necho "Tags are made by the release job" >&2\nexit 1\n')
       chmodSync(hook, 0o755)
       tagged(worktree, 'v2.0.0')
-      assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: pre-receive hook declined. Tell the person.')
+      assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: Tags are made by the release job. Tell the person.')
       assert.strictEqual(git(remote, 'tag', '--list'), '')
       // The remote gone: git's own last word.
       rmSync(remote, { recursive: true, force: true })

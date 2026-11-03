@@ -3,6 +3,7 @@ import { basename, resolve } from 'node:path'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 /*
  * Each page is rendered to its own HTML after the build, by
@@ -36,11 +37,27 @@ const wallpapers = (): Plugin => ({
   },
 })
 
+/** The review seal, served in development as the site's Worker serves it (worker/index.ts), which the build leaves to wrangler. */
+const seals = (): Plugin => ({
+  name: 'seals',
+  configureServer(server) {
+    server.middlewares.use('/seal', (req, res, next) => {
+      server.ssrLoadModule('/worker/index.ts').then(async (worker) => {
+        const { seal } = worker as typeof import('./worker/index')
+        const answer = seal(new Request(`http://localhost/seal${req.url ?? ''}`, { method: req.method ?? 'GET' }))
+        res.statusCode = answer.status
+        answer.headers.forEach((value, key) => res.setHeader(key, value))
+        res.end(Buffer.from(await answer.arrayBuffer()))
+      }, next)
+    })
+  },
+})
+
 /** The day of the build, in UTC: the client and the renderer are built minutes apart, so both read the same. */
 const BUILT_ON = new Date().toISOString().slice(0, 10)
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), wallpapers()],
+  plugins: [react(), wallpapers(), seals()],
   define: { 'import.meta.env.BUILT_ON': JSON.stringify(BUILT_ON) },
   css: {
     modules: {
@@ -53,6 +70,7 @@ export default defineConfig(({ mode }) => ({
   /* The manifest tells the prerender which stylesheets a lazy page needs up front. */
   build: { target: 'baseline-widely-available', manifest: true },
   test: {
+    ...testing('small'),
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'node',
   },

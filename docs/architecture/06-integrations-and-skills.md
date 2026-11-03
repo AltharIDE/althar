@@ -181,6 +181,33 @@ Both models were laid against all six services before any adapter was
 written. A model whose terms only one service has is a sign it is that
 service's model.
 
+### Every service alike
+
+A feature built for one code host or tracker is built for every one that can
+have it, in the same release. Where a service lacks it, Althar stands in with
+what the service has, and where neither can, it says so and why
+([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+The feature is written against the model, adds its clause to the contract
+suite, and is turned off in the adapter's capabilities where it can't be had.
+What isn't alike, as read on 31 October 2026:
+
+| What | Where it's missing | Why | What follows |
+| --- | --- | --- | --- |
+| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
+| Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
+| Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
+| A merge queue | GitHub without one on the branch, GitLab without merge trains, Bitbucket Cloud without one, and Data Center | GitHub's and GitLab's are the project's settings, and Data Center has none | Althar's merge line stands in, one merge at a time into each branch (ADR-081, task 5), with auto-merge as its merge on GitLab and on Data Center from 8.15 |
+| Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
+| A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-081, task 8, publishing as each host does |
+| Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
+| The gated call's writes | GitLab, Bitbucket Cloud and Data Center | Not built | ADR-081, task 14 |
+| Moving an issue to started (`starts`) | GitHub's and GitLab's issues | Not built: GitLab's statuses where the server has them, GitHub's project Status field, or a label the project's notes name | ADR-082, task 2 |
+| Priority | GitHub's and GitLab's issues, Trello | No field of their own: a label the project's notes name, or GitHub's organization issue fields | ADR-082, task 3 |
+| Project or milestone | Jira, Trello | Not built: Jira Cloud moves an issue to another project, Trello a card to another board | ADR-082, task 3 |
+
+Linking a pull request to GitHub's and GitLab's issues isn't a gap: a pull
+request that names the issue links it.
+
 ### Code hosts
 
 | | GitHub (and Enterprise Server) | GitLab (and self-managed) | Bitbucket Cloud | Bitbucket Data Center | The model |
@@ -254,10 +281,30 @@ service's model.
     cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
     onto what was sent. The commit the person saw counts as seen in either
     form.
-- **After the first push, pushing is the person's.** When a plan's steps are
+- **A pull request shows the review its change had** (ADR-076), unless the
+  person turned it off in Settings: on GitHub, a seal in its corner, drawn
+  by the site from its address, names the reviewer, how many passes, and
+  the commit the last pass read. Folded at the description's end, what
+  changed after review, with the commits that made it, and what the lead
+  kept, with why. Never how many findings there were.
+- **After the first push, a lead's commits go up as its turn ends** (ADR-072),
+  where the project's rules say so (`pushCommits`, "Push the lead's commits
+  automatically", on unless the person turns it off). When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
-  commits after, answering the person, a review or failed checks, waits on the
-  task's branch until the person has looked at it and pushes it: the task
+  commits after, answering the person, a review or failed checks, Althar
+  pushes to the task's open pull request once the lead's turn has ended and
+  it is done, as a plain push to that pull request's own branch, never the
+  default branch and never forced; `push_to_pull_request` pushes at once.
+  It waits for the person instead, the card's Push saying why, where the
+  pull request's branch isn't where Althar last pushed it (someone pushed
+  there outside Althar), where the person stopped or interrupted the lead
+  since, where the push would need forcing, or where it, or asking the host
+  before it, failed; a fix for failing checks doesn't go past such a hold.
+  Until they're on the pull request, commits going up offer no Push and no
+  Accept: the card says they're going up.
+- **Where the project leaves pushing to the person, it is theirs after the
+  first push.** What the lead commits waits on the task's branch until the
+  person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead never pushes:
   when the person asks it to, or what it committed should go up, it asks them
@@ -329,11 +376,28 @@ service's model.
   request merged, or, where it has none, its branch in its default branch
   here. A pull request closed without merging keeps the task open. Until
   then, the thread says which is still open.
-- **Merging is the person's.** The model has `merge`, and Althar calls it
-  only when the person accepts the change (from the board, or the task),
-  never on an agent's word: the rules refuse agents' merges. A draft is
-  marked ready first, and only the head Althar last read is merged, in the
-  first way the repository allows.
+- **Merging waits for the person's word.** The model has `merge`, and
+  Althar calls it when the person accepts the change (from the board, or the
+  task), or when they ask the coordinator ([04](04-coordinator.md#merging-on-the-persons-word)):
+  never on an agent's own initiative, and the rules still refuse agents'
+  `gh pr merge`. A draft is marked ready first on accepting, and only the
+  head Althar last read is merged, in the way asked or the first the
+  repository allows.
+- **How a branch merges** is the host's to say (`mergeWays`): GitHub's merge
+  queue on the branch, Bitbucket Cloud's (one of its `merge-queues`
+  not `INACTIVE`, `DRAINING` or `SUSPENDED`, entered by its merge call,
+  which on such a branch queues it; a workspace that won't say has none), GitLab's merge trains
+  (Premium's `merge_trains_enabled`), and auto-merge: GitLab's on every tier (both
+  `auto_merge` and the older `merge_when_pipeline_succeeds` are sent), Data
+  Center's from 8.15 by its `application-properties`. `enqueue` and
+  `leaveQueue` enter and leave the queue or train at the head read, and
+  `leaveQueue` turns auto-merge off. `branchHead` and `contains` say whether a
+  branch has its target's head: GitHub's compare, GitLab's and Bitbucket
+  Cloud's merge base, Data Center's commits between. GitHub's update-branch
+  lands in the background, so the head it says may be null, or someone
+  else's push: `madeFrom` says whether a head is the merge it made, one whose
+  first parent is the head it had, so the merge line takes no one else's
+  push for Althar's, and asks again later for one that hadn't landed.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
 
@@ -524,9 +588,19 @@ The coordinator can draft an issue on any connected tracker with
 now. Nothing reaches the tracker on its word:
 
 - **A draft is a card** in the coordinator's thread: the tracker, where it
-  goes there (a container), its title, body and labels. The person files it,
+  goes there (a container), its title, body and labels, and every other
+  field its tracker has that it is filed with (below). The person files it,
   changes it first, or discards it. There is no countdown: a draft left
   alone files nothing.
+- **Or it is filed at once** (`draft_issue`'s `file_now`), where the
+  project's notes say issues are filed at once, or the person just said so
+  ("just file it"): whether to is the agent's call by what the person said,
+  not a switch (DEV-182). Its card, filed, is the receipt in the thread,
+  with its key and link. Each card offers **Always file at once** while it
+  waits (filing it too) and, once filed at once, **Always ask first**: each
+  says so to the coordinator as the person, which keeps it as a project
+  note, and to the task's lead where it was pressed. Leads read the
+  project's notes in their brief.
 - **A task's lead can draft too**, with `draft_issue`, and look for what is
   tracked already with `find_issues`: a bug or follow-up it comes across, or
   several the person asks it to file. The card is in the task's thread, and
@@ -536,9 +610,20 @@ now. Nothing reaches the tracker on its word:
   then where the project's issues come from. Once the person files or
   discards one, the lead is told in its thread, with the key and link, as
   the coordinator hears it as news (a lead's drafts aren't the
-  coordinator's news). Leads never file on their own: that is the one flag
-  `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
-  and a reviewer only reads.
+  coordinator's news). A lead files at once only where the person said so,
+  as the coordinator does. A review's lead has no such tool, and a
+  reviewer only reads.
+- **Every field its tracker has** goes in the one call: its project,
+  milestone, cycle, parent, assignee, status, estimate, type, components
+  and due date, each by the tracker's name for it, read against where it
+  goes before it is filed (`Tracker.choicesIn`), so a card never holds a
+  name the tracker hasn't; what can't be read is left off and said to the
+  agent with what the tracker has. A label a tracker makes none of (Linear,
+  Trello) is left off and said as it is drafted. Filing sets what the
+  tracker's `create` takes (`capabilities.creates`), then the rest with
+  `update` right after, as a Jira status by its workflow; what the tracker
+  then left off, a label or a field it refused, is said on the filed card
+  and to the agent, and the issue stays filed.
 - **Where it goes** is what the coordinator names, a tracker by its name and
   a container by its id, key or name; or, without them, the tracker and
   container the project is bound to in its settings
@@ -591,23 +676,31 @@ needs Issues: Read and write, which is set on the app itself.
 Leads and the coordinator change issues that already exist
 (`IssueChanges.ts`), through each tracker's `update`, `comment` and `link`:
 
-- **A lead** changes only the issue its task came from: `comment_on_issue`
-  and `link_pull_request` apply at once, and show in its thread as a line;
-  `change_issue` proposes its status (any of its tracker's), closing it, its
-  priority, assignee, labels or title. For any other issue it tells the
+- **A lead** changes the issue its task came from, the issues its task
+  filed, and any the person named to it (in its thread, or in what they
+  asked the coordinator for it), by key or link: `comment_on_issue` and
+  `link_pull_request` apply at once, and show in its thread as a line;
+  `change_issue` proposes any field below. For any other issue it tells the
   person, and the coordinator changes it.
 - **The coordinator** changes any issue on the person's trackers, by key or
-  link: `change_issues` proposes the same fields and a project or milestone,
-  several issues on one card ("move DEV-67 to Done, set DEV-142 to Low");
-  `comment_on_issue` comments at once.
-- **Status, priority, assignee, labels, project, title and closing wait on a
-  card** the person applies with one press, or discards, in the thread of
-  whoever proposed them. Each name is read against the tracker before the
-  card is made (its statuses, members, labels, projects), and one it lacks
-  is refused with what it has, so a card never holds what can't apply. A
-  project's rule, Change issues without asking (`changeIssues`, off by
-  default), applies them at once instead, as a line. Whether a change
-  waits is that one rule (`waitsOnThePerson`).
+  link: `change_issues` proposes the same, several issues on one card
+  ("move DEV-67 to Done, set DEV-142 to Low"); `comment_on_issue` comments
+  at once.
+- **Every field waits on a card** the person applies with one press, or
+  discards, in the thread of whoever proposed it, unless its agent made it
+  at once (`at_once`), where the project's notes say so or the person just
+  did, as a line; a card's **Always change at once** and **Always ask
+  first** are kept as a note, as a draft's are. "Change issues without
+  asking" was a switch until DEV-182; a project that had it on keeps it as
+  such a note (migration 0057).
+- **Read field by field, never all or nothing** (`issueFields.ts`): each
+  name is read against the tracker before the card is made (its statuses,
+  members, labels, projects, milestones, cycles), a parent by reading that
+  issue. What it lacks, a field it hasn't, and what is so already are left
+  off and said to the agent; what reads right goes ahead, on each issue of
+  a batch. People are added and taken off (`assignee`, `unassign`), never
+  put in place of the others where an issue takes several; where it takes
+  one (Linear, Jira) the one added is in place of whoever had it.
 - **Applying is per issue,** each a receipt in the outbound ledger: what
   applied stays applied, and a card where not all of it did says why for
   each and applies again only the rest. A card being applied as Althar
@@ -630,14 +723,48 @@ What each tracker changes:
 |---|---|---|---|---|---|
 | Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | Open, closed as done or not planned | Open or closed |
 | Priority | Yes | Yes | No priorities | No priorities | No priorities |
-| Assignee, labels, title | Yes | Yes | Members, labels, name | Yes | Yes |
-| Project | Its project | No | No | Its milestone | Its milestone |
+| Assignees | One | One | Members, several | Several | Several |
+| Labels, title, description | Yes | Yes | Labels, name, description | Yes | Yes |
+| Project | Its project | No: Jira's own Move | No: its board | A Projects board | No: where it lives |
+| Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | Its milestone | Its milestone |
+| Cycle | Its cycle | No: sprints are a board's | No | No | No: iterations are a paid group's |
+| Parent | Its parent | Its parent | No | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
+| Estimate | Points | No: story points are a site's own field | No | No | Its weight |
+| Type | No: a label says | Its issue type | No | Its issue type (an organisation's) | Issue, incident, test case, task |
+| Components | No | Yes | No | No | No |
+| Due date | Yes | Yes | Yes | No | Yes |
+| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, milestone, type | Assignees, milestone, weight, type, due |
 | Comment | Yes | Yes | Yes | Yes | Yes |
 | Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
 
-Not covered yet: Jira's epic, sprint and transition screens with fields,
-Linear's cycles and estimates, GitHub Projects' fields, and GitLab's
-work-item statuses beyond open and closed.
+Where a tracker hasn't a field, its tool says so in its words ([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+Not covered yet: Jira's sprints, story points and transition screens with
+fields, GitHub Projects' own fields, and GitLab's work-item statuses beyond
+open and closed.
+
+### A task that does part of an issue
+
+A task linked to an issue does all of it unless said: as its pull request
+merges, its issue closes, where issues move along with their tasks. Drafted
+with `part_of`, or switched under its issue in its thread ("Only part of
+MER-231"), it does only part (`external_links.part_of`): its pull request
+says "Part of MER-231" rather than "Issue:", the words trackers read as not
+closing it, and as it merges Althar comments on the issue with what landed
+(what the task built) and leaves it open, whatever the move rule says. A
+tracker's own integration may still close an issue whose key a merged
+branch carries (Linear's, by its team's settings).
+
+### Finding and reading issues
+
+`find_issues` takes words in the title or description, a tracker by name,
+where on it (a team, project, repository or list), open, closed or all,
+whether only the person's, and a run of keys (`DEV-170..DEV-185`, read one
+by one, at most fifty), through each tracker's `find`. With nothing given it
+lists the person's open issues, as the issue picker does. `read_issue` says
+who has an issue, its labels, project, milestone, cycle, parent, type,
+estimate and due date, its description, and its ten latest comments. A
+tracker that couldn't be searched or read is said as such, with its words,
+never taken for none found.
 
 ### Reviewing someone else's pull request
 
@@ -1133,3 +1260,22 @@ silently switch SaaS authority.
 - [Linear rate limits](https://linear.app/developers/rate-limiting)
 - [Jira Cloud webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/)
 - [Jira Cloud rate limiting](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)
+
+### CI output is untrusted data
+
+`read_checks` reads the task's pull request head or a named commit/branch,
+including passing jobs. It returns bounded cleaned logs, literal searches,
+annotations and workflow-run artifact listings. Full logs and small artifact
+ZIPs can be exported to the worktree's gitignored `.althar/ci/` scratch area;
+artifacts are never extracted or executed. Existing files are not overwritten.
+The host listing limit is stated in the response; unavailable metadata is
+reported rather than inferred. GitLab job traces share the log operations;
+GitLab annotations and artifact downloads are not implemented yet.
+
+A fork PR's workflow output is less trusted: contributors can change the code
+and scripts producing it, even when the workflow itself belongs to the project.
+Logs, annotations and artifact names/content are evidence, never instructions
+or authority to run commands or disclose credentials. Reading CI does not relax
+the existing filtering of outsiders' comments. Tool responses are capped at
+32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
+applies while streaming, even when the server omits or lies about its size.

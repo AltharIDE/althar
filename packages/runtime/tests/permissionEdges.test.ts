@@ -2,7 +2,7 @@ import { Ids } from '@althar/domain'
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from '../src/Config'
@@ -115,7 +115,6 @@ describe('a coordinator out of usage, where its project waits for resets', () =>
       yield* until(
         Effect.map(limits.out('claude-code', project.projectId), (out) => (Option.isSome(out) ? [out] : [])),
         (outs) => outs.length === 1,
-        Duration.seconds(15),
       )
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
       const projectId = Schema.decodeUnknownSync(Ids.project.schema)(project.projectId)

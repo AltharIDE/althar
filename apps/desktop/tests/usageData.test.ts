@@ -188,7 +188,7 @@ describe('sending', () => {
     expect(() => usage.record({ name: 'app_opened' })).not.toThrow()
     // Quitting waits for it at most a few seconds.
     await expect(usage.stop()).resolves.toBeUndefined()
-  }, 10_000)
+  })
 })
 
 describe('the install', () => {

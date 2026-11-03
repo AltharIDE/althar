@@ -83,6 +83,20 @@ export const QUESTION = {
   ],
 }
 
+/**
+ * A lead's free-form question as it really came (DEV-173): no options, and a paragraph of background where a
+ * question should be. Althar shows its first sentence as the headline and clamps the rest.
+ */
+export const QUESTION_LONG = {
+  kind: 'Question',
+  project: MERIDIAN,
+  task: '173',
+  title: 'Open a follow-up PR on its own after a merge?',
+  /** The rest of what the lead sent, which a card clamps. */
+  background:
+    'ADR-070 says a lead brings failing checks to the person, and ADR-072 pushes its commits on its own, but neither says what happens once the pull request has merged: a commit made after that is not in any pull request, and Althar shows it as unshipped. The person opens the new pull request from the task today. If the lead could open it itself, a small fix would not need them, but it would also open pull requests nobody asked for, in a repository that may review each one. Which of the two should it be, and should it be a setting per project or one rule for all of them?',
+}
+
 export const SIGNED_OUT = {
   kind: 'Sign-in',
   project: TESSERA,

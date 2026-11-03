@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask } from './support'
+import { launch, openFirstProject, planTask, sizeWindow, still } from './support'
 
 /*
  * The board's lanes in a real window, as it narrows: those that don't fit
@@ -21,11 +21,7 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page } = await launch(home)
   // Althar's own window: not always the first, where the menu bar's windows are made too.
-  const window = await electronApp.browserWindow(page)
-  const sized = async (width: number) => {
-    await window.evaluate((made, wide) => made.setSize(wide, 760), width)
-    await page.waitForTimeout(500)
-  }
+  const sized = (width: number) => sizeWindow(electronApp, page, width, 760)
   try {
     await sized(1440)
     await openFirstProject(electronApp, page, repository(home))
@@ -56,10 +52,10 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
     await work.screenshot({ path: 'test-results/lanes-needs-you-collapsed.png', scale: 'css' })
 
     // The question arrives: Needs you opens by itself, and its head takes the focus from the rail that went.
-    await expect(work.getByRole('button', { name: 'Needs you stays open while something waits on you' })).toBeFocused({ timeout: 60_000 })
+    await expect(work.getByRole('button', { name: 'Needs you stays open while something waits on you' })).toBeFocused()
     await expect(work.getByRole('button', { name: /^Expand Needs you/ })).toHaveCount(0)
     await expect(work.getByRole('button', { name: /^Expand/ })).toHaveCount(1)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/lanes-needs-you-arrived.png', scale: 'css' })
 
     // Beside the conversation, at the window's narrowest: Running and Needs you keep the room.
@@ -70,13 +66,13 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
     await expect(beside.getByRole('button', { name: /^Expand (Running|Needs you)/ })).toHaveCount(0)
     // Once the lanes have eased to their new widths, nothing is off to the side.
     await expect.poll(() => beside.evaluate((board) => board.scrollWidth <= board.clientWidth)).toBe(true)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/lanes-beside-narrow.png', scale: 'css' })
 
     // Widened again, what fits opens by itself.
     await sized(1440)
     await expect(beside.getByRole('button', { name: /^Expand Up next/ })).toHaveCount(0)
-    await page.waitForTimeout(400)
+    await still(page)
     await page.screenshot({ path: 'test-results/lanes-beside-wide.png', scale: 'css' })
   } finally {
     await electronApp.close()

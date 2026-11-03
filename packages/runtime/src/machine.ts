@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { type CpuInfo, cpus, freemem, totalmem } from 'node:os'
 
 import type { MemoryPressure } from '@althar/contracts'
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 
 import { processReader, runReader } from './processReader'
 import { cpuTimeOf } from './processTree'
@@ -396,7 +396,7 @@ export const listProcesses = (platform: NodeJS.Platform = process.platform): Eff
 /** This computer as it is now. */
 export const readMachine = (platform: NodeJS.Platform = process.platform): Effect.Effect<Reading> =>
   Effect.gen(function* () {
-    const at = Date.now()
+    const at = yield* Clock.currentTimeMillis
     const cores = coresOf(cpus())
     const [memory, level, listing] = yield* Effect.all(
       [

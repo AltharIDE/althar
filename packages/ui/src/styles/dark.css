@@ -192,17 +192,18 @@
   --glow-lift: 30%; /* a project's wash: its ink lifted toward the words, and fainter, so it reads as light */
   --glow-strength: 0.75;
   --grain-scale: 0.4; /* the light's grain: its light specks read as static on dark */
-  --gather: 0.22; /* the light gathered under an agent on first run: a hint, so the names under it read */
-  --gather-off: 0.08;
-  --wash-blend: screen; /* a hover wash on the welcome's pictures lightens */
 
   /* ---- Projects: a step lighter, for a swatch and the wash of a project's page ---- */
   --project-clay: #d4774f;
   --project-ochre: #c3a259;
+  --project-sand: #b4a285;
   --project-olive: #a3ab5a;
   --project-moss: #82b07c;
   --project-teal: #5fa8b4;
   --project-slate: #95a0ae;
+  --project-indigo: #8798d7;
+  --project-plum: #c082b2;
   --project-rose: #d27d8e;
+  --project-brick: #d57e75;
   --project-umber: #b48b77;
 }

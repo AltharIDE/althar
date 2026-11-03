@@ -116,7 +116,7 @@ describe('an agent that offers no choice of model', () => {
       yield* say(created.threadId, 'Serve it. [lead:hang]')
       yield* until(
         Effect.map(notices(created.threadId), (said) =>
-          said.filter((notice) => notice.title === 'Fake opencode showed no sign of work again, so Althar started it afresh.'),
+          said.filter((notice) => notice.title === 'Fake opencode went quiet again. Started it afresh.'),
         ),
         (said) => said.length === 1,
       )
@@ -195,7 +195,7 @@ describe('an agent that offers no choice of model, further on', () => {
       yield* say('hello')
       yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
       yield* say('Where are we? [context:85]')
-      const handed = yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active', Duration.seconds(20))
+      const handed = yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active')
       assert.deepStrictEqual(
         handed.map((row) => [row.agentId, row.model, row.effort, row.state]),
         [
@@ -235,7 +235,6 @@ describe('an agent that offers no choice of model, further on', () => {
       const [held] = yield* until(
         sql<{ output: string }>`SELECT output FROM node_attempts WHERE state = 'held' AND hold_reason = 'usage_limit'`,
         (rows) => rows.length === 1,
-        Duration.seconds(15),
       )
       assert.deepInclude(JSON.parse(held?.output ?? '{}'), { heldFor: 'opencode', model: null, why: 'waits' })
     }).pipe(Effect.provide(withQueries({}, { opencode: { outOfUsage: { until: back } } })))

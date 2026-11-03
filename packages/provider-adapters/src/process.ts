@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -10,6 +10,7 @@ import { Deferred, Duration, Effect, type Scope } from 'effect'
 import { AgentStartFailed } from './errors'
 import { platformTrees, type ProcessTrees, type StopReport, stopTree } from './processTrees'
 import type { LaunchSpec } from './registry'
+import { cleanUp } from './removal'
 
 export { platformTrees, type ProcessTrees, type StopReport } from './processTrees'
 
@@ -106,10 +107,13 @@ export const privateTemp = (spec: LaunchSpec): { readonly folder: string; readon
   return { folder, env: { TMPDIR: folder, TEMP: folder, TMP: folder } }
 }
 
-/** Removes a process's own temporary folder, once nothing of it runs. */
-export const removeTemp = (folder: string | undefined) => {
-  if (folder !== undefined) rmSync(folder, { recursive: true, force: true })
-}
+/**
+ * Removes a process's own temporary folder, once nothing of it runs. It never fails: where the folder is still held, as
+ * Windows holds one a moment after the process has gone, it is logged and left, and what stopping the process found
+ * still says so (`stopped`).
+ */
+export const removeTemp = (folder: string | undefined): Effect.Effect<void> =>
+  folder === undefined ? Effect.void : cleanUp(folder, "a process's own temporary folder")
 
 export interface SpawnOptions {
   readonly grace?: Duration.Input
@@ -161,10 +165,8 @@ export const spawnOwned = (
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
       const env = launched === spec ? inherited : childEnvironment(launched)
       const launch = yield* trees.launch(launched.command, launched.args).pipe(
-        Effect.mapError((reason) => {
-          removeTemp(temp?.folder)
-          return new AgentStartFailed({ command: launched.command, reason })
-        }),
+        Effect.mapError((reason) => new AgentStartFailed({ command: launched.command, reason })),
+        Effect.tapError(() => removeTemp(temp?.folder)),
       )
       const child = yield* Effect.try({
         try: () =>
@@ -177,11 +179,8 @@ export const spawnOwned = (
             stdio: ['pipe', 'pipe', 'pipe'],
             env,
           }),
-        catch: (cause) => {
-          removeTemp(temp?.folder)
-          return new AgentStartFailed({ command: launched.command, reason: String(cause) })
-        },
-      })
+        catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
+      }).pipe(Effect.tapError(() => removeTemp(temp?.folder)))
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
@@ -197,10 +196,14 @@ export const spawnOwned = (
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
         child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-        child.once('error', (error) => {
-          removeTemp(temp?.folder)
-          resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })))
-        })
+        child.once('error', (error) =>
+          resume(
+            Effect.andThen(
+              removeTemp(temp?.folder),
+              Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })),
+            ),
+          ),
+        )
       })
       const osStartedAt = yield* osStartTime(pid, trees)
       return {
@@ -221,7 +224,7 @@ export const spawnOwned = (
         // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
         yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
         // Its own temporary folder goes once nothing of it is left to use it.
-        if (!stop.survivors) yield* Effect.sync(() => removeTemp(owned.temp))
+        if (!stop.survivors) yield* removeTemp(owned.temp)
         yield* Deferred.succeed(owned.stopped, stop)
       }),
   )

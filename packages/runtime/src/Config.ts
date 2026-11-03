@@ -82,6 +82,8 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */
+  readonly mergeLineEvery?: Duration.Duration
   /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */
   readonly foldersFirst?: Duration.Duration
   readonly foldersEvery?: Duration.Duration
@@ -100,6 +102,16 @@ export interface RuntimeOptions {
   readonly checksAppear?: Duration.Duration
   /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
   readonly checksStuck?: Duration.Duration
+  /**
+   * How long a publish step that failed for a reason that may pass (the code host's 5xx, a rate limit, a timeout, a dropped
+   * connection) waits before Althar tries it once more by itself: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly publishAgain?: Duration.Duration
+  /**
+   * How long a task its last agent left, with nothing that says why, or whose lead's commits go up as its turn ended, is
+   * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
+   */
+  readonly betweenAgents?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
@@ -141,8 +153,6 @@ export interface RuntimeOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface AutomationOptions {
-  /** The time now, in epoch milliseconds: the wall clock's. */
-  readonly now?: () => number
   /** The zone the computer is in now: its clock's. */
   readonly zone?: () => string
   /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
@@ -175,6 +185,8 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+  /** How long after its turn ends what an agent says is still that turn's, not work outside it: a second. */
+  readonly trails?: Duration.Duration
   /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
   readonly blank?: Duration.Duration
 }
@@ -315,7 +327,17 @@ export class Agents extends Context.Service<
             const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
             return {
               _tag: 'Process' as const,
-              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              spec: {
+                ...spec,
+                env: {
+                  ...spec.env,
+                  ...withoutSignIns(signedOut),
+                  ...own,
+                  ...held,
+                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held }, options),
+                  ...env,
+                },
+              },
               cwd,
               ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
             }
@@ -324,6 +346,9 @@ export class Agents extends Context.Service<
     )
   }
 }
+
+/** How many entries of git's config `withoutSignIns` sets by the environment: what a lead's guard adds goes after them. */
+export const SIGNED_OUT_GIT_CONFIG = 2
 
 /**
  * What an agent's environment adds so it carries none of the person's
@@ -336,7 +361,7 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GH_CONFIG_DIR: signedOut,
   GLAB_CONFIG_DIR: signedOut,
   // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
-  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
@@ -388,7 +413,12 @@ export type CliTool = 'gh' | 'glab'
  * say, timed out or never started, fails. Only the runtime reads it; it goes
  * to Althar's own keychain and never to an agent.
  */
-export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null, CliUnanswered> =>
+export const cliToken = (
+  tool: CliTool,
+  host: string,
+  /** How long it has to answer: ten seconds, or longer where it starts slowly, as on a machine running tests. */
+  within = 10_000,
+): Effect.Effect<string | null, CliUnanswered> =>
   Effect.callback<string | null, CliUnanswered>((resume) => {
     const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
     // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
@@ -398,7 +428,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout: within, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))

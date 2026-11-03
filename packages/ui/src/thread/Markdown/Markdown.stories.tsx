@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 
+import { broken, diagramMessage, flowchart, sequence, wide } from '../../fixtures/diagrams'
 import { refDoc } from '../../fixtures/meridian'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Markdown } from './Markdown'
@@ -108,3 +109,50 @@ Keep the public response shape. Do not change the webhook payloads, and leave th
 When done, run \`bun test refunds\` and report the diff in one paragraph.`
 /** A long block of code: the copy waits in its corner, and the code keeps clear of it. */
 export const LongCode: Story = { args: { source: '```text\n' + LONG_CODE + '\n```' } }
+
+/* A ```mermaid block, drawn: mermaid is fetched the first time one shows, so each waits for its drawing. */
+const drawn = async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+  const c = within(canvasElement)
+  await expect(await c.findByRole('img', { name: 'Diagram' })).toBeInTheDocument()
+}
+
+/** A flowchart in a message: drawn at its own size, its source, bigger and copy in the corner. */
+export const Flowchart: Story = { args: { source: diagramMessage }, play: drawn }
+/** A sequence diagram. */
+export const SequenceDiagram: Story = { args: { source: sequence }, play: drawn }
+/** Wider than the thread: it scrolls sideways, rather than shrinking until its words can't be read, and opens bigger. */
+export const WideDiagram: Story = { args: { source: wide }, play: drawn }
+/** One mermaid can't read: its source, with mermaid's error under it. */
+export const BrokenDiagram: Story = {
+  args: { source: broken },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(await c.findByRole('note')).toHaveTextContent('Couldn’t draw this diagram')
+  },
+}
+/** While the message streams, a diagram with no closing fence yet is its source; it is drawn once closed. */
+export const DiagramWhileStreaming: Story = { args: { source: flowchart.slice(0, -'\n```'.length) } }
+/** In the dark, in the dark theme's colours. */
+export const DiagramDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => (
+    <>
+      <Markdown source={diagramMessage} />
+      <Markdown source={sequence} />
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(await c.findAllByRole('img', { name: 'Diagram' })).toHaveLength(2)
+  },
+}
+/** Its source, from the switch in its corner. */
+export const DiagramSource: Story = {
+  args: { source: flowchart },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await c.findByRole('img', { name: 'Diagram' })
+    await userEvent.click(c.getByRole('button', { name: 'Source' }))
+    await expect(c.getByRole('button', { name: 'Diagram' })).toBeInTheDocument()
+  },
+}

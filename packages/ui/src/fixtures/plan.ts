@@ -87,6 +87,24 @@ export const CODEX_SIGNED_OUT: PlanAgent = {
   ],
 }
 
+/** Claude Code's windows all reset since it was last read, and its sign-in has expired since: no figure, its age and why in the detail. */
+export const CLAUDE_UNREAD: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 0,
+  limit: '',
+  until: null,
+  unread: 'Not read since reset',
+  accounts: [
+    {
+      id: 'claude-personal',
+      name: null,
+      age: 'read 2 days ago',
+      fault: 'Its sign-in has expired. Claude Code renews it the next time it runs on this account.',
+      windows: [],
+    },
+  ],
+}
+
 /** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. */
 export const CLAUDE_TWO: PlanAgent = {
   ...CLAUDE_PLENTY,
@@ -116,4 +134,63 @@ export const CLAUDE_TWO: PlanAgent = {
       ],
     },
   ],
+}
+
+/** OpenCode Go read through the account's OpenCode Console sign-in: its five hours, week and month, the week tightest. */
+export const OPENCODE_GO: PlanAgent = {
+  id: 'opencode',
+  name: 'OpenCode Go',
+  brand: Brand.OpenCode,
+  left: 58,
+  limit: 'weekly limit',
+  until: 'Mon 01:00',
+  account: null,
+  accounts: [
+    {
+      id: 'opencode-usual',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 91, until: '21:54' },
+        { id: 'weekly', label: 'Week', left: 58, until: 'Mon 01:00' },
+        { id: 'monthly', label: 'Month', left: 77, until: '3 Dec' },
+      ],
+    },
+  ],
+}
+
+/** OpenCode Go signed in with its key alone: it can run, but nothing reads how much is left. */
+export const OPENCODE_GO_CONNECTED: PlanAgent = {
+  id: 'opencode',
+  name: 'OpenCode Go',
+  brand: Brand.OpenCode,
+  left: 0,
+  limit: '',
+  until: null,
+  account: null,
+  connected: 'Connected',
+  accounts: [
+    {
+      id: 'opencode-usual',
+      name: null,
+      age: null,
+      fault: 'OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.',
+      windows: [],
+    },
+  ],
+}
+
+/** OpenCode Go's key refused: it runs nothing until it is signed in again, from its row. */
+export const OPENCODE_GO_SIGN_IN: PlanAgent = {
+  id: 'opencode',
+  name: 'OpenCode Go',
+  brand: Brand.OpenCode,
+  left: 0,
+  limit: '',
+  until: null,
+  account: null,
+  stopped: 'Signed out',
+  signIn: true,
+  accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', windows: [] }],
 }

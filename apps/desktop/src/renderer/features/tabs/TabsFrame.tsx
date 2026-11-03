@@ -1,8 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
-import { createPortal } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 
-import { LoadMeter, Offline, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -27,8 +26,8 @@ import { useTabs } from './useTabs'
  * a tab of its own, as the + does. ⌘K finds a task: in the project whose tab
  * has the window, or, on the home, in every project. ⌘U opens the peek of
  * the plan gauge, after CPU and memory, and again closes it. The tabs are the
- * window's one bar: a screen puts its own controls at the bar's end with
- * BarEnd, and its way back, where it has one, at the top of its page.
+ * window's one bar, with nothing of a screen's own: a project's views and a
+ * task's faces are in the bar under it, the screen's header.
  * Before it, on every screen, how hard the computer works, in two short
  * meters the person may turn off (`useLoad`), that the computer is offline,
  * where it is, and a newer Althar ready to install, each in one quiet line; after it, at the very end, Althar's settings'
@@ -58,18 +57,8 @@ export const NewTabContext = createContext<NewTab>({ start: () => undefined, mad
 /** The new project's tab: starting one, and its end, made or closed. */
 export const useNewTab = (): NewTab => useContext(NewTabContext)
 
-/** The end of the window's bar: undefined outside the tabs, null until the bar is drawn. */
-const EndContext = createContext<HTMLElement | null | undefined>(undefined)
-
 /** Whether the window's bar is drawn here, so a screen knows not to draw one of its own. */
 const TabBarContext = createContext(false)
-
-/** What the screen on show puts at the end of the window's bar; a screen shown without the tabs keeps it in place. */
-export function BarEnd({ children }: { children: ReactNode }) {
-  const end = useContext(EndContext)
-  if (end === undefined) return <div className={s.end}>{children}</div>
-  return end === null ? null : createPortal(children, end)
-}
 
 /** A task screen says which project its thread is in, once it has read it, so that project's tab has the window. */
 export const useVisit = (threadId: string, projectId: string | undefined) => {
@@ -92,20 +81,18 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 }
 
 /**
- * The window's one bar, while there are tabs: the projects, the screen's own
- * end, and the window's own buttons where the system draws none. Its own
+ * The window's one bar, while there are tabs: the projects, how the computer
+ * and the plans stand, Althar's settings, and the window's own buttons where the system draws none. Its own
  * component, so the maximized-state subscription lives only while it is here.
  */
 function TabsBar({
   tabs,
   usage,
-  endRef,
   quick,
   onQuick,
 }: {
   tabs: ReturnType<typeof useTabs>
   usage: { readonly open: boolean; readonly set: (open: boolean) => void }
-  endRef: (element: HTMLElement | null) => void
   /** Whether the quick settings are open. */
   quick: boolean
   onQuick: (open: boolean) => void
@@ -139,13 +126,12 @@ function TabsBar({
           <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}
           {update.ready !== null && <UpdateReady {...update.ready} />}
-          <div ref={endRef} className={s.end} />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
       }
       // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
       lights={host.platform === 'darwin' ? 'space' : 'drawn'}
-      text={{ newProjectKbd: host.platform === 'darwin' ? '⌘N' : 'Ctrl+N' }}
+      text={{ newProjectKbd: modKey('N') }}
       maximized={chrome.window?.maximized === true}
       onCloseWindow={() => host.window('close')}
       onMinimize={() => host.window('minimize')}
@@ -176,8 +162,6 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
-  const { host } = useServices()
-  const [end, setEnd] = useState<HTMLElement | null>(null)
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // The plan gauge's peek, from any screen with the bar.
@@ -201,7 +185,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
-      const command = host.platform === 'darwin' ? event.metaKey : event.ctrlKey
+      const command = primaryDown(event)
       // ⌘, opens and closes the quick settings; ⌘⇧, goes to the settings' tab. Once there is a project, and its bar.
       if (command && !event.altKey && event.code === 'Comma' && !none) {
         event.preventDefault()
@@ -224,12 +208,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         return
       }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+      if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
         newProject()
         return
       }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+      if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
         event.preventDefault()
@@ -246,24 +230,20 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, host.platform])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none])
   return (
     <CarriedBack.Provider value={back}>
       <VisitContext.Provider value={tabs.visit}>
         <NewTabContext.Provider value={newTab}>
-          <EndContext.Provider value={end}>
-            <TabBarContext.Provider value={!tabs.none}>
-              <div className={s.frame}>
-                {!tabs.none && (
-                  <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} endRef={setEnd} quick={quick} onQuick={setQuick} />
-                )}
-                <div className={s.screen}>{children}</div>
-              </div>
-              {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
-              {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
-              <CarriedAtFoot />
-            </TabBarContext.Provider>
-          </EndContext.Provider>
+          <TabBarContext.Provider value={!tabs.none}>
+            <div className={s.frame}>
+              {!tabs.none && <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} quick={quick} onQuick={setQuick} />}
+              <div className={s.screen}>{children}</div>
+            </div>
+            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+            {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
+            <CarriedAtFoot />
+          </TabBarContext.Provider>
         </NewTabContext.Provider>
       </VisitContext.Provider>
     </CarriedBack.Provider>

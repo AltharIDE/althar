@@ -356,3 +356,35 @@ export const fileDiff = (worktree: string, base: string, path: string, head?: st
     // Too long to read whole: its hunks, as git gives them, so every change is there.
     return { file: known, ...parseDiff(yield* diff('-U3')) }
   })
+
+/**
+ * A file the task left as it was, every line of it unchanged, as a review's
+ * finding may name one (a caller the change missed, a test it didn't
+ * update): only one git tracks, read from the worktree without following a
+ * link, and never one inside it that climbs out.
+ */
+export const unchangedFileDiff = (worktree: string, path: string): Effect.Effect<FileDiff, unknown> =>
+  Effect.gen(function* () {
+    if (path === '' || path.startsWith('/') || path.split('/').includes('..')) return yield* new NotFound({ kind: 'file', id: path })
+    const tracked = split(yield* git(worktree, '--literal-pathspecs', 'ls-files', '-z', '--', path))
+    if (!tracked.includes(path)) return yield* new NotFound({ kind: 'file', id: path })
+    const content = yield* newFile(worktree, path, true)
+    const file: ChangedFile = {
+      path,
+      from: null,
+      status: 'modified',
+      add: 0,
+      del: 0,
+      binary: content.kind === 'binary',
+      uncommitted: false,
+    }
+    if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false }
+    const text = content.kind === 'link' ? content.target : content.text
+    const all = text === '' ? [] : (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
+    const shown = all.slice(0, WHOLE_LINES)
+    return {
+      file,
+      lines: shown.map((line, at) => ({ kind: 'context', old: at + 1, new: at + 1, text: line }) as const),
+      truncated: shown.length < all.length,
+    }
+  })

@@ -41,7 +41,6 @@ const awaiting = (events: ReadonlyArray<UsageEvent>, check: (events: ReadonlyArr
   until(
     Effect.sync(() => [events]),
     (rows) => rows.some(check),
-    Duration.seconds(20),
   )
 
 const opened = (path = repository()) =>
@@ -160,7 +159,6 @@ describe('usage data', () => {
       yield* until(
         sql<{ id: string }>`SELECT id FROM turn_deliveries WHERE thread_id = ${task.threadId} AND state <> 'pending'`,
         (rows) => rows.length >= 2,
-        Duration.seconds(20),
       )
       yield* Effect.sleep(Duration.millis(800))
       assert.deepStrictEqual(named(events, 'task_started'), [
@@ -300,11 +298,7 @@ describe('usage data', () => {
       // A step that never reports is stuck on the person, who answers it.
       yield* started(project.projectId, 'Quietly', (instance) => instance.personId)
       const sql = yield* SqlClient.SqlClient
-      const [call] = yield* until(
-        sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`,
-        (rows) => rows.length > 0,
-        Duration.seconds(20),
-      )
+      const [call] = yield* until(sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`, (rows) => rows.length > 0)
       const runs = yield* Runs
       yield* runs.answerStuck({
         envelope: yield* Runtime.envelope('attention.answer', {}),

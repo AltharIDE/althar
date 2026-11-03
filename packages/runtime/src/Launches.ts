@@ -1,25 +1,27 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
-import { spawnOwned } from '@althar/provider-adapters'
-import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
+import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { copyAt, freshCopy } from './coordinatorFolder'
 import { bringBackThen } from './bringBack'
+import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
-import { printedMore, servingAt, uncoloured } from './leftRunning'
+import { endingLine, printedMore, servingAt, uncoloured } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
+import { endedHow, installedAsLocked, runSpec } from './runProcess'
 import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { Setups } from './Setups'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
@@ -103,8 +105,11 @@ interface Launch {
   card: string | null
   /** The end of what it printed, both streams. */
   printed: string
+  /** The end of what it printed on stderr alone. */
+  stderr: () => string
   url: string | null
-  ended: { readonly at: string; readonly code: number | null } | null
+  /** How it ended by itself: its exit code, or the signal that killed it. */
+  ended: { readonly at: string; readonly code: number | null; readonly signal: string | null } | null
   /** It was stopped, not ended by itself. */
   stopped: boolean
 }
@@ -252,13 +257,11 @@ export class Launches extends Context.Service<
         }),
       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not close the cards of earlier runs', cause)))
       // A branch's copy an earlier launch left goes with its run: none outlives Althar.
-      yield* Effect.ignore(
-        Effect.try(() => {
-          if (!existsSync(config.worktreeRoot)) return
-          for (const project of readdirSync(config.worktreeRoot))
-            rmSync(join(config.worktreeRoot, project, BRANCH_COPIES), { recursive: true, force: true })
-        }),
+      const projects = yield* Effect.try(() => (existsSync(config.worktreeRoot) ? readdirSync(config.worktreeRoot) : [])).pipe(
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
       )
+      for (const project of projects)
+        yield* cleanUp(join(config.worktreeRoot, project, BRANCH_COPIES), 'copies of branches earlier runs ran from')
 
       const shown = (launch: Launch): ShownLaunch => ({
         id: launch.id,
@@ -270,7 +273,7 @@ export class Launches extends Context.Service<
         label: launch.name ?? shortCommand(launch.command),
         url: launch.url,
         startedAt: launch.startedAt,
-        ended: launch.ended,
+        ended: launch.ended === null ? null : { at: launch.ended.at, code: launch.ended.code },
       })
       const ofProject = (projectId: string) => [...launches.values()].filter((launch) => launch.projectId === projectId).map(shown)
       const told = (projectId: string) => live.publish({ _tag: 'Launches', projectId, launches: ofProject(projectId) })
@@ -394,7 +397,10 @@ export class Launches extends Context.Service<
           const busy = [...launches.values()].some(
             (launch) => launch.taskId === null && launch.branch === null && launch.bindingId === binding.id && launch.ended === null,
           )
-          if (!busy || !existsSync(path)) yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+          if (!busy || !existsSync(path)) {
+            yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+            yield* installedAsLocked(path)
+          }
           return path
         })
 
@@ -405,6 +411,7 @@ export class Launches extends Context.Service<
         branch: launch.branch,
         ref: launch.ref,
         runnableId: launch.runnableId,
+        name: launch.name ?? shortCommand(launch.command),
         where: launch.where,
         command: launch.command,
         url: launch.url,
@@ -413,9 +420,10 @@ export class Launches extends Context.Service<
           launch.ended === null
             ? null
             : {
-                ...launch.ended,
+                at: launch.ended.at,
+                code: launch.ended.code,
                 stopped: launch.stopped,
-                last: launch.stopped ? null : uncoloured(launch.printed).trimEnd().split('\n').at(-1)?.trim() || null,
+                last: launch.stopped ? null : endingLine(launch.printed, launch.ended.code, launch.stderr()),
               },
       })
       /** Keeps a run's card in step with it. */
@@ -427,11 +435,11 @@ export class Launches extends Context.Service<
             )
 
       /** Reads what a run prints, now and then, until it says where it answers, ends, or a while goes by. */
-      const watchServing = (launch: Launch, stderr: () => string) =>
+      const watchServing = (launch: Launch) =>
         Effect.gen(function* () {
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             if (launch.url !== null || launch.ended !== null || !launches.has(launch.id)) return
-            const url = servingAt(`${launch.printed}\n${stderr()}`)
+            const url = servingAt(launch.printed)
             if (url !== null) {
               launch.url = url
               yield* toldCard(launch)
@@ -504,7 +512,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'The project has no repository on this computer to run.'
+                            ? `The project has no repository on ${thisDevice()} to run.`
                             : 'The task has no worktree here to run.',
                       })
                     const kept = yield* keptOf(input.projectId)
@@ -516,7 +524,7 @@ export class Launches extends Context.Service<
                         why: 'elsewhere',
                         message:
                           input.taskId === null
-                            ? 'Its repository has no copy on this computer to run it in.'
+                            ? `Its repository has no copy on ${thisDevice()} to run it in.`
                             : 'The task has no worktree of its repository here to run it in.',
                       })
                     // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
@@ -584,13 +592,17 @@ export class Launches extends Context.Service<
               ),
             )
 
-      /** Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried again. */
+      /**
+       * Removes a branch's copy, Althar's own, once nothing runs from it; one a run still writes in a moment is tried
+       * again, and one that stays is logged and left (`cleanUp`).
+       */
       const removeCopy = (copy: string) =>
         Effect.gen(function* () {
-          for (let tries = 0; tries < 3 && existsSync(copy); tries += 1) {
-            yield* Effect.ignore(Effect.try(() => rmSync(copy, { recursive: true, force: true })))
+          for (let tries = 0; tries < 2 && existsSync(copy); tries += 1) {
+            yield* Effect.ignore(removeFully(copy))
             if (existsSync(copy)) yield* Effect.sleep(Duration.millis(300))
           }
+          yield* cleanUp(copy, 'a copy of a branch a run ran from')
         })
 
       /**
@@ -618,12 +630,7 @@ export class Launches extends Context.Service<
             const { id, run, folder, binding } = input
             const line = lineOf(run)
             // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
-            const env = { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) }
-            const spec =
-              process.platform === 'win32'
-                ? // The line as it is: cmd.exe takes off the outer quotes (/s).
-                  { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const, env }
-                : { command: '/bin/sh', args: ['-c', line], env }
+            const spec = runSpec(line, { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) })
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
             yield* sql`INSERT INTO processes ${sql.insert({
               id,
@@ -641,12 +648,18 @@ export class Launches extends Context.Service<
             // Its copy goes once its process group has: the scope's finalizers run last added first.
             const copy = input.copy
             if (copy !== null) yield* Scope.addFinalizer(scope, removeCopy(copy))
-            const owned = yield* spawnOwned(spec, folder).pipe(
+            // What it writes to stderr is what it printed too, as a terminal shows both: a run that fails mostly says why there.
+            const printed = { early: '', to: undefined as Launch | undefined }
+            const print = (text: string) => {
+              if (printed.to === undefined) printed.early = printedMore(printed.early, text)
+              else printed.to.printed = printedMore(printed.to.printed, text)
+            }
+            const owned = yield* spawnOwned(spec, folder, { stderr: print }).pipe(
               Scope.provide(scope),
               Effect.tapError(() =>
                 Effect.andThen(
                   Scope.close(scope, Exit.void),
-                  change('processes', id, { state: 'unknown', endedAt: new Date().toISOString() }),
+                  Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })),
                 ),
               ),
             )
@@ -673,11 +686,13 @@ export class Launches extends Context.Service<
               scope,
               pid: owned.pid,
               card: null,
-              printed: '',
+              printed: printed.early,
+              stderr: owned.stderrTail,
               url: null,
               ended: null,
               stopped: false,
             }
+            printed.to = launch
             launches.set(id, launch)
             // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
             if (input.threadId !== null)
@@ -694,12 +709,12 @@ export class Launches extends Context.Service<
                 for (;;) {
                   const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
                   if (done || value === undefined) return
-                  launch.printed = printedMore(launch.printed, decoder.decode(value, { stream: true }))
+                  print(decoder.decode(value, { stream: true }))
                 }
               }),
               scope,
             )
-            yield* Effect.forkIn(watchServing(launch, owned.stderrTail), scope)
+            yield* Effect.forkIn(watchServing(launch), scope)
             // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
             yield* Effect.forkIn(
               provide(
@@ -707,7 +722,7 @@ export class Launches extends Context.Service<
                   const exit = yield* Deferred.await(owned.exited)
                   if (!launches.has(id)) return
                   const at = yield* timestamp
-                  launch.ended = { at, code: exit.code }
+                  launch.ended = { at, code: exit.code, signal: exit.signal }
                   yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
                   yield* toldCard(launch)
                   yield* told(input.projectId)
@@ -739,7 +754,7 @@ export class Launches extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const places = yield* placesOf(input.projectId, null, input.repository)
             if (places.length === 0)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'The project has no repository on this computer to run.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run.` })
             const kept = yield* keptOf(input.projectId)
             const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
             if (input.runnableId !== undefined && asked === undefined)
@@ -751,7 +766,7 @@ export class Launches extends Context.Service<
                 : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
                   places[0])
             if (place === undefined)
-              return yield* new LaunchRefused({ why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' })
+              return yield* new LaunchRefused({ why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` })
             const { binding } = place
             const key = input.ref.kind === 'branch' ? `branch:${input.ref.name.trim()}` : `pull:${input.ref.which.trim()}`
             return yield* startLocks.withLock(
@@ -833,7 +848,7 @@ export class Launches extends Context.Service<
               yield* Scope.close(launch.scope, Exit.void)
               const at = yield* timestamp
               yield* change('processes', id, { state: 'killed', endedAt: at })
-              launch.ended = { at, code: null }
+              launch.ended = { at, code: null, signal: null }
               launch.stopped = true
               yield* toldCard(launch)
             }
@@ -894,7 +909,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this computer to keep a way to run.',
+                message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
@@ -955,7 +970,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused(
                 places.length === 0
-                  ? { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' }
+                  ? { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` }
                   : {
                       why: 'which',
                       message: `Say which repository it runs in, as repository: ${places.map((place) => place.binding.name).join(', ')}.`,
@@ -1117,7 +1132,7 @@ export class Launches extends Context.Service<
       const keepTool = (actorOf: (access: ToolAccess) => ActorId): Tool => ({
         name: 'set_run_command',
         description:
-          "Keeps how the project runs, for Althar to run it for the person with no agent: the command that runs it (such as `bun run dev`), and setup, what makes a fresh copy ready (such as `test -d node_modules || bun install --frozen-lockfile`). Althar runs the setup itself, outside any agent's sandbox: before each run, and in each new task's worktree as it is made, before its lead starts, so the lead finds its dependencies installed. Without a setup, Althar works it out: installing the packages the lockfile names, never changing the lockfile. Use it when Althar can't work out how it runs, or works it out wrong, or when you change how it runs or what it needs installed first. A null command goes back to working both out from the repository. In a project of several repositories, say which, as repository. For more things to run beside it, such as Storybook or a watcher, use keep_run.",
+          "Keeps how the project runs, for Althar to run it for the person with no agent: the command that runs it (such as `bun run dev`), and setup, what makes a fresh copy ready (such as `test -d node_modules || bun install --frozen-lockfile`). Althar runs the setup itself, outside any agent's sandbox: before each run, and in each new task's worktree as it is made, before its lead starts, where no setup is recorded with record_setup, so the lead finds its dependencies installed. Without a setup, Althar works it out: installing the packages the lockfile names, never changing the lockfile. Use it when Althar can't work out how it runs, or works it out wrong, or when you change how it runs or what it needs installed first. A null command goes back to working both out from the repository. In a project of several repositories, say which, as repository. For more things to run beside it, such as Storybook or a watcher, use keep_run.",
         input: {
           type: 'object',
           properties: {
@@ -1189,14 +1204,15 @@ export class Launches extends Context.Service<
       /** A run once it says where it answers, or ends, or `within` goes by; what it was then, or nothing once it's gone. */
       const settled = (id: string, within: Duration.Duration) =>
         Effect.gen(function* () {
-          const until = Date.now() + Duration.toMillis(within)
+          const until = (yield* Clock.currentTimeMillis) + Duration.toMillis(within)
           for (;;) {
             const launch = launches.get(id)
-            if (launch === undefined || launch.url !== null || launch.ended !== null || Date.now() > until) return launch
+            if (launch === undefined || launch.url !== null || launch.ended !== null || (yield* Clock.currentTimeMillis) > until)
+              return launch
             yield* Effect.sleep(Duration.millis(250))
           }
         })
-      const lastLines = (printed: string) => uncoloured(printed).trimEnd().split('\n').slice(-LAST_LINES).join('\n') || '(nothing)'
+      const lastLines = (printed: string) => uncoloured(printed).trimEnd().split('\n').slice(-LAST_LINES).join('\n') || null
 
       /** The project's runnable an agent names, by its name or its command; its default without one. */
       const namedRun = (projectId: string, run: string | undefined) =>
@@ -1238,8 +1254,14 @@ export class Launches extends Context.Service<
               ? where
               : `a copy of ${started.branch}${commit === null ? '' : ` at ${commit.slice(0, 12)}`}, fetched just now`
           const running = `Running \`${started.command}\` in ${place}`
-          if (launch?.ended != null)
-            return `\`${started.command}\` in ${place} ended at once${launch.ended.code === null ? '' : `, with exit code ${launch.ended.code}`}. Its last lines:\n\n${lastLines(launch.printed)}\n\n${after.quiet}`
+          if (launch?.ended != null) {
+            const ended = `\`${started.command}\` in ${place} ended at once${endedHow(launch.ended)}`
+            const last = lastLines(launch.printed)
+            // Said as it is, so whoever reads it knows nothing was cut off.
+            return last === null
+              ? `${ended}, and printed nothing, on stdout or stderr.\n\n${after.quiet}`
+              : `${ended}. Its last lines, stdout and stderr:\n\n${last}\n\n${after.quiet}`
+          }
           if (launch?.url != null) return `${running}, at ${launch.url}. ${after.answering}`
           return `${running}. It hasn't said where it answers yet; the person sees it in Run’s list, with its address once it says, and stops it there.`
         })

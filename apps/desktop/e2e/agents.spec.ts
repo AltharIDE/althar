@@ -4,9 +4,9 @@ import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
 
-import { deviceWords } from '../src/renderer/shared/device'
+import { deviceWords } from '@althar/ui/device'
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, pastTheTour, still } from './support'
 
 /*
  * Every agent Althar runs, as the window shows them all: Claude Code and
@@ -24,7 +24,8 @@ test('shows every agent: those on this computer first, the rest to download or i
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_EVERY_AGENT: '1' })
   try {
-    // The first screen: the two on this computer in rows, the other eight in tiles, those Althar can fetch first.
+    // The first screen, past the tour: the two on this computer in rows, the other eight in tiles, those Althar can fetch first.
+    await pastTheTour(page)
     const rows = page.getByRole('list', { name: `Agents on ${here}` })
     await expect(rows.getByRole('listitem').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
     const away = page.getByRole('list', { name: `Agents not on ${here}` })
@@ -32,8 +33,7 @@ test('shows every agent: those on this computer first, the rest to download or i
     await expect(away.getByRole('listitem').first()).toContainText('OpenCode')
     await expect(away.getByRole('button', { name: /^Download GitHub Copilot, / })).toBeVisible()
     await expect(away.getByRole('button', { name: 'How to install Junie' })).toBeVisible()
-    // Once the launch has played over it, as the app's spec waits.
-    await page.waitForTimeout(3000)
+    await still(page)
     await page.screenshot({ path: 'test-results/agents-start.png', animations: 'disabled' })
 
     // Settings, once there is a project: a tab for each, those on this computer first.
@@ -54,11 +54,11 @@ test('shows every agent: those on this computer first, the rest to download or i
 
     // One Althar can fetch: its size and where from, and the download.
     await tabs.getByRole('tab', { name: 'Google Antigravity' }).click()
-    await expect(settings.getByText(/Althar can fetch Google Antigravity 1\.3\.0 from Google/)).toBeVisible()
+    await expect(settings.getByText(/Google Antigravity 1\.3\.0, from Google/)).toBeVisible()
     await expect(settings.getByRole('button', { name: 'Download Google Antigravity' })).toBeVisible()
     // Nothing yet of the models it may use: it says once it is here.
     await expect(settings.getByText('Models', { exact: true })).toHaveCount(0)
-    await expect(settings.getByText('It hasn’t said what it offers yet.')).toHaveCount(0)
+    await expect(settings.getByText('No models yet')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/agents-settings-antigravity.png', animations: 'disabled' })
 
     // One only its own installer puts here: its maker's page on installing it.

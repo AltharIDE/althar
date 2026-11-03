@@ -6,14 +6,15 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
 
 /*
  * A task's Graph face (ADR-054), in a real window with the fake agents and
  * the fake GitHub: a planned task's review finds something, its lead settles
  * it, the review passes and its draft pull request opens; its graph has a
- * lane for each agent and the steps in the order they ran. A card opens its
- * report, a round's marker goes to what started it in the conversation, and
+ * lane for each agent and the steps in the order they ran. The review that
+ * found something opens in the code, its finding under its line, from its
+ * card and from the conversation; one that passed opens its report. A round's marker goes to what started it in the conversation, and
  * a follow-up shows as a second round. A report goes to its place in the
  * conversation, and a permission asked mid-step is answered from its card
  * with the keyboard. The screenshots it takes are
@@ -35,8 +36,8 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
 
     // Planned with a review that finds something: implemented, reviewed, settled, reviewed again, its draft opened.
     await say(page, 'Add a retry to the checkout call. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
-    await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 60_000 })
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
 
     // Its Graph face, from the header's switch: the lead's lane, the reviewer's, Althar's; five steps in the order they ran.
@@ -52,9 +53,30 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-planned.png', animations: 'disabled', scale: 'css' })
 
-    // A card opens its step's report beside it: the reviewer's finding, and the way to it in the conversation.
+    // A review that found something opens in the code: its finding under its line, settled by the lead.
     await graph.getByRole('button', { name: /Review 1/ }).click()
-    const report = page.getByRole('dialog', { name: 'Review 1' })
+    const changes = page.getByRole('dialog', { name: 'Changes' })
+    await expect(changes).toBeVisible()
+    const note = changes.locator('article[aria-current="true"]')
+    await expect(note).toContainText('The heading is wrong.')
+    await expect(note).toContainText('Fixed')
+    await expect(changes.getByText('1 fixed')).toBeVisible()
+    await expect(changes.getByRole('navigation', { name: 'Changed files' }).getByRole('button').first()).toContainText('README.md')
+    await page.screenshot({ path: 'test-results/graph-findings.png', animations: 'disabled', scale: 'css' })
+    await page.keyboard.press('Escape')
+    await expect(changes).toHaveCount(0)
+
+    // In the conversation, the review's finding is a line, opening it there too.
+    await toConversation(page)
+    await page.getByRole('button', { name: /The heading is wrong\./ }).click()
+    await expect(changes.locator('article[aria-current="true"]')).toContainText('The heading is wrong.')
+    await page.screenshot({ path: 'test-results/graph-findings-from-conversation.png', animations: 'disabled', scale: 'css' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
+
+    // A review that passed opens its report beside it, and the way to it in the conversation.
+    await graph.getByRole('button', { name: /Review 2/ }).click()
+    const report = page.getByRole('dialog', { name: 'Review 2' })
     await expect(report).toBeVisible()
     await expect(report.getByRole('button', { name: 'Show in the conversation' })).toBeVisible()
     await page.screenshot({ path: 'test-results/graph-report.png', animations: 'disabled', scale: 'css' })
@@ -63,7 +85,7 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await expect(page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Conversation/ })).toBeChecked()
     const reviewed = page.locator('[data-item]:focus')
     await expect(reviewed).toBeInViewport()
-    await expect(reviewed).toContainText('finding')
+    await expect(reviewed).toContainText('Looks good')
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
 
     // The round's marker goes to what started it: the request the conversation opens with.
@@ -75,8 +97,11 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await say(page, 'Also log each retry. [lead:finish]')
     // From the switch: the composer has focus, and a face's letter there is only a letter.
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
-    await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible({ timeout: 10_000 })
+    await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible()
     await expect(graph.getByRole('button', { name: /^Follow-up/ })).toBeVisible()
+    // Its review passes and the round ends, the task ready again. The marker and the card show as the round opens: what the person
+    // says before it ends is more of this round, which no new round's card holds.
+    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-follow-up.png', animations: 'disabled', scale: 'css' })
 
@@ -85,14 +110,14 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await say(page, 'run make deploy')
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
     const asking = graph.getByRole('button', { name: /waits on you/ })
-    await expect(asking).toBeVisible({ timeout: 20_000 })
+    await expect(asking).toBeVisible()
     await asking.click()
     const permission = page.getByRole('dialog')
     await expect(permission.getByText('make deploy').first()).toBeVisible()
     await expect(permission.locator('input[type="radio"]:checked')).toBeFocused()
     await page.screenshot({ path: 'test-results/graph-permission.png', animations: 'disabled', scale: 'css' })
     await page.keyboard.press('Enter')
-    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0, { timeout: 10_000 })
+    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0)
     await toConversation(page)
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
   } finally {

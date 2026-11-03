@@ -2,19 +2,23 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { Ids, newId } from '@althar/domain'
 import type { UsageWindow } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { Agents } from '../src/Config'
+import { Limits } from '../src/Limits'
 import { Instance } from '../src/Instance'
 import { modelRooms } from '../src/modelRooms'
 import { Models } from '../src/Models'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { repository, runtime, until } from './support'
+import { usableModels } from '../src/usableModels'
+import { fakeAgents, repository, runtime, task, until } from './support'
 
 /*
  * Each model's room where work on it would start, as the pickers show it:
@@ -102,4 +106,88 @@ describe('each model’s room', () => {
       assert.isFalse(rooms.some((room) => room.agentId === 'opencode'))
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('gives OpenCode Go’s models Go’s room, on the account whose Go key works, though another has the reading', () => {
+    // OpenCode paid per use on its keys, every model through OpenCode Go, a plan; each home lists Go's key as its own.
+    const goAgents = Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const agents = yield* Agents
+        const go = (entry: (typeof agents.list)[number]) =>
+          entry.definition.id !== 'opencode'
+            ? entry
+            : {
+                ...entry,
+                definition: {
+                  ...entry.definition,
+                  signIn: {
+                    ...entry.definition.signIn,
+                    providers: {
+                      read: (output: string) => [
+                        { id: 'opencode-go', name: 'OpenCode Go', connections: output.trim(), pays: 'plan' as const },
+                      ],
+                      of: () => 'opencode-go',
+                      plans: ['opencode-go'],
+                    },
+                  },
+                },
+              }
+        return Agents.of({ list: agents.list.map(go), get: (id) => Effect.map(agents.get(id), go) })
+      }),
+    ).pipe(Layer.provide(fakeAgents({}, [], {}, ['opencode'])))
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const limits = yield* Limits
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* ready
+      const [personal] = yield* accounts.of('opencode')
+      const fresh = yield* accounts.add({ agentId: 'opencode', name: 'Account 2', folder: mkdtempSync(join(tmpdir(), 'althar-go-')) })
+      const resetsAt = new Date(Date.now() + HOUR).toISOString()
+      yield* reading(personal!.id, 'opencode', [left(60, resetsAt)])
+      const goRoute = Effect.map(usableModels(projectId), (all) =>
+        all.flatMap((model) => model.routes).find((route) => route.agentId === 'opencode' && route.model === 'large'),
+      )
+      // Go's key working on the account read: Go's room, though the account itself is paid per use.
+      const room = (yield* modelRooms(projectId)).find((one) => one.agentId === 'opencode' && one.model === 'large')
+      assert.deepStrictEqual([room?.accountId, room?.leftPercent], [personal!.id, 60])
+      const read = yield* goRoute
+      assert.deepStrictEqual([read?.plan, read?.room?.leftPercent, read?.refusedProvider], [true, 60, undefined])
+
+      // Go refuses that account's key, as an expired one is: the fresh one in the new account takes Go's models.
+      const { project, task: created } = yield* task('Ask Go')
+      const sessionId = yield* newId(Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: sessionId,
+        projectId: project.projectId,
+        threadId: created.threadId,
+        agentId: 'opencode',
+        accountId: personal!.id,
+        state: 'active',
+        startedAt: new Date().toISOString(),
+      })}`
+      const endedAt = new Date().toISOString()
+      yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+        id: yield* newId(Ids.turnDelivery),
+        projectId: project.projectId,
+        threadId: created.threadId,
+        providerSessionId: sessionId,
+        controllerGeneration: 1,
+        state: 'failed',
+        origin: 'person',
+        model: 'large',
+        errorClass: 'auth_required',
+        endedAt,
+        requestedAt: endedAt,
+      })}`
+      assert.strictEqual((yield* limits.pick({ agentId: 'opencode', model: 'large', projectId })).id, fresh.id)
+      assert.strictEqual((yield* limits.pick({ agentId: 'opencode', model: 'large' })).id, fresh.id)
+      // The thread that ran on the refused account moves too.
+      assert.strictEqual((yield* limits.pick({ agentId: 'opencode', model: 'large', threadId: created.threadId })).id, fresh.id)
+      const moved = yield* goRoute
+      assert.isUndefined(moved?.refusedProvider)
+      assert.deepInclude(moved, { plan: true, room: null })
+      // A model with no provider of its own still starts on the first.
+      assert.strictEqual((yield* limits.pick({ agentId: 'opencode', projectId })).id, personal!.id)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agents: goAgents })))
+  })
 })

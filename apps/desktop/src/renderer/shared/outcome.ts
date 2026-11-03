@@ -1,7 +1,7 @@
-import type { ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import { type EvidencePiece, type GalleryShot, shotName } from '@althar/ui'
+import { screenshotsNow, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
+import type { EvidencePiece, GalleryShot } from '@althar/ui'
 
-import { piecesOf } from './evidence'
+import { pieceOf, piecesOf } from './evidence'
 
 /*
  * What a task came to, as its Outputs page tells it. What it is, in the
@@ -10,10 +10,12 @@ import { piecesOf } from './evidence'
  * part that says what it is apart from the rest. A change in several
  * repositories is one task with a pull request in each: what it built says
  * what it is, and each description follows under its repository's name. How it looks now: the
- * pictures of its last state, each view once, as last taken. A change shows
- * those since it became one, so a prototype's rounds before don't count; any
- * other task, its last round that showed pictures and those after. And what
- * its lead last checked of it, and what it couldn't.
+ * pictures of its last state, each view once, as last taken: a later round's
+ * replace an earlier one's but for the views it keeps, and a change's are
+ * never the options the person chose between, as `screenshotsNow` works
+ * them out, which the runtime posts to its pull request by too (ADR-077,
+ * ADR-079). And what its lead last checked of it, and what
+ * it couldn't.
  */
 
 type Report = Extract<ThreadItem, { kind: 'step_result' }>
@@ -21,7 +23,8 @@ type Report = Extract<ThreadItem, { kind: 'step_result' }>
 export interface Outcome {
   /** What it is: its first paragraph, which says so, and the rest after it; null where its lead said nothing. */
   readonly story: { readonly lede: string; readonly rest: string } | null
-  readonly shots: ReadonlyArray<GalleryShot>
+  /** Each with its view's key, by which it is left out of a pull request's comment. */
+  readonly shots: ReadonlyArray<GalleryShot & { readonly key: string }>
   /** What the last round that ran anything showed of it working, other than pictures. */
   readonly checked: ReadonlyArray<EvidencePiece>
   readonly unverified: ReadonlyArray<string>
@@ -75,32 +78,28 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
         ? null
         : splitStory(one ?? whole ?? '')
 
-  const rounds = lead.map((item) => {
-    const pieces = piecesOf(item.id, item.content.evidence)
-    return {
-      at: item.createdAt,
-      // Full size, it is called by what it shows.
-      shots: pieces.flatMap((piece): GalleryShot[] =>
-        piece.form === 'picture' ? [{ ...piece.shot, id: piece.id, caption: piece.caption, label: piece.caption }] : [],
-      ),
-      rest: pieces.filter((piece) => piece.form !== 'picture'),
-    }
-  })
-  const made = task.madeChangeAt ?? null
-  const lastShown = rounds.findLastIndex((round) => round.shots.length > 0)
-  const now =
-    task.kind === 'change' || task.changes.length > 0
-      ? rounds.filter((round) => made === null || round.at >= made)
-      : lastShown === -1
-        ? []
-        : rounds.slice(lastShown)
-  // A view taken again shows once, where it was last taken; a picture with no name is its own view.
-  const latest = new Map<string, string>()
-  for (const round of now) for (const shot of round.shots) latest.set(shotName(shot.caption) ?? shot.id, shot.id)
+  const rounds = lead.map((item) => piecesOf(item.id, item.content.evidence).filter((piece) => piece.form !== 'picture'))
+  const now = screenshotsNow(
+    lead.map((item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      createdAt: item.createdAt,
+      evidence: item.content.evidence,
+      keptViews: item.content.keptViews,
+    })),
+    { change: task.kind === 'change' || task.changes.length > 0, since: task.madeChangeAt ?? null },
+  )
   return {
     story,
-    shots: now.flatMap((round) => round.shots.filter((shot) => latest.get(shotName(shot.caption) ?? shot.id) === shot.id)),
-    checked: rounds.findLast((round) => round.rest.length > 0)?.rest ?? [],
+    // Full size, each is called by what it shows.
+    shots: now.flatMap((one): Array<GalleryShot & { readonly key: string }> => {
+      const piece = pieceOf(
+        { kind: 'screenshot', caption: one.caption, picture: one.picture, command: null, exit: null, text: null, dropped: 0 },
+        one.id,
+      )
+      return piece.form === 'picture' ? [{ ...piece.shot, id: one.id, key: one.key, caption: one.caption, label: one.caption }] : []
+    }),
+    checked: rounds.findLast((rest) => rest.length > 0) ?? [],
     // The last list it said, even empty: what an earlier step couldn't show, a later one may have.
     unverified: [...(lead.findLast((item) => item.content.unverified !== null)?.content.unverified ?? [])],
   }

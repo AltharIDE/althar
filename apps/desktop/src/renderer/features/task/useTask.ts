@@ -57,6 +57,12 @@ export const closeText = {
   branchKept: (name: string, why: string) => `${name} is closed, but its branch stays on its host. ${why}`,
 }
 
+/** More of what went wrong than its sentence: a failed push's reason, for its way out, and all git said. */
+export interface ErrorMore {
+  readonly why: string | null
+  readonly detail: string | null
+}
+
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
@@ -71,6 +77,8 @@ export interface TaskModel {
   readonly error: string | null
   /** The error is a code host or tracker that no longer takes Althar's sign-in: signing in to it again in Settings puts it right. */
   readonly hostSignedOut: boolean
+  /** Where the error is a push that failed, or git's own failure: why (`denied`, `unreachable`…) and all git said, for Details. */
+  readonly errorMore: ErrorMore | null
   /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
   readonly conflict: string | null
   readonly dismissConflict: () => void
@@ -151,6 +159,12 @@ export interface TaskModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
   readonly markReady: (url?: string) => Promise<void>
+  /**
+   * Puts the screenshots Outputs shows in the comment on the pull request at
+   * `url`, without the views `leftOut` names: null once they're up, else
+   * what went wrong, for the sheet that posted them to say.
+   */
+  readonly postScreenshots: (url: string, leftOut: ReadonlyArray<string>) => Promise<string | null>
   /** Marks each of these draft pull requests ready for review, in turn: as its menu does, for all of them. */
   readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
@@ -204,6 +218,10 @@ export interface TaskModel {
   /** Applies changes to the task's issue its lead or Althar proposed, or throws them away. */
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator and the lead. */
+  readonly preferIssueCards: (atOnce: boolean) => Promise<void>
+  /** Whether the task does only part of its issue, so its merge comments on it and leaves it open. */
+  readonly setIssuePart: (partOf: boolean) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -280,9 +298,13 @@ export const useTask = (threadId: string): TaskModel => {
 
   // What a code host or tracker said as it stopped taking Althar's sign-in, so the error offers signing in to it again.
   const [hostSaid, setHostSaid] = useState<string | null>(null)
+  // A push that failed, or git: why and all git said, kept with its sentence so it goes when the error does.
+  const [gitSaid, setGitSaid] = useState<(ErrorMore & { readonly message: string }) | null>(null)
   const fail = useCallback((failure: unknown) => {
     setError(messageOf(failure))
     if (failure instanceof ApiError && failure.reason === 'ConnectorFailed' && failure.why === 'unauthorized') setHostSaid(failure.message)
+    if (failure instanceof ApiError && (failure.reason === 'PushRefused' || failure.reason === 'GitFailed'))
+      setGitSaid({ message: failure.message, why: failure.why ?? null, detail: failure.detail ?? null })
   }, [])
 
   const arrived = useCallback(
@@ -486,6 +508,7 @@ export const useTask = (threadId: string): TaskModel => {
     agentsKnown: status !== undefined,
     error,
     hostSignedOut: error !== null && error === hostSaid,
+    errorMore: error !== null && gitSaid !== null && error === gitSaid.message ? { why: gitSaid.why, detail: gitSaid.detail } : null,
     conflict,
     dismissConflict: () => setConflict(null),
     refused,
@@ -625,6 +648,13 @@ export const useTask = (threadId: string): TaskModel => {
       ),
     markReady: (url) =>
       act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url)), doing.markReady(url ?? '')),
+    postScreenshots: (url, leftOut) =>
+      snapshot === null
+        ? Promise.resolve(null)
+        : client.postScreenshots({ taskId: snapshot.task.id, url, leftOut }).then(
+            () => null,
+            (failure: unknown) => messageOf(failure),
+          ),
     markAllReady: (urls) =>
       onTask(async (taskId) => {
         for (const url of urls) await client.markReady(taskId, url)
@@ -706,6 +736,8 @@ export const useTask = (threadId: string): TaskModel => {
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
+    preferIssueCards: (atOnce) => act(() => client.preferIssueCards(threadId, atOnce)),
+    setIssuePart: (partOf) => onTask((taskId) => client.setTaskIssuePart(taskId, partOf)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

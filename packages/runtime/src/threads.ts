@@ -17,7 +17,8 @@ import {
   printedIn,
   together,
 } from './handed'
-import { diagnosticIn, diagnosticOf } from './diagnostics'
+import { diagnosticIn, diagnosticOf, printedFields } from './diagnostics'
+import { stoppedIn } from './tally'
 import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
@@ -39,6 +40,8 @@ export interface ItemPlace {
   readonly deliveryId?: string
   /** The folders the agent works in: a picture a link points at is read only from inside them. */
   readonly folders?: ReadonlyArray<string>
+  /** A sandbox holds its shell commands (ADR-071): what one says it couldn't do there, the sandbox refused. */
+  readonly sandboxed?: boolean
 }
 
 /** Adds an item at the end of the thread. */
@@ -304,7 +307,21 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
               rawOutput: event.rawOutput,
             })
           : undefined
-      return { ...extras, ...(yield* ended(toolCallId, output)), ...(diagnostic === undefined ? {} : { diagnostic }) }
+      // What the boundary refused, git's guard or the sandbox, is counted as a refusal of its kind (tally.ts).
+      // A call that went on after a refusal (`|| true`, a script that carried on) still had it.
+      const stopped =
+        event.status === 'failed' || event.status === 'completed'
+          ? stoppedIn([output.text, output.error ?? '', ...printedFields(event.rawOutput)].join('\n'), {
+              sandboxed: place.sandboxed === true,
+              failed: event.status === 'failed',
+            })
+          : undefined
+      return {
+        ...extras,
+        ...(yield* ended(toolCallId, output)),
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+        ...(stopped === undefined ? {} : { stopped }),
+      }
     })
 
   /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
@@ -583,6 +600,11 @@ export const transcript = (
           return [
             `[the lead asked the person to push] ${count === 1 ? '1 commit' : `${count} commits`} to ${text('where')}: ${how ?? 'not pushed yet'}`,
           ]
+        }
+        case 'task_ask': {
+          // What the coordinator asked the person to do to a task, and how they answered: one taking over doesn't ask again.
+          const states: Readonly<Record<string, string>> = { open: 'not answered yet', done: 'done', declined: 'they said not now' }
+          return [`[asked the person] ${text('move').replaceAll('_', ' ')} ${text('slug')}: ${states[text('state')] ?? text('said')}`]
         }
         default:
           return []

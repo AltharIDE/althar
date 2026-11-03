@@ -40,7 +40,7 @@ const ROLES: Readonly<Record<ProjectRepository['role'], RepositoryRole>> = {
   other: RepositoryRole.Other,
 }
 
-const TARGETS = { upstream: ChangeTarget.Upstream, fork: ChangeTarget.Fork } as const
+const TARGETS = { upstream: ChangeTarget.Upstream, fork: ChangeTarget.Fork, upstream_branch: ChangeTarget.UpstreamBranch } as const
 
 /** A host by what its repositories share: the code host and its instance, or, for one Althar doesn't know, its address. */
 const hostId = (host: RepositoryHost) => `${host.product ?? 'elsewhere'}:${host.instance ?? host.name}`
@@ -73,7 +73,15 @@ export const entryOf = (repository: ProjectRepository): MapRepository => ({
           path: repository.host.path,
           ...(repository.host.url === null ? {} : { href: repository.host.url }),
         },
-        ...(repository.fork === null ? {} : { fork: { upstream: repository.fork.upstream, target: TARGETS[repository.fork.target] } }),
+        ...(repository.fork === null
+          ? {}
+          : {
+              fork: {
+                upstream: repository.fork.upstream,
+                target: TARGETS[repository.fork.target],
+                ...(repository.fork.canPush === null ? {} : { canPush: repository.fork.canPush }),
+              },
+            }),
       }),
 })
 

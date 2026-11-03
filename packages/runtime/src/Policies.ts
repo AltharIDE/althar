@@ -1,4 +1,4 @@
-import { commandStartOf, hostOf } from '@althar/contracts'
+import { commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -6,6 +6,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
+import { newProjectDefaultsOf } from './plansAndReviews'
 import { fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
@@ -67,21 +68,35 @@ export const ProjectRules = Schema.Struct({
    */
   resolveConflicts: Schema.optional(Schema.Boolean),
   /**
+   * Whether what a task's lead commits goes up to its open pull request on
+   * its own, as its turn ends, whoever has looked (ADR-072), rather than
+   * waiting for the person's push. On without it.
+   */
+  pushCommits: Schema.optional(Schema.Boolean),
+  /**
+   * Whether a task's screenshots go up to its open pull request on their
+   * own, in one comment kept as its Outputs show them (ADR-077), rather than
+   * as the person posts them. Off without it.
+   */
+  postScreenshots: Schema.optional(Schema.Boolean),
+  /** Native web reads by project leads and reviewers. On without it. */
+  leadsReachWeb: Schema.optional(Schema.Boolean),
+  /**
    * How a task's branch and its pull request's title are named, by a pattern
    * (`@althar/contracts`' names): the person's own, over what each
    * repository's docs say. Without one, the docs', else Althar's own.
    */
   branchPattern: Schema.optional(Schema.String),
   titlePattern: Schema.optional(Schema.String),
-  /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
-  moveIssues: Schema.optional(Schema.Boolean),
   /**
-   * Whether changes to issues on the person's trackers (status, priority,
-   * assignee, labels, closing), proposed by the coordinator, a lead or
-   * Althar, apply at once rather than as a card the person applies. Off
-   * without it. Comments and links apply at once either way.
+   * Whether a task's issue is moved along with it: to its tracker's In
+   * Progress as it starts, In Review and Done with its pull request. On
+   * without it. Whether other changes to issues apply at once, or wait on the
+   * person's card, is the agents' call by what the person said, kept as a
+   * project note (DEV-182): an earlier revision's `changeIssues` is read as
+   * nothing, its migration having kept it as such a note.
    */
-  changeIssues: Schema.optional(Schema.Boolean),
+  moveIssues: Schema.optional(Schema.Boolean),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -124,6 +139,7 @@ export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
   never: (rules.never ?? []).filter(isRule),
   allow: (rules.alwaysAllow ?? []).filter(isRule),
   commands: rules.commands ?? [],
+  web: rules.leadsReachWeb ?? true,
 })
 
 /** A rule an "always" answer keeps (ADR-018): a kind, or a command by how it starts or exactly, let through or never allowed. */
@@ -174,11 +190,14 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
-/** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
-export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
-
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
+
+/** Whether a revision's rules push a lead's commits on their own (ADR-072): they do unless the person turned it off. */
+export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits ?? true
+
+/** Whether a revision's rules post a task's screenshots to its pull request on their own (ADR-077): not unless the person turned it on. */
+export const postsScreenshots = (rules: ProjectRules): boolean => rules.postScreenshots === true
 
 /** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
 export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>
@@ -204,6 +223,53 @@ const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sand
 export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
+
+/** Writes a revision of a project's rules, recorded as a fact by whoever made it. */
+export const insertRevision = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const id = yield* newId(Ids.policy)
+    yield* sql`INSERT INTO policies ${sql.insert({
+      id,
+      projectId,
+      revision,
+      rules: JSON.stringify(rules),
+      createdByActorId: actorId,
+      createdAt: yield* timestamp,
+    })}`
+    yield* fact({
+      projectId,
+      aggregateType: 'policy',
+      aggregateId: id,
+      revision: 1,
+      type: 'policy.revised',
+      payload: { revision, rules },
+      actorId,
+    })
+    return { id, revision, rules }
+  })
+
+/**
+ * The rules a project is made with: the first revision's, with what the person chose for new projects (plansAndReviews.ts) over the
+ * built-in. Only what differs from the built-in is written, so a profile that chose nothing makes the same rules as always.
+ */
+export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
+  const chosen: Partial<ProjectRules> = {
+    ...(defaults.permissions === NEW_PROJECT_DEFAULTS.permissions ? {} : { permissions: defaults.permissions }),
+    ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
+    ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
+    ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
+  }
+  return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
+}
+
+/** A new project's first rules, from what the person chose for new projects; later changes are the project's own. */
+export const seedRules = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    const defaults = yield* newProjectDefaultsOf
+    yield* insertRevision(projectId, 1, startingRules(defaults), instance.systemId)
+  })
 
 export class Policies extends Context.Service<
   Policies,
@@ -254,30 +320,6 @@ export class Policies extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decode = (rules: string) => Schema.decodeUnknownSync(Schema.fromJsonString(ProjectRules))(rules)
 
-      const insert = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const id = yield* newId(Ids.policy)
-          yield* sql`INSERT INTO policies ${sql.insert({
-            id,
-            projectId,
-            revision,
-            rules: JSON.stringify(rules),
-            createdByActorId: actorId,
-            createdAt: yield* timestamp,
-          })}`
-          yield* fact({
-            projectId,
-            aggregateType: 'policy',
-            aggregateId: id,
-            revision: 1,
-            type: 'policy.revised',
-            payload: { revision, rules },
-            actorId,
-          })
-          return { id, revision, rules }
-        })
-
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -291,7 +333,7 @@ export class Policies extends Context.Service<
           // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
           return yield* sql.withTransaction(
             Effect.flatMap(latest, (again) =>
-              again === undefined ? insert(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
+              again === undefined ? insertRevision(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
             ),
           )
         })
@@ -313,7 +355,7 @@ export class Policies extends Context.Service<
               const changed = change(now.rules, now.revision)
               const next = Effect.isEffect(changed) ? yield* changed : changed
               if (next === undefined) return
-              yield* insert(project.id, now.revision + 1, next, actorId)
+              yield* insertRevision(project.id, now.revision + 1, next, actorId)
             }),
           )
         })

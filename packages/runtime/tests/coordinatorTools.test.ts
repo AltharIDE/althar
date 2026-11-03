@@ -106,7 +106,7 @@ describe('a lead settling its task as the person says', () => {
         taskId: task.taskId,
       }
       assert.match(yield* callTool(lead, 'settle_task', { how: 'discard' }), /^It is discarded as your turn ends/)
-      yield* until(stateOf(task.taskId), ([row]) => row?.state === 'abandoned', Duration.seconds(20))
+      yield* until(stateOf(task.taskId), ([row]) => row?.state === 'abandoned')
       assert.strictEqual(yield* callTool(lead, 'settle_task', { how: 'done' }), 'It is discarded already.')
     }).pipe(Effect.provide(runtime())),
   )

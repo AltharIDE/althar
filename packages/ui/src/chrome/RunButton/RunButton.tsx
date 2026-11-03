@@ -14,7 +14,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './RunButton.module.css'
 
 /*
- * What a project runs, from the top of its screen or a task's bar (ADR-070):
+ * What a project runs, from the top of its screen or a task's bar (ADR-089):
  * the button always says Run, and after it, short, how many failed, or how
  * many run, or that one is on its way. A press only opens the list: nothing
  * runs until it is picked there, the most common included, which is first in

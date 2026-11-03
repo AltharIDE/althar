@@ -26,11 +26,13 @@ export const kindWords = {
 /**
  * The word for work that is ready: ready to accept; a review, drafted; a
  * plain task, finished; or, where its lead couldn't resolve a conflict, or
- * fix the checks on the merge, and it is the person's now, stuck, as any step
- * that can't go on without them is.
+ * fix the checks on the merge, and it is the person's now, or its lead brought
+ * the checks failing on its pull request to the person (ADR-070), stuck, as
+ * any step that can't go on without them is.
  */
 export const readyKindOf = (task: {
   readonly handedBack?: string | null | undefined
+  readonly checksBack?: string | null | undefined
   readonly kind?: string | undefined
   readonly unshipped?: unknown
   readonly change?: { readonly state: string } | null | undefined
@@ -40,7 +42,7 @@ export const readyKindOf = (task: {
     ? kindWords.drafted
     : task.kind === 'plain' || task.kind === 'review'
       ? kindWords.finished
-      : task.handedBack != null
+      : task.handedBack != null || task.checksBack != null
         ? kindWords.stuck
         : isUnshipped(task)
           ? kindWords.unshipped

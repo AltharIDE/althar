@@ -49,6 +49,19 @@ import { statements as lookupIndexes } from './0044_lookup_indexes'
 import { statements as inputFiles } from './0045_input_files'
 import { statements as shownPictures } from './0046_shown_pictures'
 import { statements as taskRequestInputs } from './0047_task_request_inputs'
+import { statements as threadItemsByInput } from './0048_thread_items_by_input'
+import { statements as decisionKind } from './0049_decision_kind'
+import { statements as moreInks } from './0050_more_inks'
+import { statements as pullRequestPictures } from './0051_pull_request_pictures'
+import { statements as onePressSettles } from './0052_one_press_settles'
+import { statements as recordedSetups } from './0053_recorded_setups'
+import { statements as personsWord } from './0054_persons_word'
+import { statements as upstreamBranches } from './0055_upstream_branches'
+import { statements as usage } from './0056_usage'
+import { statements as issueFields } from './0057_issue_fields'
+import { statements as followedPulls } from './0058_followed_pulls'
+import { statements as taskAsks } from './0059_task_asks'
+import { statements as findingTitles } from './0060_finding_titles'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -115,6 +128,19 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0045_input_files', statements: inputFiles },
   { key: '0046_shown_pictures', statements: shownPictures },
   { key: '0047_task_request_inputs', statements: taskRequestInputs },
+  { key: '0048_thread_items_by_input', statements: threadItemsByInput },
+  { key: '0049_decision_kind', statements: decisionKind },
+  { key: '0050_more_inks', statements: moreInks },
+  { key: '0051_pull_request_pictures', statements: pullRequestPictures },
+  { key: '0052_one_press_settles', statements: onePressSettles },
+  { key: '0053_recorded_setups', statements: recordedSetups },
+  { key: '0054_persons_word', statements: personsWord },
+  { key: '0055_upstream_branches', statements: upstreamBranches },
+  { key: '0056_usage', statements: usage },
+  { key: '0057_issue_fields', statements: issueFields },
+  { key: '0058_followed_pulls', statements: followedPulls },
+  { key: '0059_task_asks', statements: taskAsks },
+  { key: '0060_finding_titles', statements: findingTitles },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

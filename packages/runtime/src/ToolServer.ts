@@ -6,7 +6,12 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { McpServer } from '@althar/provider-adapters'
-import { Context, Effect, Exit, Layer, Schema } from 'effect'
+import { Context, Effect, Exit, Layer } from 'effect'
+
+import { Errands, type AskedAction, type TurnWord } from './Errands'
+import { errandTools } from './errandTools'
+import { ToolRefused } from './toolErrors'
+export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
  * Althar's tools, served to agents over MCP (docs/architecture/04): how the
@@ -27,12 +32,13 @@ export interface ToolAccess {
   readonly sessionId: string
   /** The task, for a lead or a reviewer. */
   readonly taskId: string | null
+  readonly byPerson?: boolean
+  readonly origin?: TurnWord['origin']
+  readonly turnId?: string | null
+  readonly messages?: ReadonlyArray<string>
 }
 
 export type ToolRole = 'coordinator' | 'lead' | 'reviewer'
-
-/** A tool's answer when it can't do what was asked: told to the agent, which can try again. */
-export class ToolRefused extends Schema.TaggedError<ToolRefused>()('ToolRefused', { message: Schema.String }) {}
 
 /** A tool's answer with a picture beside its words, as a screenshot's: the picture as base64, and its type. */
 export interface ToolPicture {
@@ -40,13 +46,11 @@ export interface ToolPicture {
   readonly image: { readonly data: string; readonly mimeType: string }
 }
 
-export interface Tool {
+interface ToolBase {
   readonly name: string
   readonly description: string
   /** The input, as JSON Schema. */
   readonly input: Readonly<Record<string, unknown>>
-  /** Runs the tool; the text the agent reads back, or that with a picture. */
-  readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string | ToolPicture, ToolRefused>
   /**
    * Given to the lead of a review of someone else's pull request too: it only
    * reads, or drafts that review. A review's lead is refused every other tool
@@ -54,6 +58,16 @@ export interface Tool {
    */
   readonly inReview?: boolean
 }
+
+/** Asked-for tools must supply a fresh read; the server owns authorization and receipts. */
+export type Tool = ToolBase &
+  (
+    | {
+        readonly kind?: 'ordinary'
+        readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string | ToolPicture, ToolRefused>
+      }
+    | { readonly kind: 'asked-for'; readonly action: (input: unknown, access: ToolAccess) => Effect.Effect<AskedAction, ToolRefused> }
+  )
 
 /**
  * Why a session may not call a tool, or null where it may, asked before
@@ -73,11 +87,15 @@ export class ToolServer extends Context.Service<
     guard(role: ToolRole, check: ToolGuard): Effect.Effect<void>
   }
 >()('@althar/runtime/ToolServer') {
-  static readonly layer: Layer.Layer<ToolServer> = Layer.effect(
+  static readonly layer: Layer.Layer<ToolServer, never, Errands> = Layer.effect(
     ToolServer,
     Effect.gen(function* () {
+      const errands = yield* Errands
       const grants = new Map<string, ToolAccess>()
-      const roles = new Map<ToolRole, ReadonlyArray<Tool>>()
+      const roles = new Map<ToolRole, ReadonlyArray<Tool>>([
+        ['coordinator', errandTools(errands)],
+        ['lead', errandTools(errands)],
+      ])
       const guards = new Map<ToolRole, ReadonlyArray<ToolGuard>>()
 
       const respond = async (req: IncomingMessage, res: ServerResponse) => {
@@ -93,8 +111,9 @@ export class ToolServer extends Context.Service<
         const refusal = (tool: Tool) =>
           Effect.runPromise(
             Effect.gen(function* () {
+              const current: ToolAccess = { ...access, ...(yield* errands.turn(access)) }
               for (const check of guards.get(access.role) ?? []) {
-                const why = yield* check(tool, access)
+                const why = yield* check(tool, current)
                 if (why !== null) return why
               }
               return null
@@ -117,7 +136,15 @@ export class ToolServer extends Context.Service<
             return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
           const guarded = await refusal(tool)
           if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
-          const exit = await Effect.runPromiseExit(tool.call(request.params.arguments ?? {}, access))
+          const exit = await Effect.runPromiseExit(
+            Effect.gen(function* () {
+              const current: ToolAccess = { ...access, ...(yield* errands.turn(access)) }
+              const input = request.params.arguments ?? {}
+              return tool.kind === 'asked-for'
+                ? yield* errands.execute(tool.name, current, yield* tool.action(input, current))
+                : yield* tool.call(input, current)
+            }),
+          )
           if (Exit.isSuccess(exit))
             return typeof exit.value === 'string'
               ? { content: [{ type: 'text' as const, text: exit.value }] }

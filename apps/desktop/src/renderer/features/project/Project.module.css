@@ -28,7 +28,7 @@
   border-left: 0;
 }
 
-/* its settings, in the views' place: their page scrolls under the front page */
+/* its settings, in the views' place: their page scrolls under the header */
 .settings {
   flex: 1;
   min-height: 0;
@@ -100,8 +100,7 @@
   font-size: 13px;
 }
 
-.quiet {
-  margin: 0;
-  color: var(--t-3);
-  font-size: 13px;
+/* A new project's card for its code host and a tracker, at the head of its empty conversation. */
+.firstConnections {
+  margin-top: 8px;
 }

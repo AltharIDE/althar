@@ -56,10 +56,17 @@ export const useHash = () =>
     () => '',
   )
 
+/** The second `?t=` in the address asks to hold at, to look at one frame: a number, else null (an empty or unreadable `t` asks for nothing). */
+export const askedSecond = (): number | null => {
+  if (typeof window === 'undefined') return null
+  const raw = new URLSearchParams(window.location.search).get('t')?.trim()
+  const t = raw ? Number(raw) : Number.NaN
+  return Number.isFinite(t) ? t : null
+}
+
 /** Whether motion should hold still: reduced motion, or `?t=` in the address to look at one frame. False where there is no window. */
 export const still = () =>
-  typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
+  typeof window !== 'undefined' && (window.matchMedia('(prefers-reduced-motion: reduce)').matches || askedSecond() !== null)
 
 /** `still()` for a render: false in the prerender and while the page hydrates. */
 export const useStill = () => useHydrated() && still()

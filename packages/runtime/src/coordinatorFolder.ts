@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
+import { removeFully } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -160,12 +161,16 @@ const formerWorktree = (common: string, path: string, dotGit: string): string | 
 const clearedFor = (repository: string, path: string) =>
   Effect.gen(function* () {
     const common = realpathSync(resolve(repository, yield* git(repository, 'rev-parse', '--git-common-dir')))
+    // A link or a file alone, never recursively, so nothing it points at goes; clearing the place is the work, which fails if it can't.
+    // oxlint-disable-next-line althar/one-removal
     if (kindOf(path) !== 'folder') rmSync(path, { force: true })
     mkdirSync(path, { recursive: true })
     const dotGit = join(path, '.git')
     const former = formerWorktree(common, path, dotGit)
-    rmSync(dotGit, { recursive: true, force: true })
-    if (former !== undefined) rmSync(former, { recursive: true, force: true })
+    const cleared = (gone: string) =>
+      removeFully(gone).pipe(Effect.mapError((failed) => new GitFailed({ args: ['init'], cwd: path, stderr: failed.reason })))
+    yield* cleared(dotGit)
+    if (former !== undefined) yield* cleared(former)
   }).pipe(Effect.catchDefect((error) => Effect.fail(new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }))))
 
 /** The folder of the person's repository's objects, which a copy and its mirror borrow. */

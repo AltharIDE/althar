@@ -5,6 +5,7 @@ import { TaskKind, TaskStatus, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { NextSteps } from '../../primitives/NextStep/NextStep'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
 import b from '../Board/Board.module.css'
@@ -14,13 +15,14 @@ import s from './BoardCard.module.css'
 /*
  * A task on the board, of any kind, with next to nothing to press: the whole
  * card opens the task, where a permission is answered and the lead is told
- * what's next (only a next step in its foot may be a button of its own, as
- * NextStep says). Its top says where it stands in a word, in the lane's colour
+ * what's next (only its next steps, in the strip at its foot, may be buttons
+ * of their own, as NextStep says). Its top says where it stands in a word, in the lane's colour
  * (cobalt while it runs, violet when it needs you), then its kind's word,
  * then how long. Then its title, and, where the word isn't enough, why.
  * Under them, at most, its steps, one card in the card (the pull request,
  * the branch, what it handed back) and one fact. A task an automation's run
- * started says which, quietly, at its foot.
+ * started says which, quietly, at its foot. Last, what it offers to do, in
+ * the same place on every card: a strip its width.
  */
 
 export interface BoardCardText {
@@ -50,6 +52,7 @@ export type BoardCardProps = RootProps<
     kind?: TaskKind
     /** How long, or since when: 9m. */
     at?: string
+    errands?: readonly string[] | undefined
     title: string
     /** Under the title, where the word isn't enough to say why it needs you. */
     why?: string
@@ -59,6 +62,11 @@ export type BoardCardProps = RootProps<
     object?: ReactNode
     /** One fact, at its foot. */
     foot?: ReactNode
+    /**
+     * What it offers to do without opening it, or where its task leads: one
+     * NextStep, or two, the violet one last. Its last row, a strip its width.
+     */
+    next?: ReactNode
     /**
      * What can be done to it without opening it, in its top corner, over
      * where it stands, shown as the card is hovered or has the focus: a
@@ -97,10 +105,12 @@ export function BoardCard({
   kind,
   at,
   title,
+  errands,
   why,
   track,
   object,
   foot,
+  next,
   corner,
   from,
   current,
@@ -124,7 +134,16 @@ export function BoardCard({
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {why !== undefined && why !== '' && <p className={s.why}>{why}</p>}
+      {why !== undefined && why !== '' && (
+        <p className={s.why} title={why}>
+          {why}
+        </p>
+      )}
+      {errands?.map((line) => (
+        <p className={s.why} key={line}>
+          {line}
+        </p>
+      ))}
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
@@ -134,6 +153,7 @@ export function BoardCard({
           {t.from(from)}
         </p>
       )}
+      {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>
   )

@@ -3,25 +3,22 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BoardTask, ConnectionList, ProductOption, ProjectRepository } from '@althar/contracts'
 import { Brand } from '@althar/ui'
 
-import { lanesOf } from '../src/renderer/features/board/lanes'
 import {
   connectedAs,
   hostMarksOf,
-  lastSettledOf,
   partsOf,
   rulesLineOf,
   trackersOf,
+  trackerIdOf,
+  trackersWithBinding,
   trackerUrlOf,
 } from '../src/renderer/features/project/front'
-import { card, change, connectionList, githubConnection, projectRules } from './fixtures'
+import { card, connectionList, githubConnection, projectRules } from './fixtures'
 
 /*
- * What a project's front page says, from what the window read: what settled
- * last, what it is made of, the hosts its repositories are on, the tracker
+ * What a project's header says, from what the window read: what it is made of, the hosts its repositories are on, the tracker
  * its tasks name, and its rules in a line.
  */
-
-const NOW = new Date('2026-10-01T12:00:00.000Z')
 
 const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...card(),
@@ -33,8 +30,6 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   here: [],
   ...overrides,
 })
-
-const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
 
@@ -67,25 +62,7 @@ const GITLAB: ProductOption = {
   keyChecks: [],
 }
 
-describe('a project’s front page', () => {
-  it('says what settled last: its pull request merged or closed, or the task done or abandoned, and when', () => {
-    expect(lastSettledOf(settled(), NOW)).toBeUndefined()
-    expect(lastSettledOf(settled(task({ change: change({ state: 'merged', number: 1184 }) })), NOW)).toBe('PR 1184 merged 3h ago')
-    expect(lastSettledOf(settled(task({ change: change({ state: 'closed', number: 9 }) })), NOW)).toBe('PR 9 closed 3h ago')
-    expect(lastSettledOf(settled(task({ title: 'Log the partner id' })), NOW)).toBe('Log the partner id, done 3h ago')
-    expect(lastSettledOf(settled(task({ title: 'Cold start', state: 'abandoned', settledAt: null })), NOW)).toBe('Cold start, abandoned')
-    // The most recent of them.
-    expect(
-      lastSettledOf(
-        settled(
-          task({ title: 'Older', settledAt: '2026-10-01T08:00:00.000Z' }),
-          task({ title: 'Newer', settledAt: '2026-10-01T11:30:00.000Z' }),
-        ),
-        NOW,
-      ),
-    ).toBe('Newer, done 30m ago')
-  })
-
+describe('a project’s header', () => {
   it('says what it is made of: each repository with its host’s mark, then the trackers its tasks name, each opening where it lives', () => {
     const open = vi.fn()
     const parts = partsOf({
@@ -104,7 +81,12 @@ describe('a project’s front page', () => {
       // Not connected there: it opens all the same, from its remote.
       { id: 'web', name: 'meridian-web', brand: Brand.GitHub, openLabel: 'Open on GitHub' },
       { id: 'ops', name: 'meridian-ops' },
-      { id: 'tracker:linear:linear.app:MER', name: 'MER issues', brand: Brand.Linear, openLabel: 'Open on Linear' },
+      {
+        id: 'tracker:linear:linear.app:https://linear.app/acme/team/MER:MER',
+        name: 'MER issues',
+        brand: Brand.Linear,
+        openLabel: 'Open on Linear',
+      },
     ])
     parts[1]?.onOpen?.()
     parts[3]?.onOpen?.()
@@ -174,6 +156,145 @@ describe('a project’s front page', () => {
         connectionList,
       ).map((tracker) => tracker.connections),
     ).toEqual([['conn_b', 'conn_a']])
+  })
+
+  it('puts the tracker a project is bound to first, once, and keeps what its issues name', () => {
+    const learned = { product: 'linear', at: 'linear.app', key: 'MER', url: null, connections: ['conn_a'] } as const
+    const conn = (id: string, key: string) => ({
+      ...githubConnection,
+      id,
+      product: 'linear' as const,
+      webUrl: 'https://linear.app',
+      workspace: { key, name: key },
+    })
+    const list = { ...connectionList, connections: [conn('conn_a', 'a'), conn('conn_b', 'b')] }
+    // Nothing bound: as learned. Nothing at all: nothing.
+    expect(trackersWithBinding([learned], null, list)).toEqual([learned])
+    expect(trackersWithBinding([], null, list)).toEqual([])
+    // Bound, nothing learned: its own, on its workspace.
+    expect(trackersWithBinding([], { connectionId: 'conn_b', container: null }, list)).toEqual([
+      { product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app/b', connections: ['conn_b'], bound: true },
+    ])
+    // Bound to a workspace alone: it stands apart, and no learned team is taken for its drafts' destination, whichever or however many there are.
+    const fnt = { ...learned, key: 'FNT', url: 'https://linear.app/a/team/FNT' }
+    expect(
+      trackersWithBinding([learned, fnt], { connectionId: 'conn_a', container: null }, list, 'MER').map((tracker) => [
+        tracker.key,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+      ['FNT', undefined],
+    ])
+    // Bound to another: the bound first, the learned after, unbound.
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_b', container: null }, list).map((tracker) => [tracker.key, tracker.bound]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
+    // Bound to a team: only that team's issues on its connection are it; another team's are not, and the bound is still first.
+    const team = { id: 't', name: 'Blushh Core' }
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'FNT').map((tracker) => [
+        tracker.key,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
+    // Its team's key unread (signed out, failed, pending): no learned team is taken for it, so another team's issues never become the bound row.
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list).map((tracker) => [tracker.key, tracker.bound]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
+    // Cards with no team key can't be told to be on the bound board: their own tracker, drafts elsewhere.
+    const card = { product: 'trello', at: 'trello.com', key: null, url: 'https://trello.com', connections: ['conn_t'] } as const
+    const trello = {
+      ...list,
+      connections: [
+        ...list.connections,
+        { ...conn('conn_t', 't'), product: 'trello' as const, webUrl: 'https://trello.com', workspace: undefined },
+      ],
+    }
+    expect(
+      trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello).map((tracker) => [
+        tracker.connections,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [['conn_t'], true],
+      [['conn_t'], undefined],
+    ])
+    // Real Trello has no workspace: the two share product, host, link and no key, yet are told apart, so rows never share a React key.
+    const rows = trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello)
+    expect(new Set(rows.map(trackerIdOf)).size).toBe(2)
+    // The header names them once.
+    const parts = partsOf({ repositories: [], names: [], host: null, trackers: rows, open: () => {} })
+    expect(parts.filter((part) => part.id.startsWith('tracker:'))).toHaveLength(1)
+    // Two workspaces with the same team key are two trackers, and the bound link is its own.
+    const issue = (connectionId: string, workspace: string) =>
+      ({
+        taskId: 'x',
+        issue: { product: 'linear', key: 'FNT-1', title: 't', url: `https://linear.app/${workspace}/issue/FNT-1/a`, connectionId },
+      }) as never
+    const both = trackersOf([issue('conn_a', 'a'), issue('conn_b', 'b')], {
+      ...list,
+      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false, workspaces: true }] as never,
+    })
+    expect(both).toHaveLength(2)
+    // With no connection to say, the link does: two workspaces stay two, and one workspace with and without a connection stays one.
+    const linkOnly = (workspace: string) => {
+      const { connectionId: _, ...rest } = (issue('', workspace) as { issue: Record<string, unknown> }).issue
+      return { taskId: 'x', issue: rest } as never
+    }
+    const workspaced = {
+      ...list,
+      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false, workspaces: true }] as never,
+    }
+    expect(trackersOf([linkOnly('a'), linkOnly('b')], workspaced).map((tracker) => tracker.url)).toHaveLength(2)
+    const mixed = trackersOf([issue('conn_a', 'a'), linkOnly('a')], workspaced)
+    expect(mixed).toHaveLength(1)
+    expect(mixed[0]!.connections).toEqual(['conn_a'])
+    // Bound row's standing is the bound connection's alone, whatever else its issues were read through.
+    const second = { ...conn('conn_a2', 'a'), state: 'reauth_required' as const }
+    const shared = { ...learned, connections: ['conn_a2', 'conn_a'] }
+    expect(
+      trackersWithBinding(
+        [shared],
+        { connectionId: 'conn_a', container: team },
+        { ...list, connections: [...list.connections, second] },
+        'MER',
+      )[0]?.connections,
+    ).toEqual(['conn_a'])
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'MER')).toEqual([{ ...learned, bound: true }])
+    // Its issues name no connection: the bound keeps its own, and only a link on its workspace is it.
+    const bare = { ...learned, key: 'FNT', url: 'https://linear.app/b/team/FNT', connections: [] }
+    expect(trackersWithBinding([bare], { connectionId: 'conn_b', container: team }, list, 'FNT')).toEqual([
+      { ...bare, connections: ['conn_b'], bound: true },
+    ])
+    const elsewhere = { ...bare, url: 'https://linear.app/a/team/FNT' }
+    expect(
+      trackersWithBinding([elsewhere], { connectionId: 'conn_b', container: team }, list, 'FNT').map((tracker) => [
+        tracker.url,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      ['https://linear.app/b', true],
+      ['https://linear.app/a/team/FNT', undefined],
+    ])
+    // Disconnected since: still there, for Althar can't reach it.
+    expect(
+      trackersWithBinding(
+        [],
+        { connectionId: 'gone', container: null, gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' } },
+        list,
+      ),
+    ).toEqual([{ product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app', connections: ['gone'], bound: true }])
   })
 
   it('names a tracker whose issues share no key once, by its name: Trello’s cards', () => {
@@ -250,6 +371,11 @@ describe('a project’s front page', () => {
       }),
     ).toEqual({ policy: 'Allow, except what you keep', asks: 'Always asks you: “npm publish”.' })
     expect(rulesLineOf({ ...projectRules, permissions: 'ask', alwaysAsk: [] }).asks).toBe('Nothing always asks you.')
+    // More than two: a count, not a list that runs on.
+    expect(
+      rulesLineOf({ ...projectRules, alwaysAsk: ['deploy', 'default-branch'], commands: [{ pattern: 'npm publish', decision: 'ask' }] })
+        .asks,
+    ).toBe('3 things always ask you.')
     // With everything allowed, what always asks is kept but asks nothing.
     expect(
       rulesLineOf({

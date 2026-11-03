@@ -103,6 +103,23 @@ describe('what a turn hands back', () => {
     ])
   })
 
+  it('ignores an agent’s own markdown outside the task, keeps a worktree document, and shows one it pointed at there as a plain file', () => {
+    const memory = '/Users/me/.claude/projects/-Users-me-app/memory/value-before-layout.md'
+    const mention = (path: string, how: 'wrote' | 'linked') => ({ path, how, mediaType: null, bytes: null, title: null })
+    const turn = turnOf([
+      items.tool({
+        title: 'Write memory',
+        toolKind: 'edit',
+        files: [mention(memory, 'wrote'), mention('/Users/me/.codex/memories/a.md', 'wrote'), mention('/w/meridian/docs/plan.md', 'wrote')],
+      }),
+      items.hands('Notes are at the link.', { files: [mention(memory, 'linked')] }),
+    ])
+    expect(turn.handed.documents.map((file) => file.shown)).toEqual(['docs/plan.md'])
+    // Pointed at from outside: a plain file with no way to open it, never a document card that fails to read.
+    expect(turn.handed.files.map((file) => [file.shown, file.local])).toEqual([[memory, null]])
+    expect(handedBy([{ id: 'p', pictures: [], files: [mention(memory, 'wrote')] }], '/w/meridian')).toBe(NOTHING_HANDED)
+  })
+
   it('hands back nothing for a turn that only worked', () => {
     expect(turnOf([items.tool(), items.says('Done.')]).handed).toBe(NOTHING_HANDED)
     expect(handedBy([], null)).toBe(NOTHING_HANDED)

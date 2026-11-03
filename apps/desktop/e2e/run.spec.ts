@@ -9,7 +9,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
 
 /*
- * The project run with no agent, in a real window (ADR-023, ADR-070): from
+ * The project run with no agent, in a real window (ADR-023, ADR-089): from
  * the project's front, Run opens its list, on the default branch picked
  * beside it, and a copy of it runs its dev script; its card in the
  * coordinator's thread says where it answers, Run says it runs, and the card
@@ -75,7 +75,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })
     const open = card.getByRole('button', { name: /^Open localhost:\d+$/ })
-    await expect(open).toBeVisible({ timeout: 30_000 })
+    await expect(open).toBeVisible()
     const address = (await open.getAttribute('aria-label'))?.replace('Open ', '') ?? ''
     expect(await (await fetch(`http://${address}`)).text()).toBe('meridian')
     // Run says it runs, and its list where it answers; nothing over the composer.
@@ -100,9 +100,7 @@ test('runs the default branch from the project’s front, leaves its card in the
         .getByRole('article', { name: 'Run of main' })
         .last()
         .getByRole('button', { name: /^Open localhost:\d+$/ }),
-    ).toBeVisible({
-      timeout: 30_000,
-    })
+    ).toBeVisible()
 
     // More to run: Storybook, picked from package.json, runs beside it, each answering where it says.
     await page.getByRole('button', { name: RUN }).click()

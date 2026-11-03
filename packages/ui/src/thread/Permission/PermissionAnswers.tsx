@@ -43,7 +43,7 @@ export const permissionAnswersText: PermissionAnswersText = {
   alwaysAllow: (scope) => `Always allow ${scope}`,
   neverAllow: (scope) => `Never allow ${scope}`,
   denyWithNote: 'Deny, and say what to do instead',
-  kept: (project) => `An always or a never is kept in ${project}’s rules`,
+  kept: (project) => `Kept in ${project}’s rules`,
   exact: permissionText.exact,
   prefix: permissionText.prefixOption,
   note: { placeholder: permissionText.insteadPlaceholder, submit: permissionText.deny },

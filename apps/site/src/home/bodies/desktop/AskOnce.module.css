@@ -1,0 +1,27 @@
+/* The coordinator's conversation alone, as a window down the middle, a little larger than life, and never taller than the screen. */
+.wrap { max-width: min(880px, calc((100svh - 150px) * 760 / 720 + 2 * var(--gut))); margin: 64px auto 0; padding: 0 var(--gut); }
+.frame { border-radius: 18px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line-2), 0 40px 80px rgba(40, 30, 10, 0.1), 0 10px 24px rgba(40, 30, 10, 0.05); }
+.talk { display: flex; flex-direction: column; height: 100%; background: var(--n-1); }
+/* The newest at the foot, over the composer; what it pushes up fades out under the window's edge. */
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 24px 24px 0;
+  -webkit-mask-image: linear-gradient(transparent, #000 56px);
+  mask-image: linear-gradient(transparent, #000 56px);
+}
+/* What the thread holds, stacked; it glides as it grows (AskOnce.tsx), and fades before the conversation starts again. */
+.flow { display: flex; flex-direction: column; gap: 18px; transition: opacity 600ms var(--ease); }
+.leaving { opacity: 0; }
+.said { margin: 0; }
+.composer { flex: none; padding: 14px 24px 22px; }
+
+@media (max-width: 700px) {
+  .wrap { max-width: none; margin-top: 40px; padding: 0 12px; }
+  .thread { padding: 16px 14px 0; }
+  .composer { padding: 10px 14px 16px; }
+}

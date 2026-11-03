@@ -142,7 +142,7 @@ const walk = async (
     name: more.again === undefined ? `Connect ${name}` : `Sign in to ${name} again`,
   })
   const press = (name: string | RegExp) => userEvent.click(within(panel).getByRole('button', { name }))
-  const heading = (name: string) => within(panel).findByRole('heading', { name }, { timeout: 4000 })
+  const heading = (name: string) => within(panel).findByRole('heading', { name })
   return { client, panel, closed, press, heading }
 }
 
@@ -198,7 +198,7 @@ describe('connecting GitLab', () => {
     )
     const ways = await within(panel).findByRole('group', { name: 'Ways to connect GitLab' })
     expect(within(panel).getByText('For halyard: team/gateway on git.halyard.dev')).toBeTruthy()
-    expect(within(panel).getByText(/Agents never get it; they reach GitLab through Althar/)).toBeTruthy()
+    expect(within(panel).getByText('Kept encrypted on this Mac')).toBeTruthy()
     const offered = within(ways)
       .getAllByRole('button')
       .map((button) => button.textContent)
@@ -214,7 +214,6 @@ describe('connecting GitLab', () => {
     expect(within(panel).getByText('balazs.k on git.halyard.dev')).toBeTruthy()
     expect(within(panel).getByText('api')).toBeTruthy()
     expect(within(panel).getByText('Every project balazs.k can, team’s included')).toBeTruthy()
-    expect(within(panel).getByText('Althar keeps its own copy of the token, encrypted. glab keeps working as it does.')).toBeTruthy()
     await press('Use this sign-in')
     expect(client.connectCli).toHaveBeenCalledWith('gitlab', halyard, undefined)
 
@@ -273,9 +272,7 @@ describe('connecting GitLab', () => {
     })
     await press(/git.halyard.dev\s*halyard’s server, from its remote/)
     expect(await heading('halyard’s GitLab')).toBeTruthy()
-    expect(
-      await within(panel).findByText('GitLab answers at git.halyard.dev · from halyard’s remote, origin', {}, { timeout: 3000 }),
-    ).toBeTruthy()
+    expect(await within(panel).findByText('GitLab answers at git.halyard.dev · from halyard’s remote, origin')).toBeTruthy()
     expect(client.findServer).toHaveBeenCalledWith('gitlab', halyard)
     await press('Make a token')
     expect(await heading('Make a token on git.halyard.dev')).toBeTruthy()
@@ -285,15 +282,13 @@ describe('connecting GitLab', () => {
     await press(/Continue with GitLab\s*gitlab.com, in your browser/)
     expect(await heading('Type this code on GitLab')).toBeTruthy()
     expect(await within(panel).findByText('WXYZ-0000')).toBeTruthy()
-    expect(
-      within(panel).getByText('gitlab.com/oauth/device is open in your browser. Type the code there, then Authorize Althar.'),
-    ).toBeTruthy()
+    expect(within(panel).getByText('Type it on gitlab.com/oauth/device, then Authorize Althar.')).toBeTruthy()
     expect(within(panel).getByText(/Waiting for you to approve · the code lasts (9|10) min/)).toBeTruthy()
     await press('Open the page again')
     expect(open).toHaveBeenLastCalledWith('https://gitlab.com/oauth/device?user_code=WXYZ-0000', '_blank')
-    expect(await within(panel).findByText('The code expired.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await within(panel).findByText('The code expired.')).toBeTruthy()
     expect(client.startSignIn).toHaveBeenCalledWith('gitlab', 'https://gitlab.com', undefined)
-  }, 10_000)
+  })
 
   it('says each thing it asks GitLab while GitLab is asked, with who the token is', async () => {
     const { panel, press, heading } = await walk('gitlab', {
@@ -335,12 +330,11 @@ describe('connecting GitLab', () => {
     // One way in, gitlab.com's token: its first step at once, with a company's server a press away.
     expect(await heading('Make a token on gitlab.com')).toBeTruthy()
     expect(within(panel).getByText('On gitlab.com’s token page, opened filled in')).toBeTruthy()
-    expect(within(panel).getByText('It opens with the name Althar and the api scope ticked.')).toBeTruthy()
+    expect(within(panel).getByText('Opens with the api scope ticked.')).toBeTruthy()
     await press('Open gitlab.com’s token page')
     expect(open).toHaveBeenCalledWith('https://gitlab.com/-/user_settings/personal_access_tokens', '_blank')
     await press('On a company’s own server')
     expect(await heading('Your company’s GitLab')).toBeTruthy()
-    expect(within(panel).getByText('On this server Althar connects with a token you make there.')).toBeTruthy()
 
     // Nothing typed isn't an address; what doesn't answer, or isn't GitLab, is said under the field.
     await press('Make a token')
@@ -422,7 +416,7 @@ describe('connecting Bitbucket', () => {
     })
     expect(await heading('Connected as me@northwind.io')).toBeTruthy()
     expect(within(panel).getByText('Your Atlassian account')).toBeTruthy()
-    expect(within(panel).getByText('Reaches northwind/tessera-web, northwind/tessera-api and northwind/tessera-ops')).toBeTruthy()
+    expect(within(panel).getByText('Reaches 3 repositories')).toBeTruthy()
     expect(within(panel).getByText('Write')).toBeTruthy()
     expect(within(panel).getByText('Read build statuses and pipeline logs')).toBeTruthy()
 
@@ -456,7 +450,7 @@ describe('connecting Bitbucket', () => {
     await press('On a company’s own server')
     expect(await heading('Your company’s Bitbucket')).toBeTruthy()
     await userEvent.type(within(panel).getByLabelText('Server address'), 'git.tessera.dev')
-    expect(await within(panel).findByText('Bitbucket Data Center answers at git.tessera.dev', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await within(panel).findByText('Bitbucket Data Center answers at git.tessera.dev')).toBeTruthy()
     expect(within(panel).getByRole('button', { name: 'bitbucket.org instead' })).toBeTruthy()
     await press('Make a token')
     expect(await heading('Make a token on git.tessera.dev')).toBeTruthy()
@@ -471,7 +465,7 @@ describe('connecting Bitbucket', () => {
     expect(await heading('Your account can’t push there')).toBeTruthy()
     expect(within(panel).getByText('Your account there')).toBeTruthy()
     expect(within(panel).getByText('As Reader, your account can’t do this there.')).toBeTruthy()
-    expect(within(panel).getByText('That is your account’s role there, not the token’s: its owners can change it.')).toBeTruthy()
+    expect(within(panel).getByText('Your account’s role there: its owners can change it.')).toBeTruthy()
     await press('Connect as it is')
     expect(closed).toHaveBeenCalled()
   })
@@ -505,13 +499,13 @@ describe('connecting Linear', () => {
     })
     const ways = await within(panel).findByRole('group', { name: 'Ways to connect Linear' })
     expect(within(panel).getByText('Issues become tasks, and tasks move their issues')).toBeTruthy()
-    expect(within(panel).getByText(/Agents never get it; they read issues through Althar/)).toBeTruthy()
+    expect(within(panel).getByText('Kept encrypted on this Mac')).toBeTruthy()
     expect(within(ways).getByRole('button', { name: /A personal API key\s*Made in Linear’s settings/ })).toBeTruthy()
     await userEvent.click(within(ways).getByRole('button', { name: /Continue with Linear\s*Approve in your browser/ }))
     expect(await heading('Approve Althar on Linear')).toBeTruthy()
     expect(await within(panel).findByText('Port 41000 is busy.')).toBeTruthy()
     await press('Try again')
-    expect(await within(panel).findByText('linear.app is open in your browser. Pick your workspace, then Approve.')).toBeTruthy()
+    expect(await within(panel).findByText('Pick your workspace on linear.app, then Approve.')).toBeTruthy()
     expect(open).toHaveBeenCalledWith('https://linear.app/oauth/authorize?client_id=althar', '_blank')
     expect(within(panel).getByRole('button', { name: 'Copy the link for another browser' })).toBeTruthy()
     state = 'done'
@@ -520,8 +514,8 @@ describe('connecting Linear', () => {
     expect(within(panel).getByText('3 teams')).toBeTruthy()
     expect(within(panel).getByText('Reads your workspace’s issues')).toBeTruthy()
     expect(within(panel).getByText('Moves an issue’s status')).toBeTruthy()
-    expect(within(panel).getByText('Through Althar’s Linear app, which renews its own sign-in.')).toBeTruthy()
-  }, 10_000)
+    expect(within(panel).getByText('Through Althar’s Linear app; renews itself.')).toBeTruthy()
+  })
 
   it('takes a personal key, and says when Linear doesn’t take it, with a new one made or another pasted', async () => {
     const { client, panel, press, heading } = await walk('linear', {
@@ -665,7 +659,7 @@ describe('connecting Jira', () => {
     expect(await within(panel).findByText('Nothing answers at jira.gone.test')).toBeTruthy()
     await userEvent.clear(field)
     await userEvent.type(field, 'jira.northwind.test')
-    expect(await within(panel).findByText('Jira Data Center answers at jira.northwind.test', {}, { timeout: 3000 })).toBeTruthy()
+    expect(await within(panel).findByText('Jira Data Center answers at jira.northwind.test')).toBeTruthy()
     await press('Continue')
     expect(await heading('Make a token on jira.northwind.test')).toBeTruthy()
     expect(within(panel).getByText('Create token, named Althar.')).toBeTruthy()
@@ -819,7 +813,7 @@ describe('connecting Trello', () => {
     expect(within(panel).getByText('Reads your boards')).toBeTruthy()
     expect(within(panel).getByText('Comments on cards')).toBeTruthy()
     expect(within(panel).getByText('Moves cards between lists')).toBeTruthy()
-    expect(within(panel).getByText('The token doesn’t run out; revoke it on Trello to stop it.')).toBeTruthy()
+    expect(within(panel).getByText('The token doesn’t run out.')).toBeTruthy()
   })
 })
 
@@ -856,6 +850,25 @@ describe('connecting GitHub', () => {
       press: 'Check again',
     },
     {
+      // Past two, the line counts them, and the fix lists them one to a line, to pick on GitHub.
+      check: lacking('reach', {
+        kind: 'unseen',
+        names: ['northwind/api', 'northwind/web', 'northwind/ops', 'northwind/docs'],
+        url: 'https://github.com/settings/personal-access-tokens/7',
+      }),
+      title: 'It doesn’t reach every repository',
+      says: [
+        'It doesn’t see 4 repositories.',
+        'Add these 4 under Repository access, then Update.',
+        'northwind/api',
+        'northwind/web',
+        'northwind/ops',
+        'northwind/docs',
+      ],
+      press: 'Change it on GitHub',
+      opens: 'https://github.com/settings/personal-access-tokens/7',
+    },
+    {
       check: lacking('reach', { kind: 'sso', owner: 'northwind', url: 'https://github.com/orgs/northwind/sso' }),
       title: 'northwind wants this token authorized',
       says: [
@@ -880,26 +893,20 @@ describe('connecting GitHub', () => {
     {
       check: lacking('push', { kind: 'permission', permission: 'Contents', url: null }),
       title: 'This token can’t push',
-      says: [
-        'Contents isn’t allowed on this token.',
-        'Set Contents to Read and write, then Update. It stays the same token, so there’s nothing to paste again.',
-      ],
+      says: ['Contents isn’t allowed on this token.', 'Set Contents to Read and write, then Update.'],
       press: 'Change it on GitHub',
       opens: 'https://github.com/settings/personal-access-tokens',
     },
     {
       check: lacking('checks', { kind: 'permission', permission: 'Commit statuses', url: null }),
       title: 'This token can’t read checks',
-      says: ['Set Commit statuses to Read, then Update. It stays the same token, so there’s nothing to paste again.'],
+      says: ['Set Commit statuses to Read, then Update.'],
       press: 'Check again',
     },
     {
       check: lacking('issues', { kind: 'scope', scope: 'repo', url: null }),
       title: 'This token can’t read issues',
-      says: [
-        'The token wasn’t given the repo scope.',
-        'Tick repo, then Update token. It stays the same token, so there’s nothing to paste again.',
-      ],
+      says: ['The token wasn’t given the repo scope.', 'Tick repo, then Update token.'],
       press: 'Change it on GitHub',
       opens: 'https://github.com/settings/personal-access-tokens',
     },
@@ -928,7 +935,7 @@ describe('connecting GitHub', () => {
       lacking('checks', { kind: 'no_check_runs', url: 'https://github.com/settings/tokens/new?scopes=repo,workflow' }),
     )
     expect(await heading('This token can’t read check runs')).toBeTruthy()
-    expect(within(panel).getByText('GitHub gives fine-grained tokens no check runs, so a task sees commit statuses only.')).toBeTruthy()
+    expect(within(panel).getByText('Fine-grained tokens can’t read check runs.')).toBeTruthy()
     await press('Make a classic token')
     expect(open).toHaveBeenLastCalledWith('https://github.com/settings/tokens/new?scopes=repo,workflow', '_blank')
     expect(await heading('Paste the token')).toBeTruthy()
@@ -973,8 +980,13 @@ describe('connecting GitHub', () => {
     )
     expect(await within(panel).findByText('For meridian: 3 repositories')).toBeTruthy()
     await press(/Make a token/)
-    expect(within(panel).getByText('Under Repository access, choose Only select repositories: api, web and ops.')).toBeTruthy()
-    expect(within(panel).getByText('It opens with the name, northwind as the owner, 90 days and the permissions set.')).toBeTruthy()
+    expect(within(panel).getByText('Under Repository access, choose Only select repositories: these 3.')).toBeTruthy()
+    expect(
+      within(panel)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(expect.arrayContaining(['api', 'web', 'ops']))
+    expect(within(panel).getByText('Opens filled in, for northwind.')).toBeTruthy()
     await comeBack()
     expect(await heading('Paste the token')).toBeTruthy()
     expect(within(panel).getByText('A GitHub token is on your clipboard')).toBeTruthy()
@@ -990,7 +1002,7 @@ describe('connecting GitHub', () => {
   it('offers what works without what the runtime found, and shows the permissions a token is made with on a press', async () => {
     const { panel, press, heading } = await walk('github', { getConnectGuide: vi.fn(async () => Promise.reject(new Error('down'))) })
     expect(await heading('Make a token on GitHub')).toBeTruthy()
-    expect(within(panel).getByText('It opens with the name, 90 days and the permissions set.')).toBeTruthy()
+    expect(within(panel).getByText('Opens filled in.')).toBeTruthy()
     expect(within(panel).getByText('Under Repository access, choose the repositories Althar works in.')).toBeTruthy()
     // No page to open: nothing was found to fill it in from.
     expect(within(panel).queryByRole('button', { name: /token page/ })).toBeNull()
@@ -1017,8 +1029,8 @@ describe('connecting GitHub', () => {
     expect(within(ways).getByRole('button', { name: /Use gh’s sign-in\s*Signed in to git.meridian.dev as you/ })).toBeTruthy()
     await userEvent.click(within(ways).getByRole('button', { name: /A new token\s*Made on git.meridian.dev/ }))
     expect(await heading('Make a token on git.meridian.dev')).toBeTruthy()
-    expect(within(panel).getByText('Its token stopped working. Tasks can’t reach it until it’s back.')).toBeTruthy()
-    expect(within(panel).getByText('It opens with the note Althar and the repo and workflow scopes ticked.')).toBeTruthy()
+    expect(within(panel).getByText('Its token stopped working.')).toBeTruthy()
+    expect(within(panel).getByText('Opens with the repo and workflow scopes ticked.')).toBeTruthy()
     await press(`Open git.meridian.dev’s token page`)
     expect(open).toHaveBeenCalledWith(`${meridian}/settings/tokens/new`, '_blank')
     await press('Paste it myself')
@@ -1078,10 +1090,10 @@ describe('connecting GitHub', () => {
     await press(/Continue with GitHub/)
     expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com', 'conn6')
     // How it stands couldn't be read: said, with the sign-in started again on a press.
-    expect(await within(panel).findByText('That sign-in isn’t there any more.', {}, { timeout: 4000 })).toBeTruthy()
+    expect(await within(panel).findByText('That sign-in isn’t there any more.')).toBeTruthy()
     await press('Try again')
     expect(client.startSignIn).toHaveBeenCalledTimes(2)
-  }, 10_000)
+  })
 
   it('says GitHub didn’t answer a check, and connects as it is', async () => {
     const { panel, closed, press, heading } = await walk('github', {

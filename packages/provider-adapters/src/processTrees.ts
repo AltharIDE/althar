@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { win32 } from 'node:path'
 
-import { Duration, Effect } from 'effect'
+import { Clock, Duration, Effect } from 'effect'
 
 import { keeper, keeperStartedAt } from './keeper'
 
@@ -172,8 +172,8 @@ export interface StopReport {
 /** Waits for the tree to empty, up to a limit. */
 const treeGone = (trees: ProcessTrees, pid: number, limit: Duration.Input) =>
   Effect.gen(function* () {
-    const until = Date.now() + Duration.toMillis(Duration.fromInputUnsafe(limit))
-    while ((yield* trees.alive(pid)) && Date.now() < until) yield* Effect.sleep('25 millis')
+    const until = (yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.fromInputUnsafe(limit))
+    while ((yield* trees.alive(pid)) && (yield* Clock.currentTimeMillis) < until) yield* Effect.sleep('25 millis')
     return !(yield* trees.alive(pid))
   })
 

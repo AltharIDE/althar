@@ -12,6 +12,7 @@ import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
+import { personPushes } from '../../shared/standing'
 import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
@@ -49,8 +50,9 @@ export const text = {
 
 /** A task's steps, as the dock lists them: done, the one it is on, and those to come. */
 const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
-  const { steps, at } = trackOf(task)
-  const finished = task.phase === 'ready' || task.phase === 'settled'
+  const { steps, at, done } = trackOf(task)
+  // Merging, or in its merge queue, its steps are all done: its merge is what is left, and the words say so.
+  const finished = done || task.phase === 'ready' || task.phase === 'settled'
   // A plan that hasn't started has all its steps to come; one under way that waits to go on still has the one it is on.
   const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
@@ -172,7 +174,10 @@ export function DockView({
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
-          unpushed={change.localHead === null ? 0 : change.unpushed}
+          // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),
+          // and nothing is accepted until they're on it.
+          unpushed={change.localHead === null || !personPushes(change) ? 0 : change.unpushed}
+          going={change.localHead === null || personPushes(change) ? 0 : change.unpushed}
           onPush={() => void model.push(task.taskId, change.localHead ?? '', change.url)}
           pushing={model.pushing.has(task.taskId)}
           onOpenFile={(path) => onChanges(task, path)}

@@ -1,5 +1,6 @@
 import { useId } from 'react'
 
+import { device } from '../../foundations/device'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -39,7 +40,7 @@ export interface LoadPeekText {
 }
 
 export const loadPeekText: LoadPeekText = {
-  machine: 'This Mac',
+  machine: device.This,
   cpu: 'CPU',
   memory: 'Memory',
   percent: (p) => `${p}%`,
@@ -48,7 +49,7 @@ export const loadPeekText: LoadPeekText = {
   running: 'Running',
   processes: (n) => (n === 1 ? '1 process' : `${n} processes`),
   otherApps: 'Other apps',
-  nothingRuns: 'Nothing Althar started is running.',
+  nothingRuns: 'Nothing running',
   ago: '2 min ago',
   now: 'now',
   show: 'Show in the bar',

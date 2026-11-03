@@ -1,0 +1,50 @@
+diff --git a/dist/acp-agent.js b/dist/acp-agent.js
+index d58262b5f2c1a58744691974d3935b11be82eaac..000ac8aed2c30446d865fcd9e321e47d992affc2 100644
+--- a/dist/acp-agent.js
++++ b/dist/acp-agent.js
+@@ -6269,17 +6269,16 @@ export class ClaudeAcpAgent {
+                         break;
+                     }
+                     case "rate_limit_event": {
+-                        if (lastAssistantTotalUsage !== null) {
+-                            await sendUpdate({
+-                                sessionId: params.sessionId,
+-                                update: attachUsageModel({
+-                                    sessionUpdate: "usage_update",
+-                                    used: lastAssistantTotalUsage,
+-                                    size: session.contextWindowSize,
+-                                    _meta: { "_claude/rateLimit": message.rate_limit_info },
+-                                }),
+-                            });
+-                        }
++                        // Althar: the event is sent even before this turn's first usage figure (claude-agent-acp #1127), with the context as last known, since the CLI repeats it only when the limits change.
++                        await sendUpdate({
++                            sessionId: params.sessionId,
++                            update: attachUsageModel({
++                                sessionUpdate: "usage_update",
++                                used: lastAssistantTotalUsage ?? session.contextUsedTokens ?? 0,
++                                size: session.contextWindowSize,
++                                _meta: { "_claude/rateLimit": message.rate_limit_info },
++                            }),
++                        });
+                         break;
+                     }
+                     case "conversation_reset": {
+diff --git a/dist/permissions/response.js b/dist/permissions/response.js
+index 2b763db8700c12b859490858b1026373fcf84b6f..4871dc8f6657f6a3271f367a4c0ac537e701c919 100644
+--- a/dist/permissions/response.js
++++ b/dist/permissions/response.js
+@@ -12,8 +12,12 @@ export function decodeClaudePermissionResponse(response, toolName, input, toolUs
+         toolUseID,
+         durableChangeSet,
+     });
++    // Althar: a refusal says why in the refused call's own result, from the answer's _meta, rather than in a turn after the reply.
++    const refusal = response._meta?.["althar/refusal"];
+     return {
+-        permissionResult,
++        permissionResult: permissionResult.behavior === "deny" && typeof refusal === "string" && refusal !== ""
++            ? { ...permissionResult, message: refusal.slice(0, 8000) }
++            : permissionResult,
+         ...(selection.contextResetMode ? { contextResetMode: selection.contextResetMode } : {}),
+     };
+ }

@@ -17,10 +17,28 @@ import type { AccountSignInModel } from './useAccountSignIn'
  * tool signed in.
  */
 
+/**
+ * The providers within the agent the line says, each in its own state: one paid a way Althar knows (OpenCode Go on a plan,
+ * Zen per use), and any that refused work lately, as the button that signs it in. None where none is either.
+ */
+const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> => {
+  const said = (account.providers ?? []).filter((provider) => provider.refusedAt !== null || provider.pays !== undefined)
+  if (said.length === 0) return {}
+  return {
+    providers: said.map((provider) => ({
+      name: provider.name,
+      ...(provider.pays === undefined ? {} : { paid: provider.pays }),
+      ...(provider.refusedAt === null ? {} : { refused: true }),
+    })),
+  }
+}
+
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
+  // Each provider within the agent in its own state, one that refused work lately as the line's button.
+  ...providersOf(account),
   place:
     account.home === null
       ? { kind: 'usual' }
@@ -35,18 +53,31 @@ export const accountEntry = (account: AccountStatus, now: Date = new Date()): Ac
         : { kind: 'ready', ...(account.paidBy === 'unknown' ? {} : { paid: account.paidBy }) },
 })
 
-export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; start: StartModel; signIn: AccountSignInModel }) {
+/**
+ * The agent's own sign-in, in the line it is for: the ways in the agent
+ * offers, then each step of the way chosen. Nothing while no sign-in of this
+ * agent is under way. `position` and `account` say which line it stands in.
+ */
+export function AgentSignIn({
+  agent,
+  signIn,
+  position,
+  account,
+}: {
+  agent: AgentStatus
+  signIn: AccountSignInModel
+  position: number
+  account?: { readonly name: string }
+}) {
   const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
-  // The account made for a sign-in under way is that sign-in's line until it is named.
-  const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
-  const again = flow?.again == null ? undefined : accounts.find((account) => account.id === flow.again)
+  if (flow === null) return null
   const caution = signInCautionOf(agent.id)
-  const node = flow && (
+  return (
     <AccountSignIn
       agent={agent.name}
       text={{ folder: `A folder on ${device.this}` }}
-      position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
-      {...(again === undefined ? {} : { account: { name: again.name } })}
+      position={position}
+      {...(account === undefined ? {} : { account })}
       {...(caution === undefined ? {} : { caution })}
       step={flow.step}
       ways={{
@@ -66,6 +97,21 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
       onBack={signIn.back}
       onDone={signIn.done}
       onCancel={signIn.cancel}
+    />
+  )
+}
+
+export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; start: StartModel; signIn: AccountSignInModel }) {
+  const flow = signIn.signingIn?.agentId === agent.id ? signIn.signingIn : null
+  // The account made for a sign-in under way is that sign-in's line until it is named.
+  const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
+  const again = flow?.again == null ? undefined : accounts.find((account) => account.id === flow.again)
+  const node = flow && (
+    <AgentSignIn
+      agent={agent}
+      signIn={signIn}
+      position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
+      {...(again === undefined ? {} : { account: { name: again.name } })}
     />
   )
   return (

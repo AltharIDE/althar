@@ -5,10 +5,10 @@ import s from './lightUnder.module.css'
 
 /*
  * Where the page is dark enough for the nav to turn to smoked glass over
- * it, with white words. A head that stands in the light (the homepage's
- * first screen, a Lit head) lays a LightUnder over that part of itself, from
- * just above its words down past its foot, clipped by the head; a dark
- * section lays one of tone `ink` over itself. The nav asks useLightUnder
+ * it, with white words. A dark section (the homepage's first screen, its
+ * dark bodies, the night window the other pages open on) lays a LightUnder
+ * of tone `ink` over itself; one standing in Althar's light lays one of tone
+ * `light`. The nav asks useLightUnder
  * what is under it: the light, ink, or (where there is neither) nothing,
  * and over paper it stays clear.
  */

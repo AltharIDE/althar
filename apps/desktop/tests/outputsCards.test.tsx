@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { cleanup, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -76,6 +76,16 @@ describe('what a task changed, card by card', () => {
     ])
   })
 
+  it('offers Accept and merge on a stopped task whose pull request is ready as it is, and not on one stopped without', async () => {
+    const stopped = { phase: 'stopped' as const, stopped: { by: 'althar' as const, at: null } }
+    const { onAccept } = show(task({ ...stopped, mergeable: true, changes: [pr('api', 1)] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: 'abc123', url: 'https://github.com/meridian/api/pull/1' }])
+    cleanup()
+    show(task({ ...stopped, changes: [pr('api', 1, { conflicts: true })] }))
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+  })
+
   it('says who asked for changes on its last review, on the model its plan gave them', async () => {
     const reviewed = task(
       {
@@ -101,7 +111,7 @@ describe('what a task changed, card by card', () => {
     const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
     show(task({ files: [FILE], commits: 1, here }, { items: [items.step({ step: 'review', verdict: 'pass', agentId: 'codex' })] }))
     expect(await screen.findByText(/Reviewed by/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
   })
 
   it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {
@@ -139,7 +149,7 @@ describe('what a task changed, card by card', () => {
     // In a task of several, they may be in a repository with no pull request yet: after none.
     expect(screen.getByText('2 commits aren’t in a pull request yet.')).toBeTruthy()
     expect(screen.getByText('PR #5 was closed on GitHub.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Open a new pull request' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Open a new draft pull request' }))
     expect(onOpenChange).toHaveBeenCalled()
   })
 })

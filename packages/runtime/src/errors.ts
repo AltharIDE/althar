@@ -1,15 +1,33 @@
 import { Schema } from 'effect'
 
-/** A git command failed. */
+/**
+ * A git command failed: what git wrote to stderr, never the command line in
+ * its place. Where it wrote nothing, how it ended says why: its exit code, the
+ * signal that stopped it, or that it ran past its time and Althar stopped it
+ * (`timedOut`, after `timeout` milliseconds).
+ */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   args: Schema.Array(Schema.String),
   cwd: Schema.String,
   stderr: Schema.String,
+  code: Schema.optional(Schema.Number),
+  signal: Schema.optional(Schema.String),
+  timedOut: Schema.optional(Schema.Boolean),
+  timeout: Schema.optional(Schema.Number),
 }) {}
 
 /** The folder opened as a project is not inside a git repository. */
 export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARepository', {
   path: Schema.String,
+}) {}
+
+/** A new repository can't be made where the person chose: a folder of its name is there already, or the name makes no folder. */
+export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('RepositoryRefused', {
+  reason: Schema.Literals(['taken', 'no_name']),
+  /** The folder it would be. */
+  name: Schema.String,
+  /** The folder it would be in. */
+  parent: Schema.String,
 }) {}
 
 /** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
@@ -24,7 +42,7 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
  * that isn't one, or a pull request target for a repository that isn't a fork.
  */
 export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
-  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken']),
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'no_upstream_access', 'id_taken', 'bad_setup']),
 }) {}
 
 /** Something the caller named does not exist. */
@@ -132,7 +150,7 @@ export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('Ou
  */
 export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChangeToOpen', {
   taskId: Schema.String,
-  why: Schema.Literals(['working', 'stopped', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
+  why: Schema.Literals(['working', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
   detail: Schema.optional(Schema.String),
 }) {}
 
@@ -140,9 +158,10 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
  * A task's branch can't be merged here: it has a pull request to merge
  * instead, it's settled, what the person saw isn't on its branch any more,
  * it conflicts (and, where the project says so, the lead is resolving it),
- * or the default branch is checked out with changes not committed, or with
- * changes in a submodule the merge moves, or either could not be read.
- * `detail` says where.
+ * or the default branch is checked out with changes not committed to files
+ * the merge changes, or with changes in a submodule the merge moves, or
+ * either could not be read. `detail` says where, and `into` and `files` say
+ * it in a few words.
  */
 export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   taskId: Schema.String,
@@ -160,23 +179,49 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
     'missing',
   ]),
   detail: Schema.String,
+  /** The branch it would merge into, named by its repository in a task of several: main, web’s main. */
+  into: Schema.optional(Schema.String),
+  /** The files in the way, by their path in the repository: those that conflict, have changes not committed, or git doesn't track; or the submodule. */
+  files: Schema.optional(Schema.Array(Schema.String)),
 }) {}
 
 /**
  * A push its remote won't take: it has commits this one doesn't (`behind`),
- * git couldn't sign in there (`denied`), or the remote itself said no, such
- * as a protected branch (`refused`, with what it said). Replacing a pull
- * request's commits also stops where the pull request moved on from the
- * head the person saw (`moved`), and where the project's rules never allow
- * a force push (`never`).
+ * git couldn't sign in there (`denied`), the account signed in may not push
+ * there (`forbidden`), the branch is protected (`protected`), the host
+ * couldn't be reached (`unreachable`), it got no answer in time, as while
+ * git waits for a sign-in no one can give (`unanswered`), or the remote
+ * itself said no, as a hook does (`refused`, with what it said), or git
+ * failed in a way none of these says (`failed`, all it said in `detail`). Replacing a
+ * pull request's commits also stops where the pull request moved on from
+ * the head the person saw (`moved`), and where the project's rules never
+ * allow a force push (`never`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'refused', 'moved', 'never']),
+  why: Schema.Literals([
+    'behind',
+    'denied',
+    'forbidden',
+    'protected',
+    'unreachable',
+    'unanswered',
+    'refused',
+    'failed',
+    'moved',
+    'never',
+    'fork_gone',
+    'unplaced',
+    'no_push_address',
+  ]),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
-  /** What the remote said, for one it refused. */
+  /** What the remote said, for one it refused: its one line. */
   said: Schema.optional(Schema.String),
+  /** The code host the remote is on, by name, where Althar knows it: GitLab. */
+  host: Schema.optional(Schema.String),
+  /** All git said, for a quiet Details: never the sentence itself. */
+  detail: Schema.optional(Schema.String),
 }) {}
 
 /**
@@ -264,5 +309,15 @@ export class FolderStayed extends Schema.TaggedError<FolderStayed>()('FolderStay
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */
 export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnanswered', {
   tool: Schema.String,
+  message: Schema.String,
+}) {}
+
+/**
+ * A task's screenshots can't go in a comment on its pull request as asked
+ * (ADR-077): its host takes no pictures, there are none to post, or a
+ * picture of them is no longer kept. Said in words for the person.
+ */
+export class ScreenshotsRefused extends Schema.TaggedError<ScreenshotsRefused>()('ScreenshotsRefused', {
+  why: Schema.Literals(['no_pictures', 'none', 'unkept']),
   message: Schema.String,
 }) {}

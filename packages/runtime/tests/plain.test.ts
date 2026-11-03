@@ -9,6 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from '../src/device'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -26,6 +27,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, listTools, notices, repository, runtime, until } from './support'
+import { withoutReview } from './changesSupport'
 
 /*
  * A plain task (DEV-96, ADR-035): what the coordinator starts with
@@ -81,13 +83,12 @@ const gitIn = (cwd: string, ...args: ReadonlyArray<string>) => {
 }
 
 /** The task's card once `check` holds of it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean, limit = 20) =>
+const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
       Effect.map(queries.card(taskId), (one) => [one]),
       ([one]) => one !== undefined && check(one),
-      Duration.seconds(limit),
     )
     return card ?? assert.fail('no card')
   })
@@ -99,7 +100,6 @@ const branchedOnce = (taskId: string) =>
     yield* until(
       sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces WHERE task_id = ${taskId}`,
       (rows) => rows[0]?.branchedAt != null,
-      Duration.seconds(20),
     )
     return yield* worktreeOf(taskId)
   })
@@ -121,7 +121,6 @@ const sayAfterDone = (threadId: string, body: string) =>
     yield* until(
       Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
       (gone) => gone.length === 1,
-      Duration.seconds(10),
     )
     yield* say(threadId, body)
     yield* sessions.startLast(threadId)
@@ -157,7 +156,7 @@ describe('a plain task', () => {
       assert.include(first?.prompt, `${worktree.path}, with no branch yet, at main at ${worktree.baseCommit.slice(0, 12)}`)
       assert.include(first?.prompt, `its scratch folder, ${scratchOf(worktree.path)}`)
       assert.include(first?.prompt, `on a branch of its own, ${worktree.branch}, when your turn ends`)
-      assert.include(first?.prompt, 'Nothing of it leaves this computer')
+      assert.include(first?.prompt, `Nothing of it leaves ${thisDevice()}`)
       assert.include(first?.prompt, 'call make_it_a_change')
       assert.notInclude(first?.prompt, `The branch ${worktree.branch}`)
       // Its report has no word of what it built, and needn't.
@@ -228,7 +227,6 @@ describe('a plain task', () => {
       yield* until(
         sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
         (rows) => (rows[0]?.n ?? 0) === 1,
-        Duration.seconds(20),
       )
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
@@ -291,7 +289,7 @@ describe('a plain task', () => {
       // Said in its thread, and recorded.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        [`This task’s work is on a branch of its own now, ${worktree.branch}, which stays on this computer.`, 'aside'],
+        [`This task’s work is on its branch ${worktree.branch}.`, 'aside'],
       )
       const [fact] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(fact?.payload ?? '{}'), { from: null, to: worktree.branch })
@@ -352,7 +350,6 @@ describe('a plain task', () => {
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
           (rows) => (rows[0]?.n ?? 0) === 1,
-          Duration.seconds(20),
         )
         assert.strictEqual((yield* state)[0]?.state, 'open')
         assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
@@ -405,7 +402,6 @@ describe('a plain task', () => {
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state = 'succeeded'`,
           (rows) => rows[0]?.n === 1,
-          Duration.seconds(20),
         )
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'ready'), { kind: 'plain', unshipped: null })
         assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'pull request')
@@ -424,6 +420,15 @@ describe('a plain task', () => {
       yield* cardOnce(wrote.id, (one) => one.phase === 'ready')
       for (const task of [quiet, wrote]) {
         yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { task }), taskId: task.id })
+        // Its lead is gone before its folder is: one still finishing its turn could write in a folder put back meanwhile,
+        // and Althar would make it a branch by then, which a plain task is put back without.
+        const sessions = yield* SqlClient.SqlClient
+        yield* until(
+          sessions<{
+            state: string
+          }>`SELECT state FROM provider_sessions WHERE thread_id = ${task.threadId} AND state IN ('active', 'starting')`,
+          (rows) => rows.length === 0,
+        )
         const worktree = yield* worktreeOf(task.id)
         // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
         rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
@@ -578,7 +583,7 @@ describe('a plain task of several repositories', () => {
       assert.strictEqual(gitIn(web.path, 'symbolic-ref', '--short', 'HEAD'), `${web.branch}-2`)
       assert.include(
         (yield* notices(created.threadId)).map((notice) => notice.title),
-        `This task’s work is on branches of its own now, ${api.branch}, ${web.branch}-2, which stay on this computer.`,
+        'This task’s work is on 2 branches.',
       )
       // Once made, nothing more happens.
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
@@ -630,10 +635,7 @@ describe('a plain task of several repositories', () => {
       yield* sql`UPDATE workspaces SET branch = 'althar/no..dots' WHERE id = ${web.id}`
       writeFileSync(join(api.path, 'header.md'), 'A header.\n')
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [api.branch])
-      assert.include(
-        yield* said,
-        `This task’s work is on a branch of its own now, ${api.branch}, which stays on this computer. Althar couldn’t make its branch in web yet, and tries again as its lead’s turn ends.`,
-      )
+      assert.include(yield* said, `This task’s work is on its branch ${api.branch}. Couldn’t branch in web yet.`)
       // Tried again at the next check, though nothing is written in web; still refused, it isn't said twice.
       const before = (yield* said).length
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
@@ -729,7 +731,7 @@ describe('making a quick task a change', () => {
       assert.lengthOf(github.changes, 0)
       // The person likes it, and asks its lead to make it a real thing: it does, then reports, and the review comes first.
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
       // Its thread says when it became a change, between what the quick task showed and what the change did, and the
       // description its lead wrote for the pull request, which its Outputs says it is with.
@@ -814,13 +816,12 @@ describe('making a quick task a change', () => {
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 1,
-        Duration.seconds(20),
       )
       assert.deepStrictEqual(
         github.changes.map((change) => [change.title, change.draft]),
         [['Settings, for real', false]],
       )
-      assert.isTrue(github.changes[0]?.body.startsWith('Settings were a sketch; this makes them real.'))
+      assert.isTrue(withoutReview(github.changes[0]?.body ?? '').startsWith('Settings were a sketch; this makes them real.'))
       yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
     }).pipe(Effect.provide(withGitHub(github)))
   })
@@ -848,13 +849,12 @@ describe('making a quick task a change', () => {
       assert.deepInclude(said, {
         source: 'runtime',
         severity: 'info',
-        title: 'This task is a change now: with no review, it ends on its branch, as its repository isn’t on a code host Althar knows.',
-        description: `Its work is on its branch ${worktree.branch}.`,
+        title: 'This task is a change now: with no review, it ends on its branch.',
         // Althar's own housekeeping, kept with the lead's work.
         role: 'aside',
       })
       // Its thread says nothing of a branch that stays here.
-      assert.notInclude(said.map((notice) => notice.title).join('\n'), 'stays on this computer')
+      assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
       // A change now, Done doesn't settle it: it waits to be accepted.
@@ -870,7 +870,7 @@ describe('making a quick task a change', () => {
       const place = yield* opened
       // Its lead commits, and is asked at once, in the words its task was given.
       const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'review'])
       // One run, its plan's, with the review and no more of staying here; its graph patched with the review.
@@ -903,10 +903,7 @@ describe('making a quick task a change', () => {
       )
       // With no host Althar knows, it ends on its branch, and says so.
       const said = (yield* notices(task.threadId)).map((notice) => notice.title)
-      assert.include(
-        said,
-        "This task is a change now: reviewed by Fake codex's default model, it ends on its branch, as its repository isn’t on a code host Althar knows.",
-      )
+      assert.include(said, "This task is a change now: reviewed by Fake codex's default model, it ends on its branch.")
       assert.include(said, 'The task ends on its branch.')
       assert.strictEqual(gitIn((yield* worktreeOf(task.id)).path, 'log', '-1', '--format=%s'), 'Change it')
     }).pipe(Effect.provide(withQueries())),

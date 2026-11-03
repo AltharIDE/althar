@@ -5,8 +5,10 @@ import { INSTALL, LINKS } from '../content/facts'
 import { useDownload } from '../lib/download'
 import { OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
-import { SHIFTS } from './Bar'
 import s from './Close.module.css'
+
+/** Where the shifts list lives. */
+const SHIFTS = '/shifts'
 
 /**
  * The download and the repository, as both developer pages end. The download
@@ -29,6 +31,17 @@ export function Get({ tone }: { tone: 'blue' | 'paper' }) {
       </a>
     </div>
   )
+}
+
+/**
+ * On a Mac, the other chip's build, as a quiet line under the download: for
+ * an Intel Mac where the browser didn't say (Safari and Firefox never do),
+ * or for Apple silicon where it said Intel. Its line is kept on every
+ * system, so nothing moves when the answer comes in.
+ */
+export function OtherMac({ tone }: { tone: 'blue' | 'paper' }) {
+  const { other } = useDownload()
+  return <p className={tone === 'blue' ? s.otherBlue : s.other}>{other && <a href={other.href}>{other.label}</a>}</p>
 }
 
 /**
@@ -88,6 +101,7 @@ export function Close() {
           </div>
           <div>
             <Get tone="blue" />
+            <OtherMac tone="blue" />
             <pre className={s.code}>
               <span aria-hidden="true">$ </span>
               {INSTALL.brew}

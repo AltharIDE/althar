@@ -1,4 +1,4 @@
-/* The Automations room in the views' place: its page scrolls under the front page. */
+/* The Automations room in the views' place: its page scrolls under the header. */
 .room {
   flex: 1;
   min-height: 0;

@@ -17,8 +17,11 @@ export type RepositoryAccess = typeof RepositoryAccess.Type
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
 export type RepositoryRole = typeof RepositoryRole.Type
 
-/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
-export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+/**
+ * Where a fork's tasks' work goes: pull requests on the repository it was forked from, from the fork's branches; on the fork; or
+ * branches and pull requests both on the repository it was forked from, where the person can push there (ADR-085).
+ */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branch'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
 export const LocationKind = Schema.Literals(['existing', 'managed'])
@@ -107,6 +110,8 @@ export const ThreadItemKind = Schema.Literals([
   'automation',
   /** Pictures a lead showed the person, with their captions, at any time: Althar keeps them, and they stay when its worktree goes. */
   'pictures',
+  /** The coordinator asking the person to stop, hold, restart or settle a task, where no message of theirs asked it to: one button, pressed there. Althar posts it and keeps it current. */
+  'task_ask',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -317,6 +322,8 @@ export type Sensitivity = typeof Sensitivity.Type
 
 /** The aggregates whose changes are recorded and fed to clients. */
 export const AggregateType = Schema.Literals([
+  'errand',
+  'followed_pull',
   'project',
   'task',
   'task_plan',

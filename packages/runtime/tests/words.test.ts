@@ -13,8 +13,10 @@ import {
   descriptionAsk,
   filesLine,
   fromAlthar,
+  leftQueueNote,
   nameOf,
   outsidersLine,
+  queuedNote,
   reviewForLead,
   reviewLine,
   signed,
@@ -89,12 +91,31 @@ describe('what Althar writes about a pull request', () => {
     assert.strictEqual(standing({ state: 'merged', draft: false }), 'merged')
   })
 
+  it('says it went in its merge queue, and why the queue took it out, and that it is the person’s again', () => {
+    assert.strictEqual(queuedNote('PR #12', undefined), 'PR #12 is in the merge queue.')
+    assert.deepStrictEqual(
+      (['checks', 'conflict', 'removed', 'other', null] as const).map((why) => leftQueueNote('PR #12', why)),
+      [
+        'The merge queue took PR #12 out: its checks failed.',
+        "The merge queue took PR #12 out: it conflicts with what's ahead of it.",
+        'Someone took PR #12 out of the merge queue.',
+        'The merge queue took PR #12 out.',
+        'The merge queue took PR #12 out.',
+      ],
+    )
+  })
+
   it('describes it as the lead wrote it, else from what the task built, and never with the review or its evidence', () => {
-    const credit = '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>'
+    const credit = 'Opened by [Althar](https://github.com/AltharIDE/althar).'
     assert.strictEqual(bodyOf({ lead: null, issue: null }), credit)
     // Althar's credit turned off, it doesn't sign the description either.
     assert.strictEqual(bodyOf({ lead: 'Adds a retry.', issue: null, credit: false }), 'Adds a retry.')
     assert.strictEqual(bodyOf({ lead: '', issue: { key: '#12', url: 'u', sameHost: true } }), `Issue: #12\n\n${credit}`)
+    // A task that does only part of its issue says so, in the words trackers read as not closing it.
+    assert.strictEqual(
+      bodyOf({ lead: '', issue: { key: 'MER-231', url: 'https://linear.app/m/issue/MER-231', sameHost: false, partOf: true } }),
+      `Part of [MER-231](https://linear.app/m/issue/MER-231)\n\n${credit}`,
+    )
     // The lead's description is the body, above the issue's link: not what the task built, which is the person's.
     assert.strictEqual(
       bodyOf({

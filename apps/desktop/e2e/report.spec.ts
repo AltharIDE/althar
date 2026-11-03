@@ -77,7 +77,7 @@ test('keeps logs, and reports a problem from the menu with the window, what goes
     await expect.poll(() => readFileSync(join(logs, 'main.log'), 'utf8')).toContain('message="Runtime started"')
     await expect.poll(() => readFileSync(join(logs, 'runtime.log'), 'utf8')).toContain('message="Runtime ready"')
     // A page's error nobody caught goes to main's log.
-    await page.evaluate(() => setTimeout(() => Promise.reject(new Error('An error the window left'))))
+    await page.evaluate(() => queueMicrotask(() => void Promise.reject(new Error('An error the window left'))))
     await expect.poll(() => readFileSync(join(logs, 'main.log'), 'utf8')).toContain('An error the window left')
 
     // Help → Report a problem on a Mac; elsewhere the menu has no bar, and the quick settings' foot has it.

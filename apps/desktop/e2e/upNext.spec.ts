@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, startTask } from './support'
+import { launch, openFirstProject, planTask, startTask, still } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -37,8 +37,18 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
 
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    // Its server is running before the next task is asked for: a task started before that would take the place itself
+    // and leave only two waiting, whatever the test then counted. The place holder shows only over a task that waits,
+    // so the task's own thread says it ran the command that keeps the place.
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await expect(page.getByRole('button', { name: /ran 1 command/ })).toBeVisible()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    // Each waits before the next is asked for, so a plan left counting down is caught where it happens rather than as a
+    // row in the wrong place later.
     await startTask(page, 'Add a retry', '[lead:wait]')
+    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(1)
     await startTask(page, 'Tidy the docs', '[lead:finish]')
+    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2)
     await startTask(page, 'Rename the helper', '[lead:finish]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
@@ -53,11 +63,11 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
     await expect(next.getByText('Starts when an agent is free')).toBeVisible()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-board.png', animations: 'disabled' })
 
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-home.png', animations: 'disabled' })
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
@@ -81,7 +91,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(running.getByRole('button', { name: 'Add a retry' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/upnext-started.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

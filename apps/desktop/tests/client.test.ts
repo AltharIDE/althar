@@ -3,11 +3,12 @@ import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
+import { ClientAuthority, Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
 import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '@althar/testing'
 
 import { connect, messageOf, newCommandId, receivePort } from '../src/renderer/data/client'
 import { fakeAgents } from '../src/runtime/fakeAgents'
@@ -47,20 +48,16 @@ const connected = async () => {
       scope,
     ),
   )
-  await serving(connection(emitterPort(channel.port1 as never, (data) => data)).pipe(Layer.provide(Layer.succeedContext(context))))
+  await serving(
+    connection(
+      emitterPort(channel.port1 as never, (data) => data),
+      { kind: 'window' },
+    ).pipe(Layer.provide(Layer.succeedContext(context))),
+  )
   const client = await connect(channel.port2 as unknown as DomMessagePort)
   /** A folder the person chose, as the main process allows it. */
   const grant = (path: string) => Effect.runPromise(Context.get(context, Folders).allow(path))
   return { client, grant }
-}
-
-const eventually = async <A>(read: () => Promise<A>, check: (value: A) => boolean): Promise<A> => {
-  for (let tries = 0; tries < 250; tries += 1) {
-    const value = await read()
-    if (check(value)) return value
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error('Timed out')
 }
 
 describe('the client', () => {
@@ -83,19 +80,19 @@ describe('the client', () => {
     expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
     expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
-    await eventually(
+    await waitFor(
       () => client.getThread(task.threadId),
       (thread) => thread.session?.turnRunning === false && thread.items.length > 0,
     )
     await client.send({ threadId: task.threadId, body: 'hello', disposition: 'after_current' })
-    const thread = await eventually(
+    const thread = await waitFor(
       () => client.getThread(task.threadId),
       (snapshot) => snapshot.items.some((item) => 'text' in item.content && item.content.text === 'Hello'),
     )
     expect(thread.session?.agentName).toBe('Claude Code')
     const reply = thread.items.at(-1)
     expect(await client.getThreadItem(task.threadId, reply?.id ?? '')).toEqual(reply)
-    await eventually(
+    await waitFor(
       async () => events,
       (seen) => seen.some((event) => event._tag === 'Changed' && event.threadId === task.threadId),
     )
@@ -145,7 +142,7 @@ describe('the client', () => {
     const coordinator = await client.getCoordinator(project.id)
     expect(coordinator.suggested?.agentId).toBe('claude-code')
     await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
-    const planned = await eventually(
+    const planned = await waitFor(
       () => client.getCoordinator(project.id, { limit: 50 }),
       (snapshot) => snapshot.items.some((item) => item.kind === 'task'),
     )
@@ -156,7 +153,7 @@ describe('the client', () => {
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
     expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
     await client.startPlan(planId)
-    await eventually(
+    await waitFor(
       () => client.getThreadItem(coordinator.threadId, card?.id ?? ''),
       (item) => item.kind === 'task' && item.content.phase === 'running',
     )
@@ -212,6 +209,7 @@ describe('the client', () => {
         Api.of({
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
+          GetTaskFindings: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
           GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
@@ -219,6 +217,8 @@ describe('the client', () => {
           SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
+          PlaceRepository: () => Effect.die('unused'),
+          MakeRepository: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
           ReplacePullRequest: () => Effect.die('unused'),
           MergeNote: () => Effect.die('unused'),
@@ -258,6 +258,8 @@ describe('the client', () => {
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
           SetPostTeamReviews: () => Effect.die('unused'),
+          SetReviewSeal: () => Effect.die('unused'),
+          SetReviewSealStyle: () => Effect.die('unused'),
           GetAutomations: () => Effect.die('unused'),
           GetAutomation: () => Effect.die('unused'),
           MakeAutomation: () => Effect.die('unused'),
@@ -266,11 +268,14 @@ describe('the client', () => {
           PauseAutomation: () => Effect.die('unused'),
           RunAutomationNow: () => Effect.die('unused'),
           DeleteAutomation: () => Effect.die('unused'),
+          AnswerTaskAsk: () => Effect.die('unused'),
           UndoAutomationChange: () => Effect.die('unused'),
           SetAutomationPostsReviews: () => Effect.die('unused'),
           SetAutomationsPaused: () => Effect.die('unused'),
           SetAgentsAtOnce: () => Effect.die('unused'),
           SetFolderWait: () => Effect.die('unused'),
+          SetPlansAndReviews: () => Effect.die('unused'),
+          SetNewProjectDefaults: () => Effect.die('unused'),
           GetTaskFolders: () => Effect.die('unused'),
           CleanUpFolders: () => Effect.die('unused'),
           RemoveTaskFolder: () => Effect.die('unused'),
@@ -298,6 +303,7 @@ describe('the client', () => {
           AbandonTask: () => Effect.die('unused'),
           MarkTaskDone: () => Effect.die('unused'),
           KeepTaskForLater: () => Effect.die('unused'),
+          SettledWithOnePress: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
@@ -314,6 +320,8 @@ describe('the client', () => {
           DiscardIssueDraft: () => Effect.die('unused'),
           ApplyIssueChanges: () => Effect.die('unused'),
           DiscardIssueChanges: () => Effect.die('unused'),
+          PreferIssueCards: () => Effect.die('unused'),
+          SetTaskIssuePart: () => Effect.die('unused'),
           ChangeReviewDraft: () => Effect.die('unused'),
           PostReviewDraft: () => Effect.die('unused'),
           DiscardReviewDraft: () => Effect.die('unused'),
@@ -331,6 +339,7 @@ describe('the client', () => {
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
+          PostScreenshots: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
           GetProjectNotes: () => Effect.die('unused'),
@@ -387,6 +396,7 @@ describe('the client', () => {
     )
     await serving(
       RpcServer.layer(Api).pipe(
+        Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
         Layer.provide(handlers),
         Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
       ),
@@ -409,7 +419,7 @@ describe('the client', () => {
         listening += 1
       },
     )
-    await eventually(
+    await waitFor(
       async () => [watches.length, listening],
       ([seen, said]) => (seen ?? 0) >= 2 && (said ?? 0) >= 2,
     )
@@ -468,6 +478,7 @@ describe('automations', () => {
     )
     // Handlers made on the fly need nothing, as their type can't say.
     const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
+      Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
       Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
       Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
     ) as Layer.Layer<never>

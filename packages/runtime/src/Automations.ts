@@ -10,7 +10,7 @@ import {
 import { ConnectorFailed, type ListedChange } from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { definitionOf, partsOf } from './automated'
@@ -26,7 +26,7 @@ import { Projects } from './Projects'
 import { failureWords } from './pullRequestList'
 import { change, fact, timestamp } from './records'
 import { ReviewRefused, Reviews } from './Reviews'
-import type { PlanStep } from './Runs'
+import { type PlanStep, Runs } from './Runs'
 import { instantOf, lastCome, localOf, localZone, nextToCome, type Slot, staggerOf, windowOf } from './slots'
 import { Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
@@ -87,6 +87,7 @@ type Store =
   | Plans
   | Reviews
   | Tasks
+  | Runs
   | Connections
   | Limits
 
@@ -249,10 +250,12 @@ export class Automations extends Context.Service<
       const plans = yield* Plans
       const reviews = yield* Reviews
       const tasks = yield* Tasks
+      const runs = yield* Runs
       const connections = yield* Connections
       const limits = yield* Limits
       const options = (yield* RuntimeConfig).automations ?? {}
-      const nowOf = options.now ?? (() => Date.now())
+      // The runtime's clock, read where a schedule is worked out outside an effect: a test's clock is the one it reads too.
+      const nowOf = yield* Clock.clockWith((clock) => Effect.succeed(() => clock.currentTimeMillisUnsafe()))
       const zoneOf = options.zone ?? localZone
       const tick = Duration.toMillis(options.tick ?? Duration.seconds(30))
       const settle = Duration.toMillis(options.settle ?? Duration.minutes(2))
@@ -268,8 +271,6 @@ export class Automations extends Context.Service<
       const admitted = <A, E, R>(effect: Effect.Effect<A, E, R>) => admitting.withPermits(1)(effect)
       /** Wakes the clock when an automation changes. */
       const wake = yield* Queue.sliding<void>(1)
-      /** Now, for an automation's rows: the clock its schedule is read by, so what was turned on and what came compare. */
-      const stamp = Effect.sync(() => new Date(nowOf()).toISOString())
 
       const refused = (message: string) => new AutomationRefused({ message })
 
@@ -379,7 +380,7 @@ export class Automations extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const at = yield* stamp
+          const at = yield* timestamp
           const number = row.definition + 1
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -420,7 +421,7 @@ export class Automations extends Context.Service<
           const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${input.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
           const automationId = yield* newId(Ids.automation)
-          const at = yield* stamp
+          const at = yield* timestamp
           const on = input.on === true
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -474,7 +475,7 @@ export class Automations extends Context.Service<
             Effect.gen(function* () {
               const row = yield* load(automationId)
               if (!when(row)) return false
-              const revision = yield* change('automations', automationId, { ...set, updatedAt: yield* stamp })
+              const revision = yield* change('automations', automationId, { ...set, updatedAt: yield* timestamp })
               yield* fact({ projectId: row.projectId, aggregateType: 'automation', aggregateId: automationId, revision, type, actorId })
               return true
             }),
@@ -490,7 +491,7 @@ export class Automations extends Context.Service<
           yield* stand(
             automationId,
             (row) => row.state !== 'on',
-            { state: 'on', since: yield* stamp, pausedBy: null, pauseReason: null },
+            { state: 'on', since: yield* timestamp, pausedBy: null, pauseReason: null },
             'automation.turned_on',
             actorId,
           )
@@ -560,7 +561,7 @@ export class Automations extends Context.Service<
               const [row] = yield* sql<{ projectId: ProjectId; automationId: string; state: string }>`
                 SELECT project_id, automation_id, state FROM automation_occurrences WHERE id = ${occurrenceId}`
               if (row === undefined || (row.state !== 'starting' && row.state !== 'running')) return undefined
-              const revision = yield* change('automation_occurrences', occurrenceId, { state, reason, endedAt: yield* stamp })
+              const revision = yield* change('automation_occurrences', occurrenceId, { state, reason, endedAt: yield* timestamp })
               yield* fact({
                 projectId: row.projectId,
                 aggregateType: 'automation_occurrence',
@@ -616,7 +617,7 @@ export class Automations extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const id = input.id ?? (yield* newId(Ids.automationOccurrence))
-          const at = yield* stamp
+          const at = yield* timestamp
           const ended = input.state !== 'starting'
           return yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -887,7 +888,7 @@ export class Automations extends Context.Service<
             })
             .pipe(Effect.mapError((error) => (error instanceof ReviewRefused ? refused(error.message) : error)))
           if (started.already) return yield* end(occurrenceId, 'skipped', 'A task reviews it already.')
-          if (!started.leading) return yield* end(occurrenceId, 'failed', 'Its lead couldn’t start; its task’s thread says why.')
+          if (!started.leading) return yield* end(occurrenceId, 'failed', 'Its lead couldn’t start.')
         })
 
       /**
@@ -992,7 +993,7 @@ export class Automations extends Context.Service<
                 slot,
                 dueAt: time,
                 state: 'missed',
-                reason: `Missed: the computer was asleep, or Althar closed, at ${clockOf(time, zone)}.`,
+                reason: `Missed ${clockOf(time, zone)}.`,
               })
               return coming
             }
@@ -1008,7 +1009,8 @@ export class Automations extends Context.Service<
 
       /**
        * Looks at every run under way: one whose task ended says how it went;
-       * one that has worked its minutes is stopped. A run of the review kind
+       * one that has worked its minutes is stopped, or, where only its review
+       * is still at work, goes on without it. A run of the review kind
        * made something once its review is drafted, and failed where its lead
        * went before drafting one: stopped, gone, or its last turn failed or
        * was stopped from the composer, with nothing since for as long as the
@@ -1031,6 +1033,8 @@ export class Automations extends Context.Service<
           turnState: string | null
           turnEnded: number | null
           queued: number
+          inReview: number
+          publishing: number
           worked: number | null
           parts: string
           name: string
@@ -1048,6 +1052,13 @@ export class Automations extends Context.Service<
               WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_ended,
             (SELECT count(*) FROM user_inputs i JOIN threads h ON h.id = i.thread_id
               WHERE h.task_id = k.id AND h.kind = 'task' AND i.state = 'queued') AS queued,
+            (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions x ON x.id = n.execution_id
+              JOIN runs r ON r.id = x.run_id
+              WHERE r.task_id = k.id AND r.state = 'running' AND n.node_key = 'review'
+                AND a.state IN ('admitted', 'running', 'waiting_attention', 'held')) AS in_review,
+            (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions x ON x.id = n.execution_id
+              JOIN runs r ON r.id = x.run_id
+              WHERE r.task_id = k.id AND r.state = 'running' AND n.node_key = 'publish' AND a.state IN ('admitted', 'running')) AS publishing,
             (SELECT sum((julianday(coalesce(t.ended_at, ${at})) - julianday(t.delivered_at)) * 86400000)
               FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id WHERE h.task_id = k.id AND t.delivered_at IS NOT NULL) AS worked,
             d.parts, d.name, d.prompt
@@ -1064,18 +1075,18 @@ export class Automations extends Context.Service<
               if (one.leadState === 'completed' || one.leadState === 'cancelled')
                 return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
               if (one.leadState === 'lost' || one.leadState === 'failed')
-                return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review; its task’s thread says why.')
+                return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review.')
               // A turn that failed may be taken over, as after a usage limit, and one the person stopped from the composer is
               // theirs to carry on: only one left so, with nothing waiting, for as long as the run may work ends it.
               const allowed = (Option.getOrUndefined(definitionOf(one))?.minutes ?? 45) * 60_000
               const quiet = one.queued === 0 && (one.turnEnded ?? 0) > allowed
               if (quiet && one.turnState === 'failed')
-                return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review; its task’s thread says why.')
+                return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review.')
               if (quiet && one.turnState === 'interrupted')
                 return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
             } else {
               if (one.runState === 'succeeded') return yield* end(one.id, 'made', null)
-              if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed; its thread says why.')
+              if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed.')
               if (one.runState === 'cancelled' || one.runState === 'suspended') return yield* end(one.id, 'failed', 'Its task was stopped.')
               if (one.runState === null && one.taskState === 'draft') {
                 // Made, but stopped before its plan started: it starts now.
@@ -1088,6 +1099,19 @@ export class Automations extends Context.Service<
             const definition = Option.getOrUndefined(definitionOf(one))
             const minutes = definition?.minutes ?? 45
             if ((one.worked ?? 0) > minutes * 60_000) {
+              // Its lead's work is done and its review is what runs on: the review is what stops, not the task. It goes on
+              // without one and ends as it was to, its work published, not stopped with it kept from the person.
+              if (one.inReview > 0) {
+                yield* runs
+                  .skipReview({
+                    envelope: yield* envelope('task.skip_review', { taskId: one.taskId }, undefined, instance.systemId),
+                    taskId: one.taskId,
+                  })
+                  .pipe(Effect.ignore)
+                return
+              }
+              // Its work being published, as after a review it went on without, isn't cut short: it ends on its own, or waits on the person.
+              if (one.publishing > 0) return
               yield* tasks
                 .stop({ envelope: yield* envelope('task.stop', { taskId: one.taskId }, undefined, instance.systemId), taskId: one.taskId })
                 .pipe(Effect.ignore)
@@ -1298,7 +1322,7 @@ export class Automations extends Context.Service<
                 stood === row.state
                   ? {}
                   : stood === 'on'
-                    ? { state: 'on', since: yield* stamp, pausedBy: null, pauseReason: null }
+                    ? { state: 'on', since: yield* timestamp, pausedBy: null, pauseReason: null }
                     : { state: 'paused', pausedBy: 'person', pauseReason: null },
               )
             }),
@@ -1332,7 +1356,7 @@ export class Automations extends Context.Service<
               if (!paused) yield* sql`DELETE FROM settings WHERE key = ${ALL_PAUSED}`
               else
                 yield* sql`
-                  INSERT INTO settings ${sql.insert({ key: ALL_PAUSED, value: 'on', updatedAt: yield* stamp })}
+                  INSERT INTO settings ${sql.insert({ key: ALL_PAUSED, value: 'on', updatedAt: yield* timestamp })}
                   ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
               // Every card's next time changes with it.
               const all = yield* sql<{ id: string }>`SELECT id FROM automations WHERE state = 'on'`

@@ -1,9 +1,11 @@
 import type { InAppSignIn } from './signInFlow'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
-import { secretReadRules } from './secrets'
+import { SECRET_PLACES, secretReadRules } from './secrets'
+import { openCodeProviderName, openCodeProviders } from './usageSources'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -98,7 +100,18 @@ export interface PermissionMeanings {
    * `interaction_`): it goes to the person as a question, never to the rules.
    */
   readonly questions?: string
+  /**
+   * Where a refusal's reason reaches the model in the refused call's own
+   * result: sent in the answer's `_meta` (`REFUSAL_META`), which Althar's
+   * patch of claude-agent-acp hands the SDK as its deny message. Without it,
+   * a refusal by the rules or the coordinator is said at the turn's end, as
+   * a turn of its own (ADR-019).
+   */
+  readonly reasonInBand?: true
 }
+
+/** The key in a permission answer's `_meta` that carries why Althar refused, for an agent that reads it (`reasonInBand`). */
+export const REFUSAL_META = 'althar/refusal'
 
 export interface AgentDefinition {
   readonly id: AgentId
@@ -145,6 +158,8 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
+    /** Run when `status` failed and read nothing (an older version that rejects its flags); read the same way. */
+    readonly statusFallback?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -153,8 +168,30 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /**
+     * For an agent that reaches several providers, each with a sign-in of its
+     * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
+     * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
+     */
+    readonly providers?: {
+      /** Each listed provider; `needsSignIn` where the agent itself says its sign-in must be done again. */
+      readonly read: (output: string) => ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly connections: string
+        readonly pays?: 'plan' | 'key'
+        readonly needsSignIn?: true
+      }>
+      readonly of: (model: string) => string | undefined
+      /** A provider's name where it is no longer listed, as the person knows it. */
+      readonly name?: (id: string) => string | undefined
+      /** The providers that are a plan with limits (OpenCode Go): a model through one is on that plan, whatever pays for the rest. */
+      readonly plans?: ReadonlyArray<string>
+    }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
+    /** The line versions before this major run instead, where theirs differs (OpenCode 1.x has no `--standalone`). */
+    readonly loginBefore?: { readonly major: number; readonly line: string }
     /**
      * What lists its sign-ins one by one with how each is paid for, as JSON
      * (`usageSources.ts`'s `openCodeCredentials`), where it can. Run in an
@@ -179,6 +216,17 @@ export interface AgentDefinition {
    * (`usage.ts`). Without one, its usage comes from ACP or not at all.
    */
   readonly usage?: { readonly run: (node: string) => LaunchSpec }
+  /**
+   * A command that prints a plan's limits as JSON, run in an account's home
+   * (OpenCode's own server asked for OpenCode Go's: `usageSources.ts`'s
+   * `openCodeGoUsage`). A plain read, the same a person can run.
+   */
+  readonly usageLimits?: (node: string) => LaunchSpec
+  /**
+   * Whether a command that failed says the agent's own server didn't start in time, so the same command may answer when
+   * asked again (OpenCode 2's private server, while it loads the person's plugins).
+   */
+  readonly notStarted?: (output: string) => boolean
   /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
@@ -230,12 +278,31 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
+   * Whether, here, `sessionMeta` holds a reader given `contained` to a
+   * sandbox it never runs a command outside of, in its folder and off the
+   * network (ADR-058). Where it is, what a command writes stays in that
+   * folder, whatever Althar's rules let it ask for.
+   */
+  readonly contains?: () => boolean
+  /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
    * it reaches without asking. Without it, none are worked out for its
    * leads, as it has nowhere to put them.
    */
   readonly upFront?: true
+  /**
+   * Whether a session's shell commands run in a sandbox Althar can rely on
+   * (ADR-071): one that started, or the session doesn't, holding them to
+   * the task's worktree or the coordinator's folder. `outside`, the commands
+   * that run outside it from the start, by how they start; `unsandboxed`,
+   * whether a request may ask to run outside it
+   * (`rawInput.dangerouslyDisableSandbox`). A request it holds runs without
+   * Althar reading it; one that crosses meets the rules. None where the
+   * agent has no such sandbox, or it can't start here: then the rules read
+   * every command, as before.
+   */
+  readonly holds?: (role: 'lead' | 'reader', options?: SessionOptions) => SandboxHold | undefined
   /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
@@ -265,6 +332,8 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /** Per-session process config, applied after own-tool removal and review hardening. */
+  readonly sessionEnv?: (own: Readonly<Record<string, string>>, options: SessionOptions) => Readonly<Record<string, string>>
   /**
    * `'althar'` where a message that starts with `/` runs one of its own
    * commands, and one of them turns its asking off (Copilot's `/yolo`, Grok's
@@ -292,6 +361,8 @@ export interface AgentDefinition {
  * from the start, where the agent's settings can say it.
  */
 export interface SessionOptions {
+  /** Native web tools, for project leads and reviewers; never an offline review or coordinator. */
+  readonly web?: boolean
   readonly offline?: boolean
   readonly untrusted?: boolean
   /**
@@ -303,6 +374,12 @@ export interface SessionOptions {
    */
   readonly contained?: Contained
   readonly sandbox?: UpFront
+}
+
+/** How a session's sandbox holds its shell commands: see `AgentDefinition.holds`. */
+export interface SandboxHold {
+  readonly outside: ReadonlyArray<string>
+  readonly unsandboxed: boolean
 }
 
 /** The coordinator's folder, and what its sandboxed commands may read: real paths. */
@@ -321,7 +398,33 @@ export interface Contained {
 export interface UpFront {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  /**
+   * Folders outside its own it writes to without asking, from the home
+   * folder as `~/…`: the caches of the tools its project installs with, as
+   * Electron's and Playwright's downloads. Never where the person keeps keys
+   * and sign-ins (`SECRET_PLACES`), whatever is given.
+   */
+  readonly writes?: ReadonlyArray<string>
 }
+
+/** A path without the slashes it ends with: a loop, not a pattern, which a long run of slashes would make slow. */
+export const withoutTrailingSlashes = (path: string): string => {
+  let end = path.length
+  while (end > 0 && path[end - 1] === '/') end -= 1
+  return path.slice(0, end)
+}
+
+/** The folders a lead's sandbox writes to beyond its own, without any of, in or over where keys and sign-ins are kept. */
+export const writesOf = (writes: ReadonlyArray<string>): ReadonlyArray<string> =>
+  writes.filter((folder) => {
+    const path = withoutTrailingSlashes(folder.startsWith('~/') ? folder.slice(2) : folder)
+    return (
+      folder.startsWith('~/') &&
+      path !== '' &&
+      !path.split('/').includes('..') &&
+      !SECRET_PLACES.some((place) => path === place || path.startsWith(`${place}/`) || place.startsWith(`${path}/`))
+    )
+  })
 
 /**
  * Claude Code's `sandbox.excludedCommands` for commands by how they start:
@@ -354,6 +457,8 @@ export type AgentDownload = GitHubDownload | PinnedDownload
 export interface GitHubDownload {
   /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
   readonly repository: string
+  /** Only releases whose tag starts so, such as `v2.`: the newest of them, where its latest release is on another line. */
+  readonly line?: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
@@ -528,7 +633,8 @@ const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Reco
  * Codex as the lead of a review of someone else's pull request, through the
  * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
  * as dotted keys, beside the person's MCP servers switched off): its own web
- * search off (`web_search = "disabled"`, as Codex 0.159 names it), and hooks
+ * search initially off (`web_search = "disabled"`), then enabled by sessionEnv
+ * only for a project's own reviews with web access on; and hooks
  * off (`features.hooks`), since codex-acp trusts every session's folder, so a
  * repository's `.codex` config would otherwise apply. It isn't held to
  * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
@@ -563,8 +669,10 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * Claude documents that this setting is broader than listening: commands may
  * also connect to any localhost port, including services outside the sandbox,
  * and listen on non-loopback addresses. The domain allowlist and writable
- * paths are unchanged. Where the sandbox can't start, commands run without
- * it and every one asks.
+ * paths are unchanged. Where the sandbox can start (`claudeSandboxStarts`),
+ * the session doesn't start without it, so a command it holds can run without
+ * Althar reading it (ADR-071); elsewhere commands run without it and every
+ * one asks, and meets the rules.
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
@@ -583,24 +691,39 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * asks, and meets Althar's rules, as it would on its second try. Known hosts
  * (`network.allowedDomains`) a command in the sandbox reaches without
  * asking: the project's code hosts, registries and trackers, only where its
- * rules would let them through anyway. Both are settings Claude Code takes
- * only from trusted sources, which these, given as the session's own, are.
+ * rules would let them through anyway. Known caches
+ * (`filesystem.allowWrite`) its commands write to without asking, outside
+ * the worktree: those of the tools its project installs with, so Electron's
+ * build and Playwright's browsers download inside the sandbox, never where
+ * keys and sign-ins are kept (`writesOf`). These are settings Claude Code
+ * takes only from trusted sources, which these, given as the session's own,
+ * are.
  */
-const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
+const claudeAsks = (
+  sandbox: UpFront = { commands: [], hosts: [] },
+  starts = claudeSandboxStarts(),
+  web = false,
+  writes = writesOf(sandbox.writes ?? []),
+) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
-        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        permissions: {
+          deny: secretReadRules(),
+          ...(web ? { allow: ['WebFetch', 'WebSearch'] } : {}),
+          ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...(web ? [] : ['WebFetch', 'WebSearch'])],
+        },
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: true,
-          failIfUnavailable: false,
+          failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
           network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
+          ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
         },
       },
     },
@@ -628,7 +751,7 @@ const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
  * permission judge. Its rules and sandbox below are the programmatic
  * settings, which load whatever the sources.
  */
-const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
@@ -637,7 +760,11 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
       settings: {
         permissions: offline
           ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', ...secretReadRules()], ask: ['Bash'] }
-          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['Bash', 'WebFetch'] },
+          : {
+              deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()],
+              ...(web ? { allow: ['WebFetch', 'WebSearch'] } : {}),
+              ask: ['Bash', ...(web === true ? [] : web === false ? ['WebFetch', 'WebSearch'] : ['WebFetch'])],
+            },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
         ...(untrusted ? { disableAllHooks: true } : {}),
       },
@@ -647,15 +774,42 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
 
 /**
  * Whether Claude Code's sandbox can start here: macOS's own, or bubblewrap
- * and socat on Linux, outside a Flatpak (no nested user namespaces there).
- * Not yet on Windows, where Althar hasn't tried it.
+ * and socat on Linux, outside a Flatpak (no nested user namespaces there),
+ * where bubblewrap starts a namespace (some distributions keep unprivileged
+ * user namespaces off). Not yet on Windows, where Althar hasn't tried it.
+ * Worked out once.
  */
-const claudeSandboxStarts = (): boolean => {
-  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
-  if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
-  const onPath = (name: string) =>
-    (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
-  return onPath('bwrap') && onPath('socat')
+let sandboxStarts: boolean | undefined
+export const claudeSandboxStarts = (): boolean => {
+  sandboxStarts ??= (() => {
+    if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
+    if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
+    const onPath = (name: string) =>
+      (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
+    if (!onPath('bwrap') || !onPath('socat')) return false
+    const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+    })
+    return tried.status === 0
+  })()
+  return sandboxStarts
+}
+
+/**
+ * What holds a Claude Code session's shell commands (ADR-071): a lead's
+ * sandbox, where it starts, but for the commands it runs outside from the
+ * start and those it asks to run outside; the coordinator's, which runs
+ * nothing outside. A review's lead, which reads someone else's code, and a
+ * session whose sandbox can't start, aren't held: the rules read every
+ * command.
+ */
+const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions = {}): SandboxHold | undefined => {
+  if (!claudeSandboxStarts()) return undefined
+  if (role === 'lead') return { outside: options.sandbox?.commands ?? [], unsandboxed: true }
+  return options.contained !== undefined && options.untrusted !== true && options.offline !== true
+    ? { outside: [], unsandboxed: false }
+    : undefined
 }
 
 /**
@@ -719,9 +873,22 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     name: 'Claude Code',
     service: { name: 'Anthropic', url: 'https://api.anthropic.com' },
     source: 'bundled',
+    /*
+     * `NODE_USE_ENV_PROXY`: a sandboxed command reaches the network only
+     * through the proxy its sandbox names in `HTTPS_PROXY`, which Node's own
+     * `fetch` ignores without it, so a Node tool's download (Electron's
+     * build, through `@electron/get`) fails inside the sandbox even to a host
+     * it allows. Where no proxy is named it changes nothing.
+     *
+     * `CLAUDE_CODE_DISABLE_AUTO_MEMORY`: Claude Code's auto memory writes
+     * notes into the person's own `~/.claude/projects/<main checkout>/memory`,
+     * where their own sessions in that repository, and later leads, would
+     * read them. Althar keeps a project's notes and handovers itself.
+     */
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
+      env: { NODE_USE_ENV_PROXY: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
@@ -745,7 +912,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'claude', args: ['--version'] }),
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
-    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
+    permissions: {
+      rejectAndContinue: ['reject'],
+      rejectAndStop: [],
+      allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' },
+      reasonInBand: true,
+    },
     /*
      * Offline, a reader has WebFetch and WebSearch denied, so Claude Code
      * reaches no page itself; every shell command still asks, and meets
@@ -758,11 +930,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     sessionMeta: (role = 'lead', options = {}) =>
       role !== 'reader'
-        ? claudeAsks(options.sandbox)
+        ? claudeAsks(options.sandbox, claudeSandboxStarts(), options.web === true && options.offline !== true)
         : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
           ? claudeContains(options.contained)
-          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
+          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true, options.web),
+    contains: claudeSandboxStarts,
     upFront: true,
+    holds: claudeHolds,
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
@@ -776,9 +950,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
+      'The adapter forwards the plan’s rate-limit event in usage_update `_meta["_claude/rateLimit"]`, whose windows are in the CLI’s internal `unifiedWindows`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
       "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
-      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox, and meets Althar's reader rules.",
+      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox; Althar lets it run there without reading it (ADR-071).",
+      "Its sandbox reaches the keychain's service on macOS: a credential helper git is told to use inside it could read what that helper stored.",
     ],
   },
   codex: {
@@ -837,6 +1012,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
+    sessionEnv: (own, options) =>
+      options.web === undefined && options.offline !== true
+        ? {}
+        : {
+            CODEX_CONFIG: JSON.stringify({
+              ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+              web_search: options.web === true && options.offline !== true ? 'live' : 'disabled',
+              // Opening this would also allow uploads and POSTs without the rules.
+              'sandbox_workspace_write.network_access': false,
+            }),
+          },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -853,11 +1039,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * and its network is one switch (`sandbox_workspace_write.network_access`).
      * Codex 0.160's list of allowed domains belongs to its permission
      * profiles' network proxy, experimental, which codex-acp's modes don't
-     * use. So each of those still asks first, and meets Althar's rules.
+     * use. Network stays off: enabling it would also let POSTs and uploads
+     * bypass the rules. Native web_search is live with the project switch
+     * on; clear HTTP reads that reach the rules may be allowed there.
      */
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
-      "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
+      "Shell network stays off because its sandbox cannot allow only GETs. Native web search and page opening are live when the project's web switch is on.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
     ],
@@ -896,19 +1084,61 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     options: { mode: 'mode', model: 'model', effort: 'effort', ownEffort: 'default' },
     signIn: {
-      status: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
+      status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
+      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead. Run only where the first failed: on 2.x, without `--standalone`, the background service would answer for another home.
+      statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
+        const first = output.indexOf('[')
+        const last = output.lastIndexOf(']')
+        if (first >= 0 && last > first) {
+          try {
+            const parsed: unknown = JSON.parse(output.slice(first, last + 1))
+            if (Array.isArray(parsed))
+              return parsed.some(
+                (one) =>
+                  Array.isArray((one as { connections?: unknown } | null)?.connections) &&
+                  (one as { connections: unknown[] }).connections.length > 0,
+              )
+                ? true
+                : undefined
+          } catch {
+            // Not the JSON: 1.x's count line, below.
+          }
+        }
         const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
         return count !== undefined && Number(count) > 0 ? true : undefined
       },
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
-      login: 'opencode auth login',
+      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work. OpenCode Go is a plan with limits; Zen, and the rest, are paid per use.
+      providers: {
+        read: openCodeProviders,
+        of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined),
+        name: openCodeProviderName,
+        plans: ['opencode-go'],
+      },
+      /*
+       * `--standalone` keeps the sign-in in the home the line names: without it, 2.x hands it to its user-wide background
+       * service, which keeps it in the home that service started in, the usual one, so a new account's own home stayed
+       * empty and its check couldn't tell (seen 3 November 2026, 2.2.5).
+       */
+      login: 'opencode auth login --standalone',
+      // 1.x keeps its sign-ins in the home it is run in, and takes no `--standalone`.
+      loginBefore: { major: 2, line: 'opencode auth login' },
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
+    /*
+     * OpenCode Go's limits as OpenCode's own server reads them, through the account's OpenCode Console sign-in: `data.go`'s
+     * rolling five hours, week and month, or `data: null` with no Console sign-in (seen 3 November 2026, 2.2.5). Althar reads
+     * the answer, never the sign-in.
+     */
+    usageLimits: () => ({ command: 'opencode', args: ['api', '--standalone', 'experimental.usage.limits'] }),
+    // Its private server loads the person's plugins and MCP servers first, and gives up on some starts: about one in four on a Mac with several (2.2.5, 3 November 2026).
+    notStarted: (output) => /did not finish activating/i.test(output),
     /*
      * Its sign-ins and its history are under the data folder's `opencode`;
      * its config stays the person's, under XDG_CONFIG_HOME. The data folder
@@ -924,12 +1154,29 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     reviewing: { outside: true, env: openCodeReviewing },
-    /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
+    sessionEnv: (own, options) => {
+      if (options.web === undefined && options.offline !== true) return {}
+      const web = options.web === true && options.offline !== true ? 'allow' : 'ask'
+      const permission = { ...asks, webfetch: web, websearch: web }
+      return {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          ...JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig),
+          permission,
+          agent: { build: { permission }, plan: { permission } },
+        }),
+      }
+    },
+    /*
+     * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.
+     * Its 2.x is what Althar runs (`--standalone` above), and GitHub's latest is still 1.x, which also can't open a
+     * data folder 2.x has migrated: the newest 2.x it is. Seen 2 November 2026, v2.2.5 beside v1.19.5.
+     */
     cli: {
       name: 'opencode',
       guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
+        line: 'v2.',
         assets: {
           'darwin-arm64': 'opencode-darwin-arm64.zip',
           'darwin-x64': 'opencode-darwin-x64.zip',
@@ -974,7 +1221,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
-      inheritEnv: ['COPILOT_HOME'],
+      // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
+      inheritEnv: ['COPILOT_HOME', 'GH_HOST'],
     }),
     modes: {
       ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',

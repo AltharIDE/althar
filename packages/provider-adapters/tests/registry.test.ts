@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { agents, type Contained } from '../src/registry'
+import { agents, claudeSandboxStarts, type Contained } from '../src/registry'
 import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
@@ -37,13 +37,19 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(grok.sessionMeta?.(), { yoloMode: false, autoMode: false })
     assert.deepStrictEqual(grok.sessionMeta?.('reader'), { yoloMode: false, autoMode: false })
     assert.includeMembers([...agents['qwen-code'].launch('/usr/bin/node').args], ['--approval-mode', 'default'])
+    // Claude Code writes no auto memory into the person's own ~/.claude/projects/<checkout>/memory.
+    assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' })
     assert.deepInclude(agents['mistral-vibe'].launch('/usr/bin/node').env ?? {}, {
       VIBE_DEFAULT_AGENT: 'ask',
       VIBE_BYPASS_TOOL_PERMISSIONS: 'false',
       VIBE_SMART_APPROVE_DEFAULT: 'false',
     })
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
+    // A GHE.com tenant's Copilot is named by GH_HOST, which crosses the allowlist to it.
+    assert.include(copilot.launch('/usr/bin/node').inheritEnv ?? [], 'GH_HOST')
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // Node's fetch takes the proxy a Claude Code sandbox names, so a Node tool's download reaches a host it allows.
+    assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { NODE_USE_ENV_PROXY: '1' })
     // Antigravity's mode is held where it asks, as its others approve without asking.
     assert.deepStrictEqual(agents.antigravity.options.held, { mode: 'default' })
     // None is launched with a flag that approves.
@@ -150,6 +156,7 @@ describe('the agent registry', () => {
       allowUnsandboxedCommands: boolean
       excludedCommands?: Array<string>
       network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+      filesystem?: { allowWrite?: Array<string> }
     }
     const metaOf = agents['claude-code'].sessionMeta
     if (metaOf === undefined) return assert.fail('Claude Code has session options')
@@ -168,6 +175,21 @@ describe('the agent registry', () => {
       'env -i *',
     ])
     assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    // Without caches given, it writes nowhere beyond its folder.
+    assert.isUndefined(lead.sandbox.filesystem)
+    // The tools' caches it writes to, but never where keys and sign-ins are kept, nor anything not from the home folder.
+    const writes = [
+      '~/.bun/install/cache',
+      '~/Library/Caches/ms-playwright',
+      '~/.ssh',
+      '~/.config/gh/hosts.yml',
+      '~/.config',
+      '/etc',
+      '~/../x',
+    ]
+    assert.deepStrictEqual(sandboxOf('lead', { sandbox: { ...upFront, writes } }).sandbox.filesystem, {
+      allowWrite: ['~/.bun/install/cache', '~/Library/Caches/ms-playwright'],
+    })
     // A command outside the sandbox still asks, and meets Althar's rules: nothing else changes.
     assert.include(lead.permissions.ask, 'Bash')
     assert.isTrue(lead.sandbox.autoAllowBashIfSandboxed)
@@ -303,6 +325,43 @@ describe('the agent registry', () => {
     }
   })
 
+  it('says which of Claude Code’s sessions its sandbox holds, so what it holds runs unread (ADR-071)', () => {
+    const holds = agents['claude-code'].holds
+    if (holds === undefined) return assert.fail('Claude Code says what its sandbox holds')
+    type Sandbox = { failIfUnavailable: boolean }
+    const sandboxOf = (role: 'lead' | 'reader', options?: Parameters<typeof holds>[1]) =>
+      (agents['claude-code'].sessionMeta?.(role, options) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode
+        .options.settings.sandbox
+    const folder = '/work/meridian/.coordinator'
+    const contained = { folder, reads: { allowed: [folder], denied: ['/work/meridian'] } }
+    if (!claudeSandboxStarts()) {
+      // Where it can't start, nothing is held: the rules read every command, and a lead starts without it, as before.
+      assert.isUndefined(holds('lead', { sandbox: { commands: ['ps'], hosts: [] } }))
+      assert.isUndefined(holds('reader', { contained }))
+      assert.isFalse(sandboxOf('lead').failIfUnavailable)
+      return
+    }
+    // A lead: but for what runs outside from the start and what it asks to run outside; and it doesn't start without it.
+    assert.deepStrictEqual(holds('lead', { sandbox: { commands: ['ps', 'bunx playwright'], hosts: ['github.com'] } }), {
+      outside: ['ps', 'bunx playwright'],
+      unsandboxed: true,
+    })
+    assert.isTrue(sandboxOf('lead').failIfUnavailable)
+    // The coordinator, which runs nothing outside.
+    assert.deepStrictEqual(holds('reader', { contained }), { outside: [], unsandboxed: false })
+    // Never a review's lead, nor a reader that isn't held to a folder: the rules read each of their commands.
+    assert.isUndefined(holds('reader', { contained, untrusted: true }))
+    assert.isUndefined(holds('reader', { contained, offline: true }))
+    assert.isUndefined(holds('reader'))
+    // Only Claude Code says: Codex asks only to go beyond its sandbox already, and the rest have none Althar holds.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.holds !== undefined)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
+  })
+
   it('reviews a pull request from outside only on an agent its session holds to reading', () => {
     assert.isTrue(agents['claude-code'].reviewing?.outside)
     assert.isTrue(agents.opencode.reviewing?.outside)
@@ -403,5 +462,51 @@ describe('the agent registry', () => {
     // Neither provider's read-only mode is proof that it cannot read the rest of the disk.
     assert.isUndefined(agents.codex.permissionJudge)
     assert.isUndefined(agents.opencode.permissionJudge)
+  })
+})
+
+describe('project web tools', () => {
+  type Meta = { claudeCode: { options: { settings: { permissions: { allow?: string[]; ask: string[]; deny: string[] } } } } }
+  it('allows Claude search and fetch for implementers and project reviewers, with writes still asking', () => {
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    for (const role of ['lead', 'reader'] as const) {
+      const settings = (metaOf(role, { web: true }) as Meta).claudeCode.options.settings
+      assert.includeMembers(settings.permissions.allow ?? [], ['WebSearch', 'WebFetch'])
+      assert.notInclude(settings.permissions.ask, 'WebFetch')
+      assert.include(settings.permissions.ask, 'Bash')
+      assert.includeMembers(settings.permissions.deny, secretReadRules() as string[])
+      const off = (metaOf(role, { web: false }) as Meta).claudeCode.options.settings
+      assert.include(off.permissions.ask, 'WebFetch')
+      const offline = (metaOf('reader', { web: true, offline: true }) as Meta).claudeCode.options.settings
+      assert.includeMembers(offline.permissions.deny, ['WebSearch', 'WebFetch'])
+    }
+  })
+  it('sets live Codex search and fetch, with shell network closed, and disables it when off or offline', () => {
+    const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.test.enabled': false }) }
+    for (const [options, search] of [
+      [{ web: true }, 'live'],
+      [{ web: false }, 'disabled'],
+      [{ web: true, offline: true }, 'disabled'],
+    ] as const) {
+      const config = JSON.parse(agents.codex.sessionEnv?.(own, options).CODEX_CONFIG ?? '{}')
+      assert.strictEqual(config.web_search, search)
+      assert.strictEqual(config['sandbox_workspace_write.network_access'], false)
+      assert.strictEqual(config['mcp_servers.test.enabled'], false)
+    }
+    assert.isFalse(agents.codex.reviewing?.outside)
+  })
+  it('allows OpenCode search and fetch globally and for both agents, but offline and off still ask', () => {
+    const own = agents.opencode.launch('/usr/bin/node').env ?? {}
+    for (const options of [{ web: true }, { web: false }, { web: true, offline: true }]) {
+      const env = { ...own, ...agents.opencode.sessionEnv?.(own, options) }
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')
+      for (const permission of [config.permission, config.agent.build.permission, config.agent.plan.permission]) {
+        assert.strictEqual(permission.webfetch, options.web && !options.offline ? 'allow' : 'ask')
+        assert.strictEqual(permission.websearch, options.web && !options.offline ? 'allow' : 'ask')
+        assert.strictEqual(permission.bash, 'ask')
+        assert.strictEqual(permission.edit, 'ask')
+      }
+    }
   })
 })

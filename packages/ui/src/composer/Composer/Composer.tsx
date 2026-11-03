@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, type FormEvent, type UIEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
 
+import { commandDown, keys, modKey } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ListMotion } from '../../lib/ListMotion'
@@ -149,22 +150,22 @@ export const composerText: ComposerText = {
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
-  stopKey: '⌘.',
+  stopKey: modKey('.'),
   sendNow: 'Send now',
-  sendNowNote: 'Interrupt the lead with this; it carries on with both',
-  sendNowKey: '⌘↵',
+  sendNowNote: 'Interrupts the lead',
+  sendNowKey: modKey(keys.enter),
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
   dictateBusy: 'Writing down what you said',
-  dictateProgress: (percent) => `Dictate. The speech model is downloading, ${percent}%`,
+  dictateProgress: (percent) => `Dictate, downloading ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
   chooseInput: 'Choose the microphone',
   inputs: 'Microphone',
   systemDefault: 'System default',
-  inputsNote: 'Other microphones show here once Althar may use the microphone.',
+  inputsNote: 'Others show once the microphone is allowed',
   listening: 'Listening…',
-  dictatedAway: 'What you said was written down while you were away.',
-  queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
+  dictatedAway: 'Written down while you were away',
+  queued: (n) => (n === 1 ? 'Queued' : `${n} queued`),
   editQueued: 'Edit',
   sendQueuedNow: 'Send now',
   unqueue: (text) => `Take “${text}” out of the queue`,
@@ -557,7 +558,7 @@ export function Composer({
                 if (dictation?.busy !== true) dictation?.onStop()
                 return
               }
-              if ((e.metaKey || e.ctrlKey) && canSendNow) {
+              if (commandDown(e) && canSendNow) {
                 e.preventDefault()
                 sendNow()
                 return

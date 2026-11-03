@@ -17,7 +17,7 @@ import { linesOf, type Ran } from './handed'
  */
 
 export const text = {
-  notKept: 'Althar didn’t keep what this printed.',
+  notKept: 'Output not kept.',
 }
 
 export interface CommandOutputProps {
