@@ -98,11 +98,18 @@ describe('reading sign-in status', () => {
       },
     ]
     assert.isTrue(read(JSON.stringify(listed, null, 2) + '\n', 0))
-    // Zen is what the person knows it as; each is paid as its provider is, Go on a plan.
+    // Zen is what the person knows it as; each is paid as its provider is, Go on a plan; Zen says it needs signing in again.
     assert.deepStrictEqual(providers?.read(JSON.stringify(listed, null, 2)), [
       { id: 'opencode-go', name: 'OpenCode Go', connections: 'cred_go', pays: 'plan' },
-      { id: 'opencode', name: 'OpenCode Zen', connections: 'cred_zen', pays: 'key' },
+      { id: 'opencode', name: 'OpenCode Zen', connections: 'cred_zen', pays: 'key', needsSignIn: true },
     ])
+    // One working connection beside it is enough.
+    const another = { type: 'credential', id: 'cred_zen2', label: 'Zen key 2', method: 'key' }
+    const [, zen] = listed
+    const both = [listed[0], { ...zen, connections: [...zen!.connections, another] }]
+    assert.notProperty(providers?.read(JSON.stringify(both))[1], 'needsSignIn')
+    // A provider no longer listed keeps the name the person knows it by.
+    assert.strictEqual(providers?.name?.('opencode-go'), 'OpenCode Go')
     assert.deepStrictEqual(providers?.plans, ['opencode-go'])
   })
 

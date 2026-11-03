@@ -475,11 +475,12 @@ export class PlanUsage extends Context.Service<
                 go || listed.credentials.some((credential) => credential.provider === 'opencode')
                   ? yield* Effect.promise(() => readGoUsage(definition, env))
                   : ({ kind: 'none' } as const)
-              if (go || asked.kind === 'usage') {
-                // Go refused its key lately, and nothing has put it right since: its models need it signed in again first.
-                const refused = ((yield* signIns.providers(account, check)) ?? []).some(
-                  (row) => row.id === 'opencode-go' && row.refusedAt !== null,
-                )
+              // Go refused its key lately, or OpenCode says it needs signing in, and nothing has put it right since: its models
+              // need it signed in again first, though its key may be gone from the listing.
+              const refused = ((yield* signIns.providers(account, check)) ?? []).some(
+                (row) => row.id === 'opencode-go' && row.refusedAt !== null,
+              )
+              if (go || refused || asked.kind === 'usage') {
                 const again = refused ? { kind: 'sign_in_again' as const, message: `${OPENCODE_GO} needs signing in again.` } : null
                 const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const }
                 if (asked.kind === 'usage')
@@ -492,7 +493,9 @@ export class PlanUsage extends Context.Service<
                   })
                 if (asked.kind === 'failed') {
                   const failed = fault('unreachable', asked.message)
-                  return yield* keep(account.id, { ...failed, ...onGo, fault: again ?? failed.fault })
+                  // Never read before: why is all there is to show, as for one connected and unread.
+                  const why = failed.windows.length === 0 ? { noReading: asked.message } : {}
+                  return yield* keep(account.id, { ...failed, ...onGo, ...why, fault: again ?? failed.fault })
                 }
                 // Connected, its usage unread: OpenCode reads it only through a Console sign-in.
                 const pair = usagePairs.find((one) => one.agent === 'opencode' && one.provider === 'opencode-go')

@@ -478,15 +478,25 @@ export const openCodeCredentials = (output: string): ReadonlyArray<OpenCodeCrede
 }
 
 /** OpenCode's providers the person knows by another name than its listing's: Zen, which 2.x lists as OpenCode Console. */
-const OPENCODE_NAMES: Readonly<Record<string, string>> = { opencode: 'OpenCode Zen' }
+const OPENCODE_NAMES: Readonly<Record<string, string>> = { opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }
+
+/** A provider of OpenCode's as the person knows it, where Althar names it: one no longer listed keeps its name. */
+export const openCodeProviderName = (id: string): string | undefined => OPENCODE_NAMES[id]
 
 /**
  * The providers `opencode auth list --format json` lists with a connection, as the person knows them (`OpenCode Go`,
- * `OpenCode Zen`), and how each is paid where that is known; none for another shape.
+ * `OpenCode Zen`), and how each is paid where that is known; none for another shape. One every connection of which
+ * OpenCode says needs signing in again (2.2.5's `status: { status: 'needs_auth' }`) says so.
  */
 export const openCodeProviders = (
   output: string,
-): ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string; readonly pays?: 'plan' | 'key' }> => {
+): ReadonlyArray<{
+  readonly id: string
+  readonly name: string
+  readonly connections: string
+  readonly pays?: 'plan' | 'key'
+  readonly needsSignIn?: true
+}> => {
   const first = output.indexOf('[')
   const last = output.lastIndexOf(']')
   if (first < 0 || last <= first) return []
@@ -509,12 +519,14 @@ export const openCodeProviders = (
       .sort()
     const method = record(provider.connections[0])?.method
     const pays = openCodePays(provider.id, typeof method === 'string' ? method.toLowerCase() : '')
+    const needsSignIn = provider.connections.every((one) => record(record(one)?.status)?.status === 'needs_auth')
     return [
       {
         id: provider.id,
         name: OPENCODE_NAMES[provider.id] ?? (typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id),
         connections: connections.join(','),
         ...(pays === 'unknown' ? {} : { pays }),
+        ...(needsSignIn ? { needsSignIn: true as const } : {}),
       },
     ]
   })

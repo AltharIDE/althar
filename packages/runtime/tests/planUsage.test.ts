@@ -798,6 +798,8 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
       const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.deepInclude(view, { paidBy: 'plan', plan: 'OpenCode Go' })
       assert.deepStrictEqual(view.fault, { kind: 'unreachable', message: 'OpenCode couldn’t read Go’s usage: timed out.' })
+      // Never read before: why is all it has to show, so its row still says Go is there.
+      assert.strictEqual(view.noReading, 'OpenCode couldn’t read Go’s usage: timed out.')
     }).pipe(
       Effect.provide(
         withUsage({
@@ -828,29 +830,29 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['opencode', 'key']) }))),
   )
 
-  it.live('needs signing in again where Go refused its key lately, and not once a later turn on it went through', () => {
+  /** OpenCode whose models each go through a provider of their own, as the registry has it, and a turn on Go's ended as given. */
+  const refusing = (usage: Parameters<typeof withUsage>[0]) => {
     const layer = Queries.layer.pipe(
       Layer.provideMerge(
-        withUsage(
-          // On the live clock: a reset that hasn't passed.
-          { readCredentials: goAndZen, readGoUsage: async () => go(used(20, { resetsAt: '2099-01-01T00:00:00.000Z' })) },
-          {
-            // OpenCode's models each go through a provider of their own, as the registry has it.
-            agents: Layer.effect(
-              Agents,
-              Effect.gen(function* () {
-                const all = yield* Agents
-                const opencode = yield* all.get('opencode')
-                const providers = { read: () => [], of: registry.opencode.signIn.providers!.of }
-                const definition = { ...opencode.definition, signIn: { ...opencode.definition.signIn, providers } }
-                return Agents.of({ list: [{ ...opencode, definition }], get: (agentId) => all.get(agentId) })
-              }).pipe(Effect.orDie),
-            ).pipe(Layer.provide(fakeAgents())),
-          },
-        ),
+        withUsage(usage, {
+          agents: Layer.effect(
+            Agents,
+            Effect.gen(function* () {
+              const all = yield* Agents
+              const opencode = yield* all.get('opencode')
+              const providers = {
+                read: () => [],
+                of: registry.opencode.signIn.providers!.of,
+                name: (id: string) => registry.opencode.signIn.providers?.name?.(id),
+              }
+              const definition = { ...opencode.definition, signIn: { ...opencode.definition.signIn, providers } }
+              return Agents.of({ list: [{ ...opencode, definition }], get: (agentId) => all.get(agentId) })
+            }).pipe(Effect.orDie),
+          ).pipe(Layer.provide(fakeAgents())),
+        }),
       ),
     )
-    return Effect.gen(function* () {
+    const turnOnGo = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { project, task: created } = yield* task('Ask OpenCode Go')
       const [account] = yield* (yield* Accounts).of('opencode')
@@ -864,7 +866,7 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
         state: 'active',
         startedAt: NOW,
       })}`
-      const turn = (state: 'completed' | 'failed', errorClass: string | null, endedAt: string) =>
+      return (state: 'completed' | 'failed', errorClass: string | null, endedAt: string) =>
         Effect.gen(function* () {
           yield* sql`INSERT INTO turn_deliveries ${sql.insert({
             id: yield* newId(Ids.turnDelivery),
@@ -880,6 +882,18 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
             requestedAt: endedAt,
           })}`
         })
+    })
+    return { layer, turnOnGo }
+  }
+
+  it.live('needs signing in again where Go refused its key lately, and not once a later turn on it went through', () => {
+    // On the live clock: a reset that hasn't passed.
+    const { layer, turnOnGo } = refusing({
+      readCredentials: goAndZen,
+      readGoUsage: async () => go(used(20, { resetsAt: '2099-01-01T00:00:00.000Z' })),
+    })
+    return Effect.gen(function* () {
+      const turn = yield* turnOnGo
       yield* turn('failed', 'auth_required', '2026-10-15T11:00:00.000Z')
       const refused = openCode(yield* (yield* PlanUsage).now(true))
       assert.deepStrictEqual(refused.fault, { kind: 'sign_in_again', message: 'OpenCode Go needs signing in again.' })
@@ -887,6 +901,25 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
       assert.strictEqual(refused.windows.length, 1)
       yield* turn('completed', null, '2026-10-15T11:30:00.000Z')
       assert.isNull(openCode(yield* (yield* PlanUsage).now(true)).fault)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.live('needs signing in again where Go refused its key and the key is gone from the listing, Zen alone left', () => {
+    const { layer, turnOnGo } = refusing({ readCredentials: async () => credentials(['opencode', 'key']) })
+    return Effect.gen(function* () {
+      const turn = yield* turnOnGo
+      yield* turn('failed', 'auth_required', '2026-10-15T11:00:00.000Z')
+      const view = openCode(yield* (yield* PlanUsage).now(true))
+      assert.deepInclude(view, { plan: 'OpenCode Go', paidBy: 'plan' })
+      assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'OpenCode Go needs signing in again.' })
+      // Settings names it as the person knows it, not by OpenCode's id.
+      const [account] = yield* (yield* Accounts).of('opencode')
+      const signIns = yield* SignIns
+      const rows = yield* signIns.providers(account!, yield* signIns.account(account!))
+      assert.deepStrictEqual(
+        rows?.map((row) => row.name),
+        ['OpenCode Go'],
+      )
     }).pipe(Effect.provide(layer))
   })
 })

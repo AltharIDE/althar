@@ -20,6 +20,8 @@ export interface SignInCheck {
     readonly name: string
     readonly connections: string
     readonly pays?: 'plan' | 'key'
+    /** The agent itself says this one's sign-in must be done again (OpenCode's `needs_auth`). */
+    readonly needsSignIn?: true
   }>
 }
 

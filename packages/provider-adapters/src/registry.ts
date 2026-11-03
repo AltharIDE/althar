@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
-import { openCodeProviders } from './usageSources'
+import { openCodeProviderName, openCodeProviders } from './usageSources'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -174,15 +174,24 @@ export interface AgentDefinition {
      * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
      */
     readonly providers?: {
-      readonly read: (
-        output: string,
-      ) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string; readonly pays?: 'plan' | 'key' }>
+      /** Each listed provider; `needsSignIn` where the agent itself says its sign-in must be done again. */
+      readonly read: (output: string) => ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly connections: string
+        readonly pays?: 'plan' | 'key'
+        readonly needsSignIn?: true
+      }>
       readonly of: (model: string) => string | undefined
+      /** A provider's name where it is no longer listed, as the person knows it. */
+      readonly name?: (id: string) => string | undefined
       /** The providers that are a plan with limits (OpenCode Go): a model through one is on that plan, whatever pays for the rest. */
       readonly plans?: ReadonlyArray<string>
     }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
+    /** The line versions before this major run instead, where theirs differs (OpenCode 1.x has no `--standalone`). */
+    readonly loginBefore?: { readonly major: number; readonly line: string }
     /**
      * What lists its sign-ins one by one with how each is paid for, as JSON
      * (`usageSources.ts`'s `openCodeCredentials`), where it can. Run in an
@@ -1107,6 +1116,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       providers: {
         read: openCodeProviders,
         of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined),
+        name: openCodeProviderName,
         plans: ['opencode-go'],
       },
       /*
@@ -1115,6 +1125,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
        * empty and its check couldn't tell (seen 3 November 2026, 2.2.5).
        */
       login: 'opencode auth login --standalone',
+      // 1.x keeps its sign-ins in the home it is run in, and takes no `--standalone`.
+      loginBefore: { major: 2, line: 'opencode auth login' },
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
