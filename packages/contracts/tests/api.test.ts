@@ -533,6 +533,7 @@ describe('the API', () => {
               RunAutomationNow: () => Effect.die('unused'),
               DeleteAutomation: () => Effect.die('unused'),
               AnswerTaskAsk: () => Effect.die('unused'),
+              AnswerCheckout: () => Effect.die('unused'),
               UndoAutomationChange: () => Effect.die('unused'),
               SetAutomationPostsReviews: () => Effect.die('unused'),
               SetAutomationsPaused: () => Effect.die('unused'),

@@ -153,6 +153,8 @@ export interface RuntimeOptions {
   readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** How often what waits for a checkout is looked at again, and settled tasks' checkouts given back (`local.ts`, ADR-091). */
+  readonly local?: { readonly every?: Duration.Duration }
   /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
   readonly automations?: AutomationOptions
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
