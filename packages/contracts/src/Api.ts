@@ -2345,6 +2345,8 @@ export const StuckStep = Schema.Struct({
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
   agentId: Schema.NullOr(Schema.String),
+  /** How hard it thought, where it said. */
+  effort: Schema.optional(Schema.String),
   /** The review round, from 0. */
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
@@ -2355,7 +2357,7 @@ export const StuckStep = Schema.Struct({
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
   service: Schema.optional(Schema.String),
-  /** For a sign-in refused: the model it was on at the agent, and the provider within the agent that refused it (OpenCode Go). */
+  /** The model it last ran on, where it had one: the one that failed, so handing on can leave it out; for a sign-in refused, the provider within the agent that refused it (OpenCode Go). */
   model: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
 })
@@ -3554,6 +3556,8 @@ export const Api = RpcGroup.make(
           agentId: Schema.String,
           accountId: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
+          /** How hard the agent it is handed to thinks, as the model offers it; without it, the model's own default. */
+          effort: Schema.optional(Schema.String),
         }),
         Schema.Struct({ kind: Schema.Literal('wait') }),
         Schema.Struct({ kind: Schema.Literal('abandon') }),

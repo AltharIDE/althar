@@ -2,13 +2,13 @@ import { useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { StuckAnswer, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { useRefocus } from '../../lib/refocus'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
-import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import { Terminal } from '../Terminal/Terminal'
@@ -31,10 +31,16 @@ export interface StuckAttempt {
   result: string
 }
 
-export interface StuckAgent {
-  model: ModelInfo
-  /** Why it might do better, or what it costs: Codex · 38% of this week used. */
-  note?: string
+/** Who could take the step: a menu of models, where picking one hands it the step. */
+export interface StuckHandOn {
+  /** The models offered at once, the best bet first, then the pinned ones; the one that failed isn't among them. */
+  models: readonly ModelInfo[]
+  /** Hand the step to a model. */
+  onHandOn: (model: ModelInfo) => void
+  /** Open every model, in a browser the consumer shows, which hands the step to the one picked there with `handTo`. Without it, no All models. */
+  onBrowse?: (handTo: (model: ModelInfo) => void) => void
+  /** How many models there are in all, beside All models. */
+  count?: number
 }
 
 export interface StuckOutput {
@@ -54,7 +60,10 @@ export interface StuckText {
   cancel: string
   empty: string
   retry: string
+  /** The menu of models' name. */
   retryLabel: string
+  /** The menu's last row, which opens every model. */
+  all: string
   again: string
   abandon: string
   told: string
@@ -78,12 +87,13 @@ export const stuckText: StuckText = {
   send: 'Send to the lead',
   cancel: 'Cancel',
   empty: 'Say what it should do first',
-  retry: 'Hand to another agent',
-  retryLabel: 'Hand the step to',
+  retry: 'Continue with another model',
+  retryLabel: 'Continue with',
+  all: 'All models',
   again: 'Try again',
   abandon: 'Abandon this step',
   told: 'Told the lead',
-  retried: (agent) => `Handed to ${agent}`,
+  retried: (agent) => `Continuing with ${agent}`,
   tryingAgain: 'Trying again',
   abandoned: 'Abandoned',
   undo: 'Undo',
@@ -115,12 +125,10 @@ export interface StuckProps {
   read?: { by: ModelInfo; says: ReactNode }
   /** The output that keeps failing, as it last ran. */
   output?: StuckOutput
-  /** Other agents that could take the step. Without them, no Try another agent. */
-  agents?: readonly StuckAgent[]
+  /** Hand the step to another model, picked in a menu. Without it, no Continue with another model. */
+  handOn?: StuckHandOn
   /** Tell the lead what to do instead. Without it, no Tell the lead. */
   onTell?: (note: string) => void
-  /** Hand the step to another agent. Without it (or `agents`), no Try another agent. */
-  onRetry?: (model: ModelInfo) => void
   /** Run the step again as it was, on the agent it was on, or Althar's own, such as opening the pull request. Without it, no Try again. */
   onAgain?: () => void
   /**
@@ -161,9 +169,8 @@ export function Stuck({
   tries = tried.length,
   read,
   output,
-  agents = [],
+  handOn,
   onTell,
-  onRetry,
   onAgain,
   primary,
   fix,
@@ -221,7 +228,11 @@ export function Stuck({
     }
   }
 
-  const retrying = onRetry !== undefined && agents.length > 0
+  const retrying = handOn !== undefined
+  const handTo = (model: ModelInfo) => {
+    handOn?.onHandOn(model)
+    give({ kind: StuckAnswer.Retried, agent: model })
+  }
   const offered: Record<StuckWay, boolean> = {
     tell: onTell !== undefined,
     retry: retrying,
@@ -238,7 +249,7 @@ export function Stuck({
         {t.tell}
       </Button>
     ),
-    retry: retrying && (
+    retry: handOn && (
       <Menu
         key="retry"
         label={t.retryLabel}
@@ -249,18 +260,19 @@ export function Stuck({
           </Button>
         }
       >
-        {agents.map((a) => (
-          <MenuItem
-            key={a.model.id}
-            description={a.note}
-            onSelect={() => {
-              onRetry(a.model)
-              give({ kind: StuckAnswer.Retried, agent: a.model })
-            }}
-          >
-            <Model model={a.model} />
+        {handOn.models.map((model) => (
+          <MenuItem key={model.id} onSelect={() => handTo(model)}>
+            <Model model={model} />
           </MenuItem>
         ))}
+        {handOn.onBrowse && (
+          <>
+            {handOn.models.length > 0 && <MenuSeparator />}
+            <MenuItem hint={handOn.count} onSelect={() => handOn.onBrowse?.(handTo)}>
+              {t.all}
+            </MenuItem>
+          </>
+        )}
       </Menu>
     ),
     again: onAgain && (

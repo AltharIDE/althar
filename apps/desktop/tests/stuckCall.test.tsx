@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -34,23 +34,34 @@ const request = (step: StuckStep): AttentionRequest => ({
   stuck: step,
 })
 
-const show = (step: StuckStep, onReport?: (step: string) => void, onSignIn?: (agentId: string) => void) => {
-  const { client } = fakeClient({
-    getModels: vi.fn(async () => [
-      {
-        agentId: 'codex',
-        models: [
-          { id: 'opencode-go/deepseek-v4.1-flash', name: 'OpenCode Go/DeepSeek V4.1 Flash', description: null, efforts: [], effort: null },
-        ],
-        model: null,
-        effort: null,
-        defaults: [],
-        blocked: [],
-        probing: false,
-        images: null,
-      },
-    ]),
-  })
+/** The agents list the one model an OpenCode provider refused, or, with `fixtureModels`, those of the fixtures. */
+const show = (step: StuckStep, onReport?: (step: string) => void, onSignIn?: (agentId: string) => void, fixtureModels = false) => {
+  const { client } = fakeClient(
+    fixtureModels
+      ? {}
+      : {
+          getModels: vi.fn(async () => [
+            {
+              agentId: 'codex',
+              models: [
+                {
+                  id: 'opencode-go/deepseek-v4.1-flash',
+                  name: 'OpenCode Go/DeepSeek V4.1 Flash',
+                  description: null,
+                  efforts: [],
+                  effort: null,
+                },
+              ],
+              model: null,
+              effort: null,
+              defaults: [],
+              blocked: [],
+              probing: false,
+              images: null,
+            },
+          ]),
+        },
+  )
   const onAnswer = vi.fn()
   withServices(
     <StuckCall
@@ -162,7 +173,7 @@ describe('the ways on each card offers', () => {
   const report = 'Report this'
 
   it('offers a lead’s step only what fits what went wrong, the way to take first', async () => {
-    const tell = ['Tell the lead', 'Hand to another agent', 'Abandon this step', report]
+    const tell = ['Tell the lead', 'Continue with another model', 'Abandon this step', report]
     const offered: Record<string, ReadonlyArray<string | null>> = {}
     for (const why of [
       'no_report',
@@ -182,12 +193,12 @@ describe('the ways on each card offers', () => {
       stalled: tell,
       looping: tell,
       refused: tell,
-      over_budget: ['Let Codex carry on', 'Tell the lead', 'Hand to another agent', 'Abandon this step', report],
+      over_budget: ['Let Codex carry on', 'Tell the lead', 'Continue with another model', 'Abandon this step', report],
       // Althar, the service or the session failed, not the work: nothing to tell the lead, so its agent starts again.
-      session_ended: ['Start Codex again', 'Hand to another agent', 'Abandon this step', report],
-      restarted: ['Start Codex again', 'Hand to another agent', 'Abandon this step', report],
-      transient: ['Try again', 'Hand to another agent', 'Abandon this step', report],
-      failed_to_start: ['Try again', 'Hand to another agent', 'Abandon this step', report],
+      session_ended: ['Start Codex again', 'Continue with another model', 'Abandon this step', report],
+      restarted: ['Start Codex again', 'Continue with another model', 'Abandon this step', report],
+      transient: ['Try again', 'Continue with another model', 'Abandon this step', report],
+      failed_to_start: ['Try again', 'Continue with another model', 'Abandon this step', report],
     })
   })
 
@@ -201,20 +212,20 @@ describe('the ways on each card offers', () => {
 
   it('never tells a review what to do: another reviewer for its own trouble, the same again where it was cut off', async () => {
     expect(await buttonsOf(stuck({ step: 'review', why: 'stalled' }))).toEqual([
-      'Review with another agent',
+      'Review with another model',
       'Review again',
       'Skip the review',
       report,
     ])
     expect(await buttonsOf(stuck({ step: 'review', why: 'restarted' }))).toEqual([
       'Review again',
-      'Review with another agent',
+      'Review with another model',
       'Skip the review',
       report,
     ])
     expect(await buttonsOf(stuck({ step: 'review', why: 'round_limit', agentId: 'codex', open: 2 }))).toEqual([
       'Review again',
-      'Review with another agent',
+      'Review with another model',
       'Accept it as it is',
       report,
     ])
@@ -222,7 +233,7 @@ describe('the ways on each card offers', () => {
 
   it('offers an agent out of usage, with no one named to take over, to another first, never to be told', async () => {
     expect(await buttonsOf(stuck({ why: 'usage_limit' }))).toEqual([
-      'Hand to another agent',
+      'Continue with another model',
       'Try Codex again',
       'Abandon this step',
       report,
@@ -240,7 +251,7 @@ describe('the ways on each card offers', () => {
     expect((await screen.findAllByRole('button')).map((button) => button.textContent)).toEqual([
       'Sign in again',
       'Try again',
-      'Hand to another agent',
+      'Continue with another model',
       'Abandon this step',
     ])
   })
@@ -273,5 +284,53 @@ describe('trying a step again', () => {
     const onAnswer = show(stuck({ step: 'review', why: 'stalled' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Review again' }))
     expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
+  })
+})
+
+describe('handing a step on to a model', () => {
+  /** The menu of models a review is handed on in. */
+  const menu = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Review with another model' }))
+    return within(await screen.findByRole('menu', { name: 'Review with' }))
+  }
+
+  it('offers every model but the one whose failure it was, another maker’s first, and hands the step to the one picked, another of the same agent’s too', async () => {
+    const onAnswer = show(
+      stuck({ step: 'review', why: 'signed_out', agentId: 'codex', model: 'gpt-5.2-codex' }),
+      undefined,
+      undefined,
+      true,
+    )
+    const models = await menu()
+    expect(models.getAllByRole('menuitem')[0]?.textContent).toMatch(/Claude/)
+    expect(models.queryByRole('menuitem', { name: /gpt-5\.2-codex/ })).toBeNull()
+    await userEvent.click(models.getByRole('menuitem', { name: /All models/ }))
+    const all = within(await screen.findByRole('dialog'))
+    expect(all.queryByRole('button', { name: 'Use gpt-5.2-codex' })).toBeNull()
+    await userEvent.click(all.getByRole('button', { name: 'Use gpt-5.2' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex', model: 'gpt-5.2' })
+    expect(await screen.findByText('Reviewing with gpt-5.2')).toBeTruthy()
+  })
+
+  it('leaves out no model where the step stalled, and hands it to the one picked at once', async () => {
+    const onAnswer = show(stuck({ step: 'review', why: 'stalled', agentId: 'codex', model: 'gpt-5.2-codex' }), undefined, undefined, true)
+    const models = await menu()
+    expect(models.getByRole('menuitem', { name: /gpt-5\.2-codex/ })).toBeTruthy()
+    await userEvent.click(models.getAllByRole('menuitem')[0]!)
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default' })
+  })
+
+  it('keeps the step’s effort where the agent it goes to offers it', async () => {
+    const onAnswer = show(
+      stuck({ step: 'review', why: 'stalled', agentId: 'claude-code', model: 'opus', effort: 'high' }),
+      undefined,
+      undefined,
+      true,
+    )
+    const models = await menu()
+    // Another maker's first, then the pins: Claude Code's own at the step's effort.
+    expect(models.getAllByRole('menuitem')[0]?.textContent).toMatch(/gpt-5\.2-codex/)
+    await userEvent.click(models.getByRole('menuitem', { name: /Claude|Default/ }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'claude-code', model: 'default', effort: 'high' })
   })
 })

@@ -75,7 +75,14 @@ const stuckCall = (taskId: string, not?: string) =>
     )
     return {
       id: call?.id ?? '',
-      ...(JSON.parse(call?.payload ?? '{}') as { step: string; why: string; agentId: string | null; detail: string | null }),
+      ...(JSON.parse(call?.payload ?? '{}') as {
+        step: string
+        why: string
+        agentId: string | null
+        detail: string | null
+        model?: string
+        effort?: string
+      }),
     }
   })
 
@@ -162,6 +169,23 @@ describe('a lead’s step that needs the person, handed back to its own agent on
   )
 })
 
+describe('a lead’s step that needs the person, handed to a model of another agent', () => {
+  it.live('starts it on exactly the agent, model and effort picked', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Do it. [lead:refuse]')
+      const call = yield* stuckCall(task.taskId)
+      yield* answer(call.id, { kind: 'retry', agentId: 'claude-code', model: 'large', effort: 'high' })
+      const [lead] = yield* until(
+        sql<{ agentId: string; model: string | null; effort: string | null }>`
+          SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${task.threadId} AND agent_id = 'claude-code'`,
+        (rows) => rows.length > 0,
+      )
+      assert.deepStrictEqual([lead?.agentId, lead?.model, lead?.effort], ['claude-code', 'large', 'high'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
 describe('a lead whose turn fails', () => {
   it.live("isn't reminded of its step: its service is tried again after pauses, and then it needs the person", () =>
     Effect.gen(function* () {
@@ -221,6 +245,52 @@ describe('a review that needs the person, handed back to its own reviewer', () =
       )
     }).pipe(Effect.provide(withQueries()))
   })
+})
+
+/** The model and effort the task's review is on now: its newest session. */
+const reviewerOn = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const sessions = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+      SELECT s.agent_id, s.model, s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+      WHERE t.task_id = ${taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+    return sessions[0]
+  })
+
+describe('a review that needs the person, handed on to a model', () => {
+  it.live('runs on exactly the agent, model and effort picked, and says what it was on when it stops again', () =>
+    Effect.gen(function* () {
+      const { task, call } = yield* unreported
+      yield* answer(call.id, { kind: 'retry', agentId: 'claude-code', model: 'large', effort: 'high' })
+      const again = yield* stuckCall(task.taskId, call.id)
+      assert.deepStrictEqual([again.step, again.agentId], ['review', 'claude-code'])
+      const on = yield* reviewerOn(task.taskId)
+      assert.deepStrictEqual([on?.agentId, on?.model, on?.effort], ['claude-code', 'large', 'high'])
+      // The call it raises names the model that was on the step, for the next hand on to leave out.
+      assert.deepStrictEqual([again.model, again.effort], ['large', 'high'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('runs on another model of the agent it had, at the model’s own effort where none is picked', () =>
+    Effect.gen(function* () {
+      const { task, call } = yield* unreported
+      yield* answer(call.id, { kind: 'retry', agentId: 'codex', model: 'large' })
+      // The session it had moves to Large, or another starts there; either way the review runs on it.
+      const on = yield* until(reviewerOn(task.taskId), (now) => now?.model === 'large')
+      assert.strictEqual(on?.agentId, 'codex')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps answers that name no model working: the agent’s own model and effort', () =>
+    Effect.gen(function* () {
+      const { task, call } = yield* unreported
+      yield* answer(call.id, { kind: 'retry', agentId: 'claude-code' })
+      yield* stuckCall(task.taskId, call.id)
+      const on = yield* reviewerOn(task.taskId)
+      // What the agent starts on by itself, not the plan's effort for another reviewer.
+      assert.deepStrictEqual([on?.agentId, on?.model, on?.effort], ['claude-code', 'small', 'medium'])
+    }).pipe(Effect.provide(withQueries())),
+  )
 })
 
 describe('a review whose copy of the work can’t be made', () => {

@@ -374,6 +374,8 @@ export interface StuckInfo {
   readonly why: StuckWhy
   readonly detail: string | null
   readonly agentId: string | null
+  /** How hard the step last thought, where it had a session: put there as the call is raised. */
+  readonly effort?: string
   readonly round: number
   readonly open: number
   /** What Althar did about it before asking, where it did something. */
@@ -382,7 +384,7 @@ export interface StuckInfo {
   readonly limit?: LimitCall
   /** For a service that kept failing: its name, where the registry names one (`Anthropic`); else the call says the agent's. */
   readonly service?: string
-  /** For a sign-in refused: the model the turn was on, and the provider within the agent whose sign-in it was (`opencode-go`). */
+  /** The model the step last ran on, where it had a session (the one that failed, so handing on can leave it out), and for a sign-in refused, the provider within the agent whose sign-in it was (`opencode-go`). */
   readonly model?: string
   readonly provider?: string
 }
@@ -395,7 +397,13 @@ export interface StuckInfo {
  */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string | undefined; readonly model?: string | undefined }
+  | {
+      readonly kind: 'retry'
+      readonly agentId: string
+      readonly accountId?: string | undefined
+      readonly model?: string | undefined
+      readonly effort?: string | undefined
+    }
   | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 
@@ -1220,8 +1228,18 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
-          const info: StuckInfo =
+          const told: StuckInfo =
             asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
+          // The model it was on, so handing the step on can leave out the one that failed.
+          const on =
+            told.agentId === null || told.step === 'publish' || told.model !== undefined
+              ? undefined
+              : yield* sessionOnStep(run.taskId, told.step, told.agentId)
+          const info: StuckInfo = {
+            ...told,
+            ...(on?.model == null ? {} : { model: on.model }),
+            ...(on?.effort == null ? {} : { effort: on.effort }),
+          }
           const opened = yield* sql.withTransaction(
             Effect.gen(function* () {
               const [open] = yield* sql<{ id: string }>`
@@ -1271,16 +1289,20 @@ export class Runs extends Context.Service<
           if (opened) yield* touchCard(run.taskId)
         })
 
-      /** The model a step's agent last ran on, on the step's own thread: the one it carries on with at a reset. */
-      const modelOnStep = (taskId: string, step: StuckInfo['step'], agentId: string) =>
+      /** The model and effort a step's agent last ran on, on the step's own thread. */
+      const sessionOnStep = (taskId: string, step: StuckInfo['step'], agentId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ model: string | null }>`
-            SELECT s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+          const [last] = yield* sql<{ model: string | null; effort: string | null }>`
+            SELECT s.model, s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
             WHERE t.task_id = ${taskId} AND t.kind = ${step === 'review' ? 'step' : 'task'} AND s.agent_id = ${agentId}
             ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
-          return last?.model ?? null
+          return last
         })
+
+      /** The model a step's agent last ran on, on the step's own thread: the one it carries on with at a reset. */
+      const modelOnStep = (taskId: string, step: StuckInfo['step'], agentId: string) =>
+        Effect.map(sessionOnStep(taskId, step, agentId), (last) => last?.model ?? null)
 
       /** A step that reported after all no longer needs the person: its call is withdrawn. */
       const unstuck = (run: RunRow) =>
@@ -1647,6 +1669,8 @@ export class Runs extends Context.Service<
         resumed?: Lead,
         /** Where a review carried on stands: the person's, unless Althar carries it on, as for a usage limit (ADR-037). */
         order: Order = 'person',
+        /** How hard the reviewer picked thinks; without it, the model's own, unless the plan's reviewer stays on its own model. */
+        effort?: string | null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1659,9 +1683,13 @@ export class Runs extends Context.Service<
               ? { ...planned, agentId: instead.agentId, model: instead.model }
               : reviewer === undefined || reviewer === planned.agentId
                 ? model == null
-                  ? planned
-                  : { ...planned, model }
-                : { ...planned, agentId: reviewer, model: model ?? null }
+                  ? effort == null
+                    ? planned
+                    : { ...planned, effort }
+                  : // The plan's effort is for the plan's model: another model starts on the effort picked, or its own.
+                    { ...planned, model, effort: effort ?? (model === planned.model ? planned.effort : null) }
+                : // The plan's effort is for the plan's reviewer: another agent starts on the effort picked, or its own.
+                  { ...planned, agentId: reviewer, model: model ?? null, effort: effort ?? null }
           const admitted = yield* unlessStopped(
             busy.enter(
               run.taskId,
@@ -3938,6 +3966,7 @@ export class Runs extends Context.Service<
               // As the person said, or as Althar carries it on: a place of its own, not the lead's.
               yield* lastLead(current),
               by,
+              effort ?? (answer.kind === 'retry' ? answer.effort : undefined),
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -3964,7 +3993,14 @@ export class Runs extends Context.Service<
             return yield* finish(current, 'cancelled')
           }
           // The lead's step: its agent (or the one picked) on the task's thread, told again what the step is.
-          const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, on, said, effort, accountId)
+          const sessionId = yield* leadOn(
+            current,
+            answer.kind === 'retry' ? answer.agentId : undefined,
+            on,
+            said,
+            effort ?? (answer.kind === 'retry' ? answer.effort : undefined),
+            accountId,
+          )
           if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell')
             yield* sessions.send({

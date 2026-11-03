@@ -117,7 +117,12 @@ test('A runtime killed twice while the step runs pauses it, offering only what f
     await crash(electronApp)
     const card = shown(page, CRASHED).locator('xpath=ancestor::*[.//button[normalize-space()="Abandon this step"]][1]')
     await expect(card).toBeVisible()
-    await expect(card.getByRole('button')).toHaveText([/^Start .+ again$/, 'Hand to another agent', 'Abandon this step', 'Report this'])
+    await expect(card.getByRole('button')).toHaveText([
+      /^Start .+ again$/,
+      'Continue with another model',
+      'Abandon this step',
+      'Report this',
+    ])
     await still(page)
     await card.screenshot({ path: 'test-results/restarts-crashed.png', scale: 'css' })
   } finally {
