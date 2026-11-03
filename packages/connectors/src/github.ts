@@ -412,6 +412,23 @@ const ENQUEUE = `mutation($id: ID!, $head: GitObjectID) {
   enqueuePullRequest(input: { pullRequestId: $id, expectedHeadOid: $head }) { mergeQueueEntry { position } }
 }`
 
+/** Takes a pull request out of its merge queue before it merges. */
+const DEQUEUE = `mutation($id: ID!) {
+  dequeuePullRequest(input: { id: $id }) { mergeQueueEntry { id } }
+}`
+
+/** Whether a branch merges through a merge queue, which GraphQL alone says. */
+const BRANCH_QUEUE = `query($owner: String!, $name: String!, $branch: String!) {
+  repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } }
+}`
+
+const BranchQueueAnswer = Schema.Struct({
+  repository: Schema.NullOr(Schema.Struct({ mergeQueue: Schema.NullOr(Schema.Struct({ id: Schema.String })) })),
+})
+
+const BranchAnswer = Schema.Struct({ commit: Schema.Struct({ sha: Schema.String }) })
+const CompareAnswer = Schema.Struct({ behind_by: Schema.Number })
+
 /** Why GitHub's merge queue took a pull request out, in Althar's words: its checks there failed, it conflicted, someone took it out, or it merged. */
 export const leftQueueOf = (reason: string | null | undefined): NonNullable<ChangeRequest['leftQueue']> | null => {
   switch (reason?.toLowerCase()) {
@@ -787,12 +804,15 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         )
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
     // Merged, as GitHub answers, it is: read back at once, it can still say open for a moment, and reading it takes as long again.
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       Effect.gen(function* () {
+        // GitHub's auto-merge isn't Althar's merge: without a queue, Althar's own line merges each in turn (ADR-081).
+        if (how?.auto === true)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Althar doesn’t turn on GitHub’s auto-merge' })
         const { conflicts: _, ...seen } = change
         const answer = yield* http
           .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
-            merge_method: repository.merges[0] ?? 'merge',
+            merge_method: how?.method ?? repository.merges[0] ?? 'merge',
             // Only the head Althar last saw: a push since then isn't merged unseen.
             ...(change.headSha === null ? {} : { sha: change.headSha }),
           })
@@ -817,6 +837,66 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
       }),
+    mergeWays: (repository, target) =>
+      Effect.gen(function* () {
+        const answer = yield* http
+          .graphql(BranchQueueAnswer, graphqlUrl, BRANCH_QUEUE, { owner: repository.path[0], name: repository.path[1], branch: target })
+          .pipe(
+            // A GitHub Enterprise Server without merge queues refuses the question itself: it has none.
+            Effect.catchIf(
+              (error) => error.reason === 'rejected',
+              () => Effect.succeed(null),
+            ),
+          )
+        const enabled = answer?.repository?.mergeQueue != null
+        queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled })
+        return { queue: enabled ? 'merge_queue' : null, autoMerge: false, server: null } as const
+      }),
+    // Only at the head Althar read: GitHub refuses to queue a head that moved since.
+    enqueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOf(repository, change.number, change.target)
+        if (!queue.isMergeQueueEnabled)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: `${change.target} has no merge queue` })
+        if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+        return { ...change, state: 'open', queued: true, leftQueue: null } as const
+      }),
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOf(repository, change.number, change.target)
+        if (queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, DEQUEUE, { id: change.id })
+        return { ...change, queued: false }
+      }),
+    branchHead: (repository, branch) =>
+      Effect.map(http.json(BranchAnswer, 'GET', `${repo(repository)}/branches/${branchPath(branch)}`), (answer) => answer.commit.sha),
+    // Behind by nothing: every commit of `sha` is in the branch already.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              CompareAnswer,
+              'GET',
+              `${repo(repository)}/compare/${encodeURIComponent(sha)}...${encodeURIComponent(change.headSha)}`,
+            ),
+            (answer) => answer.behind_by === 0,
+          ),
+    // GitHub's update-branch is a merge of the target into the branch, at the head read; one up to date already is left as it is.
+    updateBranch: (repository, change) =>
+      http
+        .json(
+          Schema.Unknown,
+          'PUT',
+          `${repo(repository)}/pulls/${change.number}/update-branch`,
+          change.headSha === null ? {} : { expected_head_sha: change.headSha },
+        )
+        .pipe(
+          Effect.asVoid,
+          Effect.catchIf(
+            (error) => error.status === 422 && /no new commits/i.test(error.message),
+            () => Effect.void,
+          ),
+        ),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

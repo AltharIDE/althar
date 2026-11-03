@@ -59,6 +59,8 @@ const ProjectAnswer = Schema.Struct({
   // Said only to someone who can see the project's settings.
   merge_method: Schema.optional(Schema.NullOr(Schema.String)),
   squash_option: Schema.optional(Schema.NullOr(Schema.String)),
+  // Premium's: whether merge requests merge through a merge train. Absent on a tier without them.
+  merge_trains_enabled: Schema.optional(Schema.NullOr(Schema.Boolean)),
   permissions: Schema.optional(Schema.NullOr(Schema.Struct({ project_access: Access, group_access: Access }))),
 })
 
@@ -91,10 +93,15 @@ const MergeAnswer = Schema.Struct({
   changes_count: Schema.optional(Schema.NullOr(Schema.String)),
   detailed_merge_status: Schema.optional(Schema.String),
   has_conflicts: Schema.optional(Schema.Boolean),
+  // Auto-merge, a merge train's entry included: GitLab merges it once its pipeline passes.
+  merge_when_pipeline_succeeds: Schema.optional(Schema.NullOr(Schema.Boolean)),
   head_pipeline: Schema.optional(Schema.NullOr(Pipeline)),
   updated_at: Schema.String,
 })
 type MergeAnswer = typeof MergeAnswer.Type
+
+const VersionAnswer = Schema.Struct({ version: Schema.String })
+const BranchAnswer = Schema.Struct({ commit: Schema.Struct({ id: Schema.String }) })
 
 const JobAnswer = Schema.Struct({
   id: Schema.Number,
@@ -240,6 +247,7 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
       : { conflicts: request.has_conflicts === true }),
   // A branch of the project's own; one from a fork's, `change` reads where it is.
   ...(request.source_project_id !== undefined && request.source_project_id === request.target_project_id ? { headRepository: null } : {}),
+  ...(request.merge_when_pipeline_succeeds == null ? {} : { autoMerge: request.merge_when_pipeline_succeeds }),
 })
 
 /** GitLab's state for each a list can ask for. */
@@ -653,12 +661,14 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           yield* http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { title: readyTitle(now.title) }),
         )
       }),
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       http
         .json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}/merge`, {
-          squash: repository.merges[0] === 'squash',
+          squash: (how?.method ?? repository.merges[0]) === 'squash',
           // Only the head Althar last saw: a push since then isn't merged unseen, and GitLab says 409.
           ...(change.headSha === null ? {} : { sha: change.headSha }),
+          // Auto-merge: `auto_merge` on newer servers, "merge when pipeline succeeds" on older ones, which newer ones still take.
+          ...(how?.auto === true ? { auto_merge: true, merge_when_pipeline_succeeds: true } : {}),
         })
         .pipe(
           Effect.map(changeOf),
@@ -682,6 +692,62 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    // Read each time, as the project's settings and the server's version can change: a merge is rare, and two reads are cheap.
+    mergeWays: (repository) =>
+      Effect.gen(function* () {
+        const settings = yield* http.cached(ProjectAnswer, project(repository))
+        const version = yield* http.cached(VersionAnswer, `${api}/version`).pipe(
+          Effect.map((answer) => answer.version),
+          Effect.orElseSucceed(() => null),
+        )
+        return {
+          queue: settings.merge_trains_enabled === true ? 'merge_train' : null,
+          // Every tier merges once a pipeline passes, as long as GitLab has had pipelines.
+          autoMerge: true,
+          server: version === null ? null : `GitLab ${version}`,
+        } as const
+      }),
+    // A merge train takes it at its head, and merges it once the train's pipeline for it passes.
+    enqueue: (repository, change, how) =>
+      Effect.gen(function* () {
+        yield* mayNot(
+          http.json(Schema.Unknown, 'POST', `${project(repository)}/merge_trains/merge_requests/${change.number}`, {
+            ...(change.headSha === null ? {} : { sha: change.headSha }),
+            squash: (how?.method ?? repository.merges[0]) === 'squash',
+            auto_merge: true,
+            when_pipeline_succeeds: true,
+          }),
+        )
+        return { ...changeOf(yield* read(repository, change.number)), queued: true }
+      }),
+    // Cancelling auto-merge takes it off its merge train too.
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state !== 'opened' || now.merge_when_pipeline_succeeds !== true) return changeOf(now)
+        return changeOf(
+          yield* mayNot(
+            http.json(MergeAnswer, 'POST', `${project(repository)}/merge_requests/${change.number}/cancel_merge_when_pipeline_succeeds`),
+          ),
+        )
+      }),
+    branchHead: (repository, branch) =>
+      Effect.map(
+        http.json(BranchAnswer, 'GET', `${project(repository)}/repository/branches/${encodeURIComponent(branch)}`),
+        (answer) => answer.commit.id,
+      ),
+    // The commit is in the branch where it is where the two meet.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              Schema.Struct({ id: Schema.String }),
+              'GET',
+              `${project(repository)}/repository/merge_base?refs[]=${encodeURIComponent(change.headSha)}&refs[]=${encodeURIComponent(sha)}`,
+            ),
+            (base) => base.id === sha,
+          ),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* read(repository, change.number)

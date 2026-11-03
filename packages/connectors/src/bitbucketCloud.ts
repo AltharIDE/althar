@@ -317,6 +317,13 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const branchOf = (repository: Repository | ReadonlyArray<string>, name: string) =>
     `${repo('path' in repository ? repository.path : repository)}/refs/branches/${name.split('/').map(encodeURIComponent).join('/')}`
 
+  const noAutoMerge = new ConnectorFailed({ product, reason: 'rejected', message: 'Bitbucket Cloud has no auto-merge' })
+  const noQueue = new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: 'Bitbucket Cloud’s merge queue can’t be entered or left through its API: only on its site',
+  })
+
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(http.json(User, 'GET', `${api}/user`), (user) => {
     const { id, login, name } = personOf(user)
     return { id, login, name }
@@ -528,8 +535,9 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         })
         return changeOf(repository, ready)
       }),
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       Effect.gen(function* () {
+        if (how?.auto === true) return yield* noAutoMerge
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
         const head = now.source.commit?.hash ?? null
         // Bitbucket merges whatever the branch holds, so the head Althar last saw is checked first; a push since is a 409, as GitHub's.
@@ -541,7 +549,13 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
             message: `The pull request moved on to ${head} since ${change.headSha.slice(0, 12)} was seen`,
           })
         const branch = yield* http.cached(Strategies, branchOf(repository, now.destination.branch.name))
-        const strategy = strategyOf(branch.merge_strategies ?? [], branch.default_merge_strategy)
+        const allowed = branch.merge_strategies ?? []
+        // The way asked for, where the branch allows one of its strategies; else the one the repository chose.
+        const strategy =
+          how?.method === undefined
+            ? strategyOf(allowed, branch.default_merge_strategy)
+            : (STRATEGIES.find(([one, method]) => method === how.method && allowed.includes(one))?.[0] ??
+              strategyOf(allowed, branch.default_merge_strategy))
         // Refused, Bitbucket says why: a merge check, a conflict, a draft. One that takes long answers 202 and lands later.
         yield* http.json(
           Schema.Unknown,
@@ -551,6 +565,27 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         )
         return changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
       }),
+    // Bitbucket Cloud has no auto-merge, and its merge queue can't be entered through its API: Althar's own line stands in.
+    mergeWays: () => Effect.succeed({ queue: null, autoMerge: false, server: null }),
+    enqueue: () => Effect.fail(noQueue),
+    leaveQueue: () => Effect.fail(noQueue),
+    branchHead: (repository, branch) =>
+      Effect.map(
+        http.json(Schema.Struct({ target: Schema.Struct({ hash: Schema.String }) }), 'GET', branchOf(repository, branch)),
+        (answer) => answer.target.hash,
+      ),
+    // The commit is in the branch where it is where the two meet.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              Schema.Struct({ hash: Schema.String }),
+              'GET',
+              `${repo(repository.path)}/merge-base/${encodeURIComponent(change.headSha)}..${encodeURIComponent(sha)}`,
+            ),
+            (base) => sameCommit(base.hash, sha),
+          ),
     // Bitbucket's word for closing one unmerged is declining it.
     closeChange: (repository, change) =>
       Effect.gen(function* () {

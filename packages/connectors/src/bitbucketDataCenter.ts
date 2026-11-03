@@ -232,6 +232,17 @@ export const mergesOf = (strategies: ReadonlyArray<string>, chosen?: string | nu
 export const strategyOf = (strategies: ReadonlyArray<string>, chosen?: string | null): string | undefined =>
   chosen != null && strategies.includes(chosen) ? chosen : STRATEGIES.find(([strategy]) => strategies.includes(strategy))?.[0]
 
+/** Whether a version such as "8.19.1" is at least `wanted`, part by part. */
+export const atLeast = (version: string, wanted: ReadonlyArray<number>): boolean => {
+  const parts = version.split('.').map((part) => Number.parseInt(part, 10))
+  for (const [index, want] of wanted.entries()) {
+    const part = parts[index] ?? 0
+    if (Number.isNaN(part) || part < want) return false
+    if (part > want) return true
+  }
+  return true
+}
+
 /** Where an anchor is: its file's path and its line. */
 const placeOf = (anchor: Anchor | null | undefined) => ({
   path: anchor?.path == null ? null : typeof anchor.path === 'string' ? anchor.path : anchor.path.components.join('/'),
@@ -298,6 +309,35 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   const repo = (project: string, slug: string) => `${api}/projects/${encodeURIComponent(project)}/repos/${encodeURIComponent(slug)}`
   const base = (repository: Repository) => repo(repository.path[0] ?? '', repository.path[1] ?? '')
   const pull = (repository: Repository, number: number) => `${base(repository)}/pull-requests/${number}`
+
+  /** The server's version, as it says; null where it doesn't. Read once a launch, as a server's version rarely changes under it. */
+  let version: string | null | undefined
+  const versionOf = Effect.suspend(() =>
+    version !== undefined
+      ? Effect.succeed(version)
+      : raw.json(Schema.Struct({ version: Schema.String }), 'GET', `${api}/application-properties`).pipe(
+          Effect.map((answer) => answer.version),
+          Effect.orElseSucceed(() => null),
+          Effect.tap((said) => Effect.sync(() => void (version = said))),
+        ),
+  )
+  /** Whether the server merges a pull request by itself once it can: auto-merge, from 8.15. */
+  const autoMerges = Effect.map(versionOf, (said) => said !== null && atLeast(said, [8, 15]))
+  const noAutoMerge = new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: 'This Bitbucket Data Center has no auto-merge (from 8.15)',
+  })
+  /** Whether a pull request is set to merge by itself; null where the server couldn't say. */
+  const autoMergeOf = (repository: Repository, number: number) =>
+    http.json(Schema.Struct({ autoMergeEnabled: Schema.optional(Schema.Boolean) }), 'GET', `${pull(repository, number)}/auto-merge`).pipe(
+      Effect.map((answer) => answer.autoMergeEnabled !== false),
+      Effect.catchIf(
+        (error) => error.status === 404,
+        () => Effect.succeed(false),
+      ),
+      Effect.orElseSucceed(() => null),
+    )
 
   /** Every page of a list, by `start`, within a bound. */
   const all = <A>(item: Schema.Codec<A, unknown>, url: string) =>
@@ -535,7 +575,14 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           )
       }),
     listChanges,
-    change: (repository, number) => Effect.map(http.cached(PullAnswer, pull(repository, number)), (answer) => changeOf(repository, answer)),
+    change: (repository, number, ask) =>
+      Effect.gen(function* () {
+        const change = changeOf(repository, yield* http.cached(PullAnswer, pull(repository, number)))
+        if (ask?.queue !== true || change.state !== 'open' || !(yield* autoMerges)) return change
+        // Whether it is set to merge by itself: asked only where the server has auto-merge; unsaid where it couldn't say.
+        const set = yield* autoMergeOf(repository, number)
+        return set === null ? change : { ...change, autoMerge: set }
+      }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
@@ -550,7 +597,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         })
         return changeOf(repository, ready)
       }),
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       Effect.gen(function* () {
         const url = pull(repository, change.number)
         const now = yield* http.json(PullAnswer, 'GET', url)
@@ -564,7 +611,17 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
             message: `The pull request moved on to ${head.slice(0, 12)} since ${change.headSha.slice(0, 12)} was seen`,
           })
         const { enabled, chosen } = strategiesOf(yield* http.cached(Settings, `${base(repository)}/settings/pull-requests`))
-        const strategy = strategyOf(enabled, chosen)
+        // The way asked for, where the repository allows one of its strategies; else the one it chose.
+        const strategy =
+          (how?.method === undefined
+            ? undefined
+            : STRATEGIES.find(([one, method]) => method === how.method && enabled.includes(one))?.[0]) ?? strategyOf(enabled, chosen)
+        if (how?.auto === true) {
+          if (!(yield* autoMerges)) return yield* noAutoMerge
+          // Data Center merges it once its builds and merge checks pass, as it would by the button.
+          yield* http.json(Schema.Unknown, 'POST', `${url}/auto-merge`, strategy === undefined ? {} : { strategyId: strategy })
+          return { ...changeOf(repository, now), autoMerge: true }
+        }
         const merged = yield* http
           .json(PullAnswer, 'POST', `${url}/merge?version=${now.version}`, strategy === undefined ? {} : { strategyId: strategy })
           .pipe(
@@ -589,6 +646,47 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           )
         return changeOf(repository, merged)
       }),
+    mergeWays: () =>
+      Effect.gen(function* () {
+        const version = yield* versionOf
+        return { queue: null, autoMerge: yield* autoMerges, server: version === null ? null : `Bitbucket Data Center ${version}` } as const
+      }),
+    // Data Center has no merge queue: Althar's own line stands in, with auto-merge as its merge.
+    enqueue: () => Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Bitbucket Data Center has no merge queue' })),
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        if (!(yield* autoMerges) || (yield* autoMergeOf(repository, change.number)) !== true) return { ...change, autoMerge: false }
+        yield* http.json(Schema.Unknown, 'DELETE', `${pull(repository, change.number)}/auto-merge`).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
+        return { ...change, autoMerge: false }
+      }),
+    branchHead: (repository, branch) =>
+      Effect.gen(function* () {
+        const answer = yield* http.json(
+          Schema.Struct({ values: Schema.Array(Schema.Struct({ displayId: Schema.String, latestCommit: Schema.String })) }),
+          'GET',
+          `${base(repository)}/branches?filterText=${encodeURIComponent(branch)}&limit=100`,
+        )
+        const found = answer.values.find((one) => one.displayId === branch)
+        if (found === undefined) return yield* new ConnectorFailed({ product, reason: 'not_found', message: `No branch ${branch}` })
+        return found.latestCommit
+      }),
+    // No commit of `sha` that the branch lacks: it is in the branch already.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              Schema.Struct({ values: Schema.Array(Schema.Unknown) }),
+              'GET',
+              `${base(repository)}/commits?since=${encodeURIComponent(change.headSha)}&until=${encodeURIComponent(sha)}&limit=1`,
+            ),
+            (answer) => answer.values.length === 0,
+          ),
     // Bitbucket's word for closing one unmerged is declining it: at the version read, as merging is.
     closeChange: (repository, change) =>
       Effect.gen(function* () {

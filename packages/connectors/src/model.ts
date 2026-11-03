@@ -110,6 +110,12 @@ export const ChangeRequest = Schema.Struct({
    * can still say open for a moment after). Null where it never did.
    */
   leftQueue: Schema.optional(Schema.NullOr(Schema.Literals(['checks', 'conflict', 'removed', 'merged', 'other']))),
+  /**
+   * Whether the host is set to merge it by itself once its checks pass:
+   * GitLab's auto-merge, a merge train's entry included, and Data Center's
+   * (read with `queue`). Absent where the host doesn't say.
+   */
+  autoMerge: Schema.optional(Schema.Boolean),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
@@ -268,6 +274,28 @@ export interface ChangeWords {
   readonly prefix: '#' | '!'
 }
 
+/**
+ * How changes into a branch merge on its host, as the host says now (ADR-081,
+ * "On every code host"): through the host's own queue or merge train, which
+ * tests and merges them one after another; with auto-merge, which merges one
+ * once its checks pass; or plainly, where Althar's own line stands in.
+ */
+export interface MergeWays {
+  /** GitHub's merge queue on the branch, or GitLab's merge trains on the project; null where it has none Althar can enter. */
+  readonly queue: 'merge_queue' | 'merge_train' | null
+  /** The host merges a change itself once its checks pass, as Althar asks: GitLab's, and Data Center's from 8.15. */
+  readonly autoMerge: boolean
+  /** What the server said it is, where that decided the above: GitLab's version and tier, Data Center's version. */
+  readonly server: string | null
+}
+
+/** How Althar merges a change: in a way the repository allows, or with auto-merge, which merges it once its checks pass. */
+export interface MergeHow {
+  readonly method?: MergeMethod
+  /** Turn auto-merge on rather than merge now, where `mergeWays` says the host has it. */
+  readonly auto?: boolean
+}
+
 /** What a host can do beyond the model's floor. */
 export interface HostCapabilities {
   /** Changes can be opened as drafts and marked ready. */
@@ -359,13 +387,43 @@ export interface CodeHost {
   listChanges(repository: Repository, query: ChangeQuery): Effect.Effect<ChangeList, ConnectorFailed>
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
-   * Merges a change, because the person said to: never on an agent's word.
-   * In the first way the repository allows; refused, as a draft or with
-   * checks or reviews it still needs, with the host's own words. Where its
-   * target branch merges through a merge queue, it goes in the queue
-   * instead, and comes back open and `queued`: the host merges it later.
+   * Merges a change, because the person said to: never on an agent's own
+   * initiative. In `how`'s method, else the first way the repository allows;
+   * refused, as a draft or with checks or reviews it still needs, with the
+   * host's own words. Where its target branch merges through a merge queue,
+   * it goes in the queue instead, and comes back open and `queued`: the host
+   * merges it later. With `how.auto`, auto-merge is turned on instead, and it
+   * comes back open and `queued` too.
    */
-  merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  merge(repository: Repository, change: ChangeRequest, how?: MergeHow): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /** How changes into a branch merge on the host: its queue or train, auto-merge, or plainly. Read when asked; kept a while. */
+  mergeWays(repository: Repository, target: string): Effect.Effect<MergeWays, ConnectorFailed>
+  /**
+   * Puts a change in its target's merge queue or merge train at its head
+   * (`headSha`): a push since is refused. Comes back open and `queued`; the
+   * host merges it later. Refused, as `rejected`, where `mergeWays` says none.
+   */
+  enqueue(repository: Repository, change: ChangeRequest, how?: MergeHow): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Takes a change out of its target's merge queue or train, and turns its
+   * auto-merge off, before it merges: it can be put back. One in neither is
+   * left as it is. Refused, as `rejected`, where the host can't from here.
+   */
+  leaveQueue(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /** The commit a branch is at on the host now. */
+  branchHead(repository: Repository, branch: string): Effect.Effect<string, ConnectorFailed>
+  /** Whether a change's branch has a commit in it already: up to date with its target where that is the target's head. */
+  contains(repository: Repository, change: ChangeRequest, sha: string): Effect.Effect<boolean, ConnectorFailed>
+  /**
+   * Brings a change's branch up to date with its target by a merge, never a
+   * rebase, at its head: GitHub's update-branch. Absent where the host has
+   * none from its API.
+   *
+   * TODO(bring-a-pr-s-branch-up-to-date-with-main): that task's
+   * `update_branch` brings the rest, Althar's own merge, pushed; the merge
+   * line then uses it where this is absent.
+   */
+  updateBranch?(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   /**
    * Closes a change without merging it, because the person said to: never
    * on an agent's word. Read back as the host has it after; one already
