@@ -220,3 +220,70 @@ describe('the coordinator running checks again', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
+
+describe('the coordinator bringing a pull request’s branch up to date', () => {
+  it.live('merges the target in for any pull request, and says nothing to do when it is not behind', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A teammate’s', author: 'dana', member: true })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      assert.include(yield* callTool(coordinator, 'update_branch', { pull_request: '#1' }), 'has all of main already')
+      github.fallBehind(1)
+      const said = yield* callTool(coordinator, 'update_branch', { pull_request: '#1' })
+      assert.include(said, 'is merging main into PR #1')
+      assert.lengthOf(github.branchesUpdated, 1)
+      assert.include(yield* callTool(coordinator, 'update_branch', { pull_request: '#1' }), 'has all of main already')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('says which files conflict and settles none', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A teammate’s', author: 'dana', member: true })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      github.fallBehind(1, ['src/checkout.ts', 'package.json'])
+      const said = yield* callTool(coordinator, 'update_branch', { pull_request: '#1' })
+      assert.include(said, 'conflicts with main, so nothing was merged')
+      assert.include(said, 'src/checkout.ts, package.json')
+      assert.lengthOf(github.branchesUpdated, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('leaves an outside author’s branch the account can’t push to, and offers the person the ask instead of posting it', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    const theirs = github.addPullRequest({
+      path: ['meridian', 'api'],
+      title: 'A stranger’s',
+      author: 'passerby',
+      member: false,
+      fork: ['passerby', 'api'],
+    })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      github.fallBehind(theirs.number)
+      const said = yield* callTool(coordinator, 'update_branch', { pull_request: '#1' })
+      assert.include(said, "can't push to PR #1's branch")
+      assert.include(said, "waits for the person's word")
+      // Nothing is posted on their pull request: asking them is a reply, which is the person's to ask for.
+      assert.lengthOf(github.commentsOn(1), 0)
+      assert.lengthOf(github.branchesUpdated, 0)
+      // Where their fork lets the account push, it goes like any other.
+      github.allowForkPush(theirs.number)
+      assert.include(yield* callTool(coordinator, 'update_branch', { pull_request: '#1' }), 'is merging main into PR #1')
+      assert.lengthOf(github.commentsOn(1), 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('refuses a closed pull request in the host’s words', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Old', author: 'dana', state: 'closed' })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      assert.include(yield* callTool(coordinator, 'update_branch', { pull_request: '#1' }), 'is closed, so its branch isn')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})

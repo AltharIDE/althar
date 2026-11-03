@@ -317,6 +317,29 @@ export interface PushTarget {
   readonly header: string | null
 }
 
+/**
+ * How bringing a change's branch up to date ended (ADR-081). Every ending but
+ * a failure is an answer, so the caller can say it as it is:
+ *
+ * - `updated`: the target branch is merged into it. `head` is the branch's
+ *   commit now; null where the host does the merge in the background
+ *   (GitHub's) and hasn't moved the branch yet;
+ * - `current`: it has everything the target has, so nothing was done;
+ * - `conflict`: the merge would conflict and nothing was done. `files` are
+ *   those that conflict, as far as the host or Althar's copy could tell;
+ * - `moved`: the branch isn't at the head the caller read, because someone
+ *   pushed meanwhile (`head`, where it could be read), so nothing was done;
+ * - `no_access`: the account may not push to the branch, as one on an
+ *   outside author's fork often isn't. Nothing was done; `reason` is the
+ *   host's, or Althar's, words. The author can be asked to update it.
+ */
+export type BranchUpdate =
+  | { readonly outcome: 'updated'; readonly head: string | null }
+  | { readonly outcome: 'current' }
+  | { readonly outcome: 'conflict'; readonly files: ReadonlyArray<string> }
+  | { readonly outcome: 'moved'; readonly head: string | null }
+  | { readonly outcome: 'no_access'; readonly reason: string }
+
 /** What a code host offers Althar (docs/architecture/06); its releases are `HostReleases`'s (ADR-081). */
 export interface CodeHost extends HostReleases {
   readonly product: Product
@@ -388,6 +411,22 @@ export interface CodeHost extends HostReleases {
    * `rejected`, in the host's words.
    */
   reopenChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Merges the change's target branch into its branch, so the branch has
+   * what the target has since it was made (ADR-081). A merge commit, never a
+   * rebase and never a forced push: GitHub does it with its own call; the
+   * others merge in a copy of Althar's own and push it plainly. It goes only
+   * if the branch is still at `expectedHead`, the commit the caller read, so
+   * a push made meanwhile is never merged unseen or overwritten (`moved`).
+   * A branch on a fork is updated where the account may push to it, else
+   * `no_access`. A conflict is read, never settled (`conflict`). A change
+   * that isn't open is refused, as `rejected`, in the host's words.
+   */
+  updateBranch(
+    repository: Repository,
+    change: ChangeRequest,
+    ask: { readonly expectedHead: string },
+  ): Effect.Effect<BranchUpdate, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /**
    * The end of a check's log, or with `whole` all of it. Null for a check the
@@ -493,6 +532,14 @@ export const stillOpen = (product: Product, words: ChangeWords, number: number):
     product,
     reason: 'rejected',
     message: `${words.short} ${words.prefix}${number} is still open, so its branch stays.`,
+  })
+
+/** A host's refusal to bring up to date the branch of a change that is no longer open: it would be merged into for nothing. */
+export const notOpen = (product: Product, words: ChangeWords, number: number, state: ChangeState): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is ${state}, so its branch isn’t brought up to date.`,
   })
 
 /** A branch as a URL's path takes it: each part encoded, its slashes kept. */

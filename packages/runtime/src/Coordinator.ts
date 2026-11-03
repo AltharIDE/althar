@@ -38,6 +38,7 @@ import {
   replyOnPullRequest,
   reopenPullRequest,
   rerunChecks,
+  updateBranch,
 } from './coordinatorPullRequests'
 import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
@@ -1700,6 +1701,12 @@ export class Coordinator extends Context.Service<
           "Opens a closed pull request that Althar opened again, by its link or number: on GitHub, GitLab and Bitbucket Data Center. Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
           { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
           (access, input) => reopenPullRequest(access.projectId, input),
+        ),
+        tool(
+          'update_branch',
+          "Brings a pull request's branch up to date with the branch it goes into, by its link or number: merges that branch into it. A merge commit, never a rebase and never a forced push, so it can be undone. GitHub does it with its update-branch; GitLab and Bitbucket (Cloud and Data Center) by Althar's merge in a copy of its own, pushed plainly. Any of the project's pull requests, an outside author's included, where Althar's account may push to its branch; where it may not, nothing is done and it says so: asking the author is a reply, which waits for the person's word. A conflict stops and names the files; you don't settle it, a task's lead or the author does. A branch pushed to since you read it is left as it is. Use it when a pull request is behind and that holds up its merge or its checks.",
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => updateBranch(access.projectId, input),
         ),
         tool(
           'reply_on_pull_request',

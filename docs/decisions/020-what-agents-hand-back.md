@@ -86,6 +86,11 @@
     it. Once a finished task's folder is removed, one it committed reads
     from the commit kept as the folder went; one it never committed is
     gone (ADR-056).
+  - **Only what the person can open is a document.** A markdown file
+    written outside the task's folders (an agent's own memory, in
+    `~/.claude` or `~/.codex`) is not handed back; one pointed at from
+    there, or one that can't be read, is a plain file line, never a card
+    with an error.
   - **Claude Code's output doesn't stream:** its adapter sends it once, at
     the end.
 - **Revisit when:**
