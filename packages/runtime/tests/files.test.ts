@@ -264,6 +264,18 @@ describe('files sent with a message', () => {
         assert.strictEqual(yield* refused([{ grant: 'grant_gone' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ kept: 'input_0:1' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ grant: yield* grant(join(from, 'nothing-here')) }]), "Althar couldn't read nothing-here.")
+        // More than a message carries by their bytes together, though each is within its own; a folder of too many files.
+        const parts = yield* Effect.forEach([1, 2, 3], (n) => {
+          const part = join(from, `part-${n}.zip`)
+          writeFileSync(part, '')
+          truncateSync(part, MESSAGE_FILES.bytes - 1)
+          return grant(part)
+        })
+        assert.strictEqual(yield* refused(parts.map((one) => ({ grant: one }))), "A message's files come to at most 100 MB together.")
+        const folder = join(from, 'many')
+        mkdirSync(folder)
+        for (let n = 0; n <= MESSAGE_FILES.entries; n += 1) writeFileSync(join(folder, `${n}.txt`), '')
+        assert.strictEqual(yield* refused([{ grant: yield* grant(folder) }]), 'many holds over 2,000 files.')
         // Nothing was copied for a message refused, nor said.
         assert.isFalse(existsSync(join(worktree, '.althar', 'attachments')))
         assert.lengthOf(messages((yield* client.GetThread({ threadId: task.threadId })).items), 0)

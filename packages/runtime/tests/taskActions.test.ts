@@ -236,6 +236,10 @@ describe('hold_task and restart_task', () => {
       yield* c.turn('discard it after all')
       assert.match(yield* callTool(c.access, 'settle_task', { task: task.slug, how: 'discard' }), /its worktree and branch stay/)
       assert.strictEqual((yield* standing(task.taskId))?.state, 'abandoned')
+      // Discarded, it is neither discarded nor marked done again, and has no plan to hold.
+      assert.match(yield* callTool(c.access, 'settle_task', { task: task.slug, how: 'discard' }), /is discarded already/)
+      assert.match(yield* callTool(c.access, 'settle_task', { task: task.slug, how: 'done' }), /is discarded: restart it first/)
+      assert.match(yield* callTool(c.access, 'hold_task', { task: task.slug }), /has no plan waiting to start/)
       const sql = yield* SqlClient.SqlClient
       const [folder] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
       if (folder !== undefined) assert.isTrue(existsSync(folder.path), 'discarding keeps its worktree')
@@ -268,10 +272,16 @@ describe('settle_task', () => {
       const one = yield* quick(c, 'Which partners still call v1')
       yield* c.turn('keep the partners one for later')
       assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'keep' }), /^Kept .* for later/)
+      assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'keep' }), /is kept for later already/)
       assert.isNotNull((yield* standing(one.taskId))?.keptAt)
       yield* c.turn('that is done, settle it')
       assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'done' }), /^Marked .* done/)
       assert.strictEqual((yield* standing(one.taskId))?.state, 'done')
+      // Settled, there is nothing more to settle, keep, restart or stop.
+      assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'done' }), /is done already: it is in Settled/)
+      assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'keep' }), /is settled already/)
+      assert.match(yield* callTool(c.access, 'restart_task', { task: one.slug }), /is settled\. Writing to its lead opens it again/)
+      assert.match(yield* callTool(c.access, 'stop_task', { task: one.slug, turn: true }), /lead isn’t in a turn/)
       assert.include(yield* titles(one.threadId), 'The coordinator marked this task done, as you asked: “that is done, settle it”')
 
       const change = yield* started(c.projectId, 'Change the API', 'Work on it. [lead:wait]')
@@ -279,6 +289,13 @@ describe('settle_task', () => {
         yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'done' }),
         /^Nothing changed: .* is a change: it is done once its pull request merges/,
       )
+      assert.match(
+        yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'keep' }),
+        /is a change: it waits on its pull request/,
+      )
+      yield* until(standing(change.taskId), (row) => row?.run === 'running')
+      assert.match(yield* callTool(c.access, 'hold_task', { task: change.slug }), /has started: there is no plan to hold/)
+      assert.match(yield* callTool(c.access, 'restart_task', { task: change.slug }), /isn’t stopped, held or discarded/)
     }).pipe(Effect.provide(runtime())),
   )
 

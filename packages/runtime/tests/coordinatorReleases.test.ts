@@ -306,6 +306,96 @@ describe('the coordinator releasing on Bitbucket', () => {
   })
 })
 
+describe('the coordinator releasing where a host has no drafts, or no releases', () => {
+  it.live('on GitLab, makes the release, which is publishing it, once there is a tag', () => {
+    const host = makeFakeService({ product: 'gitlab' })
+    host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      const word = yield* turn(coordinator, 'Publish 0.7.0, approve its run, and delete v0.6.0')
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }), 'has no tag v0.7.0')
+      // Deleting takes no commit nor a move; one that isn't there is nothing to delete.
+      assert.include(
+        yield* callTool(coordinator, 'push_tag', { tag: 'v0.6.0', delete: true, move: true, message: word }),
+        'Deleting a tag takes no commit',
+      )
+      assert.include(yield* callTool(coordinator, 'push_tag', { tag: 'v0.6.0', delete: true, message: word }), 'nothing to delete')
+      // Nothing to approve before there is a run, nor once its runs are done.
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', workflow: 'deploy', message: word }),
+        'No run of deploy on v0.7.0 yet',
+      )
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', message: word }), 'push_tag makes it first')
+      assert.include(
+        yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', files: ['a.zip'], message: word }),
+        'publish without files',
+      )
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      const before = yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' })
+      assert.include(before, 'has no drafts: publish_release makes it')
+      assert.include(before, 'No CI run on v0.7.0 yet')
+      assert.include(
+        yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', name: 'Meridian 0.7', notes: 'Faster', message: word }),
+        'Published v0.7.0',
+      )
+      // Asked again, it is released already: nothing more is made.
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', message: word }), 'v0.7.0 is released already')
+      assert.deepStrictEqual(host.published, ['v0.7.0'])
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }), 'v0.7.0 is published')
+      // A deployment only another reviewer approves; and nothing failed to run again.
+      host.startRun(PATH, { ref: 'v0.7.0', name: 'deploy', state: 'passed', gates: [{ name: 'production', approvable: false }] })
+      const read = yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' })
+      assert.include(read, "which the connected account can't approve")
+      assert.include(yield* callTool(coordinator, 'rerun_failed_jobs', { tag: 'v0.7.0' }), 'None of the runs on v0.7.0 failed')
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', message: word }),
+        "deploy on v0.7.0 waits for production, which the connected account can't approve",
+      )
+      assert.include(yield* callTool(coordinator, 'rerun_failed_jobs', { tag: 'v0.7.0', workflow: 'lint' }), 'No run on v0.7.0 of lint')
+      assert.include(yield* callTool(coordinator, 'read_release_steps', {}), 'GitLab has no drafts')
+    }).pipe(Effect.provide(withHost(host)))
+  })
+
+  it.live('on Bitbucket Cloud, reads the tag and its Downloads, and runs a failed pipeline again whole', () => {
+    const host = makeFakeService({ product: 'bitbucket_cloud' })
+    host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      assert.include(
+        yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }),
+        'Bitbucket Cloud has no releases: the tag v0.7.0 is there',
+      )
+      const run = host.startRun(PATH, { ref: 'v0.7.0', name: 'release', state: 'failed' })
+      assert.include(yield* callTool(coordinator, 'rerun_failed_jobs', { tag: 'v0.7.0' }), 'Bitbucket runs the pipeline again whole')
+      assert.deepStrictEqual(host.rerunRuns, [run.id])
+      assert.include(yield* callTool(coordinator, 'read_release_steps', {}), 'the tag, then its files in Downloads')
+    }).pipe(Effect.provide(withHost(host)))
+  })
+
+  it.live('on Bitbucket Data Center, says the tag is the release and refuses to publish', () => {
+    const host = makeFakeService({ product: 'bitbucket_dc' })
+    host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      const word = yield* turn(coordinator, 'Publish 0.7.0')
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }), 'No tag v0.7.0, so no release.')
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }), 'Bitbucket Data Center has no releases')
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', message: word }), 'There is nothing to publish')
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', message: word }),
+        'whoever runs them approves them there',
+      )
+      assert.include(yield* callTool(coordinator, 'read_release_steps', { repository: 'nowhere' }), 'The project’s repositories are')
+      assert.include(yield* callTool(coordinator, 'read_release_steps', {}), 'Bitbucket Data Center has no releases')
+    }).pipe(Effect.provide(withHost(host)))
+  })
+})
+
 describe('another repository’s release steps', () => {
   it.live('reads its release workflow from the coordinator’s copy, and asks the person where it says nothing', () => {
     const { host, working } = github()

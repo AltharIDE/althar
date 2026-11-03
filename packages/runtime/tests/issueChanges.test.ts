@@ -393,6 +393,32 @@ describe('changes to issues', () => {
       const again = yield* (yield* IssueChanges).apply(failed?.changesId ?? '', instance.personId)
       assert.strictEqual(again.state, 'applied')
       assert.strictEqual((yield* tracker.issue('MER-232')).priority?.level, 'urgent')
+      // What can't be asked: no issue, one named twice, an empty comment, or a comment on no issue.
+      assert.include(yield* callTool(access, 'change_issues', { changes: [], at_once: true }), 'Name at least one issue to change.')
+      assert.include(
+        yield* callTool(access, 'change_issues', {
+          changes: [
+            { issue: 'MER-232', priority: 'low' },
+            { issue: 'MER-232', close: true },
+          ],
+          at_once: true,
+        }),
+        'Name each issue once',
+      )
+      assert.include(yield* callTool(access, 'comment_on_issue', { issue: 'MER-232', body: '  ' }), 'Write the comment: it is empty.')
+      assert.include(yield* callTool(access, 'comment_on_issue', { body: 'Fixed.' }), 'Say which issue, by its key or link, as issue.')
+      // Each way a tracker refuses is said in words the person can act on.
+      for (const [reason, said] of [
+        ['not_found', 'Linear doesn’t have it any more, or this account can’t see it.'],
+        ['rate_limited', 'Linear asks Althar to wait before trying again.'],
+        ['rejected', 'The fake update failed (rejected)'],
+        ['unreachable', 'Its answer was lost, so it may have changed on Linear. Applying again is safe.'],
+      ] as const) {
+        tracker.failNext('update', reason)
+        // A priority it hasn't, so there is always something to change.
+        const priority = (yield* tracker.issue('MER-232')).priority?.level === 'low' ? 'high' : 'low'
+        assert.include(yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority }], at_once: true }), said, reason)
+      }
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
