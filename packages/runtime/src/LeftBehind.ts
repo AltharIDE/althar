@@ -15,8 +15,10 @@ import { addItem } from './threads'
  * What a task leaves running once it settles, however it settles: merged
  * (its merge read back, or heard from its host), marked done, abandoned, its
  * commits after a merge left out, a review posted, a round that made nothing
- * new putting it back where it was. Each of them says so here (`settled`),
- * after the settled fact, and everything of the task stops in the background:
+ * new putting it back where it was; and its project removed, for a task that
+ * works in the person's checkout, so it holds that until all of it has
+ * stopped (ADR-086). Each of them says so here (`settled`), after the
+ * settled fact, and everything of the task stops in the background:
  * every agent on its threads (its lead, its steps', its reviewer) once its
  * turn ends, what each left running in the background first, through the
  * agent, then the task's runs, and last whatever still carries the task in
@@ -82,8 +84,8 @@ export class LeftBehind extends Context.Service<
   {
     /**
      * The task settled, its settled fact written or about to be in the
-     * caller's transaction: everything of it stops, in the background, once
-     * that is written. Never fails, and never waits.
+     * caller's transaction, or its project removed: everything of it stops,
+     * in the background, once that is written. Never fails, and never waits.
      */
     settled(taskId: string): Effect.Effect<void>
     /** Stops what settled tasks and removed projects left running that Althar lost track of, and agents left idle on settled tasks. */
@@ -111,14 +113,18 @@ export class LeftBehind extends Context.Service<
       // Tasks being stopped now: one said settled twice is stopped once.
       const stopping = new Set<string>()
 
-      /** The task's project and its own thread, where it is settled now; undefined where it isn't, as reopened since. */
+      /**
+       * The task's project and its own thread, where it is settled now or its
+       * project removed; undefined where it isn't, as reopened since.
+       */
       const settledNow = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; threadId: string | null }>`
-            SELECT k.project_id,
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string | null; removed: number }>`
+            SELECT k.project_id, p.archived_at IS NOT NULL AS removed,
               (SELECT t.id FROM threads t WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY t.created_at, t.rowid LIMIT 1) AS thread_id
-            FROM tasks k WHERE k.id = ${taskId} AND k.state IN ('done', 'abandoned')`
+            FROM tasks k JOIN projects p ON p.id = k.project_id
+            WHERE k.id = ${taskId} AND (k.state IN ('done', 'abandoned') OR p.archived_at IS NOT NULL)`
           return task
         })
 
@@ -162,8 +168,9 @@ export class LeftBehind extends Context.Service<
         Effect.gen(function* () {
           if (Option.isNone(yield* sessions.running(threadId))) return []
           yield* turnEnds(threadId)
-          // Opened again while its turn ended, or written to already, as by the person: its agent stays.
-          if ((yield* settledNow(taskId)) === undefined || (yield* waitingOn(threadId))) return []
+          // Opened again while its turn ended, or written to already, as by the person: its agent stays. Not in a removed project.
+          const task = yield* settledNow(taskId)
+          if (task === undefined || (task.removed === 0 && (yield* waitingOn(threadId)))) return []
           const running = yield* sessions.running(threadId)
           if (Option.isNone(running)) return []
           const stuck: Array<string> = []
@@ -181,7 +188,7 @@ export class LeftBehind extends Context.Service<
           // Stopping it stops its process group, with whatever of it is left.
           yield* sessions.stop(threadId).pipe(Effect.ignore)
           // Written to as it stopped: what was said starts it again, as it would have found no agent.
-          if (yield* waitingOn(threadId)) yield* sessions.startLast(threadId).pipe(Effect.ignore)
+          if (task.removed === 0 && (yield* waitingOn(threadId))) yield* sessions.startLast(threadId).pipe(Effect.ignore)
           return stuck
         })
 
@@ -200,7 +207,8 @@ export class LeftBehind extends Context.Service<
           const outlived = (yield* settledNow(taskId)) === undefined ? [] : yield* stopMarked((one) => Effect.succeed(one === work))
           if (stuck.length === 0 && outlived.length === 0) return
           yield* Effect.logWarning('A settled task left something running that wouldn’t stop', { taskId, stuck, outlived })
-          if (task.threadId === null) return
+          // A removed project's thread is seen by no one.
+          if (task.threadId === null || task.removed === 1) return
           const what = [...stuck, ...(outlived.length === 0 ? [] : [outlived.length === 1 ? 'a process' : `${outlived.length} processes`])]
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',

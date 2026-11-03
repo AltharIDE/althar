@@ -733,15 +733,17 @@ export const handlers = Api.toLayer(
           api(
             Effect.gen(function* () {
               const said = yield* envelope('project.remove', { projectId }, commandId)
+              // A checkout its tasks hold stays theirs until all of them has stopped, counted from before it is removed; then it goes back (ADR-086).
+              const local = yield* localTasksIn(projectId).pipe(Effect.provideContext(folderStore))
               const removing = Effect.gen(function* () {
                 const threads = yield* projects.remove(projectId, said.commandId)
                 // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
                 yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
                 // And what it runs stops, with no project left to stop it from.
                 yield* launches.stopAll(projectId)
+                // What its Local tasks' agents left running in their checkouts, as a server outside their group, stops as a settled task's does.
+                yield* Effect.forEach(local, (taskId) => leftBehind.settled(taskId), { discard: true })
               })
-              // A checkout its tasks hold stays theirs until all that has stopped, counted from before it is removed; then it goes back (ADR-086).
-              const local = yield* localTasksIn(projectId).pipe(Effect.provideContext(folderStore))
               yield* local.reduce((inner, taskId) => leftBehind.stoppingWhile(taskId, inner), removing)
               if (local.length > 0) yield* runs.checkoutsMoved
             }),

@@ -71,7 +71,9 @@
   - **Removing a project gives its checkouts back the same way.** Its tasks
     hold them, against the same folder added again too, while removing it
     stops their agents and what they ran, counted as stopping from before it
-    is removed. Then each goes back where it is clean. One with uncommitted
+    is removed, and while LeftBehind stops what their agents left running
+    there, as a server outside their group, as it does a settled task's.
+    Then each goes back where it is clean. One with uncommitted
     changes is let go as it is, as there is no thread left to say so in: the
     next task that wants it asks the person about them.
   - **A quick task in the checkout has its branch from the start,** made
