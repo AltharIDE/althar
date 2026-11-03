@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, runButtonText } from '@althar/ui'
+import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText } from '@althar/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
@@ -307,8 +307,18 @@ const RUNS = [
   { name: 'storybook', command: 'pnpm storybook' },
 ] as const
 
+/** The Run button's words as 0.3.0 said them: the picture is of that release, not of Run now. */
+const RUN_THEN = {
+  run: (label: string) => `Run ${label}`,
+  label: 'What it runs',
+  resting: 'Not running',
+  add: 'Add something to run…',
+  edit: 'Edit the list…',
+  note: 'Checked ones are running. Pick one to start or stop it.',
+}
+
 function Run() {
-  const t = runButtonText
+  const t = RUN_THEN
   return (
     <Frame
       label="Run, split: a press runs web, and its list starts or stops each thing the project runs: web and the API running, the worker and Storybook not"

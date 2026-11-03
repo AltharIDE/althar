@@ -1,7 +1,7 @@
 import type { MessageSender } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
-import { type CommandEnvelope, type ProjectId } from '@althar/domain'
+import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -43,7 +43,8 @@ import {
 import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
-import type { Policies } from './Policies'
+import { Policies, worksInOf } from './Policies'
+import { localTakenFor, worksLocal } from './local'
 import { Projects } from './Projects'
 import { ReviewRefused, Reviews } from './Reviews'
 import { findTasks, foundWords } from './Search'
@@ -118,6 +119,11 @@ type Store =
   | Automations
   | RuntimeConfig
 
+/* Where a task works, as the coordinator says it (ADR-091): Local, in the person's own checkout, or a worktree; and why. */
+const Where = {
+  works_in: Schema.optional(Schema.Literals(['local', 'worktree'])),
+  works_in_why: Schema.optional(Schema.String),
+}
 const Drafted = Schema.Struct({
   title: Schema.String,
   description: Schema.optional(Schema.String),
@@ -125,6 +131,7 @@ const Drafted = Schema.Struct({
   /** It does only part of its issue: its merge comments on the issue rather than closing it. */
   part_of: Schema.optional(Schema.Boolean),
   repositories: Schema.optional(Schema.Array(Schema.String)),
+  ...Where,
 })
 /* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-052). */
 const DraftedTask = Schema.Struct({ ...Drafted.fields, pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])) })
@@ -167,6 +174,7 @@ const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   review: Schema.optional(Schema.NullOr(StepPick)),
+  ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
 const Started = Schema.Struct({
@@ -174,6 +182,7 @@ const Started = Schema.Struct({
   description: Schema.optional(Schema.String),
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   repositories: Schema.optional(Schema.Array(Schema.String)),
+  ...Where,
 })
 /* A pull request to review, by its link or number, and the model that reviews it. */
 const ToReview = Schema.Struct({
@@ -560,13 +569,30 @@ export class Coordinator extends Context.Service<
           return `Dropped ${id}.`
         })
 
+      /** Where a task works, as the coordinator said it, else as the project starts its tasks (ADR-091). */
+      const worksInFor = (projectId: string, asked: 'local' | 'worktree' | undefined) =>
+        Effect.gen(function* () {
+          if (asked !== undefined) return asked === 'local' ? ('checkout' as const) : ('worktree' as const)
+          return worksInOf((yield* (yield* Policies).current(projectId as ProjectId)).rules)
+        })
+
+      /** What a task planned Local is told of its checkout: who works there now, which it waits for. */
+      const localLine = (projectId: string, taskId: string, worksIn: WorksIn) =>
+        Effect.gen(function* () {
+          if (worksIn !== 'checkout') return ''
+          const taken = yield* localTakenFor(taskId)
+          return taken === null
+            ? ' It works Local, in the person’s checkout.'
+            : ` It works Local, so it waits for ${taken.title}, which works there now; with works_in: worktree it would start beside it.`
+        })
+
       /**
        * Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before.
        * `plain`, for one started with no plan: its worktrees have no branch until its lead changes the repository.
        */
       const drafting = (
         access: ToolAccess,
-        { title, description, issue: from, part_of: partOf, repositories }: typeof Drafted.Type,
+        { title, description, issue: from, part_of: partOf, repositories, works_in: asked }: typeof Drafted.Type,
         plain = false,
       ) =>
         Effect.gen(function* () {
@@ -612,6 +638,8 @@ export class Coordinator extends Context.Service<
               // Sent with no words, its images and files are still what they asked for.
               ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
+              // Where it works: as the coordinator said, else the project's default (ADR-091).
+              worksIn: yield* worksInFor(access.projectId, asked),
             })
             .pipe(
               // A project of several repositories needs to hear which the task changes: said so, with the ones it has.
@@ -711,6 +739,7 @@ export class Coordinator extends Context.Service<
           const { created } = yield* drafting(access, drafted, true)
           // Called again, unsure the first worked, it doesn't start the same task twice.
           if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
+          const worksIn = yield* worksInFor(access.projectId, drafted.works_in)
           const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: created.taskId,
@@ -721,8 +750,16 @@ export class Coordinator extends Context.Service<
             held: true,
             // It said nothing goes outside the project when it is done: nor does it once its lead writes and it has a branch.
             here: true,
+            worksIn,
+            ...(drafted.works_in_why === undefined ? {} : { worksInWhy: drafted.works_in_why }),
           })
           const started = yield* plans.start(planId, instance.coordinatorId)
+          if (started === 'waiting' && worksIn === 'checkout') {
+            const taken = yield* localTakenFor(created.taskId)
+            if (taken !== null)
+              return `Started ${created.slug} Local, but it waits for ${taken.title}, which works in the person's checkout now. Its lead starts by itself once that is settled. Say so in a sentence.`
+            return `Started ${created.slug} Local, but Althar asks the person about their checkout first, as its card shows. Say so in a sentence.`
+          }
           if (started === 'waiting') {
             const { busy: atWork, atOnce } = yield* busy.now
             return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
@@ -1112,6 +1149,9 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          // Where it works: as said now, else as it was drafted, else the project's default (ADR-091).
+          const drafted = (yield* worksLocal(task.id)) ? 'local' : undefined
+          const worksIn = yield* worksInFor(access.projectId, proposed.works_in ?? drafted)
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
@@ -1122,10 +1162,13 @@ export class Coordinator extends Context.Service<
             reason: proposed.lead.reason ?? null,
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
+            worksIn,
+            ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
           })
+          const where = yield* localLine(access.projectId, task.id, worksIn)
           if (held !== undefined)
-            return `Changed ${task.slug}'s plan. It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
-          return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
+            return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
+          return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
       const message = (access: ToolAccess, input: unknown) =>
@@ -1611,6 +1654,16 @@ export class Coordinator extends Context.Service<
                 description:
                   "The project's repositories the task changes, by name. Needed only in a project of several; the lead can still read the others.",
               },
+              works_in: {
+                type: 'string',
+                enum: ['local', 'worktree'],
+                description:
+                  "Where it works. local: in the person's own checkout, with their builds, simulators and running services, one task at a time and beside their own edits. worktree: a folder of its own, side by side with other tasks, built from cold. The project's default without it; while another task works Local, plan worktree and say why, or local to wait for it.",
+              },
+              works_in_why: {
+                type: 'string',
+                description: "Why, in a few words, where it isn't the project's default: shown on its card.",
+              },
             },
             required: ['title'],
           },
@@ -1750,6 +1803,16 @@ export class Coordinator extends Context.Service<
                 },
                 required: ['model'],
               },
+              works_in: {
+                type: 'string',
+                enum: ['local', 'worktree'],
+                description:
+                  "Where it works. local: in the person's own checkout, with their builds, simulators and running services, one task at a time and beside their own edits. worktree: a folder of its own, side by side with other tasks, built from cold. The project's default without it; while another task works Local, plan worktree and say why, or local to wait for it.",
+              },
+              works_in_why: {
+                type: 'string',
+                description: "Why, in a few words, where it isn't the project's default: shown on its card.",
+              },
             },
             required: ['task', 'lead'],
           },
@@ -1772,6 +1835,16 @@ export class Coordinator extends Context.Service<
                 type: 'array',
                 items: { type: 'string' },
                 description: "The project's repositories it works in, by name. Needed only in a project of several.",
+              },
+              works_in: {
+                type: 'string',
+                enum: ['local', 'worktree'],
+                description:
+                  "Where it works. local: in the person's own checkout, with their builds, simulators and running services, one task at a time and beside their own edits. worktree: a folder of its own, side by side with other tasks, built from cold. The project's default without it; while another task works Local, plan worktree and say why, or local to wait for it.",
+              },
+              works_in_why: {
+                type: 'string',
+                description: "Why, in a few words, where it isn't the project's default: shown on its card.",
               },
             },
             required: ['title', 'lead'],

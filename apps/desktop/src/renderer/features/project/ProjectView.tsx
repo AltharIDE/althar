@@ -16,7 +16,6 @@ import {
   ThreadShellProvider,
   ThreadSkeleton,
   ProjectHeader,
-  Running,
   keys,
   modKey,
 } from '@althar/ui'
@@ -34,7 +33,6 @@ import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { usualLead } from '../automations/lead'
-import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
@@ -264,7 +262,7 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
-  // Every run in the project, the tasks' too, each saying where, over the composer.
+  // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
   const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
@@ -302,7 +300,7 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
+    onChange: (planId, steps, end, worksIn) => void model.changePlan(planId, steps, end, worksIn),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
@@ -409,25 +407,7 @@ export function ProjectView({
             </>
           ) : null
         }
-        above={
-          (offer.offering !== null || launches.length > 0) && (
-            <>
-              <ForkOffer offer={offer} />
-              {launches.length > 0 && (
-                <Running
-                  processes={runningOf(launches, now, { where: true })}
-                  onStop={(id) => void model.stopLaunch(id)}
-                  onDismiss={(id) => void model.clearLaunch(id)}
-                  // Where it answers opens in the person's browser.
-                  onOpenUrl={(id) => {
-                    const url = launches.find((launch) => launch.id === id)?.url
-                    if (url != null) window.open(url, '_blank')
-                  }}
-                />
-              )}
-            </>
-          )
-        }
+        above={offer.offering !== null && <ForkOffer offer={offer} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}
@@ -513,7 +493,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, on its default branch (ADR-044).
+      // What the project runs, with no agent, where it is picked to (ADR-090).
       {...(coordinator === null
         ? {}
         : {
@@ -522,12 +502,19 @@ export function ProjectView({
                 projectId={projectId}
                 project={kept.name ?? name}
                 taskId={null}
+                // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
+                tasks={
+                  board.board?.tasks
+                    .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
+                    .map((task) => ({ id: task.taskId, title: task.title })) ?? null
+                }
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}
-                onRun={(id) => void model.runProject(null, id)}
+                onRun={(id, taskId) => void model.runProject(taskId, id)}
                 onStop={(id) => void model.stopLaunch(id)}
-                onRunBranch={model.runBranch}
+                onClear={(id) => void model.clearLaunch(id)}
+                onRunRef={model.runRef}
               />
             ),
           })}

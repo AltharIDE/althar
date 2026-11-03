@@ -1263,7 +1263,7 @@ export class Launches extends Context.Service<
               : `${ended}. Its last lines, stdout and stderr:\n\n${last}\n\n${after.quiet}`
           }
           if (launch?.url != null) return `${running}, at ${launch.url}. ${after.answering}`
-          return `${running}. It hasn't said where it answers yet; the person sees it in the Running pill, with its address once it says, and stops it there.`
+          return `${running}. It hasn't said where it answers yet; the person sees it in Run’s list, with its address once it says, and stops it there.`
         })
 
       const runTool: Tool = {
@@ -1311,7 +1311,7 @@ export class Launches extends Context.Service<
                   task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`,
                   {
                     answering:
-                      "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from the Running pill too.",
+                      "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from Run’s list too.",
                     quiet:
                       'Tell the person why, in a sentence; if how it runs is wrong, keep how with set_run_command or keep_run and run it again.',
                   },
@@ -1324,14 +1324,14 @@ export class Launches extends Context.Service<
       /*
        * A lead runs the project in its own worktree, as the coordinator runs a
        * task's: the same run, with its card in the task's thread and in the
-       * Running pill, which the person opens and stops as any other. It stops
+       * task's Run list, which the person opens and stops as any other. It stops
        * only its task's runs.
        */
       const LeadAsked = Schema.Struct({ run: Schema.optional(Schema.String), repository: Schema.optional(Schema.String) })
       const leadRunTool: Tool = {
         name: 'run_project',
         description:
-          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in the Running pill over the composer, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
+          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in Run’s list, in the task’s bar or on the project’s front, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
         input: {
           type: 'object',
           properties: {
@@ -1365,7 +1365,7 @@ export class Launches extends Context.Service<
       const stopTool: Tool = {
         name: 'stop_project',
         description:
-          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from the Running pill. What runs from the default branch, or another task's worktree, isn't yours to stop.",
+          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from Run’s list. What runs from the default branch, or another task's worktree, isn't yours to stop.",
         input: { type: 'object', properties: { run: { type: 'string' } } },
         call: (input, access) =>
           said(

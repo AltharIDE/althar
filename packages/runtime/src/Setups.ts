@@ -484,7 +484,7 @@ export class Setups extends Context.Service<
                   JOIN tasks k ON k.id = w.task_id AND (k.state <> 'abandoned' OR w.cleaned_at IS NOT NULL)
                   JOIN projects p ON p.id = w.project_id AND p.archived_at IS NULL
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL`
+                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL AND w.setup IS NULL`
               if (unset !== undefined) yield* setUp(unset)
             }),
           ),
@@ -496,7 +496,7 @@ export class Setups extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL
+              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL AND w.setup IS NULL
               ORDER BY b.created_at, b.rowid`
             // Each in a fiber of Althar's own, side by side: a lead that stops waiting doesn't stop its worktree's setup.
             const fibers = yield* Effect.forEach(unset, (workspace) => Effect.forkIn(settle(workspace.id), setupsScope))
@@ -512,7 +512,7 @@ export class Setups extends Context.Service<
               SELECT b.display_name AS name, w.setup, b.recorded_setup AS recorded,
                 (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
               FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write'
+              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL
                 AND w.setup IS NOT NULL
               ORDER BY b.created_at, b.rowid`
             if (rows.length === 0) return null
@@ -541,7 +541,7 @@ export class Setups extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL
             ORDER BY b.created_at, b.rowid`
           if (named === undefined) return all
           const wanted = named.trim().toLowerCase()

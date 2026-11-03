@@ -3,7 +3,7 @@ import type { MessageSender } from '@althar/contracts'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
+import { type CommandEnvelope, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
   type AgentConnection,
@@ -64,7 +64,7 @@ import { Limits, type PlanOnly } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
-import { Policies } from './Policies'
+import { Policies, worksInOf } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
@@ -160,6 +160,8 @@ interface TaskRepository {
   readonly defaultBranch: string
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   readonly within: string | null
+  /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-091); 0 for a worktree. */
+  readonly local: number
 }
 
 /**
@@ -257,6 +259,18 @@ const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readon
   if (first === undefined) return ''
   return repositories.length === 1 ? join(first.worktree, first.within ?? '') : dirname(first.worktree)
 }
+
+/**
+ * What a Local task's lead is told of its folder (ADR-091): the person's
+ * own checkout, which they may edit while it works, so it commits only its
+ * own files and never moves the checkout or throws anything there away.
+ */
+export const localBrief = (several: boolean) =>
+  [
+    `This task works Local: ${several ? 'each folder is' : 'the folder is'} the person's own checkout, where they work, with their builds, simulators and services, and they may edit there while you do.`,
+    'Commit only the files you changed for this task, by name, never with `git add -A`, `git add .` or `git commit -a`; leave anything else changed there as it is, uncommitted.',
+    "Never switch branch, stash, reset, restore or clean there: Althar checked out this task's branch for it, and puts the checkout back on the branch it was on once the task is settled.",
+  ].join(' ')
 
 /** What the person asked for, in their words, for a brief: where it says more than the task's title and description. */
 const askedFor = (thread: { readonly title: string; readonly description: string; readonly request: string | null }) =>
@@ -1129,7 +1143,8 @@ export class Sessions extends Context.Service<
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
-              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within,
+              w.kind IS NOT NULL AS local
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -2167,6 +2182,8 @@ export class Sessions extends Context.Service<
                     context: {
                       worktree: thread.cwd,
                       worktrees: thread.repositories.map((repository) => repository.worktree),
+                      // Local, the person's own checkouts: what isn't committed there is theirs too (ADR-091).
+                      shared: thread.repositories.filter((repository) => repository.local === 1).map((repository) => repository.worktree),
                       defaultBranch: thread.defaultBranch,
                       // A fork's task bound for the repository it came from has that repository's default too.
                       defaultBranches: thread.repositories.flatMap((repository) => [
@@ -2989,14 +3006,17 @@ export class Sessions extends Context.Service<
             thread.repositories.length === 1 && first !== undefined
               ? `its scratch folder, ${scratchOf(first.worktree)}`
               : `each worktree's scratch folder, .althar/scratch`
+          // Local, its folders are the person's own checkouts (ADR-091).
+          const local = thread.repositories.some((repository) => repository.local === 1)
+          const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
           return [
             why.kind === 'start'
               ? several
-                ? 'You are working on a task across several repositories, each in a git worktree of its own. Althar keeps its record and answers your permission requests.'
-                : 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
+                ? `You are working on a task across several repositories, each ${local ? "in the person's own checkout of it" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
+                : `You are working on a task ${local ? "in the person's own checkout of its repository" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
               : why.kind === 'handover'
-                ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
-                : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
+                ? `You are carrying on a task an earlier session of yours worked on, in the same ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
+                : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${folders}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...(why.kind === 'start' && standing?.state === 'done'
               ? [
@@ -3010,7 +3030,8 @@ export class Sessions extends Context.Service<
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
-              : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
+              : `The ${local ? 'checkout' : 'worktree'} is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
+            ...(local ? [localBrief(several)] : []),
             ...(others.length === 0
               ? []
               : [
@@ -3083,7 +3104,7 @@ export class Sessions extends Context.Service<
         })
 
       /** The coordinator's role: what it does, where it reads the project's repositories, its tools, and how it picks models for work. */
-      const coordinatorRole = (thread: CoordinatorThread) => {
+      const coordinatorRole = (thread: CoordinatorThread, worksIn: WorksIn) => {
         const repositories = thread.folder.repositories
         return [
           `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which its lead, a model you pick, does in a worktree of its own.`,
@@ -3105,6 +3126,7 @@ export class Sessions extends Context.Service<
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
             '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+            `- works_in, on draft_task, propose_plan and start_task: where the task works. Local is the person's own checkout, with their builds, simulators and services, one task at a time and beside their own edits; a worktree is a folder of its own, side by side with other tasks, built from cold. This project starts tasks ${worksIn === 'checkout' ? 'Local' : 'in a worktree'} unless you say. When another task works Local, plan the next one in a worktree and say why in works_in_why, unless it needs the person's setup and can wait; the tools say who works Local now.`,
             '- screenshot, to see a page served on this computer, such as what run_project runs or Storybook: Althar draws it headless and gives it back to you as a picture, at a viewport you choose, the whole page or one element.',
             "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
@@ -3148,12 +3170,19 @@ export class Sessions extends Context.Service<
         ]
       }
 
+      /** Where the project starts its tasks (ADR-091); in a worktree where its rules can't be read. */
+      const projectWorksIn = (projectId: ProjectId) =>
+        policies.current(projectId).pipe(
+          Effect.map((policy) => worksInOf(policy.rules)),
+          Effect.orElseSucceed((): WorksIn => 'worktree'),
+        )
+
       /** The coordinator's brief: its role, the project's notes, and the thread so far. */
       const coordinatorBrief = (thread: CoordinatorThread) =>
         Effect.gen(function* () {
           const notes = yield* notesOf(thread.projectId)
           return [
-            ...coordinatorRole(thread),
+            ...coordinatorRole(thread, yield* projectWorksIn(thread.projectId)),
             `Open errands:\n${(yield* errandLines(thread.projectId)).join('\n') || 'None.'}`,
             ...(notes.length === 0 ? [] : [notesSection(notes)]),
             ...(yield* threadSoFar(thread.threadId)),
@@ -3181,7 +3210,8 @@ export class Sessions extends Context.Service<
             modelOf,
             working: (threadId) => threads.get(threadId)?.turnRunning === true,
           })
-          return { text: [...coordinatorRole(thread), ...record.sections].join('\n\n'), open: record.open }
+          const worksIn = yield* projectWorksIn(thread.projectId)
+          return { text: [...coordinatorRole(thread, worksIn), ...record.sections].join('\n\n'), open: record.open }
         })
 
       /**
