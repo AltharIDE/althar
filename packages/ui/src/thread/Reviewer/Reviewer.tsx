@@ -44,8 +44,12 @@ export type ReviewerProps = RootProps<
   }
 >
 
-/** A file's name and line, without its folders: `Runs.ts:770`. */
-const shortAt = (at: string) => at.slice(at.lastIndexOf('/') + 1)
+/** A file's name without its folders, and its line: `Runs.ts`, `:770`. */
+const shortAt = (at: string) => {
+  const name = at.slice(at.lastIndexOf('/') + 1)
+  const line = /:\d+$/.exec(name)?.[0] ?? ''
+  return { name: name.slice(0, name.length - line.length), line }
+}
 
 /**
  * A reviewer in its own voice, in a task's thread: its verdict in a
@@ -69,7 +73,8 @@ export function Reviewer({ verdict, findings, onOpen, text, className, ...rest }
                 <span className={s.head}>{findingHead({ title: finding.title ?? null, claim: finding.claim }).head}</span>
                 {finding.at !== undefined && finding.at !== '' && (
                   <code className={s.short} title={finding.at}>
-                    {shortAt(finding.at)}
+                    <span className={s.name}>{shortAt(finding.at).name}</span>
+                    {shortAt(finding.at).line}
                   </code>
                 )}
               </button>

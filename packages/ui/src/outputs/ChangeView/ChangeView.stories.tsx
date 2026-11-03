@@ -245,6 +245,8 @@ export const Findings: Story = {
     const body = within(canvasElement.ownerDocument.body)
     const list = body.getByRole('navigation', { name: 'Changed files' })
     await expect(body.getByText('6 open')).toBeInTheDocument()
+    // What it changed, not the files it left alone.
+    await expect(body.getByText('7 files')).toBeInTheDocument()
     // Named files first, worst finding first: the file it left alone, then the tests, then the browser's styles.
     const names = within(list)
       .getAllByRole('button')

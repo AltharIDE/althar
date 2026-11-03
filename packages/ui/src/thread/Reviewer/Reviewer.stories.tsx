@@ -83,7 +83,7 @@ export const Lines: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText('Needs changes: 6 findings.')).toBeInTheDocument()
-    await expect(c.getByText('ModelChoice.tsx:143')).toBeInTheDocument()
+    await expect(c.getByTitle('apps/desktop/src/renderer/shared/ModelChoice.tsx:143')).toHaveTextContent('ModelChoice.tsx:143')
     await userEvent.click(c.getByRole('button', { name: /Long names are still cut at 860px/ }))
     await expect(args.onOpen).toHaveBeenCalledWith(2)
   },

@@ -273,7 +273,7 @@ export function ChangeView({
             <Dialog.Title className={s.title}>{t.title}</Dialog.Title>
             <span className={s.branch}>{base ? t.into(branch, base) : branch}</span>
             <span className={s.sum}>
-              {t.files(files.length)}
+              {t.files(files.filter((file) => file.untouched !== true).length)}
               <Delta {...counts(add, del)} />
             </span>
             {findings.length > 0 && <span className={s.sum}>{t.findingsSum(open, fixed, findings.length - open - fixed)}</span>}
