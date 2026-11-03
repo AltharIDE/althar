@@ -2,6 +2,7 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEf
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
+  CheckoutAsk,
   AbandonTask,
   AttachPullRequest,
   ChangeView,
@@ -66,6 +67,8 @@ import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
+import { localText } from '../../shared/local'
+import { LocalPlace } from '../../shared/LocalPlace'
 import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
@@ -196,6 +199,9 @@ export const statusOf = (
   // Held for the connection, it carries on by itself once it is back (ADR-060).
   if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-086).
+  if (snapshot.task.waitsForCheckout != null)
+    return { status: TaskStatus.Queued, state: localText.word, why: localText.waits(snapshot.task.waitsForCheckout) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
   if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
@@ -861,10 +867,13 @@ export function TaskView({
         meter={contextMeter(session, named, model.compact)}
         // Another agent's model hands the task to that agent.
         picker={
-          model.agents.length > 0 &&
-          choice !== null && (
-            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
-          )
+          <>
+            {model.agents.length > 0 && choice !== null && (
+              <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
+            )}
+            {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-086). */}
+            {snapshot.task.local === true && <LocalPlace path={snapshot.task.worktree} />}
+          </>
         }
       />
     </div>
@@ -1148,6 +1157,19 @@ export function TaskView({
               </div>
             )}
             {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
+            {/* Before a Local task takes the person's checkout: its changes not committed, or a branch of theirs (ADR-086). */}
+            {snapshot.attention.map((request) =>
+              request.kind === 'checkout' && request.checkout !== undefined ? (
+                <CheckoutAsk
+                  key={request.id}
+                  repository={request.checkout.repository}
+                  holdup={request.checkout.holdup}
+                  files={request.checkout.files}
+                  branch={request.checkout.branch}
+                  onAnswer={(answer) => void model.answerCheckout(request.id, answer)}
+                />
+              ) : null,
+            )}
             {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
             {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
               <HeldLimit

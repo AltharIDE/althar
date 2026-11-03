@@ -12,4 +12,8 @@ export const localText = {
     wait.why === 'taken' ? `Waits for Local: ${wait.by.title} is there` : `Waits until ${wait.repository}’s changes are committed`,
   /** Its word, as a waiting card says it. */
   word: 'Waits for Local',
+  /** Where it works, beside the lead's model, and in full on pointing. */
+  place: 'Local',
+  inCheckout: 'Works in your checkout',
+  inCheckoutAt: (path: string) => `Works in your checkout, ${path}`,
 }
