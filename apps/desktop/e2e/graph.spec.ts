@@ -12,8 +12,9 @@ import { connectGitHub, launch, openFirstProject, say, shown, toConversation } f
  * A task's Graph face (ADR-054), in a real window with the fake agents and
  * the fake GitHub: a planned task's review finds something, its lead settles
  * it, the review passes and its draft pull request opens; its graph has a
- * lane for each agent and the steps in the order they ran. A card opens its
- * report, a round's marker goes to what started it in the conversation, and
+ * lane for each agent and the steps in the order they ran. The review that
+ * found something opens in the code, its finding under its line, from its
+ * card and from the conversation; one that passed opens its report. A round's marker goes to what started it in the conversation, and
  * a follow-up shows as a second round. A report goes to its place in the
  * conversation, and a permission asked mid-step is answered from its card
  * with the keyboard. The screenshots it takes are
@@ -52,9 +53,30 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-planned.png', animations: 'disabled', scale: 'css' })
 
-    // A card opens its step's report beside it: the reviewer's finding, and the way to it in the conversation.
+    // A review that found something opens in the code: its finding under its line, settled by the lead.
     await graph.getByRole('button', { name: /Review 1/ }).click()
-    const report = page.getByRole('dialog', { name: 'Review 1' })
+    const changes = page.getByRole('dialog', { name: 'Changes' })
+    await expect(changes).toBeVisible()
+    const note = changes.locator('article[aria-current="true"]')
+    await expect(note).toContainText('The heading is wrong.')
+    await expect(note).toContainText('Fixed')
+    await expect(changes.getByText('1 fixed')).toBeVisible()
+    await expect(changes.getByRole('navigation', { name: 'Changed files' }).getByRole('button').first()).toContainText('README.md')
+    await page.screenshot({ path: 'test-results/graph-findings.png', animations: 'disabled', scale: 'css' })
+    await page.keyboard.press('Escape')
+    await expect(changes).toHaveCount(0)
+
+    // In the conversation, the review's finding is a line, opening it there too.
+    await toConversation(page)
+    await page.getByRole('button', { name: /The heading is wrong\./ }).click()
+    await expect(changes.locator('article[aria-current="true"]')).toContainText('The heading is wrong.')
+    await page.screenshot({ path: 'test-results/graph-findings-from-conversation.png', animations: 'disabled', scale: 'css' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
+
+    // A review that passed opens its report beside it, and the way to it in the conversation.
+    await graph.getByRole('button', { name: /Review 2/ }).click()
+    const report = page.getByRole('dialog', { name: 'Review 2' })
     await expect(report).toBeVisible()
     await expect(report.getByRole('button', { name: 'Show in the conversation' })).toBeVisible()
     await page.screenshot({ path: 'test-results/graph-report.png', animations: 'disabled', scale: 'css' })
@@ -63,7 +85,7 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await expect(page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Conversation/ })).toBeChecked()
     const reviewed = page.locator('[data-item]:focus')
     await expect(reviewed).toBeInViewport()
-    await expect(reviewed).toContainText('finding')
+    await expect(reviewed).toContainText('Looks good')
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
 
     // The round's marker goes to what started it: the request the conversation opens with.

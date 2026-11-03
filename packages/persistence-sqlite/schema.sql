@@ -650,7 +650,7 @@ CREATE TABLE findings (
   repeats_finding_id TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), title TEXT,
   CHECK ((state = 'open') = (settled_at IS NULL)),
   FOREIGN KEY (review_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
   FOREIGN KEY (settled_in_attempt_id, project_id) REFERENCES node_attempts (id, project_id),

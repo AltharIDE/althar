@@ -104,6 +104,73 @@ export const hostContract = (subject: HostSubject) =>
     )
   })
 
+export interface MergeSubject {
+  readonly name: string
+  readonly host: CodeHost
+  /** A repository the account can merge into. */
+  readonly path: ReadonlyArray<string>
+  /** Opens a change into the default branch, ready to merge, and gives its number. */
+  readonly ready: Effect.Effect<number, unknown>
+}
+
+/*
+ * Merging, as the coordinator's merge line asks a host (ADR-081): how a
+ * branch merges there, where it is, whether a change has its head, and a
+ * merge only at the head it was given: through the host's queue or train,
+ * with auto-merge, or plainly, and taken out of a queue again. Each host's
+ * fake runs these in CI; a real account's, when the person proves that host.
+ */
+export const mergeContract = (subject: MergeSubject) =>
+  describe(`${subject.name}, merging`, () => {
+    it.live('says how a branch merges, where it is, and whether a change has its head', () =>
+      Effect.gen(function* () {
+        const { host } = subject
+        const repository = yield* host.repository(subject.path)
+        const ways = yield* host.mergeWays(repository, repository.defaultBranch)
+        assert.include([null, 'merge_queue', 'merge_train'], ways.queue)
+        const head = yield* host.branchHead(repository, repository.defaultBranch)
+        assert.isNotEmpty(head)
+        const change = yield* host.change(repository, yield* subject.ready)
+        assert.isTrue(yield* host.contains(repository, change, head), 'a change opened from the default branch has its head')
+      }),
+    )
+
+    it.live('merges only at the head it was given, in the way it says, and takes one out of the queue again', () =>
+      Effect.gen(function* () {
+        const { host } = subject
+        const repository = yield* host.repository(subject.path)
+        const ways = yield* host.mergeWays(repository, repository.defaultBranch)
+        const before = yield* host.branchHead(repository, repository.defaultBranch)
+        const change = yield* host.change(repository, yield* subject.ready)
+        const stale = yield* Effect.flip(host.merge(repository, { ...change, headSha: 'a-head-nobody-saw' }))
+        assert.strictEqual(stale.reason, 'rejected', 'a head that moved is refused')
+        const method = repository.merges.at(-1)
+        if (ways.queue !== null) {
+          const late = yield* Effect.flip(host.enqueue(repository, { ...change, headSha: 'a-head-nobody-saw' }))
+          assert.strictEqual(late.reason, 'rejected', 'queued only at the head it was given')
+          const queued = yield* host.enqueue(repository, change)
+          assert.deepInclude(queued, { state: 'open', queued: true })
+          const out = yield* host.leaveQueue(repository, queued)
+          assert.notStrictEqual(out.queued, true)
+          return
+        }
+        if (ways.autoMerge) {
+          const auto = yield* host.merge(repository, change, { auto: true, ...(method === undefined ? {} : { method }) })
+          assert.deepInclude(auto, { state: 'open', autoMerge: true })
+          assert.isFalse((yield* host.leaveQueue(repository, auto)).autoMerge ?? false)
+        } else assert.strictEqual((yield* Effect.flip(host.merge(repository, change, { auto: true }))).reason, 'rejected')
+        const merged = yield* host.merge(repository, change, method === undefined ? {} : { method })
+        // A merge that takes long lands later: it is done only once a read shows it.
+        if (merged.state === 'merged') {
+          const after = yield* host.branchHead(repository, repository.defaultBranch)
+          assert.notStrictEqual(after, before, 'the target moves on to the merge')
+          const next = yield* host.change(repository, yield* subject.ready)
+          assert.isTrue(yield* host.contains(repository, next, after))
+        } else assert.strictEqual(merged.state, 'open')
+      }),
+    )
+  })
+
 /**
  * What CI and people do on the host around a release, for the release
  * contract: on a fake, its controls; on a real service, a scratch

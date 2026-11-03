@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 
 import { fromOutside } from '../src/model'
 import { makeFakeService } from '../src/testing'
-import { hostContract, releaseContract, trackerContract } from './contract'
+import { hostContract, mergeContract, releaseContract, trackerContract } from './contract'
 
 const fake = makeFakeService({ pushUrl: (path) => `/tmp/fake/${path.join('/')}.git` })
 fake.addRepository(['meridian', 'api'])
@@ -17,6 +17,28 @@ hostContract({
   branch: Effect.sync(() => `althar/contract-${(branches += 1)}`),
 })
 trackerContract({ name: 'The fake', tracker: fake, ref: 'MER-231' })
+
+// Merging on each host's fake, as each merges: GitHub plainly and through its merge queue, GitLab with auto-merge and through
+// its merge trains, Bitbucket Cloud plainly and through its merge queue, and Bitbucket Data Center with auto-merge.
+for (const [name, product, queue] of [
+  ['GitHub', 'github', false],
+  ['GitHub with a merge queue', 'github', true],
+  ['GitLab', 'gitlab', false],
+  ['GitLab with merge trains', 'gitlab', true],
+  ['Bitbucket Cloud', 'bitbucket_cloud', false],
+  ['Bitbucket Cloud with a merge queue', 'bitbucket_cloud', true],
+  ['Bitbucket Data Center', 'bitbucket_dc', false],
+] as const) {
+  const host = makeFakeService({ product })
+  host.addRepository(['meridian', 'api'])
+  if (queue) host.mergeQueue()
+  mergeContract({
+    name: `The fake as ${name}`,
+    host,
+    path: ['meridian', 'api'],
+    ready: Effect.sync(() => host.addPullRequest({ path: ['meridian', 'api'], title: 'Retry refunds', author: 'you' }).number),
+  })
+}
 
 // Releasing, as each host's adapter does it, on a fake of each: never on a real repository, where a tag and a release reach people.
 for (const product of ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const) {

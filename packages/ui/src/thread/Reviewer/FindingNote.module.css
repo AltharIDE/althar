@@ -1,0 +1,113 @@
+/* a finding as a note on the code's paper, under the line it is about */
+.note {
+  max-width: 720px;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--note-line);
+  border-radius: var(--r);
+  background: var(--note-paper);
+  font-family: var(--font);
+  color: var(--t-1);
+  cursor: default;
+}
+/* the one you're on */
+.note[data-current='true'] {
+  border-color: var(--line-3);
+  box-shadow: var(--lift-card);
+}
+/* settled: it steps back, so what's still open stands out */
+.note[data-state='fixed'][data-current='false'],
+.note[data-state='set_aside'][data-current='false'] {
+  border-color: var(--line-2);
+  background: var(--paper);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.weight,
+.heavy {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-3);
+}
+.heavy {
+  color: var(--warm);
+}
+.title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+/* the title of one you're not on goes to it */
+.pick {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.pick:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 3px;
+}
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.note[data-state='set_aside'] .state {
+  color: var(--t-2);
+}
+
+.body,
+.shut {
+  --prose-size: 13px;
+  --prose-lh: 1.55;
+  margin-top: 4px;
+  color: var(--t-2);
+}
+.body :global(*),
+.shut :global(*) {
+  overflow-wrap: anywhere;
+}
+.shut {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.more {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+/* what the lead did about it */
+.answer {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--note-line);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-2);
+}
+.note[data-state='fixed'][data-current='false'] .answer,
+.note[data-state='set_aside'][data-current='false'] .answer {
+  border-top-color: var(--line-2);
+}
+.commit {
+  margin-left: 6px;
+  font: 11.5px/18px var(--mono);
+  color: var(--t-3);
+}

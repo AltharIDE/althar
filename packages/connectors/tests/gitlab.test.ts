@@ -466,6 +466,71 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('turns auto-merge on, in the way asked, and says when it is on', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['PUT', `${PROJECT}/merge_requests/12/merge`, { json: request({ draft: false, merge_when_pipeline_succeeds: true }) }],
+      ])
+      assert.deepInclude(yield* host.merge(repository, change, { auto: true, method: 'merge' }), { state: 'open', autoMerge: true })
+      // Both words, for servers older and newer than auto_merge.
+      assert.deepStrictEqual(sent[0]?.body, { squash: false, sha: 'a4f0330b', auto_merge: true, merge_when_pipeline_succeeds: true })
+    }),
+  )
+
+  it.effect('says how a branch merges: its merge trains where the project has them, auto-merge, and the server', () =>
+    Effect.gen(function* () {
+      const project = { id: 34675721, path_with_namespace: 'meridian/payments/api', web_url: repository.webUrl }
+      const trains = gitlab([
+        ['GET', PROJECT, { json: { ...project, merge_trains_enabled: true } }],
+        ['GET', `${API}/version`, { json: { version: '17.11.2-ee', revision: 'abc' } }],
+      ])
+      assert.deepStrictEqual(yield* trains.host.mergeWays(repository, 'main'), {
+        queue: 'merge_train',
+        autoMerge: true,
+        server: 'GitLab 17.11.2-ee',
+      })
+      // A tier without trains says nothing of them; a server that won't say its version is still read.
+      const plain = gitlab([
+        ['GET', PROJECT, { json: project }],
+        ['GET', `${API}/version`, { status: 403, json: { message: '403 Forbidden' } }],
+      ])
+      assert.deepStrictEqual(yield* plain.host.mergeWays(repository, 'main'), { queue: null, autoMerge: true, server: null })
+    }),
+  )
+
+  it.effect('puts a merge request on its merge train at its head, and takes it off again', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${PROJECT}/merge_trains/merge_requests/12`, { status: 201, json: [{ id: 1 }] }],
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ draft: false, merge_when_pipeline_succeeds: true }) }],
+        ['POST', `${PROJECT}/merge_requests/12/cancel_merge_when_pipeline_succeeds`, { json: request({ draft: false }) }],
+      ])
+      assert.deepInclude(yield* host.enqueue(repository, change), { state: 'open', queued: true, autoMerge: true })
+      assert.deepStrictEqual(sent[0]?.body, { sha: 'a4f0330b', squash: true, auto_merge: true, when_pipeline_succeeds: true })
+      assert.notStrictEqual((yield* host.leaveQueue(repository, change)).autoMerge, true)
+      assert.strictEqual(sent.at(-1)?.url, `${PROJECT}/merge_requests/12/cancel_merge_when_pipeline_succeeds`)
+      // One on no train, nor set to merge, is left as it is.
+      const idle = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request({ draft: false }) }]])
+      yield* idle.host.leaveQueue(repository, change)
+      assert.lengthOf(idle.sent, 1)
+    }),
+  )
+
+  it.effect('reads a branch’s head, and whether a merge request has a commit, where the two meet', () =>
+    Effect.gen(function* () {
+      const base = (id: string) => ({ json: { id, short_id: id.slice(0, 8) } })
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/repository/branches/release%2F1.0`, { json: { name: 'release/1.0', commit: { id: 'tip' } } }],
+        ['GET', /merge_base\?refs\[\]=a4f0330b&refs\[\]=tip$/, base('tip')],
+        ['GET', /merge_base\?refs\[\]=a4f0330b&refs\[\]=newer$/, base('older')],
+      ])
+      assert.strictEqual(yield* host.branchHead(repository, 'release/1.0'), 'tip')
+      assert.isTrue(yield* host.contains(repository, change, 'tip'))
+      assert.isFalse(yield* host.contains(repository, change, 'newer'))
+      assert.lengthOf(sent, 3)
+    }),
+  )
+
   it.effect('says why it can’t merge, in GitLab’s words', () =>
     Effect.gen(function* () {
       const statuses = ['ci_must_pass', 'need_rebase', 'something_new']

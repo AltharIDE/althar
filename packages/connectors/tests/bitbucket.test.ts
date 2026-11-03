@@ -484,6 +484,107 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('merges in the way asked, reads a branch’s head and whether a pull request has it; no auto-merge, and no queue set', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull({ draft: false }) }],
+        ['GET', `${ACE}/refs/branches/master`, { json: { ...master, target: { hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' } } }],
+        ['POST', `${PR}/merge`, { json: pull({ state: 'MERGED' }) }],
+        [
+          'GET',
+          `${ACE}/merge-base/7f9d4e6279c8..1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b`,
+          { json: { hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' } },
+        ],
+        ['GET', `${ACE}/merge-base/7f9d4e6279c8..newer`, { json: { hash: '0000aaaa' } }],
+      ])
+      const seen = yield* host.change(ace, 552)
+      yield* host.merge(ace, { ...seen, headSha: null }, { method: 'squash' })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { merge_strategy: 'squash' })
+      assert.strictEqual(yield* host.branchHead(ace, 'master'), '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b')
+      assert.isTrue(yield* host.contains(ace, seen, '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'))
+      assert.isFalse(yield* host.contains(ace, seen, 'newer'))
+      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: null, autoMerge: false, server: null })
+      assert.strictEqual((yield* Effect.flip(host.merge(ace, seen, { auto: true }))).reason, 'rejected')
+      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /no merge queue/)
+      // In no queue, it is left as it is.
+      assert.isFalse((yield* host.leaveQueue(ace, seen)).queued ?? true)
+      assert.isFalse(sent.some((request) => request.method === 'DELETE'))
+    }),
+  )
+
+  it.effect('reads the merge queue on a branch and whether a pull request is in it, puts it in by its merge, and takes it out', () =>
+    Effect.gen(function* () {
+      let queued = false
+      const QUEUES = `${ACE}/merge-queues`
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull({ draft: false }) }],
+        [
+          'GET',
+          `${QUEUES}?target_branch=master`,
+          {
+            json: {
+              values: [
+                { uuid: '{old}', name: 'Old', state: 'INACTIVE' },
+                { uuid: '{q1}', name: 'Main', state: 'ACTIVE' },
+              ],
+            },
+          },
+        ],
+        [
+          'GET',
+          `${QUEUES}?target_branch=develop`,
+          {
+            json: {
+              values: [
+                { uuid: '{q2}', name: 'Dev', state: 'DRAINING' },
+                { uuid: '{q3}', name: 'Dev', state: 'SUSPENDED' },
+              ],
+            },
+          },
+        ],
+        ['GET', `${QUEUES}?target_branch=hold`, { json: { values: [{ uuid: '{q4}', name: 'Hold', state: 'PAUSED' }] } }],
+        ['GET', `${QUEUES}?target_branch=release`, { status: 403, json: { type: 'error', error: { message: 'Forbidden' } } }],
+        ['GET', `${ACE}/refs/branches/master`, { json: { name: 'master' } }],
+        [
+          'POST',
+          `${PR}/merge`,
+          () => {
+            queued = true
+            return { status: 202, json: { task_id: 't1' } }
+          },
+        ],
+        ['GET', `${QUEUES}/%7Bq1%7D/queue/552`, () => (queued ? { json: { status: 'QUEUED', rank: 1 } } : { status: 404, json: {} })],
+        [
+          'DELETE',
+          `${QUEUES}/%7Bq1%7D/queue/552`,
+          () => {
+            queued = false
+            return { status: 202 }
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: 'merge_queue', autoMerge: false, server: null })
+      // A draining or suspended queue takes none, nor does a workspace that won't say; a paused one takes them and holds landing.
+      assert.strictEqual((yield* host.mergeWays(ace, 'develop')).queue, null)
+      assert.strictEqual((yield* host.mergeWays(ace, 'hold')).queue, 'merge_queue')
+      assert.strictEqual((yield* host.mergeWays(ace, 'release')).queue, null)
+      const seen = yield* host.change(ace, 552, { queue: true })
+      assert.isFalse(seen.queued)
+      assert.isUndefined((yield* host.change(ace, 552)).queued)
+      // At a head it hasn't seen, nothing is sent.
+      assert.deepInclude(yield* Effect.flip(host.enqueue(ace, { ...seen, headSha: 'a-head-nobody-saw' })), { status: 409 })
+      assert.isFalse(sent.some((request) => request.method === 'POST'))
+      assert.deepInclude(yield* host.enqueue(ace, seen), { state: 'open', queued: true })
+      assert.strictEqual(sent.filter((request) => request.method === 'POST').length, 1)
+      assert.isFalse((yield* host.leaveQueue(ace, seen)).queued)
+      assert.strictEqual(sent.filter((request) => request.method === 'DELETE').length, 1)
+      assert.isFalse((yield* host.change(ace, 552, { queue: true })).queued)
+      // Out already, nothing more is asked.
+      yield* host.leaveQueue(ace, seen)
+      assert.strictEqual(sent.filter((request) => request.method === 'DELETE').length, 1)
+    }),
+  )
+
   it.effect('won’t merge a head it hasn’t seen, and says why Bitbucket won’t', () =>
     Effect.gen(function* () {
       const moved = cloud([['GET', PR, { json: pull({ source: { branch: { name: 'x' }, commit: { hash: '0123456789ab' } } }) }]])
@@ -1351,6 +1452,82 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
     }),
   )
+
+  it.effect('turns auto-merge on from 8.15, in the way asked, reads it back, and turns it off', () =>
+    Effect.gen(function* () {
+      let on = false
+      const { host, sent } = center([
+        whoami('jcitizen'),
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/settings/pull-requests`, settings({ id: 'no-ff', enabled: true })],
+        [
+          'POST',
+          `${PULL}/auto-merge`,
+          () => {
+            on = true
+            return { json: { autoMergeEnabled: true } }
+          },
+        ],
+        ['GET', `${PULL}/auto-merge`, () => (on ? { json: { autoMergeEnabled: true } } : { status: 404, json: { errors: [] } })],
+        [
+          'DELETE',
+          `${PULL}/auto-merge`,
+          () => {
+            on = false
+            return { status: 204 }
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.mergeWays(prj, 'master'), {
+        queue: null,
+        autoMerge: true,
+        server: 'Bitbucket Data Center 9.4.2',
+      })
+      const seen = yield* host.change(prj, 101)
+      assert.isFalse((yield* host.change(prj, 101, { queue: true })).autoMerge ?? true)
+      assert.deepInclude(yield* host.merge(prj, seen, { auto: true, method: 'squash' }), { state: 'open', autoMerge: true })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { strategyId: 'squash' })
+      assert.isTrue((yield* host.change(prj, 101, { queue: true })).autoMerge)
+      assert.isFalse((yield* host.leaveQueue(prj, seen)).autoMerge)
+      assert.isTrue(sent.some((request) => request.method === 'DELETE'))
+      // An older server has none: said so, and nothing is asked of it.
+      const older = center([
+        ['GET', `${DC}/application-properties`, { json: { version: '8.9.4', buildNumber: '8009004', displayName: 'Bitbucket' } }],
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/settings/pull-requests`, settings()],
+      ])
+      assert.isFalse((yield* older.host.mergeWays(prj, 'master')).autoMerge)
+      assert.strictEqual((yield* Effect.flip(older.host.merge(prj, seen, { auto: true }))).reason, 'rejected')
+      assert.isFalse(older.sent.some((request) => request.url.endsWith('/auto-merge')))
+    }),
+  )
+
+  it.effect('reads a branch’s head, and whether a pull request has a commit, by the commits between', () =>
+    Effect.gen(function* () {
+      const { host } = center([
+        [
+          'GET',
+          `${MY}/branches?filterText=release%2F1.0&limit=100`,
+          { json: page([ref('release/1.0-rc', 'cafe'), ref('release/1.0', 'beef')]) },
+        ],
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/commits?since=babecafebabecafebabecafebabecafebabecafe&until=beef&limit=1`, { json: page([]) }],
+        ['GET', `${MY}/commits?since=babecafebabecafebabecafebabecafebabecafe&until=newer&limit=1`, { json: page([{ id: 'newer' }]) }],
+      ])
+      assert.strictEqual(yield* host.branchHead(prj, 'release/1.0'), 'beef')
+      const seen = yield* host.change(prj, 101)
+      assert.isTrue(yield* host.contains(prj, seen, 'beef'))
+      assert.isFalse(yield* host.contains(prj, seen, 'newer'))
+      assert.strictEqual((yield* Effect.flip(host.branchHead(prj, 'gone'))).reason, 'not_found')
+    }),
+  )
+
+  it('compares versions part by part', () => {
+    assert.isTrue(dc.atLeast('8.15.0', [8, 15]))
+    assert.isTrue(dc.atLeast('9.0', [8, 15]))
+    assert.isFalse(dc.atLeast('8.9.12', [8, 15]))
+    assert.isFalse(dc.atLeast('eight', [8, 15]))
+  })
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {

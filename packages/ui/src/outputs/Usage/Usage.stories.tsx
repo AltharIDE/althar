@@ -28,6 +28,21 @@ const PER_USE: ReadonlyArray<UsageLine> = [
   { id: 'key', name: 'Claude Code', mark: Brand.ClaudeCode, spent: 21.59, estimated: true, models: ['Claude Opus 5'], tokens: 13_400_000 },
   { id: 'router', name: 'OpenCode', mark: Brand.OpenCode, spent: null, models: ['Qwen3 Coder'], tokens: 2_400_000 },
 ]
+/** A task's lines: Claude Code on its plan, GPT-6 Astra on OpenCode Zen in dollars, and Go with no figure, and why. */
+const BY_PROVIDER: ReadonlyArray<UsageLine> = [
+  { id: 'cc', name: 'Claude Code', mark: Brand.ClaudeCode, took: 0, estimated: true, models: ['Claude Opus 5.5'], tokens: 74_107_422 },
+  { id: 'zen', name: 'OpenCode Zen', mark: Brand.OpenCode, spent: 1.485206, estimated: true, models: ['GPT-6 Astra'], tokens: 965_656 },
+  {
+    id: 'go',
+    name: 'OpenCode Go',
+    mark: Brand.OpenCode,
+    took: null,
+    estimated: true,
+    models: ['GLM-5.3'],
+    tokens: 412_000,
+    why: 'OpenCode Go doesn’t report its usage to Althar.',
+  },
+]
 
 const meta = {
   title: 'Outputs/Usage',
@@ -69,6 +84,24 @@ export const PerUse: Story = {
     await expect(within(canvasElement).getAllByRole('listitem')[1]).toHaveTextContent('—')
   },
 }
+/** An OpenCode account, a line for each provider: Zen's dollars, and where Go's share can't be known, its "—" says why on focus. */
+export const ByProvider: Story = {
+  args: { lines: BY_PROVIDER },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 340, paddingTop: 48 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const lines = within(canvasElement).getAllByRole('listitem')
+    await expect(lines[1]).toHaveTextContent('OpenCode ZenGPT-6 Astra · 966k tokens~$1.49')
+    await userEvent.tab()
+    await expect(within(lines[2]!).getByText('—')).toHaveFocus()
+    await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('OpenCode Go doesn’t report its usage to Althar.')
+  },
+}
 
 /** In Outputs: one row with each figure by its mark, closed until the person opens it. */
 export const Card: StoryObj<typeof UsageCard> = {
@@ -108,4 +141,13 @@ export const CardOpen: StoryObj<typeof UsageCard> = {
     </div>
   ),
   args: { lines: TWO_PLANS, open: true, onOpenChange: fn() },
+}
+/** The task the person asked about: GPT-6 Astra ran on OpenCode Zen, so its line says dollars, beside Claude Code's share. */
+export const CardByProvider: StoryObj<typeof UsageCard> = {
+  render: (args) => (
+    <div style={{ width: 380 }}>
+      <UsageCard {...args} />
+    </div>
+  ),
+  args: { lines: BY_PROVIDER.slice(0, 2), open: true, onOpenChange: fn() },
 }

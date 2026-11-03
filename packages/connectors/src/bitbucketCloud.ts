@@ -18,6 +18,7 @@ import type {
   CodeHost,
   Comment,
   ListedChange,
+  MergeHow,
   MergeMethod,
   Person,
   Repository,
@@ -165,6 +166,12 @@ const ActivityAnswer = Schema.Struct({
   comment: Schema.optional(Schema.Struct({ created_on: Schema.String })),
 })
 type ActivityAnswer = typeof ActivityAnswer.Type
+
+/** A merge queue set on a branch, and whether it takes pull requests: ACTIVE and PAUSED (which holds landing) do; DRAINING and SUSPENDED refuse them, INACTIVE needs none. */
+const SHUT = new Set(['INACTIVE', 'DRAINING', 'SUSPENDED'])
+const MergeQueues = Schema.Struct({ values: Schema.Array(Schema.Struct({ uuid: Schema.String, state: Schema.String })) })
+/** A pull request in a queue, as it stands there: REMOVING once it is being taken out. */
+const Queued = Schema.Struct({ status: Schema.optional(Schema.String) })
 
 /** A file the pull request changes, and by how many lines. */
 const Diffstat = Schema.Struct({ lines_added: Schema.optional(Schema.Number), lines_removed: Schema.optional(Schema.Number) })
@@ -318,6 +325,78 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const pull = (repository: Repository, number: number) => `${repo(repository.path)}/pullrequests/${number}`
   const branchOf = (repository: Repository | ReadonlyArray<string>, name: string) =>
     `${repo('path' in repository ? repository.path : repository)}/refs/branches/${name.split('/').map(encodeURIComponent).join('/')}`
+
+  const noAutoMerge = new ConnectorFailed({ product, reason: 'rejected', message: 'Bitbucket Cloud has no auto-merge' })
+  const noQueue = new ConnectorFailed({ product, reason: 'rejected', message: 'The branch has no merge queue taking pull requests' })
+  /**
+   * The merge queue taking pull requests on a branch, by its id: none where it
+   * has none, or the workspace hasn't the feature or won't say (as GitHub's).
+   */
+  const queueOn = (repository: Repository, branch: string) =>
+    http.json(MergeQueues, 'GET', `${repo(repository.path)}/merge-queues?target_branch=${encodeURIComponent(branch)}`).pipe(
+      Effect.map((answer) => answer.values.find((queue) => !SHUT.has(queue.state))?.uuid ?? null),
+      Effect.catchIf(
+        (error) => error.reason === 'not_found' || error.reason === 'forbidden',
+        () => Effect.succeed(null),
+      ),
+    )
+  /**
+   * Bitbucket's merge, at the head Althar last saw: it takes no head, so the
+   * head is checked first. On a branch whose queue takes pull requests, it
+   * puts it in instead.
+   */
+  const postMerge = (repository: Repository, change: ChangeRequest, how?: MergeHow) =>
+    Effect.gen(function* () {
+      const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+      const head = now.source.commit?.hash ?? null
+      // Bitbucket merges whatever the branch holds, so the head Althar last saw is checked first; a push since is a 409, as GitHub's.
+      if (change.headSha !== null && head !== null && !sameCommit(head, change.headSha))
+        return yield* new ConnectorFailed({
+          product,
+          reason: 'rejected',
+          status: 409,
+          message: `The pull request moved on to ${head} since ${change.headSha.slice(0, 12)} was seen`,
+        })
+      const branch = yield* http.cached(Strategies, branchOf(repository, now.destination.branch.name))
+      const allowed = branch.merge_strategies ?? []
+      // The way asked for, where the branch allows one of its strategies; else the one the repository chose.
+      const strategy =
+        how?.method === undefined
+          ? strategyOf(allowed, branch.default_merge_strategy)
+          : (STRATEGIES.find(([one, method]) => method === how.method && allowed.includes(one))?.[0] ??
+            strategyOf(allowed, branch.default_merge_strategy))
+      // Refused, Bitbucket says why: a merge check, a conflict, a draft. One that takes long answers 202 and lands later.
+      yield* http.json(
+        Schema.Unknown,
+        'POST',
+        `${pull(repository, change.number)}/merge`,
+        strategy === undefined ? {} : { merge_strategy: strategy },
+      )
+    })
+  const inQueue = (repository: Repository, queue: string, number: number) =>
+    http.json(Queued, 'GET', `${repo(repository.path)}/merge-queues/${encodeURIComponent(queue)}/queue/${number}`).pipe(
+      Effect.map((answer) => answer.status !== 'REMOVING'),
+      Effect.catchIf(
+        (error) => error.reason === 'not_found',
+        () => Effect.succeed(false),
+      ),
+    )
+
+  /** A pull request as read, with its size, file by file. */
+  const readChange = (repository: Repository, number: number, answer: PullAnswer) =>
+    Effect.gen(function* () {
+      // Its size, file by file; a diff Bitbucket won't count in time leaves it unsaid, not the pull request unread.
+      const files = yield* all(Diffstat, `${pull(repository, number)}/diffstat`).pipe(Effect.orElseSucceed(() => null))
+      const size =
+        files === null
+          ? null
+          : {
+              additions: files.reduce((sum, file) => sum + (file.lines_added ?? 0), 0),
+              deletions: files.reduce((sum, file) => sum + (file.lines_removed ?? 0), 0),
+              changedFiles: files.length,
+            }
+      return changeOf(repository, answer, size)
+    })
 
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(http.json(User, 'GET', `${api}/user`), (user) => {
     const { id, login, name } = personOf(user)
@@ -513,20 +592,13 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }),
     listChanges,
     allowance: () => http.allowance(),
-    change: (repository, number) =>
+    change: (repository, number, ask) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
-        // Its size, file by file; a diff Bitbucket won't count in time leaves it unsaid, not the pull request unread.
-        const files = yield* all(Diffstat, `${pull(repository, number)}/diffstat`).pipe(Effect.orElseSucceed(() => null))
-        const size =
-          files === null
-            ? null
-            : {
-                additions: files.reduce((sum, file) => sum + (file.lines_added ?? 0), 0),
-                deletions: files.reduce((sum, file) => sum + (file.lines_removed ?? 0), 0),
-                changedFiles: files.length,
-              }
-        return changeOf(repository, answer, size)
+        const read = yield* readChange(repository, number, answer)
+        if (ask?.queue !== true || read.state !== 'open') return read
+        const queue = yield* queueOn(repository, read.target)
+        return { ...read, queued: queue === null ? false : yield* inQueue(repository, queue, number) }
       }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
@@ -541,29 +613,57 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         })
         return changeOf(repository, ready)
       }),
-    merge: (repository, change) =>
+    merge: (repository, change, how) =>
       Effect.gen(function* () {
-        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
-        const head = now.source.commit?.hash ?? null
-        // Bitbucket merges whatever the branch holds, so the head Althar last saw is checked first; a push since is a 409, as GitHub's.
-        if (change.headSha !== null && head !== null && !sameCommit(head, change.headSha))
-          return yield* new ConnectorFailed({
-            product,
-            reason: 'rejected',
-            status: 409,
-            message: `The pull request moved on to ${head} since ${change.headSha.slice(0, 12)} was seen`,
-          })
-        const branch = yield* http.cached(Strategies, branchOf(repository, now.destination.branch.name))
-        const strategy = strategyOf(branch.merge_strategies ?? [], branch.default_merge_strategy)
-        // Refused, Bitbucket says why: a merge check, a conflict, a draft. One that takes long answers 202 and lands later.
-        yield* http.json(
-          Schema.Unknown,
-          'POST',
-          `${pull(repository, change.number)}/merge`,
-          strategy === undefined ? {} : { merge_strategy: strategy },
-        )
+        if (how?.auto === true) return yield* noAutoMerge
+        yield* postMerge(repository, change, how)
         return changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
       }),
+    // Bitbucket Cloud has no auto-merge. Its merge queue is read and left through its API, and entered by its merge.
+    mergeWays: (repository, target) =>
+      Effect.map(queueOn(repository, target), (queue) => ({
+        queue: queue === null ? null : ('merge_queue' as const),
+        autoMerge: false,
+        server: null,
+      })),
+    // Its merge, on a branch whose queue takes pull requests, puts it in instead (a 202); again, on one in it, changes nothing.
+    enqueue: (repository, change, how) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOn(repository, change.target)
+        if (queue === null) return yield* noQueue
+        yield* postMerge(repository, change, how)
+        const read = changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
+        return read.state === 'open' ? { ...read, queued: yield* inQueue(repository, queue, change.number) } : read
+      }),
+    // Taken out as Bitbucket does it, a moment later: one in no queue is left as it is.
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOn(repository, change.target)
+        if (queue === null || !(yield* inQueue(repository, queue, change.number))) return { ...change, queued: false }
+        yield* http.json(
+          Schema.Unknown,
+          'DELETE',
+          `${repo(repository.path)}/merge-queues/${encodeURIComponent(queue)}/queue/${change.number}`,
+        )
+        return { ...change, queued: false }
+      }),
+    branchHead: (repository, branch) =>
+      Effect.map(
+        http.json(Schema.Struct({ target: Schema.Struct({ hash: Schema.String }) }), 'GET', branchOf(repository, branch)),
+        (answer) => answer.target.hash,
+      ),
+    // The commit is in the branch where it is where the two meet.
+    contains: (repository, change, sha) =>
+      change.headSha === null
+        ? Effect.succeed(false)
+        : Effect.map(
+            http.json(
+              Schema.Struct({ hash: Schema.String }),
+              'GET',
+              `${repo(repository.path)}/merge-base/${encodeURIComponent(change.headSha)}..${encodeURIComponent(sha)}`,
+            ),
+            (base) => sameCommit(base.hash, sha),
+          ),
     // Bitbucket's word for closing one unmerged is declining it.
     closeChange: (repository, change) =>
       Effect.gen(function* () {

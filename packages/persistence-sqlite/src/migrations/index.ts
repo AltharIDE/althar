@@ -61,7 +61,8 @@ import { statements as usage } from './0056_usage'
 import { statements as issueFields } from './0057_issue_fields'
 import { statements as followedPulls } from './0058_followed_pulls'
 import { statements as taskAsks } from './0059_task_asks'
-import { statements as skills } from './0060_skills'
+import { statements as findingTitles } from './0060_finding_titles'
+import { statements as skills } from './0061_skills'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -140,7 +141,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0057_issue_fields', statements: issueFields },
   { key: '0058_followed_pulls', statements: followedPulls },
   { key: '0059_task_asks', statements: taskAsks },
-  { key: '0060_skills', statements: skills },
+  { key: '0060_finding_titles', statements: findingTitles },
+  { key: '0061_skills', statements: skills },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
