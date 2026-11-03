@@ -201,6 +201,30 @@ describe('what crosses a lead’s sandbox', () => {
     assert.strictEqual(decideLeaving(command(writes, { dangerouslyDisableSandbox: true }), context('ask')).verdict, 'ask')
   })
 
+  it('is what the project runs outside from the start, asked to or not: Electron can’t start inside a Mac’s sandbox', () => {
+    const outside = ['node scripts/e2e.ts', 'env -i', 'bunx playwright']
+    // The two lines a lead was refused when its end-to-end run died inside on Chromium's Mach port.
+    for (const line of [
+      'node scripts/e2e.ts e2e/zz-evidence.spec.ts e2e/webReach.spec.ts',
+      'git log --oneline -1 && EV=after env -i HOME="$HOME" PATH="/opt/homebrew/bin:/usr/bin:/bin" EV=after node scripts/e2e.ts e2e/zz-evidence.spec.ts 2>&1 | tail -25',
+      'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15',
+    ])
+      assert.strictEqual(
+        decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict,
+        'allow',
+        line,
+      )
+    // Only by how it starts: another script, or one beside it, is still unread.
+    for (const line of ['node scripts/fix.ts', 'node scripts/e2e.tsx', 'node scripts/e2e.ts && python3 tools/fix.py'])
+      assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict, 'deny', line)
+    // And it still meets the project's rules: a push to main asks.
+    assert.strictEqual(
+      decideLeaving(command('node scripts/e2e.ts && git push origin main', { dangerouslyDisableSandbox: true }), context('allow'), outside)
+        .verdict,
+      'ask',
+    )
+  })
+
   it('is counted by the kind that kept it', () => {
     const at = context('ask')
     assert.strictEqual(tallyKindOf(command('git push origin main'), at), 'default-branch')
