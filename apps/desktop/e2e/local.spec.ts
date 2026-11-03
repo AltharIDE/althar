@@ -9,7 +9,7 @@ import { repository } from '../tests/repository'
 import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, still } from './support'
 
 /*
- * A task that works Local, in the person's own checkout (ADR-086), in a real
+ * A task that works Local, in the person's own checkout (ADR-090), in a real
  * window with the fake agent: the project starts tasks Local; a plan says so;
  * started with the person's edit not committed there, it asks first, waits as
  * answered and takes the checkout once it is committed; a second task waits

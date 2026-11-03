@@ -20,7 +20,9 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
+  PlansAndReviews,
   LinkButton,
+  NewProjectDefaults,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -69,6 +71,8 @@ import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
 import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
+import { usePlansAndReviews } from './usePlansAndReviews'
+import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useTaskFolders } from './useTaskFolders'
@@ -117,7 +121,11 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
-      const account = wanted.accounts.find((one) => one.signIn === 'signed_out') ?? wanted.accounts[0]
+      // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
+      const account =
+        wanted.accounts.find((one) => one.signIn === 'signed_out') ??
+        wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
+        wanted.accounts[0]
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
@@ -197,6 +205,10 @@ function SectionBody({
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
+    case 'plans-and-reviews':
+      return <PlansAndReviewsSection />
+    case 'new-projects':
+      return <NewProjectsSection />
     case 'reviews':
       return <ReviewsSection connections={connections} />
     case 'notifications':
@@ -368,6 +380,30 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
       </SettingList>
       <Failed when={failed || atOnce?.failed === true || paused?.failed === true} />
+    </>
+  )
+}
+
+/* ---- plans and reviews ------------------------------------------------------------- */
+
+function PlansAndReviewsSection() {
+  const plansAndReviews = usePlansAndReviews()
+  return (
+    <>
+      {plansAndReviews !== null && <PlansAndReviews value={plansAndReviews.value} onChange={plansAndReviews.set} />}
+      <Failed when={plansAndReviews?.failed === true} />
+    </>
+  )
+}
+
+/* ---- new projects ------------------------------------------------------------------ */
+
+function NewProjectsSection() {
+  const defaults = useNewProjectDefaults()
+  return (
+    <>
+      {defaults !== null && <NewProjectDefaults value={defaults.value} onChange={defaults.set} />}
+      <Failed when={defaults?.failed === true} />
     </>
   )
 }

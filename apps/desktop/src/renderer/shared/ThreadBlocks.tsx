@@ -47,6 +47,7 @@ import type {
   ReviewDraftContent,
   Part,
   PushRequestContent,
+  TaskAskContent,
   QuestionContent,
   RunContent,
   SetupContent,
@@ -414,6 +415,7 @@ export function ThreadBlocks({
   push,
   review,
   automation,
+  taskAsk,
   queued,
   onTryAgain,
   onSignIn,
@@ -454,6 +456,8 @@ export function ThreadBlocks({
   review?: (review: ReviewDraftContent) => ReactNode
   /** Draws an automation's card in the coordinator's thread, by its item, which turning it on, undoing and answering it name. */
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
+  /** Draws the coordinator's card asking to stop, hold, restart or settle a task, by its item, which answering it names. */
+  taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
@@ -537,6 +541,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
       case 'automation':
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
+      case 'task_ask':
+        return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>

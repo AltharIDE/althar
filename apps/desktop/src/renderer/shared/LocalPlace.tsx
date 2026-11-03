@@ -5,7 +5,7 @@ import s from './LocalPlace.module.css'
 
 /**
  * Where a task works, said as Codex says it under its composer: one quiet
- * word beside the lead's model, Local, named in full on pointing (ADR-086).
+ * word beside the lead's model, Local, named in full on pointing (ADR-090).
  * Nothing to open: the folder is the person's own, its branch what their
  * editor shows.
  */

@@ -16,7 +16,10 @@ import { gitRunsOf } from '../src/rules'
 
 const at = guard(realpathSync(mkdtempSync(join(tmpdir(), 'althar-guard-test-'))))
 
-/** A repository on the task's branch, pushed, with the default branch and another branch on its remote. */
+/**
+ * A repository on the task's branch, pushed, with the default branch and another branch on its remote, and a branch of
+ * work that is nowhere else (`feature/unmerged`).
+ */
 const repository = () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-guarded-')))
   const remote = join(home, 'remote.git')
@@ -32,6 +35,9 @@ const repository = () => {
   plain(work, 'push', '-q', 'origin', 'main')
   plain(work, 'branch', 'feature/other')
   plain(work, 'push', '-q', 'origin', 'feature/other')
+  plain(work, 'switch', '-qc', 'feature/unmerged')
+  plain(work, 'commit', '-q', '--allow-empty', '-m', 'Only here')
+  plain(work, 'switch', '-q', 'main')
   plain(work, 'switch', '-qc', 'althar/retry')
   plain(work, 'commit', '-q', '--allow-empty', '-m', 'Retry')
   plain(work, 'push', '-q', 'origin', 'althar/retry')
@@ -88,10 +94,13 @@ describe("a lead's git", () => {
     assert.notStrictEqual(forced.status, 0)
     assert.include(forced.said, "a force push to althar/retry can't be undone")
     // Here too: deleting another branch, or moving it so it loses commits.
-    const deleted = run(work, 'git', 'branch', '-D', 'feature/other')
+    const deleted = run(work, 'git', 'branch', '-D', 'feature/unmerged')
     assert.notStrictEqual(deleted.status, 0)
-    assert.include(deleted.said, "deleting the branch feature/other can't be undone")
-    assert.include(run(work, 'git', 'branch', '--list', 'feature/other').said, 'feature/other')
+    assert.include(deleted.said, "deleting the branch feature/unmerged can't be undone")
+    assert.include(run(work, 'git', 'branch', '--list', 'feature/unmerged').said, 'feature/unmerged')
+    const moved = run(work, 'git', 'branch', '-f', 'feature/unmerged', 'main')
+    assert.notStrictEqual(moved.status, 0)
+    assert.include(moved.said, "moving feature/unmerged so it loses commits can't be undone")
   })
 
   it('stops them from a script, a loop or $(…) as from a plain command', () => {
@@ -113,8 +122,47 @@ describe("a lead's git", () => {
     const { work } = repository()
     assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', 'althar/retry:main').said), 'default-branch')
     assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', '--delete', 'feature/other').said), 'delete-branch')
-    assert.strictEqual(guardStopIn(run(work, 'git', 'branch', '-D', 'feature/other').said), 'delete-branch')
+    assert.strictEqual(guardStopIn(run(work, 'git', 'branch', '-D', 'feature/unmerged').said), 'delete-branch')
     assert.strictEqual(guardStopIn(run(work, 'git', 'push', 'origin', 'althar/retry').said), undefined)
+  })
+
+  it('lets a branch go whose commits are on another, as `git branch -d` does for work that is merged', () => {
+    const { work } = repository()
+    // feature/other's commit is on main and on the remote's feature/other: nothing is lost here.
+    const deleted = run(work, 'git', 'branch', '-d', 'feature/other')
+    assert.strictEqual(deleted.status, 0, deleted.said)
+    assert.strictEqual(run(work, 'git', 'branch', '--list', 'feature/other').said.trim(), '')
+    // Nor moving a branch back to where its commits are kept: feature/unmerged's own commit is first kept on a tag.
+    run(work, 'git', 'tag', 'kept', 'feature/unmerged')
+    assert.strictEqual(run(work, 'git', 'branch', '-f', 'feature/unmerged', 'main').status, 0)
+  })
+
+  it('leaves a repository that isn’t the task’s alone: a scratch one in the temp folder is the lead’s', () => {
+    const task = repository()
+    const scratch = repository()
+    const own = {
+      ...env,
+      ...guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], repositories: [task.work], count: 0, at }),
+    }
+    const ran = (cwd: string, ...args: Array<string>) => {
+      const done = spawnSync('git', args, { cwd, env: own, encoding: 'utf8' })
+      return { status: done.status, said: `${done.stdout}${done.stderr}` }
+    }
+    assert.strictEqual(ran(scratch.work, 'push', '-q', 'origin', 'althar/retry:main').status, 0)
+    assert.strictEqual(ran(scratch.work, 'branch', '-D', 'feature/unmerged').status, 0)
+    // The task's own, from any worktree of it, is guarded as before.
+    const worktree = join(task.home, 'second')
+    ran(task.work, 'worktree', 'add', '-q', '--detach', worktree)
+    for (const cwd of [task.work, worktree]) {
+      const stopped = ran(cwd, 'push', 'origin', 'althar/retry:main')
+      assert.notStrictEqual(stopped.status, 0, cwd)
+      assert.include(stopped.said, 'a push to main, the default branch', cwd)
+    }
+    // A scratch repository pushing to one of the task's remotes is stopped, as the task's own would be.
+    ran(scratch.work, 'remote', 'add', 'task', join(task.home, 'remote.git'))
+    const back = ran(scratch.work, 'push', 'task', 'althar/retry:main')
+    assert.notStrictEqual(back.status, 0)
+    assert.include(back.said, 'a push to main, the default branch')
   })
 
   // No guard on Windows, where Git for Windows' `ps` can't show git's own words (guardHolds).
@@ -131,7 +179,7 @@ describe("a lead's git", () => {
     )
     assert.notStrictEqual(other.status, 0)
     assert.include(other.said, 'deleting feature/other on origin')
-    assert.notStrictEqual(run(work, 'git', 'branch', '-D', 'feature/other').status, 0)
+    assert.notStrictEqual(run(work, 'git', 'branch', '-D', 'feature/unmerged').status, 0)
     // What was allowed goes, once.
     assert.strictEqual(run(work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'the allowed push')
     run(work, 'git', 'commit', '-q', '--allow-empty', '-m', 'Again')

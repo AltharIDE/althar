@@ -272,9 +272,12 @@ export const runtime = (
   more: {
     readonly signedOut?: ReadonlyArray<string>
     readonly agents?: Layer.Layer<Agents>
-    readonly countdown?: Duration.Duration
+    /** A plan's countdown; null leaves it to the person's setting (plansAndReviews.ts). */
+    readonly countdown?: Duration.Duration | null
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    /** How often the merge line is swept by itself; never, with an infinite one, where a test sweeps it. */
+    readonly mergeLineEvery?: Duration.Duration
     /** How long a pull request may show no checks before it counts as having none; none at all unless a test says. */
     readonly checksAppear?: Duration.Duration
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
@@ -324,7 +327,7 @@ export const runtime = (
     /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
     readonly leftFirst?: Duration.Duration
     readonly leftEvery?: Duration.Duration
-    /** How often what waits for a checkout is looked at again (ADR-086): every 100 milliseconds unless a test says. */
+    /** How often what waits for a checkout is looked at again (ADR-090): every 100 milliseconds unless a test says. */
     readonly localEvery?: Duration.Duration
   } = {},
 ) =>
@@ -338,10 +341,11 @@ export const runtime = (
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
-    countdown: more.countdown ?? Duration.millis(300),
+    ...(more.countdown === null ? {} : { countdown: more.countdown ?? Duration.millis(300) }),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
+    ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     publishAgain: more.publishAgain ?? Duration.zero,

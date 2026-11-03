@@ -74,6 +74,55 @@
   text-align: center;
 }
 
+/*
+ * From the left edge of what it is set in: no room of its own round it, a
+ * small mark beside the heading and its line, how far along at the head's
+ * end, and the foot from the left too.
+ */
+.start {
+  gap: 16px;
+  padding: 0;
+}
+.start .top {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: start;
+  column-gap: 12px;
+  row-gap: 2px;
+  text-align: left;
+}
+.start .chipWrap,
+.start .top:not(.stepped) .chipWrap {
+  grid-row: 1 / span 2;
+  grid-column: 1;
+  align-self: start;
+  margin: 1px 0 0;
+}
+.start .title {
+  grid-row: 1;
+  grid-column: 2;
+  font-size: 15px;
+}
+.start .line {
+  grid-row: 2;
+  grid-column: 2;
+  max-width: none;
+}
+.start .pager {
+  grid-row: 1;
+  grid-column: 3;
+  margin: 0;
+}
+.start .tick {
+  right: -4px;
+  bottom: -4px;
+  width: 15px;
+  height: 15px;
+}
+.start .foot {
+  text-align: left;
+}
+
 /* how far along: a short bar for each step, ink up to the one it is on */
 .pager {
   display: inline-flex;

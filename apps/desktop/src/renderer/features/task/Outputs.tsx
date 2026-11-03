@@ -2,10 +2,22 @@ import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot }
 import { doing, type Doing } from './actions'
 import { Failure } from './Failure'
 import type { ErrorMore } from './useTask'
-import { Button, ChangeSet, ChangeState, CheckState, type ChangeReview, Diverged, type PullRequest, WhatItMade, modKey } from '@althar/ui'
+import {
+  Button,
+  ChangeSet,
+  ChangeState,
+  CheckState,
+  type ChangeReview,
+  Diverged,
+  type PullRequest,
+  UsageCard,
+  WhatItMade,
+  modKey,
+} from '@althar/ui'
 import type { ReactNode } from 'react'
 
-import { type NameModel, useModelNames } from '../../shared/modelNames'
+import { type NameModel, useModelNames, useProviderNames } from '../../shared/modelNames'
+import { usageLines, useUsageOpen } from '../../shared/usage'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
@@ -209,6 +221,10 @@ export function Outputs({
 }) {
   const { task } = snapshot
   const named = useModelNames()
+  const nameProvider = useProviderNames()
+  // What it used of each account its agents ran on, closed until the person opens it, then open on every task (ADR-084).
+  const usage = usageLines(snapshot.usage, named, nameProvider)
+  const [usageOpen, setUsageOpen] = useUsageOpen()
   const ready = task.phase === 'ready'
   const review = reviewOf(snapshot, named)
   // Its latest pull request in each repository, the open one else the newest; the others came before them.
@@ -515,9 +531,11 @@ export function Outputs({
       )}
       {/* With no pull request still open to hold it, nor its branch's card, a new one is pressed from here. */}
       {first === undefined && here === null && openNew}
+      {usage.length > 0 && <UsageCard lines={usage} open={usageOpen} onOpenChange={setUsageOpen} />}
     </>
   )
-  const changed = change !== null || local !== null || here !== null || done || closed.length > 0 || earlier.length > 0 || shipping
+  const changed =
+    change !== null || local !== null || here !== null || done || closed.length > 0 || earlier.length > 0 || shipping || usage.length > 0
   return (
     <div className={s.outputs}>
       <div className={telling && changed ? s.outputsWide : telling ? s.outputsAlone : s.outputsChanged}>

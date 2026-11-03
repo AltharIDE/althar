@@ -7,7 +7,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 
 /*
  * What Althar asks before a Local task takes the person's checkout
- * (ADR-086): it has changes that aren't committed, which nothing switches
+ * (ADR-090): it has changes that aren't committed, which nothing switches
  * under, stashes or resets; or it is on a branch of the person's own, which
  * it goes back to once the task is settled. Each way on in a button: wait
  * until the changes are committed, check out the task's branch, start the

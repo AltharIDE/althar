@@ -240,7 +240,7 @@ export enum TaskKind {
 
 /** What a task does with its work when it is done. */
 /**
- * Where a task works (ADR-086): Local, in each of its repositories' own
+ * Where a task works (ADR-090): Local, in each of its repositories' own
  * checkouts, where the person works, one task at a time; or a worktree of
  * its own, side by side with other tasks.
  */

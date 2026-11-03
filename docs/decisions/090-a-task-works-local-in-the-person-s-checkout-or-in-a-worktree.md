@@ -1,4 +1,4 @@
-# ADR-086: A task works Local, in the person's checkout, or in a worktree of its own
+# ADR-090: A task works Local, in the person's checkout, or in a worktree of its own
 
 - **Status:** Accepted; amends [ADR-006](006-worktree-per-task.md)
 - **Date:** 2026-11-03

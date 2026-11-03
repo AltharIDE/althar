@@ -22,7 +22,7 @@
   font-weight: 600;
   color: var(--t-1);
 }
-/* Where it works, at the head's end beside the kicker and title (ADR-086). */
+/* Where it works, at the head's end beside the kicker and title (ADR-090). */
 .where {
   grid-column: 2;
   grid-row: 1 / span 2;

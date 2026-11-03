@@ -81,7 +81,7 @@ export interface TaskLaunchText {
   hold: string
   start: string
   startNow: string
-  /** Where it works (ADR-086): the choice's name, and each place. */
+  /** Where it works (ADR-090): the choice's name, and each place. */
   worksIn: string
   local: string
   worktree: string
@@ -196,7 +196,7 @@ export interface TaskLaunchProps {
   /** No row for what happens when the work is done, where tasks end on their branch. */
   hideEnd?: boolean
   /**
-   * Where it works (ADR-086): Local, in the person's own checkout, or a
+   * Where it works (ADR-090): Local, in the person's own checkout, or a
    * worktree of its own, beside the title, changeable until its first step
    * starts. No choice without it, as for a review, which reads a copy.
    */

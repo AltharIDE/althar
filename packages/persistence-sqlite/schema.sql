@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -527,7 +527,7 @@ CREATE TABLE provider_sessions (
   last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_event_sequence >= 0),
   started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), account_id TEXT REFERENCES agent_accounts (id),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), account_id TEXT REFERENCES agent_accounts (id), reported_cost REAL CHECK (reported_cost IS NULL OR reported_cost >= 0), reported_currency TEXT,
   CHECK ((state = 'superseded') = (superseded_by_session_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (run_attempt_id, project_id) REFERENCES run_attempts (id, project_id),
@@ -651,7 +651,7 @@ CREATE TABLE findings (
   repeats_finding_id TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), title TEXT,
   CHECK ((state = 'open') = (settled_at IS NULL)),
   FOREIGN KEY (review_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
   FOREIGN KEY (settled_in_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -907,7 +907,7 @@ CREATE TABLE external_links (
   polled_at TEXT CHECK (polled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), part_of INTEGER NOT NULL DEFAULT 0 CHECK (part_of IN (0, 1)),
   UNIQUE (task_id, kind, product, external_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   UNIQUE (id, project_id)
@@ -997,7 +997,7 @@ CREATE TABLE issue_drafts (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')), fields TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fields)), direct INTEGER NOT NULL DEFAULT 0 CHECK (direct IN (0, 1)), left_off TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(left_off)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'filed') = (issue_url IS NOT NULL AND issue_ref IS NOT NULL AND issue_key IS NOT NULL)),
@@ -1387,3 +1387,39 @@ CREATE TABLE errand_steps (
 CREATE INDEX errands_open ON errands(project_id, state);
 
 CREATE INDEX errand_steps_task ON errand_steps(task_id);
+
+CREATE TABLE plan_usage_weeks (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  used_percent REAL NOT NULL CHECK (used_percent >= 0 AND used_percent <= 100),
+  resets_at TEXT,
+  observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id, observed_at)
+) STRICT;
+
+CREATE INDEX agent_accounts_of_agent ON agent_accounts (device_id, agent_id) WHERE removed_at IS NULL;
+
+CREATE TABLE followed_pulls (
+    id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    connection_id TEXT NOT NULL REFERENCES connections(id),
+    product TEXT NOT NULL REFERENCES vocab_connection_product(word),
+    repository TEXT NOT NULL,
+    number INTEGER NOT NULL CHECK (number >= 1),
+    url TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('open', 'merged', 'closed')),
+    head_sha TEXT,
+    from_fork INTEGER NOT NULL DEFAULT 0 CHECK (from_fork IN (0, 1)),
+    -- Open before Althar first looked at its repository: its first checks are read without news.
+    baseline INTEGER NOT NULL DEFAULT 0 CHECK (baseline IN (0, 1)),
+    checks_sha TEXT,
+    checks_outcome TEXT CHECK (checks_outcome IN ('passed', 'failed', 'running')),
+    checks_revision INTEGER NOT NULL DEFAULT 0 CHECK (checks_revision >= 0),
+    failed_at TEXT,
+    checks_read_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    UNIQUE (project_id, connection_id, repository, number)
+  ) STRICT;
+
+CREATE INDEX followed_pulls_open ON followed_pulls(project_id, state);

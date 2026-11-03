@@ -10,6 +10,7 @@ import {
   CHANGE_QUESTION,
   CHANGE_QUEUED,
   CHANGE_QUEUED_MIDWAY,
+  CHANGE_NOTHING_BUILT,
   CHANGE_READY,
   CHANGE_RUNNING,
   CHANGE_RUNNING_PR,
@@ -86,7 +87,7 @@ export const ChangeRunning: Story = {
 }
 /** A follow-up on a change whose pull request is open: the pull request, and its checks so far. */
 export const ChangeRunningWithItsPullRequest: Story = { args: CHANGE_RUNNING_PR }
-/** In the person's own checkout, Local (ADR-086): said with its kind's word, nothing else about it changes. */
+/** In the person's own checkout, Local (ADR-090): said with its kind's word, nothing else about it changes. */
 export const ChangeRunningLocal: Story = {
   args: { ...CHANGE_RUNNING, local: true },
   play: async ({ canvasElement }) => {
@@ -438,6 +439,18 @@ export const PlainWorking: Story = {
     await expect(card.getByText('Working')).toBeInTheDocument()
     await expect(card.queryByText('Change')).not.toBeInTheDocument()
     await expect(card.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument()
+  },
+}
+/** A change that built nothing: what its lead leaves to the person under the title, Done alone in its corner, no Accept. */
+export const ChangeNothingBuilt: Story = {
+  args: { ...CHANGE_NOTHING_BUILT, corner: <SettleWays onDone={fn()} doneHint="Settle it where it is." /> },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Nothing built')).toBeInTheDocument()
+    await userEvent.hover(card.getByText('Nothing built'))
+    await expect(card.getByRole('button', { name: 'Done' })).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Keep for later' })).not.toBeInTheDocument()
+    await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
   },
 }
 /** Finished: its Done and Keep for later in its corner, shown as it is hovered or has the focus. */

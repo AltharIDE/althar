@@ -49,6 +49,7 @@ describe('a project’s rules', () => {
     await screen.findByRole('heading', { name: 'Always', level: 3 })
     expect(screen.queryByRole('heading', { name: 'Rules' })).toBeNull()
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
+      'Agents may',
       'Always',
       'Never',
       'Ask me',

@@ -48,7 +48,7 @@ export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published'
 export type WorkspaceState = typeof WorkspaceState.Type
 
 /**
- * Where a task works (ADR-086): a worktree of its own, or its repository's own checkout on this device, where the person works,
+ * Where a task works (ADR-090): a worktree of its own, or its repository's own checkout on this device, where the person works,
  * held by one task at a time. Local on screen. A project's default for new tasks, a plan's choice, and each workspace's kind.
  */
 export const WorksIn = Schema.Literals(['worktree', 'checkout'])
@@ -117,6 +117,8 @@ export const ThreadItemKind = Schema.Literals([
   'automation',
   /** Pictures a lead showed the person, with their captions, at any time: Althar keeps them, and they stay when its worktree goes. */
   'pictures',
+  /** The coordinator asking the person to stop, hold, restart or settle a task, where no message of theirs asked it to: one button, pressed there. Althar posts it and keeps it current. */
+  'task_ask',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -185,7 +187,7 @@ export type SnapshotReason = typeof SnapshotReason.Type
 
 /**
  * Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at
- * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-086).
+ * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-090).
  */
 export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout'])
 export type HoldReason = typeof HoldReason.Type
@@ -332,6 +334,7 @@ export type Sensitivity = typeof Sensitivity.Type
 /** The aggregates whose changes are recorded and fed to clients. */
 export const AggregateType = Schema.Literals([
   'errand',
+  'followed_pull',
   'project',
   'task',
   'task_plan',

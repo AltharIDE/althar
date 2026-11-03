@@ -2,7 +2,7 @@ import { at, vocabulary, word } from './0001_initial/columns'
 
 /*
  * A task works Local, in the person's own checkout, or in a worktree of its
- * own, as before (ADR-086): the project's rules say where new tasks start,
+ * own, as before (ADR-090): the project's rules say where new tasks start,
  * and each plan where its task does. A workspace's `kind` is which it is: a
  * `checkout` is the repository's clone on this device, held by one task at a
  * time, which Althar never removes. It is null for a worktree, as SQLite adds

@@ -17,7 +17,7 @@ import { addItem } from './threads'
  * commits after a merge left out, a review posted, a round that made nothing
  * new putting it back where it was; and its project removed, for a task that
  * works in the person's checkout, so it holds that until all of it has
- * stopped (ADR-086). Each of them says so here (`settled`), after the
+ * stopped (ADR-090). Each of them says so here (`settled`), after the
  * settled fact, and everything of the task stops in the background:
  * every agent on its threads (its lead, its steps', its reviewer) once its
  * turn ends, what each left running in the background first, through the
@@ -93,7 +93,7 @@ export class LeftBehind extends Context.Service<
     /**
      * Tasks whose settling is asked for or under way, until everything of
      * theirs it stops has stopped: what a settled Local task holds, its
-     * checkout, is its own until then (ADR-086).
+     * checkout, is its own until then (ADR-090).
      */
     readonly stopping: Effect.Effect<ReadonlySet<string>>
     /** Counts the task as stopping (`stopping`) while `effect` settles it and stops what it can itself, as abandoning it does. */

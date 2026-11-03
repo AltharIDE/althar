@@ -289,7 +289,7 @@ describe('a task’s card in the Talk room', () => {
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), to))
   })
 
-  it('shows where a plan works, why, and who works Local now, and moves it as the person picks (ADR-086)', async () => {
+  it('shows where a plan works, why, and who works Local now, and moves it as the person picks (ADR-090)', async () => {
     const plan = card().plan!
     const client = await talking(
       card({

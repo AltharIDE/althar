@@ -7,6 +7,7 @@ import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
+import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -24,9 +25,6 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * (`reads`): it has no run, and starting it starts its lead (Reviews.lead);
  * its lead is only ever one its session holds to reading.
  */
-
-/** How long a proposed plan waits before it starts on its own (docs/plans/mvp.md). */
-export const COUNTDOWN = Duration.seconds(25)
 
 type Store = SqlClient.SqlClient | Instance | Runs | Reviews | Ledger | Crypto.Crypto | RuntimeConfig
 
@@ -49,7 +47,7 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
-      /** Where it works (ADR-086), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
+      /** Where it works (ADR-090), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
     }): Effect.Effect<string, unknown>
@@ -72,7 +70,7 @@ export class Plans extends Context.Service<
       steps: ReadonlyArray<PlanStep>,
       actorId: ActorId,
       end?: TaskEnd | null,
-      /** Where it works, until its first step starts (ADR-086); as it was without it. */
+      /** Where it works, until its first step starts (ADR-090); as it was without it. */
       worksIn?: WorksIn,
     ): Effect.Effect<void, unknown>
   }
@@ -84,7 +82,8 @@ export class Plans extends Context.Service<
       const instance = yield* Instance
       const runs = yield* Runs
       const reviews = yield* Reviews
-      const countdownOf = (yield* RuntimeConfig).countdown ?? COUNTDOWN
+      // The person's setting (plansAndReviews.ts), read as each plan is proposed; a test's own takes its place.
+      const testCountdown = (yield* RuntimeConfig).countdown
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /** Wakes the countdown when a plan changes. */
       const wake = yield* Queue.sliding<void>(1)
@@ -150,12 +149,17 @@ export class Plans extends Context.Service<
             const planId = yield* newId(Ids.taskPlan)
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
-            const startsAt =
-              input.held === true ? null : new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
+            const countdown = input.startsIn ?? testCountdown ?? (yield* countdownNow)
+            const countdownEnds = new Date(Date.parse(at) + Duration.toMillis(countdown)).toISOString()
+            let startsAt: string | null = null
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.
-                const earlier = yield* sql<{ id: string }>`SELECT id FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                const earlier = yield* sql<{ id: string; startsAt: string | null }>`
+                  SELECT id, starts_at FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                // A plan the person held stays held when it is re-planned, unless this one is to start at once or says how soon.
+                const keepsHold = input.held === undefined && input.startsIn === undefined && earlier.some((plan) => plan.startsAt === null)
+                startsAt = input.held === true || keepsHold ? null : countdownEnds
                 for (const plan of earlier) {
                   const revision = yield* change('task_plans', plan.id, { state: 'replaced', decidedAt: at })
                   yield* fact({
@@ -324,7 +328,7 @@ export class Plans extends Context.Service<
               )
               if (done) {
                 yield* touchCard(plan.taskId)
-                // Moved between a worktree and its checkout as it waits: placed again now (ADR-086).
+                // Moved between a worktree and its checkout as it waits: placed again now (ADR-090).
                 if (worksIn !== undefined) yield* runs.checkoutsMoved
               }
             }),

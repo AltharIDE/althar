@@ -327,7 +327,7 @@ describe('the board’s lanes', () => {
         expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
       })
 
-      it('says after which task one waiting for the checkout starts, and that it works Local (ADR-086)', () => {
+      it('says after which task one waiting for the checkout starts, and that it works Local (ADR-090)', () => {
         const local = task({
           taskId: 'l',
           threadId: 'th-l',

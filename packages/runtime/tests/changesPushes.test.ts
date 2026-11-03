@@ -492,7 +492,11 @@ describe('a push the lead asks the person for', () => {
       // Pushed to from elsewhere, the pull request has commits the branch doesn't: nothing can go up until they're in it.
       pushFromElsewhere(bare, task.branch)
       commit(task.path, 'After')
-      assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), "PR #1 has commits your branch doesn't")
+      const behind = yield* callTool(task.lead, 'push_to_pull_request', {})
+      assert.include(behind, "PR #1 has commits your branch doesn't")
+      // The lead is handed the steps to bring them in, not sent to the person.
+      assert.include(behind, 'Call fetch_from_remote with pull_request 1, merge what it says it got into your branch')
+      assert.notInclude(behind, 'Tell the person')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

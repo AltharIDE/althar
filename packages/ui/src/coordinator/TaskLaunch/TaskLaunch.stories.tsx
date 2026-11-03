@@ -207,7 +207,7 @@ export const WaitingForAFreeAgent: Story = {
   },
 }
 
-/** Where it works, in its head (ADR-086): Local, the person's own checkout, or a worktree, changeable until it starts. */
+/** Where it works, in its head (ADR-090): Local, the person's own checkout, or a worktree, changeable until it starts. */
 function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
   const [worksIn, setWorksIn] = useState(start)
   return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />

@@ -22,7 +22,7 @@ import s from './Card.module.css'
  * starts, where it stands, and a way in.
  */
 
-/** How long a plan waits before it starts on its own: the runtime's countdown. */
+/** How long a plan waits before it starts on its own where its card doesn't say: the runtime's countdown unless the person changed it. */
 export const COUNTDOWN = 25
 
 export const text = {
@@ -71,7 +71,7 @@ type Plan = NonNullable<TaskCardContent['plan']>
 const ENDS: Readonly<Record<End, TaskEnd>> = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly }
 const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end === TaskEnd.ReadyPr ? 'ready' : 'none')
 
-/** The kit's place, from the plan's, and back (ADR-086). */
+/** The kit's place, from the plan's, and back (ADR-090). */
 const placeOf = (where: Where): WorksIn => (where === 'checkout' ? WorksIn.Local : WorksIn.Worktree)
 const whereOf = (place: WorksIn): Where => (place === WorksIn.Local ? 'checkout' : 'worktree')
 
@@ -156,7 +156,7 @@ function PlanCard({
           )
         )
       }}
-      wait={COUNTDOWN}
+      wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
@@ -167,7 +167,7 @@ function PlanCard({
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
       text={{ endByRule: () => '', ruleNote: (_project, note) => note }}
-      // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-086).
+      // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-090).
       {...(worksIn === undefined
         ? {}
         : {
@@ -205,7 +205,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
-  // So does one started Local that waits for its checkout (ADR-086).
+  // So does one started Local that waits for its checkout (ADR-090).
   if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />
   // A review has no steps to go through: its lead reads and drafts.

@@ -1,4 +1,4 @@
-import { commandStartOf, hostOf } from '@althar/contracts'
+import { commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -6,6 +6,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
+import { newProjectDefaultsOf } from './plansAndReviews'
 import { fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
@@ -87,17 +88,17 @@ export const ProjectRules = Schema.Struct({
    */
   branchPattern: Schema.optional(Schema.String),
   titlePattern: Schema.optional(Schema.String),
-  /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
+  /**
+   * Whether a task's issue is moved along with it: to its tracker's In
+   * Progress as it starts, In Review and Done with its pull request. On
+   * without it. Whether other changes to issues apply at once, or wait on the
+   * person's card, is the agents' call by what the person said, kept as a
+   * project note (DEV-182): an earlier revision's `changeIssues` is read as
+   * nothing, its migration having kept it as such a note.
+   */
   moveIssues: Schema.optional(Schema.Boolean),
   /**
-   * Whether changes to issues on the person's trackers (status, priority,
-   * assignee, labels, closing), proposed by the coordinator, a lead or
-   * Althar, apply at once rather than as a card the person applies. Off
-   * without it. Comments and links apply at once either way.
-   */
-  changeIssues: Schema.optional(Schema.Boolean),
-  /**
-   * Where new tasks start (ADR-086): in a worktree of their own, or Local, in
+   * Where new tasks start (ADR-090): in a worktree of their own, or Local, in
    * each repository's own checkout here, one task at a time. The coordinator
    * chooses per task. A worktree without it.
    */
@@ -195,10 +196,7 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
-/** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
-export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
-
-/** Where a revision's rules start new tasks (ADR-086): in a worktree of their own unless the person chose Local. */
+/** Where a revision's rules start new tasks (ADR-090): in a worktree of their own unless the person chose Local. */
 export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
@@ -234,6 +232,53 @@ const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sand
 export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
+
+/** Writes a revision of a project's rules, recorded as a fact by whoever made it. */
+export const insertRevision = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const id = yield* newId(Ids.policy)
+    yield* sql`INSERT INTO policies ${sql.insert({
+      id,
+      projectId,
+      revision,
+      rules: JSON.stringify(rules),
+      createdByActorId: actorId,
+      createdAt: yield* timestamp,
+    })}`
+    yield* fact({
+      projectId,
+      aggregateType: 'policy',
+      aggregateId: id,
+      revision: 1,
+      type: 'policy.revised',
+      payload: { revision, rules },
+      actorId,
+    })
+    return { id, revision, rules }
+  })
+
+/**
+ * The rules a project is made with: the first revision's, with what the person chose for new projects (plansAndReviews.ts) over the
+ * built-in. Only what differs from the built-in is written, so a profile that chose nothing makes the same rules as always.
+ */
+export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
+  const chosen: Partial<ProjectRules> = {
+    ...(defaults.permissions === NEW_PROJECT_DEFAULTS.permissions ? {} : { permissions: defaults.permissions }),
+    ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
+    ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
+    ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
+  }
+  return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
+}
+
+/** A new project's first rules, from what the person chose for new projects; later changes are the project's own. */
+export const seedRules = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    const defaults = yield* newProjectDefaultsOf
+    yield* insertRevision(projectId, 1, startingRules(defaults), instance.systemId)
+  })
 
 export class Policies extends Context.Service<
   Policies,
@@ -284,30 +329,6 @@ export class Policies extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decode = (rules: string) => Schema.decodeUnknownSync(Schema.fromJsonString(ProjectRules))(rules)
 
-      const insert = (projectId: ProjectId, revision: number, rules: ProjectRules, actorId: ActorId) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const id = yield* newId(Ids.policy)
-          yield* sql`INSERT INTO policies ${sql.insert({
-            id,
-            projectId,
-            revision,
-            rules: JSON.stringify(rules),
-            createdByActorId: actorId,
-            createdAt: yield* timestamp,
-          })}`
-          yield* fact({
-            projectId,
-            aggregateType: 'policy',
-            aggregateId: id,
-            revision: 1,
-            type: 'policy.revised',
-            payload: { revision, rules },
-            actorId,
-          })
-          return { id, revision, rules }
-        })
-
       const current = (projectId: ProjectId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -321,7 +342,7 @@ export class Policies extends Context.Service<
           // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
           return yield* sql.withTransaction(
             Effect.flatMap(latest, (again) =>
-              again === undefined ? insert(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
+              again === undefined ? insertRevision(projectId, 1, FIRST, instance.systemId) : Effect.succeed(again),
             ),
           )
         })
@@ -343,7 +364,7 @@ export class Policies extends Context.Service<
               const changed = change(now.rules, now.revision)
               const next = Effect.isEffect(changed) ? yield* changed : changed
               if (next === undefined) return
-              yield* insert(project.id, now.revision + 1, next, actorId)
+              yield* insertRevision(project.id, now.revision + 1, next, actorId)
             }),
           )
         })

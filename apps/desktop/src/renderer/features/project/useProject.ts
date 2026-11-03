@@ -95,6 +95,8 @@ export interface ProjectModel {
   readonly discardIssueDraft: (draftId: string) => Promise<void>
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator. */
+  readonly preferIssueCards: (atOnce: boolean) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -405,6 +407,7 @@ export const useProject = (projectId: string): ProjectModel => {
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
+    preferIssueCards: (atOnce) => act(() => (threadId === null ? Promise.resolve() : client.preferIssueCards(threadId, atOnce))),
     dismissError: () => setError(null),
   }
 }

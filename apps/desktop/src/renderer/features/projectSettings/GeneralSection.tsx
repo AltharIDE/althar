@@ -9,9 +9,10 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 
 /*
  * What a project is, and how its tasks work: its name and the ink its mark
- * is drawn in, changed in place; then where new tasks start (ADR-086), and
- * the switches every task follows, each with one line on when it acts. One that didn't hold says why under it.
- * Allowing everything is a rule, so it is with the rules.
+ * is drawn in, changed in place; then where new tasks start (ADR-090), and
+ * the switches every task follows, each with one line on when it acts. One
+ * that didn't hold says why under it. Allowing everything and what agents may
+ * do without asking are rules, so they are with the rules.
  */
 
 export const text = {
@@ -22,10 +23,6 @@ export const text = {
     worktree: 'Worktree',
     /** One line for both, which stays put as the choice flips: what each gives up. */
     line: 'Local works in your own checkout, with your builds, simulators and services: one task at a time, beside your own edits. A worktree gives each task a copy of its own, side by side, that builds from cold.',
-  },
-  leadsReachWeb: {
-    title: 'Leads can reach the web',
-    line: 'Search and read websites without asking. Pages could steer a lead into sending private code in a URL. Outside pull request reviews stay offline. Applies to new sessions.',
   },
   conflicts: {
     title: 'Resolve merge conflicts automatically',
@@ -44,9 +41,6 @@ export const text = {
   moveIssues: {
     title: 'Move issues along with their tasks',
     line: 'To In Progress, In Review, then Done',
-  },
-  changeIssues: {
-    title: 'Change issues without asking',
   },
 }
 
@@ -95,12 +89,10 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
     rules === null
       ? []
       : [
-          { rule: 'leadsReachWeb', words: text.leadsReachWeb, on: rules.leadsReachWeb, set: model.setLeadsReachWeb },
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
           { rule: 'pushCommits', words: text.pushCommits, on: rules.pushCommits, set: model.setPushCommits },
           { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },
           { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
-          { rule: 'changeIssues', words: text.changeIssues, on: rules.changeIssues, set: model.setChangeIssues },
         ]
   return (
     <>

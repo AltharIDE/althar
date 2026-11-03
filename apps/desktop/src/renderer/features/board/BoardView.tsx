@@ -39,7 +39,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react'
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
-import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
+import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
@@ -76,7 +76,7 @@ export const text = {
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
-  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-086). */
+  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-090). */
   forLocal: localText.word,
   planned: 'Planned',
   /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
@@ -211,7 +211,7 @@ const kindOf = (task: Pick<BoardTask, 'kind'>): TaskKind => {
 export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | undefined =>
   (task.local === true ? boardCardText.local(boardCardText.kind[kindOf(task)]) : boardCardText.kind[kindOf(task)]) || undefined
 
-/** In the person's own checkout, as its kind's word says (ADR-086). */
+/** In the person's own checkout, as its kind's word says (ADR-090). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
@@ -515,6 +515,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
+      const ask = work.nothingBuilt === true ? askOf(work.summary) : null
       const object =
         change === null ? (
           branch === null ? null : (
@@ -533,6 +534,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
+        // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
+        ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
@@ -601,7 +604,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   return (
     <SettleWays
       {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
-      {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(work.phase === 'ready' && work.kind !== 'change' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />
   )
@@ -717,7 +720,7 @@ export function BoardView({
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
-  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-086).
+  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-090).
   const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
   const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
   const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
@@ -730,7 +733,7 @@ export function BoardView({
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
-    // Not one that waits for its checkout: nothing of it has begun (ADR-086).
+    // Not one that waits for its checkout: nothing of it has begun (ADR-090).
     const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
     const reason =
       index < continuing

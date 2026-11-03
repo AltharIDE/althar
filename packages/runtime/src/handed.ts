@@ -144,6 +144,12 @@ export const inside = (path: string, folders: ReadonlyArray<string>) =>
     return null
   })
 
+/** The folders as they really are, those that exist. */
+const realRoots = (folders: ReadonlyArray<string>) =>
+  Effect.promise(async () =>
+    (await Promise.all(folders.map((folder) => realpath(folder).catch(() => null)))).filter((root) => root !== null),
+  )
+
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i
 
 /** Whether a link points at a picture, by its type or its name. */
@@ -154,6 +160,8 @@ export interface HandedNow {
   readonly pictures: ReadonlyArray<KeptPicture>
   readonly files: ReadonlyArray<FileMention>
 }
+
+const NOTHING: HandedNow = { pictures: [], files: [] }
 
 /**
  * What something handed back becomes: a picture kept, a file noted, or
@@ -273,32 +281,39 @@ const wroteWhole = (rawInput: unknown): string | null => {
   return typeof path === 'string' && path !== '' ? path : null
 }
 
-/** What a tool call's content and input hand back, kept: pictures, files it pointed at, and files it wrote whole or made. */
+/**
+ * What a tool call's content and input hand back, kept: pictures, files it
+ * pointed at, and files it wrote whole or made. A file it wrote outside the
+ * folders it works in isn't handed back: it can't be read from there, and
+ * what an agent writes there is its own bookkeeping (Claude Code's memory
+ * under `~/.claude`, Codex's under `~/.codex`), not a document for the person.
+ */
 export const handedByTool = (place: HandedPlace, content: ReadonlyArray<ToolContent>, rawInput: unknown, kind: string) =>
   Effect.gen(function* () {
     const [cwd] = place.folders
     // A file named from where the agent works, whole, so it is read from there and not from a repository's root.
-    const wrote = (path: string): HandedNow => ({
-      pictures: [],
-      files: [
-        {
-          path: isAbsolute(path) || cwd === undefined ? path : resolve(cwd, path),
-          how: 'wrote',
-          mediaType: null,
-          bytes: null,
-          title: null,
-        },
-      ],
-    })
-    let now: HandedNow = { pictures: [], files: [] }
+    const wrote = (path: string) =>
+      Effect.gen(function* () {
+        const whole = isAbsolute(path) || cwd === undefined ? path : resolve(cwd, path)
+        // One there is judged by where it really is, so no link leads out; one gone since it was written, by its name.
+        const real = yield* Effect.promise(() => realpath(whole).catch(() => null))
+        const where = real === null ? resolve(whole) : real
+        const roots = real === null ? place.folders.map((folder) => resolve(folder)) : yield* realRoots(place.folders)
+        if (!roots.some((root) => where === root || where.startsWith(`${root}${sep}`))) return NOTHING
+        return {
+          pictures: [],
+          files: [{ path: whole, how: 'wrote', mediaType: null, bytes: null, title: null } satisfies FileMention],
+        } satisfies HandedNow
+      })
+    let now: HandedNow = NOTHING
     for (const entry of content) {
       if (entry._tag === 'Diff') {
-        if (entry.created) now = together(now, wrote(entry.path))
+        if (entry.created) now = together(now, yield* wrote(entry.path))
       } else if (entry._tag === 'Image' || entry._tag === 'Link' || entry._tag === 'Embedded')
         now = together(now, yield* handedNow(place, entry))
     }
     const whole = kind === 'edit' ? wroteWhole(rawInput) : null
-    return whole === null ? now : together(now, wrote(whole))
+    return whole === null ? now : together(now, yield* wrote(whole))
   })
 
 /**

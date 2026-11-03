@@ -18,7 +18,7 @@ import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
 
 /*
- * Local tasks (ADR-086). A task works either in worktrees of its own, as
+ * Local tasks (ADR-090). A task works either in worktrees of its own, as
  * before, or Local, in each of its repositories' own checkouts here, where
  * the person works. A Local task's workspace is the checkout itself
  * (`workspaces.kind = 'checkout'`): planned, it waits there, `preparing`,
@@ -354,7 +354,7 @@ const listed = (files: ReadonlyArray<string>) => {
 const onOf = (checkout: Checkout) => checkout.branch ?? checkout.head.slice(0, 7)
 
 /**
- * Places a task where its plan says, as its first step begins (ADR-086).
+ * Places a task where its plan says, as its first step begins (ADR-090).
  * A worktree: a planned Local workspace becomes one now. Local: a worktree
  * made with its draft goes, and it takes each of its repositories' checkouts,
  * unless another task holds one (`taken`; a settled one only until all of it

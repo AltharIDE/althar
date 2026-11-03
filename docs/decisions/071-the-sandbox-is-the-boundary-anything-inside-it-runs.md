@@ -6,6 +6,7 @@
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
   [ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)
+- **Amended:** 2026-11-03 ([ADR-089](089-the-asks-and-refusals-left-are-what-can-t-be-undone.md)): what crosses unread goes ahead with everything allowed; git's guard acts only in the task's repositories and lets a branch go that loses no commits; where it holds, a Never of only what it stops no longer refuses what the rules can't read.
 - **Owner:** Repository maintainers
 - **Context:** Althar decided by reading each command (`rules.ts`) and let
   through only what it could prove harmless. Real agents write loops,
@@ -74,12 +75,15 @@
   - **What crosses meets the rules as before:** a command that runs or asks
     to run outside the sandbox, an edit outside the task's worktree, a host
     it asks for. With everything allowed, only ADR-067's irreversible kinds
-    ask; in every other mode, the rules as they stand. But with everything
+    ask; in every other mode, the rules as they stand. With everything
     allowed, a command the agent asks to run outside that Althar can't read
-    is refused, saying to run it inside, where it runs without asking, or as
-    plain commands (`decideLeaving`): outside, nothing would stop a script
-    writing to the person's checkout. What the project runs outside from
-    the start, its tests and its build, goes as it said.
+    goes ahead unread
+    ([ADR-089](089-the-asks-and-refusals-left-are-what-can-t-be-undone.md));
+    it was refused at first (`decideLeaving`), and leads worked around it.
+    On macOS Electron and Chromium can't start inside Claude Code's or
+    Codex's sandbox (neither profile allows `mach-register`, which
+    Chromium's `bootstrap_check_in` needs, and no setting adds it), so an
+    end-to-end run has to cross.
   - **What can't be undone is stopped where it happens, at git.** Every
     lead's git takes its hooks from a folder of Althar's (`core.hooksPath`
     by the environment, `pushGuard.ts`). Its `pre-push` stops a push to the

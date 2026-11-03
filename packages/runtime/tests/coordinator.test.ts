@@ -15,6 +15,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
+import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -273,6 +274,26 @@ describe('the coordinator loop', () => {
         /\n\nPull request: Althar could not read its state just now\.$/,
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('stops after two rounds when the person set two', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ rounds: 2 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
+      const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round']), {
+        step: 'review',
+        why: 'round_limit',
+        round: 2,
+      })
+      assert.deepStrictEqual(
+        (yield* results(waiting?.threadId ?? '')).map((step) => step.step),
+        ['implement', 'review', 'settle', 'review', 'settle'],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
   it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
@@ -1212,6 +1233,47 @@ describe("the coordinator's tools", () => {
       assert.isNull(card?.plan?.startsAt)
       assert.lengthOf(card?.plan?.steps ?? [], 1)
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps a held plan held when the coordinator plans the task again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      yield* callTool(access, 'draft_task', { title: 'Hold me' })
+      assert.match(
+        yield* callTool(access, 'propose_plan', { task: 'hold-me', lead: { agent: 'codex', model: 'large' } }),
+        /starts in 25 seconds/,
+      )
+      const proposed = () =>
+        sql<{ id: string; startsAt: string | null; parameters: string }>`
+          SELECT id, starts_at, parameters FROM task_plans WHERE state = 'proposed'`
+      const [first] = yield* proposed()
+      yield* plans.hold(first?.id ?? '', actor)
+      const reply = yield* callTool(access, 'propose_plan', {
+        task: 'hold-me',
+        lead: { agent: 'codex', model: 'large' },
+        review: { agent: 'claude-code', model: 'small' },
+      })
+      assert.match(reply, /stays held until the person starts it/)
+      assert.notMatch(reply, /25 seconds/)
+      const [again, ...others] = yield* proposed()
+      assert.isEmpty(others)
+      assert.notStrictEqual(again?.id, first?.id)
+      assert.strictEqual(again?.startsAt, null)
+      assert.deepStrictEqual(
+        (JSON.parse(again?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string }> }).steps.map((step) => step.key),
+        ['implement', 'review'],
+      )
+      // Past the countdown it would have had, it is still held and has not started.
+      yield* Effect.sleep('400 millis')
+      assert.strictEqual((yield* proposed())[0]?.id, again?.id)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs`)[0]?.n, 0)
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'held')
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(100) }))),
   )
 
   it.live('read the project and its tasks, pass messages on, and refuse what they cannot do', () =>

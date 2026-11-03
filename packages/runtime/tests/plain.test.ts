@@ -420,6 +420,15 @@ describe('a plain task', () => {
       yield* cardOnce(wrote.id, (one) => one.phase === 'ready')
       for (const task of [quiet, wrote]) {
         yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { task }), taskId: task.id })
+        // Its lead is gone before its folder is: one still finishing its turn could write in a folder put back meanwhile,
+        // and Althar would make it a branch by then, which a plain task is put back without.
+        const sessions = yield* SqlClient.SqlClient
+        yield* until(
+          sessions<{
+            state: string
+          }>`SELECT state FROM provider_sessions WHERE thread_id = ${task.threadId} AND state IN ('active', 'starting')`,
+          (rows) => rows.length === 0,
+        )
         const worktree = yield* worktreeOf(task.id)
         // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
         rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
@@ -848,7 +857,22 @@ describe('making a quick task a change', () => {
       assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
-      // A change now, Done doesn't settle it: it waits to be accepted.
+      // A change now, but it built nothing: there is nothing to accept, so Done settles it as it is, with no pull request opened or merged.
+      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      const [settled] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
+      assert.strictEqual(settled?.state, 'done')
+      const [links] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM external_links WHERE task_id = ${task.id} AND kind = 'change'`
+      assert.strictEqual(links?.n, 0)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('does not settle a change with commits on its branch as Done: it waits to be accepted', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const place = yield* opened
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.isFalse(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
       const [still] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
       assert.strictEqual(still?.state, 'open')

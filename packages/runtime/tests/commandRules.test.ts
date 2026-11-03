@@ -63,7 +63,11 @@ describe('a wrapper with nothing after it, where the project asks about everythi
   })
 
   it('sees through `sudo` and its options to what it runs', () => {
-    assert.deepStrictEqual(run('sudo -E npm publish'), { verdict: 'ask', reason: 'Deploying or publishing always asks.', held: true })
+    assert.deepStrictEqual(run('sudo -E npm publish'), {
+      verdict: 'ask',
+      reason: 'Tearing down, deleting or publishing always asks: once it is gone or published, it can’t be taken back.',
+      held: true,
+    })
   })
 })
 
@@ -91,7 +95,7 @@ describe('package runners in their other forms', () => {
     // `timeout` with an option of its own that takes no value, before how long.
     assert.deepStrictEqual(run('timeout --preserve-status 600 npm publish'), {
       verdict: 'ask',
-      reason: 'Deploying or publishing always asks.',
+      reason: 'Tearing down, deleting or publishing always asks: once it is gone or published, it can’t be taken back.',
       held: true,
     })
   })

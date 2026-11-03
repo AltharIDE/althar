@@ -105,6 +105,22 @@
 .signedOut {
   color: var(--signal);
 }
+/* an agent's providers, each with a sign-in of its own: its name, then how it is paid for */
+.providers {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px 14px;
+}
+.provider {
+  display: inline-flex;
+  gap: 5px;
+  color: var(--t-2);
+}
+.provider > span {
+  color: var(--t-3);
+}
 .rename {
   grid-column: 2 / span 2;
   display: flex;

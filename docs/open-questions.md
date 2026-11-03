@@ -518,11 +518,12 @@ never under running work.
   #218 on review, since no source could run it yet; open until a spike shows
   a real one ([#221](https://github.com/AltharIDE/althar/issues/221); the
   draft is in [the plan](plans/plan-usage.md#the-exception-to-rule-3)).
-- [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
-  `auth list` says "can't tell", so an OpenCode 2.x account has no usage
-  source and shows a fault until OpenCode documents a way to read one
-  account's credential or usage, and the registry reads
-  `auth list --standalone --format json`
+- [ ] **OpenCode 2.x usage.** OpenCode Go is read from OpenCode's own
+  `opencode api --standalone experimental.usage.limits`, through the
+  account's OpenCode Console sign-in (3 November 2026, 2.2.5); an account
+  with Go's key alone is connected, unread. Open for its other plan
+  providers, kept in `opencode.db`, until OpenCode documents a way to read
+  one account's usage
   ([research](plans/plan-usage.md#the-exception-to-rule-3)).
 - [ ] **Claude accounts with no session.** Can the Agent SDK's
   `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's

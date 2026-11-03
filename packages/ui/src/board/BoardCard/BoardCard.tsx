@@ -28,7 +28,7 @@ import s from './BoardCard.module.css'
 export interface BoardCardText {
   /** A kind's word on the card; a plain task has none. */
   kind: Record<TaskKind, string>
-  /** A kind's word for a task in the person's own checkout (ADR-086): with Local after it, or Local alone. */
+  /** A kind's word for a task in the person's own checkout (ADR-090): with Local after it, or Local alone. */
   local: (kind: string) => string
   /** The automation whose run it is. */
   from: (automation: string) => string
@@ -53,7 +53,7 @@ export type BoardCardProps = RootProps<
     word: string
     /** What it makes: a change or a review says so; a plain task says nothing. */
     kind?: TaskKind
-    /** It works in the person's own checkout, Local, said with its kind's word (ADR-086). */
+    /** It works in the person's own checkout, Local, said with its kind's word (ADR-090). */
     local?: boolean
     /** How long, or since when: 9m. */
     at?: string
