@@ -106,6 +106,8 @@ interface Held {
   readonly paidBy?: 'plan' | 'key'
   /** Why it has no reading, where the agent reports none anyone can read: said calmly, not a fault. */
   readonly noReading?: string
+  /** For an agent whose providers each have a sign-in (OpenCode): how each listed is paid, unknown where Althar can't tell. */
+  readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
 }
 
 const keyOf = (window: UsageWindow) => (window.label === undefined ? window.kind : `${window.kind}:${window.label}`)
@@ -156,8 +158,21 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
-    /** How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it yet. */
-    readonly paidBy: (accountId: string) => Effect.Effect<{ readonly paidBy: 'plan' | 'key'; readonly plan: string | null } | null, Failure>
+    /**
+     * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
+     * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
+     * read this run (none before it is); and why
+     * a plan has no reading, where it reports none.
+     */
+    readonly paidBy: (accountId: string) => Effect.Effect<
+      {
+        readonly paidBy: 'plan' | 'key'
+        readonly plan: string | null
+        readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
+        readonly noReading?: string
+      } | null,
+      Failure
+    >
   }
 >()('@althar/runtime/PlanUsage') {
   static readonly layer: Layer.Layer<PlanUsage, never, SqlClient.SqlClient | Agents | Accounts | SignIns | Live | RuntimeConfig> =
@@ -469,6 +484,11 @@ export class PlanUsage extends Context.Service<
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
               const listed = yield* Effect.promise(() => readCredentials(definition, env))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
+              // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
+              // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
+              const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
+              for (const { provider, pays } of listed.credentials)
+                providers[provider] = providers[provider] === undefined || providers[provider] === pays ? pays : 'unknown'
               // OpenCode Go is the account's plan where it has Go's key, or its OpenCode Console sign-in reads Go's limits.
               const go = listed.credentials.some((credential) => credential.provider === 'opencode-go')
               const asked =
@@ -482,7 +502,7 @@ export class PlanUsage extends Context.Service<
               )
               if (go || refused || asked.kind === 'usage') {
                 const again = refused ? { kind: 'sign_in_again' as const, message: `${OPENCODE_GO} needs signing in again.` } : null
-                const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const }
+                const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const, providers }
                 if (asked.kind === 'usage')
                   return yield* keep(account.id, {
                     ...onGo,
@@ -515,8 +535,11 @@ export class PlanUsage extends Context.Service<
                   unknown ??= `OpenCode has a ${credential.provider} sign-in whose usage Althar cannot read yet.`
                 else if (credential.pays === 'plan') unread ??= noReadingOf(resolved.pair) ?? undefined
               }
-              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan' })
-              return yield* keep(account.id, unread === undefined ? key : { ...key, paidBy: 'plan', noReading: unread })
+              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan', providers })
+              return yield* keep(
+                account.id,
+                unread === undefined ? { ...key, providers } : { ...key, paidBy: 'plan', noReading: unread, providers },
+              )
             }
             if (check.paidBy === 'key') return yield* keep(account.id, key)
             const pair = planPairOf(definition.id)
@@ -623,7 +646,13 @@ export class PlanUsage extends Context.Service<
             Effect.map(hydrate, () => {
               const one = held.get(accountId)
               const paidBy = one?.paidBy ?? (one?.source != null ? 'plan' : null)
-              return one === undefined || paidBy === null ? null : { paidBy, plan: paidBy === 'plan' ? one.plan : null }
+              if (one === undefined || paidBy === null) return null
+              return {
+                paidBy,
+                plan: paidBy === 'plan' ? one.plan : null,
+                ...(one.providers === undefined ? {} : { providers: one.providers }),
+                ...(one.noReading === undefined ? {} : { noReading: one.noReading }),
+              }
             }),
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
