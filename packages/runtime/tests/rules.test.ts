@@ -2601,6 +2601,11 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       'bun publish',
       'cargo publish',
       'twine upload dist/*',
+      // A dry run turned off is a real one.
+      'npm publish --dry-run=false',
+      'helm uninstall api --dry-run=false',
+      'kubectl delete deployment api --dry-run none',
+      'kubectl delete deployment api --dry-run=none',
     ]) {
       const decided = decide(runs(command), rules(allow))
       assert.strictEqual(decided.verdict, 'ask', command)
@@ -2614,6 +2619,8 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       'kubectl apply -f prod.yaml',
       'kubectl delete deployment api --dry-run=client',
       'kubectl delete deployment api --dry-run=server',
+      'kubectl delete deployment api --dry-run client',
+      'helm uninstall api --dry-run=true',
     ])
       assert.strictEqual(verdictOf(command, rules(allow)), 'allow', command)
   })

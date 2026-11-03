@@ -2078,11 +2078,24 @@ const DESTROYERS: Readonly<Record<string, RegExp>> = {
   poetry: /^publish$/,
 }
 
+/** What a dry-run flag may say and still only try: kubectl's `client` and `server`, a boolean's yes. */
+const DRY_RUN_VALUES = /^(client|server|true|1|yes)$/i
+
+/** Whether the words ask for a dry run: the bare flag, or one set to a value that only tries (`--dry-run=client`, `--dry-run server`), not `none` or `false`. */
+const dryRun = (words: ReadonlyArray<string>): boolean =>
+  words.some((word, index) => {
+    const flag = /^--?dry-?run(?:=(.*))?$/.exec(word)
+    if (flag === null) return false
+    if (flag[1] !== undefined) return DRY_RUN_VALUES.test(flag[1])
+    const next = words[index + 1] ?? ''
+    return !/^(none|false|0|no)$/i.test(next)
+  })
+
 /** Whether a command tears down, deletes or publishes, as its program and subcommand say: not a dry run, which does neither. */
 const destroys = (words: ReadonlyArray<string>): boolean => {
   const [first = '', ...rest] = words
   const program = first.slice(first.lastIndexOf('/') + 1)
-  if (rest.some((word) => /^--?dry-?run(=.*)?$/.test(word) && word !== '--dry-run=none')) return false
+  if (dryRun(rest)) return false
   const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
   if (DESTROYERS[program]?.test(sub) === true) return true
   // `terraform apply -destroy`, `fly apps destroy`.
@@ -2396,11 +2409,15 @@ const flagValue = (args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>)
 const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
   const others = (branches: ReadonlyArray<string | undefined>) =>
     branches.filter((branch): branch is string => branch !== undefined && branch !== '' && branch !== context.taskBranch)
-  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>, floor: Floor | undefined = 'irreversible') =>
+  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>, floor: Floor | 'none' = 'irreversible') =>
     others(branches)
       .slice(0, 1)
       .map((branch) =>
-        kept(`${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`, 'delete-branch', floor),
+        kept(
+          `${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`,
+          'delete-branch',
+          floor === 'none' ? undefined : floor,
+        ),
       )
   const named = git.args.filter((arg) => !arg.startsWith('-'))
   switch (git.subcommand) {
@@ -2410,7 +2427,7 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
         return branchKept('Deleting the branch', named)
       // So it doesn't ask, but a project that never allows deleting branches still refuses it.
       if (hasFlag(git.args, '-d', '--delete'))
-        return (context.project ?? MVP_RULES).never.includes('delete-branch') ? branchKept('Deleting the branch', named, undefined) : []
+        return (context.project ?? MVP_RULES).never.includes('delete-branch') ? branchKept('Deleting the branch', named, 'none') : []
       const renames = hasFlag(git.args, '-m', '-M', '--move')
       const copies = hasFlag(git.args, '-c', '-C', '--copy')
       const forced = hasFlag(git.args, '-f', '--force', '-M', '-C')
