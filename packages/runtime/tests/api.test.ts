@@ -45,6 +45,7 @@ import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Folders } from '../src/Folders'
+import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { type AgentEntry, Agents, Connectors, type RuntimeOptions } from '../src/Config'
@@ -1187,6 +1188,7 @@ describe('project rules, through the API', () => {
           alwaysAllow: [],
           commands: [],
           end: null,
+          worksIn: 'worktree',
           resolveConflicts: false,
           pushCommits: true,
           postScreenshots: false,
@@ -1733,6 +1735,70 @@ describe('a project’s menu, through the API', () => {
         assert.notStrictEqual((yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })).id, project.id)
       }),
     ),
+  )
+
+  it.live.skipIf(process.platform === 'win32')(
+    'removes a project whose task works Local: its checkout goes back to its branch once its lead, and the server it left, have stopped',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // Its lead stays in its turn until the removal stops it.
+          const { client, grant } = yield* connected({ countdown: Duration.minutes(5), agents: fakeAgents({ holds: holds() }) })
+          const root = repository()
+          const branchOf = Effect.sync(() => execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim())
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+          yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, worksIn: 'checkout' })
+          const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+          yield* client.Send({
+            commandId: commandId(),
+            threadId: coordinator.threadId,
+            body: 'Add docs. [coordinator:plan] [coordinator:plan-no-review] [lead:slowly]',
+            disposition: 'after_current',
+          })
+          const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+            snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null && item.content.phase === 'planned'),
+          )
+          const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
+          const [planId, threadId, taskId] =
+            card?.kind === 'task' ? [card.content.plan?.id ?? '', card.content.threadId, card.content.taskId] : ['', '', '']
+          yield* client.StartPlan({ commandId: commandId(), planId })
+          // Its lead at work in the person's checkout, on the task's branch.
+          yield* until(client.GetThread({ threadId }), (thread) => thread.session?.turnRunning === true)
+          const taken = yield* branchOf
+          assert.notStrictEqual(taken, 'main')
+          // And a server its lead started, gone from its group to run on its own from the checkout, as `npm run dev &` does.
+          const marked = Effect.gen(function* () {
+            const listing = yield* listProcesses()
+            const marks = listing === null ? new Map<number, string>() : yield* marksOf()([...listing.keys()])
+            return [...marks].flatMap(([pid, work]) => (work === `task:${taskId}` ? [pid] : []))
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              // Started by a shell that exits at once, so it is in no tree of Althar's.
+              const serve = `"${process.execPath}" -e "setInterval(() => {}, 1000)" >/dev/null 2>&1 & echo $!`
+              const pid = execFileSync('/bin/sh', ['-c', serve], { cwd: root, env: { ...process.env, [WORK]: `task:${taskId}` } })
+              return Number(pid.toString().trim())
+            }),
+            // Stopped by then, unless the test failed.
+            (pid) =>
+              Effect.sync(() => {
+                try {
+                  process.kill(pid, 'SIGKILL')
+                } catch {}
+              }),
+          )
+          yield* until(marked, (pids) => pids.includes(server))
+
+          yield* client.RemoveProject({ commandId: commandId(), projectId: project.id })
+          yield* until(branchOf, (on) => on === 'main', 'the checkout goes back to main')
+          // Not before the server has stopped.
+          assert.deepStrictEqual(yield* marked, [])
+          // The task's branch stays, with what was on it; the same folder, added again, is free to work in.
+          assert.strictEqual(execFileSync('git', ['-C', root, 'branch', '--list', taken], { encoding: 'utf8' }).trim(), taken)
+          const again = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+          assert.notStrictEqual(again.id, project.id)
+        }),
+      ),
   )
 })
 

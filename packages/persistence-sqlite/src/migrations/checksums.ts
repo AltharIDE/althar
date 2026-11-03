@@ -64,5 +64,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0058_followed_pulls': 'ab550d9f4e9a14a328ecfdb37887aa3512f04057fa937508847cb0c68b7e7043',
   '0059_task_asks': '824ce98c265a2459189e15e070fcd1a3b01488e6ba3b8ca73997d4ffc5640129',
   '0060_finding_titles': 'e205614f007c5232164f727e6084a2b5210d2f473145cb1f62282dc8ee7930b1',
-  '0061_skills': 'ac2b8ba12660d4a876e22c87ae030f75ab3c93dcd6596ed57835feb4a2923ae2',
+  '0061_local_tasks': '6d52f601596ca2a31fec9c3b298e1cfd6e9a580a5bfc9dca2aa37e691776a460',
+  '0062_skills': 'ac2b8ba12660d4a876e22c87ae030f75ab3c93dcd6596ed57835feb4a2923ae2',
 }

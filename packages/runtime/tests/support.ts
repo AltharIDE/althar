@@ -343,6 +343,8 @@ export const runtime = (
     /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
     readonly leftFirst?: Duration.Duration
     readonly leftEvery?: Duration.Duration
+    /** How often what waits for a checkout is looked at again (ADR-091): every 100 milliseconds unless a test says. */
+    readonly localEvery?: Duration.Duration
   } = {},
 ) =>
   Runtime.layer({
@@ -386,6 +388,7 @@ export const runtime = (
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
     leftFirst: more.leftFirst ?? Duration.hours(1),
     ...(more.leftEvery === undefined ? {} : { leftEvery: more.leftEvery }),
+    local: { every: more.localEvery ?? Duration.millis(100) },
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */

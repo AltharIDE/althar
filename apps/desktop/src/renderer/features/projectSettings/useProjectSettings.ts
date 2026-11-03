@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary } from '@althar/contracts'
+import type { ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -23,6 +23,8 @@ import { useServices } from '../../data/services'
 
 /** A rule the settings switch in place. */
 export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
+/** A rule set from General: one of its switches, or where new tasks start (ADR-091). */
+export type GeneralRule = RuleSwitch | 'worksIn'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -60,8 +62,10 @@ export interface ProjectSettingsModel {
   readonly setMoveIssues: (on: boolean) => void
   /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
-  /** Which switch didn't hold, and why. */
-  readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
+  /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
+  readonly setWorksIn: (worksIn: WorksIn) => void
+  /** Which rule didn't hold, and why. */
+  readonly ruleFailed: { readonly rule: GeneralRule; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -128,9 +132,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   )
 
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
-  const [ruleFailed, setRuleFailed] = useState<{ readonly rule: RuleSwitch; readonly message: string } | null>(null)
+  const [ruleFailed, setRuleFailed] = useState<{ readonly rule: GeneralRule; readonly message: string } | null>(null)
   const setRule = useCallback(
-    <R extends RuleSwitch>(rule: R, value: ProjectRulesView[R]) => {
+    <R extends GeneralRule>(rule: R, value: ProjectRulesView[R]) => {
       const key = keys.rules(projectId)
       setRuleFailed(null)
       cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: value }))
@@ -162,6 +166,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     },
     [cache, projectId, setRule],
   )
+  const setWorksIn = useCallback((worksIn: WorksIn) => setRule('worksIn', worksIn), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -244,6 +249,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     looked,
     setMoveIssues,
     setRepositoryFile,
+    setWorksIn,
     ruleFailed,
     removing,
     askRemove,

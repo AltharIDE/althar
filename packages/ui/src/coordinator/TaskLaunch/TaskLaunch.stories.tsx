@@ -10,6 +10,7 @@ import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
+import { WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
@@ -204,6 +205,42 @@ export const WaitingForAFreeAgent: Story = {
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
     await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
   },
+}
+
+/** Where it works, in its head (ADR-091): Local, the person's own checkout, or a worktree, changeable until it starts. */
+function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+  const [worksIn, setWorksIn] = useState(start)
+  return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />
+}
+
+/** Planned Local, the project's default: one line on what it gives up. */
+export const Local: Story = {
+  render: () => <Placed />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Local' })).toBeChecked()
+    await expect(c.getByText('One task at a time; your own edits share it.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+    await expect(c.getByText('Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+  },
+}
+
+/** Another task works Local: the coordinator planned this one in a worktree and says why; Local would wait for it. */
+export const LocalTaken: Story = {
+  render: () => <Placed worksIn={WorksIn.Worktree} localTaken="Dark mode for Settings" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+    await expect(c.getByText('Waits for Dark mode for Settings.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+  },
+}
+
+/** Started Local, it waits for the checkout: said where the clock was. */
+export const WaitingForLocal: Story = {
+  render: () => <Placed localTaken="Dark mode for Settings" queued="Waits for Local: Dark mode for Settings is there" />,
 }
 
 /** A runtime is out: its steps wait for the reset, unless you move them. */

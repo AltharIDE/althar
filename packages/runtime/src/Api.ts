@@ -62,6 +62,8 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { LeftBehind } from './LeftBehind'
+import { localTasksIn } from './local'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -78,6 +80,7 @@ import {
   type ProjectRules,
   repositoryFilesOf,
   resolvesConflicts,
+  worksInOf,
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
@@ -201,6 +204,7 @@ export const handlers = Api.toLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
     const machine = yield* MachineLoad
     const planUsage = yield* PlanUsage
@@ -505,6 +509,7 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        worksIn: worksInOf(rules),
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
@@ -804,11 +809,19 @@ export const handlers = Api.toLayer(
           api(
             Effect.gen(function* () {
               const said = yield* envelope('project.remove', { projectId }, commandId)
-              const threads = yield* projects.remove(projectId, said.commandId)
-              // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
-              yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
-              // And what it runs stops, with no project left to stop it from.
-              yield* launches.stopAll(projectId)
+              // A checkout its tasks hold stays theirs until all of them has stopped, counted from before it is removed; then it goes back (ADR-091).
+              const local = yield* localTasksIn(projectId).pipe(Effect.provideContext(folderStore))
+              const removing = Effect.gen(function* () {
+                const threads = yield* projects.remove(projectId, said.commandId)
+                // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
+                yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
+                // And what it runs stops, with no project left to stop it from.
+                yield* launches.stopAll(projectId)
+                // What its Local tasks' agents left running in their checkouts, as a server outside their group, stops as a settled task's does.
+                yield* Effect.forEach(local, (taskId) => leftBehind.settled(taskId), { discard: true })
+              })
+              yield* local.reduce((inner, taskId) => leftBehind.stoppingWhile(taskId, inner), removing)
+              if (local.length > 0) yield* runs.checkoutsMoved
             }),
           ),
         ),
@@ -1231,7 +1244,8 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangePlan: ({ commandId, planId, steps, end, worksIn }) =>
+        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,
@@ -1316,6 +1330,15 @@ export const handlers = Api.toLayer(
                 sender,
               })
             }),
+          ),
+        ),
+      AnswerCheckout: ({ commandId, attentionId, answer }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('attention.answer_checkout', { attentionId, answer }, commandId), (said) =>
+              runs.answerCheckout({ envelope: said, attentionId, answer }),
+            ),
           ),
         ),
       HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {

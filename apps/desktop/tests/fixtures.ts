@@ -69,6 +69,7 @@ export const projectRules: ProjectRulesView = {
   alwaysAllow: [],
   commands: [],
   end: null,
+  worksIn: 'worktree',
   resolveConflicts: false,
   pushCommits: true,
   postScreenshots: false,
@@ -1175,6 +1176,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postReviewDraft: vi.fn(async () => {}),
     discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
+    answerCheckout: vi.fn(async () => {}),
     handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({

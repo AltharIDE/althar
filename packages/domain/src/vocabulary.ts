@@ -47,6 +47,13 @@ export type RunAttemptState = typeof RunAttemptState.Type
 export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed'])
 export type WorkspaceState = typeof WorkspaceState.Type
 
+/**
+ * Where a task works (ADR-091): a worktree of its own, or its repository's own checkout on this device, where the person works,
+ * held by one task at a time. Local on screen. A project's default for new tasks, a plan's choice, and each workspace's kind.
+ */
+export const WorksIn = Schema.Literals(['worktree', 'checkout'])
+export type WorksIn = typeof WorksIn.Type
+
 export const ExecutionState = Schema.Literals(['running', 'succeeded', 'failed', 'cancelled'])
 export type ExecutionState = typeof ExecutionState.Type
 
@@ -178,8 +185,11 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at once. */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])
+/**
+ * Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at
+ * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-091).
+ */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -190,6 +200,7 @@ export const AttentionKind = Schema.Literals([
   'graph_patch',
   'usage_limit',
   'review_disagreement',
+  'checkout',
 ])
 export type AttentionKind = typeof AttentionKind.Type
 
