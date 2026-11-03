@@ -346,6 +346,9 @@ describe('the board’s lanes', () => {
         const next = within(screen.getByRole('region', { name: 'Up next' }))
         expect(next.getByText('After Dark mode for Settings')).toBeTruthy()
         expect(next.getByText('Change · Local')).toBeTruthy()
+        // Under a divider of its own: it isn't paused for a limit or the connection.
+        expect(next.getByText('Waits for Local')).toBeTruthy()
+        expect(next.queryByText('Paused')).toBeNull()
         // Nothing of it has begun: it doesn't continue.
         expect(next.queryByText(/^Continues/)).toBeNull()
       })

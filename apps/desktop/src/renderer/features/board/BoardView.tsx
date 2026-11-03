@@ -34,7 +34,7 @@ import {
   unreachable,
   Wait,
 } from '@althar/ui'
-import { type ReactNode, useEffect, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -76,6 +76,8 @@ export const text = {
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
+  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-086). */
+  forLocal: localText.word,
   planned: 'Planned',
   /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
   upNextEmpty: {
@@ -715,6 +717,10 @@ export function BoardView({
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
+  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-086).
+  const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
+  const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
+  const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
   const pointed = (lane: BoardLane | null) =>
     setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
   // Hidden while its screen is kept (`KeptScreens`), with the pointer still on it, nothing says it looked away: it lets go.
@@ -816,11 +822,14 @@ export function BoardView({
             {...(line === undefined ? {} : { onMove: line.move })}
           />
         )}
-        {paused > 0 && <BoardDivider>{text.paused}</BoardDivider>}
-        {paused > 0 && (
-          <BoardList>
-            {shown.next.slice(continuing + free, continuing + free + paused).map((work, index) => nextRow(work, continuing + free + index))}
-          </BoardList>
+        {[halted, forLocal].map(
+          (rows, at) =>
+            rows.length > 0 && (
+              <Fragment key={at === 0 ? 'paused' : 'local'}>
+                <BoardDivider>{at === 0 ? text.paused : text.forLocal}</BoardDivider>
+                <BoardList>{rows.map((work) => nextRow(work, shown.next.indexOf(work)))}</BoardList>
+              </Fragment>
+            ),
         )}
         {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
         {continuing + free + paused < shown.next.length && (

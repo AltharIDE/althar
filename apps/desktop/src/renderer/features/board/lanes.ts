@@ -90,8 +90,11 @@ const groupOf = (task: BoardTask): Group | null => {
   return task.phase === 'running' ? 'running' : null
 }
 
-/** When a paused task can go on: a usage limit's reset, the soonest first; the connection, whenever it is back, after them. */
-const backAt = (task: BoardTask) => task.waits?.until ?? '￿'
+/**
+ * When a paused task can go on: a usage limit's reset, the soonest first; the connection, whenever it is back, after them;
+ * last, one started Local that waits for its checkout, under a divider of its own (ADR-086).
+ */
+const backAt = (task: BoardTask) => `${task.waitsForCheckout == null ? 0 : 1}${task.waits?.until ?? '￿'}`
 
 /**
  * Up next's waiting groups and Running, from the tasks in them: each in the

@@ -12,7 +12,7 @@ import s from './LocalPlace.module.css'
 export function LocalPlace({ path }: { path: string | null }) {
   return (
     <Tooltip label={path === null ? localText.inCheckout : localText.inCheckoutAt(path)} placement="above">
-      <span className={s.place} tabIndex={0}>
+      <span className={s.place}>
         <Icon name="folder" size={12} />
         {localText.place}
       </span>
