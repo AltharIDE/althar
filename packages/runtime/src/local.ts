@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { type Checkout, giveBack, holdupOf, readCheckout, takeCheckout } from './checkouts'
 import { RuntimeConfig } from './Config'
 import { makeScratch } from './firstWrite'
+import { makeKeyedLock } from './keyedLock'
 import { branchExists, commitOf, git } from './git'
 import { Instance } from './Instance'
 import { prepareWorktree, startCommitOf, startOf } from './Projects'
@@ -85,6 +86,23 @@ export const spotsOf = (taskId: string) =>
       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
       ORDER BY b.created_at, b.rowid`
   })
+
+/** A workspace as it stands now, by its id. */
+const spotById = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [spot] = yield* sql<Spot>`${sql.unsafe(SPOT)} WHERE w.id = ${id}`
+    return spot ?? null
+  })
+
+/**
+ * One at a time for each checkout: taking it, and giving it back, read
+ * again under the lock, so the loop that gives settled tasks' checkouts back
+ * and a task that asks for one never both act on what they read before.
+ */
+const checkoutLocks = makeKeyedLock()
+const lockingCheckouts = <A, E, R>(paths: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  [...new Set(paths)].toSorted().reduceRight<Effect.Effect<A, E, R>>((inner, path) => checkoutLocks.withLock(path, inner), effect)
 
 /** Whether a task works Local: any of its workspaces here is its repository's checkout. */
 export const worksLocal = (taskId: string) => Effect.map(spotsOf(taskId), (spots) => spots.some((spot) => spot.kind === 'checkout'))
@@ -221,8 +239,12 @@ export type Placed =
  * themselves is left where they put it.
  */
 export const giveBackSpot = (spot: Spot, told: (spot: Spot) => boolean = () => false) =>
+  lockingCheckouts([spot.repository], givingBack(spot, told))
+
+const givingBack = (was: Spot, told: (spot: Spot) => boolean) =>
   Effect.gen(function* () {
-    if (spot.kind !== 'checkout' || spot.state !== 'ready' || spot.returnedAt !== null) return 'back' as const
+    const spot = yield* spotById(was.id)
+    if (spot === null || spot.kind !== 'checkout' || spot.state !== 'ready' || spot.returnedAt !== null) return 'back' as const
     const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
     const gave = yield* giveBack(spot.repository, spot.branch, returnsTo)
     if (gave.kind === 'changes') {
@@ -263,6 +285,14 @@ const onOf = (checkout: Checkout) => checkout.branch ?? checkout.head.slice(0, 7
  * be: a task never holds one while it waits for another.
  */
 export const place = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null = null, told?: (spot: Spot) => boolean) =>
+  Effect.flatMap(spotsOf(taskId), (spots) =>
+    lockingCheckouts(
+      spots.map((spot) => spot.repository),
+      placing(taskId, worksIn, answer, told ?? (() => false)),
+    ),
+  )
+
+const placing = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer | null, told: (spot: Spot) => boolean) =>
   Effect.gen(function* () {
     const spots = yield* spotsOf(taskId)
     if (worksIn === 'worktree') {
@@ -279,7 +309,7 @@ export const place = (taskId: string, worksIn: WorksIn, answer: CheckoutAnswer |
       // One settled whose checkout stayed for changes not committed then: given back now, if they are.
       const freed =
         holder !== null && (holder.taskState === 'done' || holder.taskState === 'abandoned')
-          ? (yield* giveBackSpot(holder, told)) === 'back'
+          ? (yield* givingBack(holder, told)) === 'back'
           : false
       if (holder !== null && !freed) return { kind: 'taken', by: { taskId: holder.taskId, title: holder.title } } as Placed
       const was = yield* readCheckout(spot.repository)

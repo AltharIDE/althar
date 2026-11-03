@@ -12,6 +12,7 @@ import {
   type TaskEnd,
   type ThreadItem,
   type FieldAnswer,
+  type WorksIn,
 } from '@althar/contracts'
 
 import { messageOf, type RunRef } from '../../data/client'
@@ -85,7 +86,7 @@ export interface ProjectModel {
   readonly holdPlan: (planId: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly changeIssueDraft: (
     draftId: string,
@@ -397,7 +398,7 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
-    changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
+    changePlan: (planId, steps, end, worksIn) => act(() => client.changePlan(planId, steps, end, worksIn)),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),

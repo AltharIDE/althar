@@ -299,7 +299,7 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
+    onChange: (planId, steps, end, worksIn) => void model.changePlan(planId, steps, end, worksIn),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.

@@ -3279,22 +3279,25 @@ export class Runs extends Context.Service<
             yield* touchCard(plan.taskId)
             return 'waiting' as const
           }
-          yield* startFirst(current, admitted.attemptId)
-          return 'running' as const
+          // Local, held for its checkout, it waits as one with no place does (ADR-086).
+          return (yield* startFirst(current, admitted.attemptId)) ? ('running' as const) : ('waiting' as const)
         })
 
-      /** A plan's first step under way: its lead, as the plan says, on it. A lead that can't start leaves Implement needing the person, who can hand it to another agent. */
+      /**
+       * A plan's first step under way: its lead, as the plan says, on it. A lead that can't start leaves Implement needing the
+       * person, who can hand it to another agent. False where it is held for its checkout instead (ADR-086).
+       */
       const startFirst = (current: RunRow, attemptId: string) =>
         Effect.gen(function* () {
-          // Where it works first: Local, its checkouts taken, or held for them (ADR-086).
-          if (!(yield* placeFirst(current, attemptId))) return
+          // Where it works first: Local, its checkouts taken, or held for them.
+          if (!(yield* placeFirst(current, attemptId))) return false
           // The plan's lead nearly out, where the project waits or asks: held or asked before it starts.
           const { implement: lead } = yield* stepsOf(current)
-          if (lead !== undefined && (yield* heldLow(current, 'implement', attemptId, 0, lead))) return
+          if (lead !== undefined && (yield* heldLow(current, 'implement', attemptId, 0, lead))) return true
           const begun = yield* Effect.exit(leadOn(current))
           if (begun._tag === 'Failure') {
             const { implement } = yield* stepsOf(current)
-            return yield* stuck(
+            yield* stuck(
               current,
               { id: attemptId },
               {
@@ -3306,11 +3309,13 @@ export class Runs extends Context.Service<
                 open: 0,
               },
             )
+            return true
           }
           yield* begin(current, attemptId, begun.value, current.threadId)
           // Its first step has started: the issue it came from moves to In Progress, as the person would move it.
           yield* issues.started(current.taskId)
           yield* touchCard(current.taskId)
+          return true
         })
 
       /**

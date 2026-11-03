@@ -28,6 +28,8 @@ import s from './BoardCard.module.css'
 export interface BoardCardText {
   /** A kind's word on the card; a plain task has none. */
   kind: Record<TaskKind, string>
+  /** A kind's word for a task in the person's own checkout (ADR-086): with Local after it, or Local alone. */
+  local: (kind: string) => string
   /** The automation whose run it is. */
   from: (automation: string) => string
 }
@@ -38,6 +40,7 @@ export const boardCardText: BoardCardText = {
     [TaskKind.Review]: 'Review',
     [TaskKind.Plain]: '',
   },
+  local: (kind) => (kind === '' ? 'Local' : `${kind} · Local`),
   from: (automation) => `From ${automation}`,
 }
 
@@ -50,6 +53,8 @@ export type BoardCardProps = RootProps<
     word: string
     /** What it makes: a change or a review says so; a plain task says nothing. */
     kind?: TaskKind
+    /** It works in the person's own checkout, Local, said with its kind's word (ADR-086). */
+    local?: boolean
     /** How long, or since when: 9m. */
     at?: string
     errands?: readonly string[] | undefined
@@ -103,6 +108,7 @@ export function BoardCard({
   status = TaskStatus.Running,
   word,
   kind,
+  local = false,
   at,
   title,
   errands,
@@ -120,7 +126,8 @@ export function BoardCard({
   ...rest
 }: BoardCardProps) {
   const t = { ...boardCardText, ...text }
-  const named = kind === undefined ? '' : t.kind[kind]
+  const own = kind === undefined ? '' : t.kind[kind]
+  const named = local ? t.local(own) : own
   return (
     <article className={cx(b.card, s.card, s[status], className)} aria-current={current || undefined} {...rest}>
       <div className={b.top}>

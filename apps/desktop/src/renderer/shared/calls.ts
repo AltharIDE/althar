@@ -11,6 +11,8 @@ export const kindWords = {
   stuck: 'Stuck',
   /** A question an agent asks the person. */
   question: 'Question',
+  /** What Althar asks before a Local task takes the person's checkout (ADR-086). */
+  checkout: 'Local',
   /** A call for a step a usage limit stopped, which the person moves on or holds for the reset. */
   limit: 'Out of usage',
   /** Work done, waiting to be accepted. */
@@ -58,11 +60,13 @@ export const isUnshipped = (task: {
 export const callKindOf = (call: { readonly kind: string; readonly stuck: { readonly why: string } | null }): string =>
   call.kind === 'question'
     ? kindWords.question
-    : call.stuck === null
-      ? kindWords.permission
-      : call.stuck.why === 'usage_limit'
-        ? kindWords.limit
-        : kindWords.stuck
+    : call.kind === 'checkout'
+      ? kindWords.checkout
+      : call.stuck === null
+        ? kindWords.permission
+        : call.stuck.why === 'usage_limit'
+          ? kindWords.limit
+          : kindWords.stuck
 
 /** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'

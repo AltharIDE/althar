@@ -2,7 +2,7 @@ import { Fragment, useEffect, useEffectEvent, useRef, useState, type ReactNode }
 
 import { Icon } from '../../foundations/Icon/Icon'
 import type { ModelInfo } from '../../primitives/Model/Model'
-import { TaskEnd } from '../../foundations/vocabulary'
+import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
 import { taskEndText, type ChoiceWords } from '../../foundations/vocabularyText'
 import { useControlled } from '../../lib/controlled'
 import { useOnScreen } from '../../lib/onScreen'
@@ -13,6 +13,7 @@ import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
+import { Segmented } from '../../primitives/Segmented/Segmented'
 import { IssueRef, type IssueRefProps } from '../Issue/Issue'
 import s from './TaskLaunch.module.css'
 import { Rhythm } from '../../lib/rhythm'
@@ -80,6 +81,15 @@ export interface TaskLaunchText {
   hold: string
   start: string
   startNow: string
+  /** Where it works (ADR-086): the choice's name, and each place. */
+  worksIn: string
+  local: string
+  worktree: string
+  /** What each gives up, said under the choice; Local, while another task works there, what it waits for. */
+  localNote: (taken: string | null) => string
+  worktreeNote: string
+  /** Planned in a worktree while another task works Local: why, where the coordinator didn't say. */
+  localTaken: (taken: string) => string
 }
 
 export const taskLaunchText: TaskLaunchText = {
@@ -108,6 +118,12 @@ export const taskLaunchText: TaskLaunchText = {
   hold: 'Hold',
   start: 'Start',
   startNow: 'Start now',
+  worksIn: 'Works in',
+  local: 'Local',
+  worktree: 'Worktree',
+  localNote: (taken) => (taken === null ? 'One task at a time; your own edits share it.' : `Waits for ${taken}.`),
+  worktreeNote: 'Side by side with other tasks. Builds from cold.',
+  localTaken: (taken) => `Local is taken by ${taken}.`,
 }
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
@@ -123,6 +139,13 @@ function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string;
       </>
     )
   return step.why ?? null
+}
+
+/** Under the choice of where it works: why, where the coordinator said or Local is taken, then what the choice gives up. */
+const whereLine = (worksIn: WorksIn, why: string | undefined, taken: string | null, t: TaskLaunchText) => {
+  const reason = why ?? (worksIn === WorksIn.Worktree && taken !== null ? t.localTaken(taken) : null)
+  const note = worksIn === WorksIn.Local ? t.localNote(taken) : t.worktreeNote
+  return reason === null ? note : `${reason.replace(/\.?$/, '.')} ${note}`
 }
 
 /** The countdown as a ring that empties. */
@@ -172,6 +195,17 @@ export interface TaskLaunchProps {
   onHeldChange?: (held: boolean) => void
   /** No row for what happens when the work is done, where tasks end on their branch. */
   hideEnd?: boolean
+  /**
+   * Where it works (ADR-086): Local, in the person's own checkout, or a
+   * worktree of its own, beside the title, changeable until its first step
+   * starts. No choice without it, as for a review, which reads a copy.
+   */
+  worksIn?: WorksIn
+  onWorksInChange?: (worksIn: WorksIn) => void
+  /** Why it works there, in the coordinator's words, where that isn't the project's default. */
+  worksInWhy?: string
+  /** The task working Local now, by its title, which it would wait for there. */
+  localTaken?: string
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
   text?: Partial<TaskLaunchText>
@@ -199,6 +233,10 @@ export function TaskLaunch({
   defaultHeld = false,
   onHeldChange,
   hideEnd = false,
+  worksIn,
+  onWorksInChange,
+  worksInWhy,
+  localTaken,
   onStart,
   text,
 }: TaskLaunchProps) {
@@ -259,6 +297,22 @@ export function TaskLaunch({
           )}
         </span>
         <p className={s.title}>{title}</p>
+        {worksIn !== undefined && (
+          <>
+            <div className={s.where}>
+              <Segmented<WorksIn>
+                label={t.worksIn}
+                value={worksIn}
+                onChange={(next) => onWorksInChange?.(next)}
+                options={[
+                  { value: WorksIn.Local, label: t.local },
+                  { value: WorksIn.Worktree, label: t.worktree },
+                ]}
+              />
+            </div>
+            <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>
+          </>
+        )}
       </div>
       <ol className={s.steps}>
         {steps.map((st, i) => (
