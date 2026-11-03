@@ -31,8 +31,8 @@ const NEEDS: WorkNeed[] = [
 
 /* What it runs: its repository's own way, and Storybook beside it. */
 const RUNS: RunTarget[] = [
-  { id: 'dev', command: 'bun run dev', where: 'main', from: 'repository' },
-  { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', where: 'main', from: 'person' },
+  { id: 'dev', command: 'bun run dev', from: 'repository' },
+  { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', from: 'person' },
 ]
 
 const runIt = fn()
@@ -157,10 +157,13 @@ export const UnknownHost: Story = {
   },
 }
 
-/** What it runs sits at the end: one press runs its default branch, with no agent; the chevron has the rest. */
+/** What it runs sits at the end: a press opens its list, and nothing runs until a line is picked there (ADR-090). */
 export const Runs: Story = {
   play: async ({ canvasElement }) => {
+    runIt.mockClear()
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run' }))
+    await expect(runIt).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
     await expect(runIt).toHaveBeenCalledWith('dev')
   },
 }
