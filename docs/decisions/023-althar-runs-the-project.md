@@ -47,13 +47,19 @@
     null command goes back to working both out.
   - **Althar runs it,** with no agent: in a task's worktree, to see what the
     task built, or in a copy of the default branch of its own (beside the
-    coordinator's, made fresh each time it starts, what git ignores kept).
+    coordinator's, made fresh each time it starts, what git ignores kept
+    while its lockfiles stay as its packages were installed from: once they
+    change, what git ignores goes too, so its setup installs them again, and
+    a copy installed once never runs a later default branch on its first
+    packages).
     The person starts it from the task's menu or the project's front, and the
     coordinator with `run_project` when the person asks it to. A run already
     going in the same place is the one there is.
   - **Althar owns the process:** recorded as its own (purpose `run`), in a
     process group of its own, with the inherited environment every child
-    gets (docs/architecture/07). It stops when the person stops it or Althar
+    gets (docs/architecture/07), and, as a desktop app it opens needs, the
+    Linux session's display and bus (`DISPLAY`, `WAYLAND_DISPLAY`,
+    `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`). It stops when the person stops it or Althar
     quits; one an earlier launch left is stopped by reconciliation, as an
     agent's is.
   - **It shows where what agents leave running shows** (ADR-022): in the
@@ -69,7 +75,9 @@
     saying how it ended (stopped, or exited with its last line) with Run
     again. A run Althar's restart ended is marked stopped. The coordinator's
     `run_project` waits up to 30 seconds for the address, so its reply can
-    link it, or say how the run ended.
+    link it, or say how the run ended: its exit code, or the signal that
+    killed it and whether it crashed, and the last lines it printed on
+    stdout and stderr both, or that it printed nothing.
   - **The mini task is not how to run it** (DEV-55): it is for something
     small an agent does.
 - **Alternatives considered:**
