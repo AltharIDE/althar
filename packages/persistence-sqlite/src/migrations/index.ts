@@ -58,6 +58,7 @@ import { statements as recordedSetups } from './0053_recorded_setups'
 import { statements as personsWord } from './0054_persons_word'
 import { statements as upstreamBranches } from './0055_upstream_branches'
 import { statements as usage } from './0056_usage'
+import { statements as issueFields } from './0057_issue_fields'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -133,6 +134,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0054_persons_word', statements: personsWord },
   { key: '0055_upstream_branches', statements: upstreamBranches },
   { key: '0056_usage', statements: usage },
+  { key: '0057_issue_fields', statements: issueFields },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
