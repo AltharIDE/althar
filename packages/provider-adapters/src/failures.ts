@@ -36,7 +36,7 @@ const JUNIE_BALANCE = -32010
 const VIBE_RATE_LIMIT = -31001
 /**
  * ACP's "Resource not found". Said of a session (`data.sessionId`), it is one
- * the agent no longer has: claude-agent-acp 0.99.1 drops a session whose
+ * the agent no longer has: claude-agent-acp 0.100.0 drops a session whose
  * Claude Code process died, and answers its next prompt with this. Said of a
  * resource (`data.uri`), it isn't.
  */
