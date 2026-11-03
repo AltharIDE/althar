@@ -426,6 +426,65 @@ describe('a task', () => {
     expect(reviewedUnfurl(team)).toMatchObject({ kind: 'change', key: 'PR #7', state: 'open', repository: 'meridian/api' })
   })
 
+  it('files an issue at once from its card and has later ones filed at once, or asks first again, said to the coordinator', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.draft({ draftId: 'idr_1', title: 'Refunds skip the limiter', fields: [{ field: 'milestone', to: 'Beta' }] }),
+            items.draft({
+              draftId: 'idr_2',
+              title: 'Filed at once',
+              state: 'filed',
+              direct: true,
+              issue: { key: 'MER-4', url: 'https://linear.app/m/issue/MER-4' },
+              leftOff: ['Label “nonesuch”: Linear left it off.'],
+            }),
+          ],
+          task: { ...base.task, phase: 'waiting' },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const first = (await screen.findByRole('heading', { name: 'Refunds skip the limiter' })).closest('article') as HTMLElement
+    expect(within(first).getByText('Milestone: Beta · Labels: payments')).toBeTruthy()
+    await userEvent.click(within(first).getByRole('button', { name: 'Always file at once' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
+    expect(client.preferIssueCards).toHaveBeenCalledWith(expect.any(String), true)
+    expect(screen.getByText('Left off: Label “nonesuch”: Linear left it off.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Always ask first' }))
+    expect(client.preferIssueCards).toHaveBeenLastCalledWith(expect.any(String), false)
+  })
+
+  it('says whether the task does all of its issue or only part, and changes it', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            issue: {
+              product: 'linear',
+              ref: 'MER-231',
+              key: 'MER-231',
+              title: 'Rate-limit refunds',
+              url: 'https://linear.app/m/issue/MER-231',
+              status: { name: 'Todo', category: 'todo' },
+              priority: null,
+              container: 'Meridian',
+            },
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const part = await screen.findByRole('switch', { name: 'Only part of MER-231' })
+    expect(part.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(part)
+    await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true))
+  })
+
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
     const base = snapshot()
     const { client } = fakeClient({

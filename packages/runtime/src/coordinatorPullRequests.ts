@@ -31,7 +31,7 @@ import { ToolRefused } from './ToolServer'
 const refused = (message: string) => new ToolRefused({ message })
 
 /** A host's failure said to the coordinator, in the host's words. */
-const hostSays = (error: ConnectorFailed) =>
+export const hostSays = (error: ConnectorFailed) =>
   refused(
     error.reason === 'not_found'
       ? 'That is not there, or Althar’s sign-in can’t see it.'
@@ -40,7 +40,7 @@ const hostSays = (error: ConnectorFailed) =>
         : `The code host said: ${error.message}`,
   )
 
-const viaHost = <A, R>(effect: Effect.Effect<A, ConnectorFailed, R>) => Effect.mapError(effect, hostSays)
+export const viaHost = <A, R>(effect: Effect.Effect<A, ConnectorFailed, R>) => Effect.mapError(effect, hostSays)
 
 const decodeRemotes = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 
@@ -101,7 +101,7 @@ const placeOf = (projectId: string, asked: string) =>
   })
 
 /** The project's repository named, or its only one on a connected host. */
-const repositoryOf = (projectId: string, named: string | null | undefined) =>
+export const repositoryOf = (projectId: string, named: string | null | undefined) =>
   Effect.gen(function* () {
     const { hosted } = yield* hostedOf(projectId)
     const wanted = named?.trim().toLowerCase()

@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
+import { type FakeReleaseControls, makeFakeReleases } from './fakeReleases'
 import type {
   Account,
   ChangeList,
@@ -10,11 +11,13 @@ import type {
   ChangeToReview,
   Check,
   Choice,
+  ChosenField,
   CodeHost,
   Comment,
   Container,
   Issue,
   IssueChange,
+  IssueComment,
   IssueField,
   ListedChange,
   NewReview,
@@ -90,6 +93,8 @@ export interface FakeServiceOptions {
   readonly saysHead?: boolean
   /** What of an issue it updates: as its product's adapter does, unless a test says. */
   readonly changes?: ReadonlyArray<IssueField>
+  /** What of those it sets as it files an issue, the rest left to `update` right after: as its product's adapter does, unless a test says. */
+  readonly creates?: ReadonlyArray<IssueField>
   /**
    * What each call waits for before it answers, by method, as a host far away takes its time: a gate the test opens when
    * it has seen what it looks for meanwhile, never a time of the fake's. At once unless said.
@@ -100,12 +105,40 @@ export interface FakeServiceOptions {
 /** What each product's adapter changes of an issue, as the fake takes them. */
 const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
   product === 'linear'
-    ? ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title']
+    ? [
+        'status',
+        'close',
+        'priority',
+        'assignee',
+        'labels',
+        'project',
+        'milestone',
+        'cycle',
+        'parent',
+        'estimate',
+        'due',
+        'title',
+        'description',
+      ]
     : product === 'jira_cloud' || product === 'jira_dc'
-      ? ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+      ? ['status', 'close', 'priority', 'assignee', 'labels', 'milestone', 'parent', 'type', 'components', 'due', 'title', 'description']
       : product === 'trello'
-        ? ['status', 'close', 'assignee', 'labels', 'title']
-        : ['status', 'close', 'assignee', 'labels', 'project', 'title']
+        ? ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description']
+        : product === 'gitlab'
+          ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
+          : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
+
+/** What of those each product's adapter sets as it files an issue. */
+const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
+  product === 'linear'
+    ? ['status', 'assignee', 'project', 'milestone', 'cycle', 'parent', 'estimate', 'due']
+    : product === 'jira_cloud' || product === 'jira_dc'
+      ? ['assignee', 'milestone', 'parent', 'type', 'components', 'due']
+      : product === 'trello'
+        ? ['assignee', 'due']
+        : product === 'gitlab'
+          ? ['assignee', 'milestone', 'estimate', 'type', 'due']
+          : ['assignee', 'milestone', 'type']
 
 /** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
 const STATUSES: ReadonlyArray<Issue['status']> = [
@@ -127,6 +160,14 @@ const OPEN_CLOSED: ReadonlyArray<Issue['status']> = [
 const LABELS = ['bug', 'docs', 'payments']
 const PEOPLE = [{ id: 'user-sam', login: 'sam', name: 'Sam Rivera' }]
 const PROJECTS = ['Q4 launch', 'Payments v2']
+/** Each project's milestones, by the project's name. */
+const MILESTONES: Readonly<Record<string, ReadonlyArray<string>>> = { 'Q4 launch': ['Beta', 'GA'], 'Payments v2': ['Design'] }
+const CYCLES = [
+  { name: 'Cycle 12', also: ['12', 'current'] },
+  { name: 'Cycle 13', also: ['13', 'next'] },
+]
+const TYPES = ['Task', 'Bug', 'Story']
+const COMPONENTS = ['API', 'Web']
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
@@ -247,7 +288,7 @@ export interface FakeControls {
  * repositories it has. `failNext('access', …)` makes the next check stop at
  * its account: refused where the reason is `unauthorized`.
  */
-export type FakeService = CodeHost & Tracker & FakeControls & { readonly access: Access }
+export type FakeService = CodeHost & Tracker & FakeControls & FakeReleaseControls & { readonly access: Access }
 
 const START = Date.parse('2026-10-01T09:00:00.000Z')
 
@@ -287,6 +328,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const created: Array<Issue> = []
   const issueChanges: Array<{ readonly ref: string; readonly change: IssueChange }> = []
   const changesHere = options.changes ?? CHANGES_OF(product)
+  const createsHere = (options.creates ?? CREATES_OF(product)).filter((field) => changesHere.includes(field))
+  const capabilitiesHere = {
+    links: true,
+    starts: true,
+    changes: changesHere,
+    creates: createsHere,
+    assignees: product === 'linear' || product === 'jira_cloud' || product === 'jira_dc' ? ('one' as const) : ('many' as const),
+  }
   /** Its statuses: a repository's issue is open or closed; any other has a team's. */
   const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
@@ -348,8 +397,109 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     ...containers.values(),
   ]
 
+  /** What a field can be set to on the fake, for an issue with these statuses. */
+  const choicesOf = (
+    field: ChosenField,
+    statuses: ReadonlyArray<Issue['status']>,
+  ): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
+    const allowed: IssueField = field
+    if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
+    const named = (prefix: string, names: ReadonlyArray<string>) =>
+      names.map((name): Choice => ({ id: `${prefix}-${name.toLowerCase().replace(/\s+/g, '-')}`, name }))
+    switch (field) {
+      case 'status':
+        return Effect.succeed(statuses.map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
+      case 'labels':
+        return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
+      case 'assignee':
+        return Effect.succeed([me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })))
+      case 'project':
+        return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
+      // A Linear milestone is its project's; a repository's are its own.
+      case 'milestone':
+        return Effect.succeed(
+          PROJECTS.flatMap((project) =>
+            (MILESTONES[project] ?? []).map((name): Choice => ({
+              id: `milestone-${name.toLowerCase()}`,
+              name,
+              ...(product === 'linear' ? { in: `project-${project.toLowerCase()}`, also: [`${project} / ${name}`] } : {}),
+            })),
+          ),
+        )
+      case 'cycle':
+        return Effect.succeed(CYCLES.map((cycle): Choice => ({ id: `cycle-${cycle.also[0] ?? ''}`, name: cycle.name, also: cycle.also })))
+      case 'type':
+        return Effect.succeed(named('type', TYPES))
+      case 'components':
+        return Effect.succeed(named('component', COMPONENTS))
+    }
+  }
+
+  /** An issue with a change made, as the fake's adapters make it; undefined for a status it hasn't. */
+  const changed = (found: Issue, wanted: IssueChange): Issue | undefined => {
+    const statuses = statusesOf(found)
+    const closed = statuses.find((status) => status.category === 'done')
+    const status =
+      wanted.status !== undefined
+        ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
+        : wanted.close === true
+          ? closed
+          : found.status
+    if (status === undefined) return undefined
+    const people: ReadonlyArray<Person> = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
+    const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
+    const assignees = (() => {
+      const asked = wanted.assignee
+      if (asked === undefined) return found.assignees
+      if (asked === null) return []
+      const added = people.filter((person) => asked.add.some((choice) => choice.id === person.id))
+      // One assignee, where the adapter has one: the one added is in place of whoever had it.
+      if (capabilitiesHere.assignees === 'one')
+        return added.length > 0
+          ? added.slice(-1)
+          : found.assignees.filter((person) => !asked.remove.some((choice) => choice.id === person.id))
+      const kept = found.assignees.filter((person) => !asked.remove.some((choice) => choice.id === person.id))
+      return [...kept, ...added.filter((person) => !kept.some((had) => had.id === person.id))]
+    })()
+    const parent = wanted.parent == null ? wanted.parent : (issues.get(wanted.parent.ref) ?? null)
+    return {
+      ...found,
+      status,
+      assignees,
+      ...(wanted.title === undefined ? {} : { title: wanted.title }),
+      ...(wanted.description === undefined ? {} : { body: wanted.description }),
+      ...(wanted.priority === undefined
+        ? {}
+        : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
+      ...(wanted.labels === undefined
+        ? {}
+        : {
+            labels: [
+              ...new Set([
+                ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
+                ...wanted.labels.add.map((label) => label.name),
+              ]),
+            ],
+          }),
+      ...(wanted.project === undefined
+        ? {}
+        : { project: wanted.project === null ? null : { id: wanted.project.id, name: wanted.project.name } }),
+      ...(wanted.milestone === undefined
+        ? {}
+        : { milestone: wanted.milestone === null ? null : { id: wanted.milestone.id, name: wanted.milestone.name } }),
+      ...(wanted.cycle === undefined ? {} : { cycle: wanted.cycle?.name ?? null }),
+      ...(parent === undefined ? {} : { parent: parent === null ? null : { key: parent.key, title: parent.title } }),
+      ...(wanted.estimate === undefined ? {} : { estimate: wanted.estimate }),
+      ...(wanted.type === undefined ? {} : { type: wanted.type.name }),
+      ...(wanted.components === undefined ? {} : { components: wanted.components.map((component) => component.name) }),
+      ...(wanted.due === undefined ? {} : { due: wanted.due }),
+      updatedAt: now(),
+    }
+  }
+
   const service: FakeService = {
     product,
+    ...makeFakeReleases({ product, called }),
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
       drafts: true,
@@ -360,9 +510,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
       reopen: product !== 'bitbucket_cloud',
       rerun: product !== 'bitbucket_dc',
-      links: true,
-      starts: true,
-      changes: changesHere,
+      ...capabilitiesHere,
     },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
@@ -698,62 +846,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         return Effect.succeed({ moved: true, status })
       }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
-    choices: (issue, field) =>
-      Effect.andThen(called('choices'), (): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
-        const allowed: IssueField = field
-        if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
-        switch (field) {
-          case 'status':
-            return Effect.succeed(statusesOf(issue).map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
-          case 'labels':
-            return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
-          case 'assignee':
-            return Effect.succeed(
-              [me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })),
-            )
-          case 'project':
-            return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
-        }
-      }),
+    choices: (issue, field) => Effect.andThen(called('choices'), () => choicesOf(field, statusesOf(issue))),
+    choicesIn: (id, field) =>
+      Effect.andThen(called('choicesIn'), () =>
+        filable().some((candidate) => candidate.id === id)
+          ? choicesOf(field, repositories.has(id.toLowerCase()) ? OPEN_CLOSED : STATUSES)
+          : Effect.fail(missing(`container ${id}`)),
+      ),
     update: (issue, wanted) =>
       Effect.andThen(called('update'), () => {
-        const refused = unchangeable({ links: true, starts: true, changes: changesHere }, wanted)
+        const refused = unchangeable(capabilitiesHere, wanted)
         if (refused !== undefined) return Effect.fail(cantChange(product, refused, 'the fake has no such field'))
         const found = issues.get(issue.ref)
         if (found === undefined) return Effect.fail(missing(`issue ${issue.ref}`))
-        const statuses = statusesOf(found)
-        const closed = statuses.find((status) => status.category === 'done')
-        const status =
-          wanted.status !== undefined
-            ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
-            : wanted.close === true
-              ? closed
-              : found.status
-        if (status === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
-        const people = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
-        const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
-        const after: Issue = {
-          ...found,
-          status,
-          ...(wanted.title === undefined ? {} : { title: wanted.title }),
-          ...(wanted.priority === undefined
-            ? {}
-            : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
-          ...(wanted.assignee === undefined
-            ? {}
-            : { assignees: wanted.assignee === null ? [] : people.filter((person) => person.id === wanted.assignee?.id) }),
-          ...(wanted.labels === undefined
-            ? {}
-            : {
-                labels: [
-                  ...new Set([
-                    ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
-                    ...wanted.labels.add.map((label) => label.name),
-                  ]),
-                ],
-              }),
-          updatedAt: now(),
-        }
+        const after = changed(found, wanted)
+        if (after === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
         issues.set(found.ref, after)
         issueChanges.push({ ref: found.ref, change: wanted })
         return Effect.succeed(after)
@@ -762,13 +869,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('create'), () => {
         const container = filable().find((candidate) => candidate.id === id)
         if (container === undefined) return Effect.fail(missing(`container ${id}`))
+        // As an adapter files only what it sets as it files: the rest is `update`'s, right after.
+        const beyond = Object.keys(draft.fields ?? {}).find((field) => !createsHere.includes(field as IssueField))
+        if (beyond !== undefined)
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `The fake files no ${beyond}` }))
         // A repository's issues are numbered `owner/repo#1`, a team's by its key (MER-1).
         const refOf = (number: number) =>
           repositories.has(id.toLowerCase()) || container.key === null ? `${id}#${number}` : `${container.key}-${number}`
         let number = 1
         while (issues.has(refOf(number))) number += 1
         const ref = refOf(number)
-        const filed: Issue = {
+        const added: Issue = {
           ...service.addIssue({ ref, title: draft.title, body: draft.body, assigned: false }),
           labels: [...draft.labels],
           container: container.name,
@@ -778,10 +889,36 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               ? null
               : { level: draft.priority, name: draft.priority === 'none' ? 'No priority' : draft.priority },
         }
+        const filed = changed(added, draft.fields ?? {}) ?? added
         issues.set(ref, filed)
         created.push(filed)
         return Effect.succeed(filed)
       }),
+    find: (query) =>
+      Effect.andThen(called('find'), () => {
+        const words = query.text?.trim().toLowerCase() ?? ''
+        const within = query.container === undefined ? undefined : filable().find((one) => one.id === query.container)
+        return Effect.succeed(
+          [...issues.values()]
+            .filter((issue) => {
+              const ended = issue.status.category === 'done' || issue.status.category === 'cancelled'
+              return (
+                (query.state === 'all' || (query.state === 'closed') === ended) &&
+                (query.mine !== true || issue.assignees.some((person) => person.id === me.id)) &&
+                (within === undefined || issue.container === within.name || issue.container === within.key) &&
+                (words === '' || `${issue.title}\n${issue.body}`.toLowerCase().includes(words))
+              )
+            })
+            .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+            .slice(0, query.limit),
+        )
+      }),
+    comments: (issue, limit) =>
+      Effect.andThen(called('comments'), () =>
+        Effect.succeed(
+          (issueComments.get(issue.ref) ?? []).slice(-limit).map((body): IssueComment => ({ author: me, body, at: issue.updatedAt })),
+        ),
+      ),
     access: (input) =>
       called('access').pipe(
         Effect.map(() => {

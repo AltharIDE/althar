@@ -221,3 +221,9 @@ a.key:hover {
   text-decoration: line-through;
   text-decoration-color: var(--t-4);
 }
+
+/* on changes made at once: ask first next time, at the line's end */
+.lineAsk {
+  flex: none;
+  margin-left: auto;
+}

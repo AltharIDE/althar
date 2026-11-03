@@ -992,7 +992,7 @@ export class Changes extends Context.Service<
        */
       const bodyFor = (
         threadId: string,
-        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null,
+        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string } | null = null,
@@ -1371,8 +1371,9 @@ export class Changes extends Context.Service<
             url: string
             ref: string
             connectionId: string | null
+            partOf: number
           }>`
-            SELECT id, product, key, url, ref, connection_id FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
+            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
           // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
           const sameHost =
             issueLink !== undefined &&
@@ -1388,7 +1389,7 @@ export class Changes extends Context.Service<
           })
           const body = yield* bodyFor(
             task.threadId,
-            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
+            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost, partOf: issueLink.partOf === 1 },
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),

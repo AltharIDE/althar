@@ -88,15 +88,15 @@ export const ProjectRules = Schema.Struct({
    */
   branchPattern: Schema.optional(Schema.String),
   titlePattern: Schema.optional(Schema.String),
-  /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
-  moveIssues: Schema.optional(Schema.Boolean),
   /**
-   * Whether changes to issues on the person's trackers (status, priority,
-   * assignee, labels, closing), proposed by the coordinator, a lead or
-   * Althar, apply at once rather than as a card the person applies. Off
-   * without it. Comments and links apply at once either way.
+   * Whether a task's issue is moved along with it: to its tracker's In
+   * Progress as it starts, In Review and Done with its pull request. On
+   * without it. Whether other changes to issues apply at once, or wait on the
+   * person's card, is the agents' call by what the person said, kept as a
+   * project note (DEV-182): an earlier revision's `changeIssues` is read as
+   * nothing, its migration having kept it as such a note.
    */
-  changeIssues: Schema.optional(Schema.Boolean),
+  moveIssues: Schema.optional(Schema.Boolean),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -189,9 +189,6 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
-
-/** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
-export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true

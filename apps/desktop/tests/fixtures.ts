@@ -76,7 +76,6 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
-  changeIssues: false,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
     commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
@@ -1106,6 +1105,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     discardIssueDraft: vi.fn(async () => {}),
     applyIssueChanges: vi.fn(async () => {}),
     discardIssueChanges: vi.fn(async () => {}),
+    preferIssueCards: vi.fn(async () => {}),
+    setTaskIssuePart: vi.fn(async () => {}),
     changeReviewDraft: vi.fn(async () => {}),
     postReviewDraft: vi.fn(async () => {}),
     discardReviewDraft: vi.fn(async () => {}),

@@ -660,6 +660,8 @@ describe('the API', () => {
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
               ClearLaunch: () => Effect.void,
+              PreferIssueCards: () => Effect.void,
+              SetTaskIssuePart: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({
                   _tag: 'Changed' as const,

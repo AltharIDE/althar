@@ -58,6 +58,18 @@ export interface AskedAction {
   readonly branch?: string | undefined
   readonly request: Readonly<Record<string, unknown>>
   readonly read: Effect.Effect<FreshAction, ToolRefused>
+  /**
+   * The read after an earlier call's answer was lost, where it differs:
+   * what proves now that it happened. Without it, `read` reads it back.
+   */
+  readonly readBack?: Effect.Effect<FreshAction, ToolRefused>
+  /**
+   * The same intent may come again and need doing again, as a tag someone
+   * deleted is asked for again, or a rerun waits on its approval anew: a
+   * confirmed answer is given again only once a fresh read agrees it's
+   * done, and otherwise it is done again, under a receipt of its own.
+   */
+  readonly recurs?: boolean
   /** Only ActionNotPerformed proves a refusal did not write; other errors require read-back. */
   readonly act: (fresh: FreshAction) => Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed>
 }
@@ -290,12 +302,14 @@ export class Errands extends Context.Service<
       const execute = (tool: string, access: ToolAccess, action: AskedAction) => {
         // The same external intent shares a receipt across messages, sessions and errands.
         // Include a task revision or operation generation in request for an action that may legitimately recur.
-        const key = `asked:${createHash('sha256')
+        const base = `asked:${createHash('sha256')
           .update(stable([access.projectId, tool, action.target, action.head, action.branch, action.request]))
           .digest('hex')}`
         return locks.withLock(
-          key,
+          base,
           Effect.gen(function* () {
+            // An intent that recurs keeps a receipt a time, keyed after the one before: `base`, then `base#<receipt>`.
+            let key = base
             let errand: ErrandRow | undefined
             let step: StepRow | undefined
             const authorize = Effect.gen(function* () {
@@ -331,12 +345,14 @@ export class Errands extends Context.Service<
               return errand.words
             })
             const words = yield* authorize
-            const [receipt] = yield* sql<{
+            let [receipt] = yield* sql<{
               id: string
               workItemId: string
+              idempotencyKey: string
               state: string
               response: string | null
-            }>`SELECT id, work_item_id, state, response FROM mutation_receipts WHERE project_id = ${access.projectId} AND idempotency_key = ${key} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            }>`SELECT id, work_item_id, idempotency_key, state, response FROM mutation_receipts WHERE project_id = ${access.projectId} AND (idempotency_key = ${base} OR idempotency_key LIKE ${`${base}#%`}) ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            if (receipt !== undefined) key = receipt.idempotencyKey
             const finish = (answer: string, head: string | undefined) =>
               sql.withTransaction(
                 Effect.gen(function* () {
@@ -361,7 +377,8 @@ export class Errands extends Context.Service<
                 }),
               )
             const previous: unknown = JSON.parse(receipt?.response ?? 'null')
-            if (receipt?.state === 'confirmed' && typeof previous === 'string') {
+            const recurring = action.recurs === true && step?.state !== 'done' && errand?.state !== 'done' && receipt?.state === 'confirmed'
+            if (receipt?.state === 'confirmed' && typeof previous === 'string' && !recurring) {
               const answer = previous
               const [kept] = yield* sql<{ request: string }>`SELECT request FROM mutation_receipts WHERE id = ${receipt.id}`
               const saved = JSON.parse(kept?.request ?? '{}') as { head?: string }
@@ -370,7 +387,12 @@ export class Errands extends Context.Service<
             }
             if (step?.state === 'done' || errand?.state === 'done') return yield* refused('This step is done already.')
             // This callback must contact the authority, including when a previous call's answer was lost.
-            const fresh = yield* action.read
+            const fresh = yield* receipt !== undefined &&
+            receipt.state !== 'failed' &&
+            receipt.state !== 'confirmed' &&
+            action.readBack !== undefined
+              ? action.readBack
+              : action.read
             yield* authorize // A message or objection may have arrived during the read.
             if (fresh.state === 'objection') {
               if (errand !== undefined) yield* set(errand, 'paused', fresh.reason ?? 'A new objection needs the person’s word again.')
@@ -394,6 +416,16 @@ export class Errands extends Context.Service<
               return yield* refused('The head moved. Read it again before asking for this action.')
             if (fresh.state === 'unknown' || fresh.state === 'waiting')
               return yield* refused(fresh.reason ?? 'This step still waits; nothing was changed.')
+            if (recurring && receipt !== undefined) {
+              const answer = fresh.answer ?? (typeof previous === 'string' ? previous : 'Already done.')
+              if (fresh.state === 'done') {
+                yield* finish(answer, fresh.head)
+                return answer
+              }
+              // Done before, and not now: this is another time of it, with a receipt of its own.
+              key = `${base}#${receipt.id}`
+              receipt = undefined
+            }
             if (receipt !== undefined && receipt.state !== 'failed' && fresh.state !== 'done' && fresh.state !== 'absent')
               return yield* refused(
                 'The earlier answer was lost. Read back whether it happened or is still in flight; it will not be acted on twice.',

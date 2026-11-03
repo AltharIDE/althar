@@ -1561,8 +1561,9 @@ export class Queries extends Context.Service<
             snapshot: string
             listening: number
             connectionId: string | null
+            partOf: number
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
             ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
@@ -1648,7 +1649,13 @@ export class Queries extends Context.Service<
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
+          return {
+            issue,
+            issueConnection: issueRow?.connectionId ?? null,
+            // It does only part of its issue: its merge comments rather than closing it.
+            ...(issueRow?.partOf === 1 ? { issuePartOf: true } : {}),
+            changes,
+          }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
