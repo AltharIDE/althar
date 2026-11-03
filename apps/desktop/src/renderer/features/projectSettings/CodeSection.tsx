@@ -5,6 +5,7 @@ import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { serviceOfProduct } from '../connections/ways'
 import { text as frontText, trackerIdOf, type Tracker } from '../project/front'
+import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -126,11 +127,13 @@ export function CodeSection({
   onManage: () => void
 }) {
   const repositories = useRepositories(projectId)
+  const offer = useForkOffer(projectId, repositories.repositories)
   const bound = useProjectTracker(projectId, list)
   // Once one is bound, drafts go there alone: the rest are only where its issues are.
   const binding = trackers.some((tracker) => tracker.bound === true)
   return (
     <>
+      <ForkOffer offer={offer} />
       <Repositories model={repositories} connections={list} onConnect={onConnect} />
       <SettingGroup
         title={text.trackers}

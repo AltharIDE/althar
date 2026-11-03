@@ -45,7 +45,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('Claude Code').first()).toBeVisible()
     await page.getByRole('button', { name: /^Continue/ }).click()
     const found = page.getByRole('list', { name: 'Repositories for the project' })
-    await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/, /Add a folder/])
+    await expect(found.getByRole('listitem')).toHaveText([/meridian.*~\/Projects\/meridian/, /halyard/])
     await still(page)
     await page.screenshot({ path: 'test-results/start.png' })
     await found.getByRole('checkbox', { name: /meridian/ }).click()

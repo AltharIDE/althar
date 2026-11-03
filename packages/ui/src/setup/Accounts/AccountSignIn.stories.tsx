@@ -174,6 +174,22 @@ export const NotSignedInYet: Story = {
   },
 }
 
+/** Check again while it reads: the link says so and waits. */
+export const CheckingAgain: Story = {
+  args: { step: { kind: 'terminal', line: 'opencode auth login', opened: true, notYet: true, checking: true } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Checking…' })).toBeDisabled()
+  },
+}
+
+/** The agent answered something Althar couldn't read: it says so, not "not yet". */
+export const CouldntTell: Story = {
+  args: { step: { kind: 'terminal', line: 'opencode auth login', opened: true, notYet: true, unclear: true } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText(/Couldn’t tell if it signed in\./)).toBeInTheDocument()
+  },
+}
+
 /** Where Terminal couldn't be opened: the line to run, to copy. */
 export const RunItYourself: Story = {
   args: { step: { kind: 'terminal', line: 'CODEX_HOME=~/.althar/codex/side codex login', opened: false } },

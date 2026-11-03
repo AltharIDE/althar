@@ -4,12 +4,14 @@ import { device } from '../../foundations/device'
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { keys, modKey } from '../../foundations/keys'
 import { Light } from '../../foundations/Light/Light'
+import { BrandMark } from '../../foundations/Marks/Marks'
 import { RuntimeState, TaskStatus } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
 import { Button } from '../../primitives/Button/Button'
 import { Field } from '../../primitives/Field/Field'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
@@ -17,7 +19,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { AgentsAway, type AgentsAwayText } from '../../setup/AgentsAway/AgentsAway'
 import { RepositoryPick, type RepositoryChoice, type RepositoryPickText } from '../../setup/RepositoryPick/RepositoryPick'
 import { Runtimes, type RuntimeEntry, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
-import { AgentsScene, CallsScene, ReviewScene, TaskScene, type SceneProps } from './scenes'
+import { CoordinatorScene, MakersScene, ProjectScene, ReviewScene, type SceneProps } from './scenes'
 import { Station } from './Station'
 import s from './Welcome.module.css'
 
@@ -25,32 +27,41 @@ import s from './Welcome.module.css'
  * The first thing Althar shows, before there is a project: one card, the
  * same size on every step, with a track of its steps along its head.
  *
- * It opens on a short tour, a page for each of what Althar does: you ask
- * the coordinator, agents from different makers build, only the calls come
- * to you, and the work is reviewed before you see it. Each page plays a
- * scene made of the real components, with notes pinned to its parts. Skip
- * leaves the tour for the setup; once the tour has been seen it is left out.
+ * It opens on a short tour, a page for each of what is new here: work
+ * happens in projects, of one repository or several, each task on a copy of
+ * its own; you tell the project's coordinator what you want, and it plans;
+ * agents from different makers do the work and review each other's, every
+ * agent Althar runs named by its mark; and the change is reviewed before you
+ * see it. Each page plays a scene made of the real components, at its real
+ * size where the window allows. Skip leaves the tour for the setup; once the
+ * tour has been seen it is left out.
  *
  * Then the setup, one thing a step: the agents on this computer, signed in
- * or not, with the one thing each needs; the first project, the
- * repositories found ticked into it, or a folder added; where its code is,
- * for pull requests; and a tracker, for issues. Only the project is needed:
- * a project can be made with no agent ready, and the code host and the
- * tracker can wait. The project is made on its step, so the last two steps
- * know where its code is; the last step opens it.
+ * or not, with the one thing each needs, and those it could have; the first
+ * project, of a folder chosen or the repositories found, found by typing;
+ * where its code is, for pull requests; and a tracker, for issues. Only the
+ * project is needed: a project can be made with no agent ready, and the code
+ * host and the tracker can wait. The project is made on its step, so the
+ * last two steps know where its code is; the last step opens it.
  *
  * Return presses the step's main button, which takes the focus as each step
- * arrives; the arrows walk the tour. With reduced motion, or `still`, every
- * scene arrives finished.
+ * arrives; on the project's, the field that finds a repository takes it, and
+ * Return ticks what it found. The arrows walk the tour. With reduced motion,
+ * or `still`, every scene arrives finished.
  */
 
 /** Where the welcome is: the tour's four pages, then the setup's four steps. */
-export type WelcomeStep = 'ask' | 'build' | 'decide' | 'review' | 'agents' | 'project' | 'code' | 'issues'
+export type WelcomeStep = 'projects' | 'coordinator' | 'makers' | 'review' | 'agents' | 'project' | 'code' | 'issues'
 
-type TourStep = 'ask' | 'build' | 'decide' | 'review'
-const TOUR: readonly TourStep[] = ['ask', 'build', 'decide', 'review']
+type TourStep = 'projects' | 'coordinator' | 'makers' | 'review'
+const TOUR: readonly TourStep[] = ['projects', 'coordinator', 'makers', 'review']
 const SETUP: readonly WelcomeStep[] = ['agents', 'project', 'code', 'issues']
-const SCENES: Record<TourStep, ComponentType<SceneProps>> = { ask: TaskScene, build: AgentsScene, decide: CallsScene, review: ReviewScene }
+const SCENES: Record<TourStep, ComponentType<SceneProps>> = {
+  projects: ProjectScene,
+  coordinator: CoordinatorScene,
+  makers: MakersScene,
+  review: ReviewScene,
+}
 
 export interface WelcomePageText {
   /** Its name on the track. */
@@ -61,8 +72,6 @@ export interface WelcomePageText {
 
 export interface WelcomeText {
   name: string
-  /** Over the tour's first page. */
-  greeting: string
   /** The track, read out. */
   steps: string
   skip: string
@@ -71,7 +80,23 @@ export interface WelcomeText {
   /** The tour's last page goes on to the setup. */
   setUp: string
   tour: Record<TourStep, WelcomePageText>
-  agents: { label: string; title: string; line: string; list: string; asking: string; noneHere: string; go: string; without: string }
+  /** Every agent Althar runs, a mark each on the makers' page, read out. */
+  makers: string
+  agents: {
+    label: string
+    title: string
+    line: string
+    /** Over the agents on this computer. */
+    here: string
+    list: string
+    asking: string
+    /** None on this computer, with those it could have under it. */
+    noneHere: string
+    /** None at all: none here, and none offered. */
+    noneAtAll: string
+    go: string
+    without: string
+  }
   project: {
     label: string
     title: string
@@ -91,53 +116,55 @@ export interface WelcomeText {
 
 export const welcomeText: WelcomeText = {
   name: 'Althar',
-  greeting: 'Welcome to Althar',
   steps: 'Steps',
   skip: 'Skip',
   back: 'Back',
   next: 'Next',
   setUp: 'Set up Althar',
   tour: {
-    ask: {
-      label: 'Ask',
-      title: 'Tell the coordinator what you want',
-      body: 'It plans the work into tasks and gives each one an agent to lead it. It writes no code itself.',
+    projects: {
+      label: 'Projects',
+      title: 'Work happens in projects',
+      body: 'One repository or several, with its own coordinator, board, rules and notes. Each task works on its own branch, in a copy of its own, so your folders stay as they are.',
     },
-    build: {
-      label: 'Build',
+    coordinator: {
+      label: 'Coordinator',
+      title: 'Meet the coordinator',
+      body: 'Tell it what you want done. It plans the work into tasks, gives each an agent to lead it, and brings you only what needs your decision. It writes no code itself.',
+    },
+    makers: {
+      label: 'Makers',
       title: 'Agents from different makers',
-      body: 'Claude Code, Codex, OpenCode and others, each signed in as you on your own plan. One task can use several at once.',
-    },
-    decide: {
-      label: 'Decide',
-      title: 'Only the calls come to you',
-      body: 'Tasks move across the board on their own. What only you can decide waits under Needs you.',
+      body: 'The agents you already use, each signed in as you, on your own plan. One leads a task, and another maker’s agent reviews its work.',
     },
     review: {
       label: 'Review',
       title: 'Reviewed before you see it',
-      body: 'Before its pull request opens, an agent from another maker reviews the change. The lead fixes what holds and says why it keeps the rest, and the pull request carries the review.',
+      body: 'Each change ends in a pull request that carries its review. Merging it stays yours.',
     },
   },
+  makers: 'The agents Althar runs',
   agents: {
     label: 'Agents',
     title: 'Your agents',
     line: 'Althar runs the agents you already use, on your own plans. One signed in is enough to start.',
+    here: `On ${device.this}`,
     list: `Agents on ${device.this}`,
     asking: 'Asking the agents',
-    noneHere: `None on ${device.this} yet`,
+    noneHere: 'None yet: download one below, or install one yourself.',
+    noneAtAll: 'None found.',
     go: 'Continue',
     without: 'Continue without one',
   },
   project: {
     label: 'Project',
     title: 'Your first project',
-    line: 'One repository or several. Each task works on a copy of its own, so these folders stay as they are.',
+    line: 'One repository or several. More can be added later, in its settings.',
     over: 'Let go to add it',
     name: 'Project name',
     make: 'Make the project',
     makeKbd: modKey(keys.return),
-    nothing: 'Tick a repository, or add a folder.',
+    nothing: 'Tick a repository, or choose a folder.',
   },
   code: {
     label: 'Code',
@@ -165,7 +192,7 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   toured?: boolean
   /** The tour is over, finished or skipped. */
   onToured?: () => void
-  /** The agents, as each answered; null while they are still being asked. */
+  /** Every agent Althar runs, as each answered; null while they are still being asked. Their marks are the makers' page's too. */
   runtimes: readonly RuntimeEntry[] | null
   /** The agents' rows' own words, such as what this computer is called. */
   runtimesText?: Partial<RuntimesText>
@@ -274,9 +301,11 @@ export function Welcome({
     if (made && step === 'project') setStep('code')
   }, [made, step, setStep])
 
-  // Each step's main button takes the focus as the step arrives, so Return goes on.
+  // Each step's main button takes the focus as the step arrives, so Return goes on; the project's step is about finding a
+  // repository, so its field takes it, where there are any to find.
   useLayoutEffect(() => {
-    primary.current?.focus({ preventScroll: true })
+    const find = step === 'project' ? root.current?.querySelector<HTMLInputElement>('input[type="search"]:not(:disabled)') : null
+    ;(find ?? primary.current)?.focus({ preventScroll: true })
   }, [step])
 
   // The arrows walk the tour while focus is in the welcome, not anywhere on the page it sits in.
@@ -337,87 +366,79 @@ export function Welcome({
         </header>
 
         <div key={step} className={cx(s.body, !instant && s.arrive)}>
-          {isTour(step) ? (
-            <div className={s.tour}>
-              <SceneFrame scene={SCENES[step]} room={ROOM[step]} instant={instant} label={t.tour[step].label} />
-              <div className={s.words}>
-                {at === 0 && <span className={s.greeting}>{t.greeting}</span>}
-                <h1 id={titleId} className={s.title}>
-                  {title}
-                </h1>
-                <p className={s.line}>{t.tour[step].body}</p>
+          <div className={s.words}>
+            <h1 id={titleId} className={s.title}>
+              {title}
+            </h1>
+            <p className={s.line}>{isTour(step) ? t.tour[step].body : t[step].line}</p>
+            {step === 'makers' && <Makers runtimes={runtimes} label={t.makers} />}
+          </div>
+          {isTour(step) && <SceneFit scene={SCENES[step]} instant={instant} />}
+          {step === 'agents' &&
+            (runtimes === null ? (
+              <div className={s.waiting} aria-label={t.agents.asking} aria-busy="true">
+                <Skeleton height={36} />
+                <Skeleton height={36} />
+                <Skeleton height={36} />
               </div>
-            </div>
-          ) : (
-            <>
-              <div className={s.words}>
-                <h1 id={titleId} className={s.title}>
-                  {title}
-                </h1>
-                <p className={s.line}>{t[step].line}</p>
-              </div>
-              {step === 'agents' &&
-                (runtimes === null ? (
-                  <div className={s.waiting} aria-label={t.agents.asking} aria-busy="true">
-                    <Skeleton height={36} />
-                    <Skeleton height={36} />
-                    <Skeleton height={36} />
-                  </div>
-                ) : (
-                  <div className={s.agents}>
-                    {here.length > 0 ? (
-                      <Runtimes
-                        label={t.agents.list}
-                        runtimes={here}
-                        {...rows}
-                        {...(runtimesText === undefined ? {} : { text: runtimesText })}
-                      />
-                    ) : (
-                      <p className={s.quiet}>{t.agents.noneHere}</p>
-                    )}
-                    <AgentsAway
-                      agents={away}
-                      {...(rows.onInstall === undefined ? {} : { onInstall: rows.onInstall })}
-                      {...(rows.onHelp === undefined ? {} : { onHelp: rows.onHelp })}
-                      {...(awayText === undefined ? {} : { text: awayText })}
+            ) : (
+              <div className={s.agents}>
+                <section className={s.here} aria-labelledby={`${titleId}-here`}>
+                  <h2 id={`${titleId}-here`} className={s.section}>
+                    {t.agents.here}
+                  </h2>
+                  {here.length > 0 ? (
+                    <Runtimes
+                      label={t.agents.list}
+                      runtimes={here}
+                      {...rows}
+                      {...(runtimesText === undefined ? {} : { text: runtimesText })}
                     />
-                  </div>
-                ))}
-              {step === 'project' && (
-                <>
-                  <RepositoryPick
-                    repositories={repositories}
-                    picked={picked}
-                    onPick={(id) => {
-                      setNothing(false)
-                      onPick(id)
-                    }}
-                    onAdd={onAdd}
-                    {...(repositoryText === undefined ? {} : { text: repositoryText })}
-                  />
-                  {nothing && (
-                    <p className={s.error} role="alert">
-                      {t.project.nothing}
-                    </p>
+                  ) : (
+                    <p className={s.none}>{away.length > 0 ? t.agents.noneHere : t.agents.noneAtAll}</p>
                   )}
-                  {picked.length > 0 && (
-                    <div className={s.named}>
-                      <label htmlFor={nameId} className={s.namedLabel}>
-                        {t.project.name}
-                      </label>
-                      <Field id={nameId} value={name} onChange={(event) => onNameChange(event.target.value)} spellCheck={false} />
-                    </div>
-                  )}
-                </>
+                </section>
+                <AgentsAway
+                  agents={away}
+                  {...(rows.onInstall === undefined ? {} : { onInstall: rows.onInstall })}
+                  {...(rows.onHelp === undefined ? {} : { onHelp: rows.onHelp })}
+                  {...(awayText === undefined ? {} : { text: awayText })}
+                />
+              </div>
+            ))}
+          {step === 'project' && (
+            <>
+              <RepositoryPick
+                repositories={repositories}
+                picked={picked}
+                onPick={(id) => {
+                  setNothing(false)
+                  onPick(id)
+                }}
+                onAdd={onAdd}
+                {...(repositoryText === undefined ? {} : { text: repositoryText })}
+              />
+              {nothing && (
+                <p className={s.error} role="alert">
+                  {t.project.nothing}
+                </p>
               )}
-              {step === 'code' && hosts}
-              {step === 'issues' && trackers}
-              {error !== undefined && error.step === step && (
-                <div className={s.error} role="alert">
-                  {error.said}
+              {picked.length > 0 && (
+                <div className={s.named}>
+                  <label htmlFor={nameId} className={s.namedLabel}>
+                    {t.project.name}
+                  </label>
+                  <Field id={nameId} value={name} onChange={(event) => onNameChange(event.target.value)} spellCheck={false} />
                 </div>
               )}
             </>
+          )}
+          {step === 'code' && hosts}
+          {step === 'issues' && trackers}
+          {error !== undefined && error.step === step && (
+            <div className={s.error} role="alert">
+              {error.said}
+            </div>
           )}
         </div>
 
@@ -472,9 +493,9 @@ function mainOf(
 ): Main {
   const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
   switch (step) {
-    case 'ask':
-    case 'build':
-    case 'decide':
+    case 'projects':
+    case 'coordinator':
+    case 'makers':
       return { label: w.t.next, act: w.next }
     case 'review':
       return { label: w.t.setUp, act: w.next }
@@ -490,26 +511,32 @@ function mainOf(
   }
 }
 
-/** Room round a scene for the notes that point into it from outside: more at the sides, where the long ones reach, and most where one reaches far. */
-const ROOM: Record<TourStep, { readonly side: number; readonly end: number }> = {
-  ask: { side: 330, end: 72 },
-  build: { side: 200, end: 72 },
-  decide: { side: 200, end: 72 },
-  review: { side: 220, end: 72 },
+/**
+ * Every agent Althar runs, a mark each, as the runtime lists them, its name
+ * on hover and read out. Its line is held while the agents are still asked,
+ * so the page doesn't move when they answer.
+ */
+function Makers({ runtimes, label }: { runtimes: readonly RuntimeEntry[] | null; label: string }) {
+  return (
+    <ul className={s.makers} aria-label={label}>
+      {runtimes?.map((r) => (
+        <li key={r.id}>
+          <Tooltip label={r.name} placement="below">
+            <span className={s.maker} role="img" aria-label={r.name}>
+              {r.brand === undefined ? <span className={s.makerName}>{r.name}</span> : <BrandMark brand={r.brand} size={18} />}
+            </span>
+          </Tooltip>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
-/** A scene, playing, scaled to fit its frame on the drafting table's dots. */
-function SceneFrame({
-  scene: Scene,
-  room,
-  instant,
-  label,
-}: {
-  scene: ComponentType<SceneProps>
-  room: { readonly side: number; readonly end: number }
-  instant: boolean
-  label: string
-}) {
+/** Room round a scene, so it never meets its frame's edge. */
+const PAD = 12
+
+/** A scene, playing, as large as its frame lets it be and never larger than itself, on the drafting table's dots. */
+function SceneFit({ scene: Scene, instant }: { scene: ComponentType<SceneProps>; instant: boolean }) {
   const frame = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number; room: { w: number; h: number } } | null>(null)
   useLayoutEffect(() => {
@@ -524,16 +551,19 @@ function SceneFrame({
     observer.observe(box)
     return () => observer.disconnect()
   }, [])
-  const w = (size?.w ?? 0) + room.side * 2
-  const h = (size?.h ?? 0) + room.end * 2
-  const k = size === null || size.w === 0 ? 1 : Math.min(1, (size.room.w - 24) / w, (size.room.h - 16) / h)
+  const k = size === null || size.w === 0 ? 1 : Math.min(1, (size.room.w - PAD * 2) / size.w, (size.room.h - PAD * 2) / size.h)
   return (
     <div ref={frame} className={s.frame} aria-hidden="true">
       <div
         className={s.stage}
-        style={{ width: w, height: h, transform: `translate(-50%, -50%) scale(${k})`, opacity: size === null ? 0 : 1 }}
+        style={{
+          width: size?.w ?? 0,
+          height: size?.h ?? 0,
+          transform: `translate(-50%, -50%) scale(${k})`,
+          opacity: size === null ? 0 : 1,
+        }}
       >
-        <Station n={1} label={label} x={room.side} y={room.end} shown built instant={instant} bare>
+        <Station instant={instant}>
           <Scene live={!instant} instant={instant} />
         </Station>
       </div>

@@ -1,5 +1,5 @@
 import { Dialog, RadioGroup, Toggle } from 'radix-ui'
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 
 import { modKey, commandDown } from '../../foundations/keys'
 import { unreachable } from '../../foundations/vocabulary'
@@ -15,12 +15,12 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type ModelRoom, type ModelRoomText, RoomNote } from '../ModelPick/room'
 import s from './ModelBrowser.module.css'
 
-/** An agent runtime on this machine, and how it is signed in. Status, not pitch. */
+/** An agent runtime on this machine. Its name is what a row shows; `how` only where something is off. */
 export interface RuntimeInfo {
   id: string
   name: string
-  /** How it is connected: signed in, API key, this Mac. */
-  how: string
+  /** Where it isn't in its normal state: signed out, out of usage. Left out when all is well, so a row says only the agent's name. */
+  how?: string
   /** Its mark. Without one, a generic plug. */
   brand?: Brand
 }
@@ -33,18 +33,15 @@ export interface ModelBrowserText {
   pinned: string
   connected: string
   connect: string
-  columns: { model: string; runtime: string; context: string; effort: string }
+  columns: { model: string; runtime: string; room: string; context: string; effort: string }
   /** The list's name, and what a screen reader hears as the search narrows it. */
   count: (n: number) => string
-  inUse: string
   use: (model: string, inUse: boolean) => string
   defaultEffort: (model: string) => string
   pin: (model: string) => string
   pinTitle: (pinned: boolean) => string
   block: (model: string) => string
   blockTitle: (blocked: boolean) => string
-  /** A model switched off, beside its name. */
-  off: string
   /** A context window, in thousands of tokens. */
   context: (k: number) => string
   /** A model whose runtime doesn't say its context window. */
@@ -65,16 +62,14 @@ export const modelBrowserText: ModelBrowserText = {
   pinned: 'Pinned',
   connected: 'Connected',
   connect: 'Connect a runtime',
-  columns: { model: 'Model', runtime: 'Runtime', context: 'Context', effort: 'Default effort' },
+  columns: { model: 'Model', runtime: 'Runtime', room: 'Usage', context: 'Context', effort: 'Default effort' },
   count: (n) => `${n} models`,
-  inUse: 'in use',
   use: (model, inUse) => `Use ${model}${inUse ? ', in use' : ''}`,
   defaultEffort: (model) => `Default effort for ${model}`,
   pin: (model) => `Pin ${model}`,
   pinTitle: (pinned) => (pinned ? 'Unpin' : 'Pin'),
   block: (model) => `Don’t use ${model}`,
   blockTitle: (blocked) => (blocked ? 'Use again' : 'Don’t use'),
-  off: 'not used',
   context: (k) => (k >= 1000 ? `${k / 1000}M` : `${k}k`),
   noContext: '—',
   empty: (q) => `No model matches “${q}”.`,
@@ -102,12 +97,30 @@ export interface ModelBrowserProps {
   /** Switches a model off, or on again. Without it, there is no such control. */
   onToggleBlocked?: (id: string) => void
   onSetDefaultEffort: (id: string, level: string) => void
-  /** How much room a model has where work on it would start, after its name; null where its plan is read by nothing. */
+  /** How much room a model has where work on it would start, in a column of its own; shown only where there is a reading (null or undefined has none). */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
   /** Add a runtime. Without it, there is no such row. */
   onConnect?: () => void
   text?: Partial<ModelBrowserText>
+}
+
+/**
+ * A model's full name on hover or focus, where its row has to cut it short:
+ * the title attribute never shows for the keyboard.
+ */
+function FullName({ name, children }: { name: string; children: ReactElement }) {
+  const [open, setOpen] = useState(false)
+  const cell = useRef<HTMLSpanElement>(null)
+  const cut = () => [...(cell.current?.querySelectorAll('span') ?? [])].some((n) => n.scrollWidth > n.clientWidth)
+  return (
+    <Tooltip label={name} open={open} onOpenChange={(next) => setOpen(next && cut())}>
+      {/* the cell, not the button: a switched-off model's button is disabled and takes neither hover nor a tooltip */}
+      <span ref={cell} className={s.name}>
+        {children}
+      </span>
+    </Tooltip>
+  )
 }
 
 /** All, pinned, or one runtime by id. */
@@ -182,6 +195,11 @@ export function ModelBrowser({
         )
     )
   }, [q, filter, pins, blocked, models, runtimes])
+
+  /* a column shows only where a row has something in it */
+  const readings = useMemo(() => new Map(rows.map((m) => [m.id, room?.(m) ?? null])), [rows, room])
+  const hasRoom = rows.some((m) => readings.get(m.id) != null)
+  const hasContext = rows.some((m) => m.context !== undefined)
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     /* a select in a row handles its own arrows, and they bubble here through its portal */
@@ -300,11 +318,12 @@ export function ModelBrowser({
               )}
             </div>
 
-            <div className={s.results}>
+            <div className={s.results} data-room={hasRoom || undefined} data-context={hasContext || undefined}>
               <div className={s.cols} aria-hidden="true">
                 <span>{t.columns.model}</span>
-                <span>{t.columns.runtime}</span>
-                <span>{t.columns.context}</span>
+                <span className={s.colAgent}>{t.columns.runtime}</span>
+                {hasRoom && <span className={s.colRoom}>{t.columns.room}</span>}
+                {hasContext && <span className={s.colContext}>{t.columns.context}</span>}
                 <span>{t.columns.effort}</span>
                 <span />
               </div>
@@ -317,38 +336,42 @@ export function ModelBrowser({
                   const off = blocked.includes(m.id)
                   const inUse = m.id === value
                   const level = defaultEffort(m)
-                  const left = room?.(m)
+                  const left = readings.get(m.id) ?? null
                   const via = `${ids}-${m.id}-via`
                   const ctx = `${ids}-${m.id}-ctx`
                   return (
-                    <li key={m.id} data-id={m.id} className={cx(s.row, off && s.off)}>
-                      <button
-                        type="button"
-                        data-use
-                        className={s.use}
-                        disabled={off}
-                        onClick={() => onPick(m.id)}
-                        title={m.name}
-                        aria-label={t.use(m.name, inUse)}
-                        aria-describedby={`${via} ${ctx}`}
-                      >
-                        <Model model={m} />
-                        {inUse && <span className={s.inUse}>{t.inUse}</span>}
-                        {off && <span className={s.inUse}>{t.off}</span>}
-                        {left !== undefined && <RoomNote room={left} compact text={roomText} />}
-                      </button>
+                    <li key={m.id} data-id={m.id} className={cx(s.row, off && s.off, inUse && s.current)}>
+                      <FullName name={m.name}>
+                        <button
+                          type="button"
+                          data-use
+                          className={s.use}
+                          disabled={off}
+                          onClick={() => onPick(m.id)}
+                          aria-label={t.use(m.name, inUse)}
+                          aria-current={inUse || undefined}
+                          aria-describedby={hasContext ? `${via} ${ctx}` : via}
+                        >
+                          {/* how it is reached is the agent column's to say */}
+                          <Model model={{ ...m, via: undefined }} />
+                        </button>
+                      </FullName>
                       <span className={s.via} id={via}>
                         {c ? (
                           <>
-                            {c.name} <span>· {c.how}</span>
+                            {c.name}
+                            {c.how && <span>{c.how}</span>}
                           </>
                         ) : (
                           m.runtime
                         )}
                       </span>
-                      <span className={s.ctx} id={ctx}>
-                        {m.context === undefined ? t.noContext : t.context(m.context)}
-                      </span>
+                      {hasRoom && <span className={s.room}>{left == null ? null : <RoomNote room={left} compact text={roomText} />}</span>}
+                      {hasContext && (
+                        <span className={s.ctx} id={ctx}>
+                          {m.context === undefined ? t.noContext : t.context(m.context)}
+                        </span>
+                      )}
                       {m.efforts.length > 0 ? (
                         <Select
                           label={t.defaultEffort(m.name)}

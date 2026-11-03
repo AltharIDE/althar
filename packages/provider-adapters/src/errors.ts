@@ -16,7 +16,7 @@ export class AgentExited extends Schema.TaggedError<AgentExited>()('AgentExited'
 /** A request to the agent failed, classified as in docs/architecture/03's failure table. */
 export class AgentRequestFailed extends Schema.TaggedError<AgentRequestFailed>()('AgentRequestFailed', {
   method: Schema.String,
-  failure: Schema.Literals(['usage_limit', 'context_full', 'auth_required', 'invalid_request', 'transient', 'unknown']),
+  failure: Schema.Literals(['usage_limit', 'context_full', 'session_lost', 'auth_required', 'invalid_request', 'transient', 'unknown']),
   message: Schema.String,
   resetsAt: Schema.optional(Schema.String),
 }) {}
