@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
+import { type FakeReleaseControls, makeFakeReleases } from './fakeReleases'
 import type {
   Account,
   BranchUpdate,
@@ -301,7 +302,7 @@ export interface FakeControls {
  * repositories it has. `failNext('access', …)` makes the next check stop at
  * its account: refused where the reason is `unauthorized`.
  */
-export type FakeService = CodeHost & Tracker & FakeControls & { readonly access: Access }
+export type FakeService = CodeHost & Tracker & FakeControls & FakeReleaseControls & { readonly access: Access }
 
 const START = Date.parse('2026-10-01T09:00:00.000Z')
 
@@ -517,6 +518,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
 
   const service: FakeService = {
     product,
+    ...makeFakeReleases({ product, called }),
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
       drafts: true,

@@ -5,6 +5,7 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
+import { makeGitHubReleases } from './githubReleases'
 import type {
   Account,
   Activity,
@@ -958,6 +959,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
 
   return {
     product,
+    ...makeGitHubReleases({ http, repo }),
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
       drafts: true,

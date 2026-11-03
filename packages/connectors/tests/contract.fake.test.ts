@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 
 import { fromOutside } from '../src/model'
 import { makeFakeService } from '../src/testing'
-import { hostContract, trackerContract } from './contract'
+import { hostContract, releaseContract, trackerContract } from './contract'
 
 const fake = makeFakeService({ pushUrl: (path) => `/tmp/fake/${path.join('/')}.git` })
 fake.addRepository(['meridian', 'api'])
@@ -17,6 +17,27 @@ hostContract({
   branch: Effect.sync(() => `althar/contract-${(branches += 1)}`),
 })
 trackerContract({ name: 'The fake', tracker: fake, ref: 'MER-231' })
+
+// Releasing, as each host's adapter does it, on a fake of each: never on a real repository, where a tag and a release reach people.
+for (const product of ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const) {
+  const host = makeFakeService({ product })
+  const path = ['meridian', 'desktop']
+  host.addRepository(path)
+  let tags = 0
+  releaseContract({
+    name: `The ${product} fake`,
+    host,
+    path,
+    otherCommit: '5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e',
+    tagName: Effect.sync(() => `v0.7.${(tags += 1)}`),
+    startRun: (tag) =>
+      Effect.sync(() => {
+        host.startRun(path, { ref: tag, gates: [{ name: 'release' }, { name: 'production', approvable: false }] })
+      }),
+    draft: (tag) => Effect.sync(() => void host.draftRelease(path, tag, ['Althar-arm64.dmg'])),
+    failedRun: (tag) => Effect.sync(() => void host.startRun(path, { ref: tag, state: 'failed' })),
+  })
+}
 
 // Only the fake files issues in the suite: a real service's contract would file real ones.
 describe('The fake, filing issues', () => {

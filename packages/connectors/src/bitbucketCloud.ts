@@ -6,6 +6,7 @@ import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
 import { makeHttp } from './http'
+import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
 import type {
   Account,
   Activity,
@@ -454,6 +455,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false, reopen: false, rerun: true },
+    ...makeBitbucketCloudReleases({ http, repo }),
     account,
     repository: (path) =>
       Effect.gen(function* () {
