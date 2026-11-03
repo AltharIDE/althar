@@ -2,6 +2,7 @@ import type { Effect } from 'effect'
 import { Schema } from 'effect'
 
 import { ConnectorFailed } from './errors'
+import type { HostReleases } from './releases'
 
 /*
  * The two models (docs/architecture/06, "Code hosts and trackers"): what
@@ -316,8 +317,8 @@ export interface PushTarget {
   readonly header: string | null
 }
 
-/** What a code host offers Althar (docs/architecture/06). */
-export interface CodeHost {
+/** What a code host offers Althar (docs/architecture/06); its releases are `HostReleases`'s (ADR-081). */
+export interface CodeHost extends HostReleases {
   readonly product: Product
   readonly words: ChangeWords
   readonly capabilities: HostCapabilities

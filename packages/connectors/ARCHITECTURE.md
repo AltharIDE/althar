@@ -23,6 +23,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `jira.ts` | Jira Cloud and Jira Data Center, a tracker each, over REST: version 3 on Cloud, version 2 on Data Center |
 | `jiraText.ts` | Jira's text to Markdown and back: Cloud's Atlassian Document Format, Data Center's wiki markup |
 | `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
+| `releases.ts`, `*Releases.ts` | Releases on each code host: tags, a release published as the host does, the runs on a tag with what each waits on, approving them, running failed jobs again. [RELEASES.md](RELEASES.md) says what each host can and can't do, and the docs relied on |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
 | `links.ts` | Which host a git remote is on, and what a pasted link points at |
@@ -54,6 +55,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **Bitbucket Cloud merges what the branch holds:** its API takes no head to merge at, so the adapter checks the head the person saw just before, and a push in the moment between would be merged. Data Center's pull request version closes that gap.
 - **Bitbucket Cloud's write access** is membership of the repository's workspace: Bitbucket tells only an admin who can write to a repository. A token without `read:workspace` can't read membership either: everyone then counts as an outsider, and the log says so once.
 - **Bitbucket Data Center's checks** are build statuses, from the list Data Center deprecated in 7.14 and still serves, as nothing else lists a commit's. Code Insights reports aren't read, and a build's log is its build server's.
+- **Releasing** hasn't run against a live host yet: [RELEASES.md](RELEASES.md#not-yet-confirmed-against-a-live-host) lists what comes from the docs alone.
 - **Bitbucket Data Center before 8.18** has no drafts: a draft opens ready.
 - **Listening to Bitbucket Cloud** asks several things a turn, each by ETag; whether an unchanged answer counts against its hourly limit isn't documented.
 - **A Bitbucket Cloud API token is made with scopes** (`read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` and `read:pipeline`, all `:bitbucket`); the Connections panel links to where it is made but doesn't list them.

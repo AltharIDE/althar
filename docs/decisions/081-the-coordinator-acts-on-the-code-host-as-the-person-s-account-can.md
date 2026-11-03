@@ -781,6 +781,11 @@ comes:
   was lost, such as one that timed out, is read back before it is tried
   again, and its receipt stays pending until then, so a restart or a lost
   answer doesn't do anything twice.
+- **The same ask can come again and need doing again:** a rerun waits on
+  its approval anew, or someone deletes a tag the person then asks for
+  again. What was done before is answered from its receipt only where the
+  host still says it is done; otherwise it is done again, on a receipt of
+  its own.
 - **The target branch changes while an errand waits:** it ends and says so,
   since the ask was for that branch.
 - **Someone acts on the host meanwhile,** the person included (merges it,

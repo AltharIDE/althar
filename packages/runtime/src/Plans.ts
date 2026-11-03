@@ -138,12 +138,16 @@ export class Plans extends Context.Service<
             const planId = yield* newId(Ids.taskPlan)
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
-            const startsAt =
-              input.held === true ? null : new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
+            const countdownEnds = new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
+            let startsAt: string | null = null
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.
-                const earlier = yield* sql<{ id: string }>`SELECT id FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                const earlier = yield* sql<{ id: string; startsAt: string | null }>`
+                  SELECT id, starts_at FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
+                // A plan the person held stays held when it is re-planned, unless this one is to start at once or says how soon.
+                const keepsHold = input.held === undefined && input.startsIn === undefined && earlier.some((plan) => plan.startsAt === null)
+                startsAt = input.held === true || keepsHold ? null : countdownEnds
                 for (const plan of earlier) {
                   const revision = yield* change('task_plans', plan.id, { state: 'replaced', decidedAt: at })
                   yield* fact({
