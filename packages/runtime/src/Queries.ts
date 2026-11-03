@@ -2333,7 +2333,9 @@ export class Queries extends Context.Service<
             card.kind === 'change' &&
             card.unshipped == null &&
             (card.change === null || card.change.state === 'closed') &&
-            (said === null || (said.commits === 0 && said.files.length === 0))
+            (said === null || (said.commits === 0 && said.files.length === 0)) &&
+            // What Done would settle: the same reading, from git, so the card never offers what Done refuses.
+            (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(row.id)).pipe(Effect.orElseSucceed(() => false)))
           const read = {
             ...card,
             ...(nothingBuilt ? { nothingBuilt } : {}),
@@ -2867,7 +2869,8 @@ export class Queries extends Context.Service<
               card.unshipped == null &&
               (card.change === null || card.change.state === 'closed') &&
               said.commits === 0 &&
-              said.files.length === 0
+              said.files.length === 0 &&
+              (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(head.taskId)).pipe(Effect.orElseSucceed(() => false)))
                 ? { nothingBuilt: true }
                 : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',

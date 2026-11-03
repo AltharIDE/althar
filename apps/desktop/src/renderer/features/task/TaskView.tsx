@@ -679,7 +679,7 @@ export function TaskView({
   // Its newest pull request that merged: what a merged task's commits came after.
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
-  // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
+  // once posted; a change that built nothing only takes Done. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
   const settleable =
     !busy &&
     isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '', nothingBuilt: snapshot.task.nothingBuilt })

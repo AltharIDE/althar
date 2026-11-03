@@ -608,9 +608,9 @@ export class Changes extends Context.Service<
      */
     publish(input: PublishInput): Effect.Effect<Published, unknown>
     /**
-     * Whether its lead built nothing: no commits on any of its branches, nothing uncommitted but evidence, and no pull request
-     * open or merged (one closed with nothing left counts). Such a task has nothing to open or merge, so it settles as Done,
-     * and no pull request is opened for it.
+     * Whether its lead built nothing: it has a branch, with no commits on it, nothing uncommitted but evidence, and no pull
+     * request open or merged (one closed with nothing left counts); false where a branch can't be read. Such a change has
+     * nothing to open or merge, so it settles as Done, and no pull request is opened for it.
      */
     nothingBuilt(taskId: string): Effect.Effect<boolean, unknown>
     /** The task's repositories whose last pull request merged or closed with commits after it: what a next pull request would have. */
@@ -4062,9 +4062,11 @@ export class Changes extends Context.Service<
           const worktrees = yield* sql<{ path: string; baseCommit: string | null; baseRef: string | null }>`
             SELECT w.path, w.base_commit, w.base_ref FROM workspaces w
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'`
+          // No branch of its own to read, or one whose folder is gone (deleted, or on a volume not mounted): not known to be empty.
+          if (worktrees.length === 0) return false
           const pictures = yield* evidencePaths(taskId)
           for (const worktree of worktrees) {
-            if (!existsSync(worktree.path)) continue
+            if (!existsSync(worktree.path)) return false
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false

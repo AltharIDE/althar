@@ -51,3 +51,25 @@ for (const appearance of ['light', 'dark'] as const) {
     }
   })
 }
+
+test('settles it as Done from its board card, with no pull request', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const { electronApp, page } = await launch(home, {}, { scheme: 'system' })
+  try {
+    await openFirstProject(electronApp, page, repository(projects))
+    await startTask(page, 'Plan usage shows what is left on OpenCode Zen', '[lead:finish]')
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    await page.getByRole('radio', { name: 'Home' }).click()
+    const work = page.getByRole('region', { name: 'The project’s work' })
+    const card = work.getByRole('article').filter({ hasText: 'Nothing built' })
+    await expect(card).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Accept' })).toHaveCount(0)
+    await card.hover()
+    await card.getByRole('button', { name: 'Done' }).click()
+    await expect(work.getByText('Nothing built', { exact: true })).toHaveCount(0)
+  } finally {
+    await electronApp.close()
+  }
+})

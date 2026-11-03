@@ -91,8 +91,9 @@ export const isFinished = (task: { readonly kind: string; readonly phase: string
 
 /**
  * Whether a task is the person's to settle with Done or Keep for later: a
- * finished task that isn't a change, waiting in Needs you or kept for later.
- * A review with a draft only keeps: it settles as its draft is posted.
+ * finished task that isn't a change, or a change that built nothing (Done
+ * only), waiting in Needs you or kept for later. A review with a draft only
+ * keeps: it settles as its draft is posted.
  */
 export const isSettleable = (task: {
   readonly kind: string
@@ -101,7 +102,19 @@ export const isSettleable = (task: {
 }): boolean =>
   (task.kind !== 'change' || (task.nothingBuilt === true && task.phase === 'ready')) && (task.phase === 'ready' || task.phase === 'kept')
 
-/** Whether a settleable task takes Done: a plain one, or a review answered; a review with a draft settles as it is posted. */
+/**
+ * What a finished lead's report leaves to the person, in a line: the last line of it that asks, else its last line. Null where
+ * it said nothing. Bullets and numbers its options come in are dropped.
+ */
+export const askOf = (summary: string | null | undefined): string | null => {
+  const lines = (summary ?? '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim())
+    .filter((line) => line !== '')
+  return lines.findLast((line) => line.endsWith('?')) ?? lines.at(-1) ?? null
+}
+
+/** Whether a settleable task takes Done: a plain one, a change that built nothing, or a review answered; a review with a draft settles as it is posted. */
 export const takesDone = (task: {
   readonly kind: string
   readonly reviewing?: Reviewing

@@ -38,7 +38,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
+import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
@@ -507,6 +507,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
+      const ask = work.nothingBuilt === true ? askOf(work.summary) : null
       const object =
         change === null ? (
           branch === null ? null : (
@@ -525,8 +526,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
-        // Nothing built: no accept to press; Done settles it where it is, in its corner.
-        ...(work.nothingBuilt === true ? { corner: settleWaysOf(work, actions) } : {}),
+        // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
+        ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
