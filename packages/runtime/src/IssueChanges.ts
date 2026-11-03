@@ -1,12 +1,9 @@
 import {
-  type Choice,
   type ChosenField,
   ConnectorFailed,
   fieldsOf,
   type Issue,
   type IssueChange,
-  type IssueField,
-  type Priority,
   type Product,
   products,
   type Tracker,
@@ -20,57 +17,53 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
 import { envelope } from './envelope'
+import { taskShown } from './evidence'
 import { NotFound, OutwardUncertain } from './errors'
 import { Instance } from './Instance'
 import { changeWords, lineWords, linesOf } from './issueChangeWords'
+import { anything, AskedFields, fieldSchema, readFields, type Wanted, wantedFields } from './issueFields'
 import { Issues } from './Issues'
 import { outward } from './outward'
-import { changesIssues, movesIssues, Policies } from './Policies'
+import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
+export type { Wanted } from './issueFields'
+
 /*
  * Changes to issues on the person's trackers (docs/architecture/06,
  * "Changing issues"): the coordinator's, on any issue; a task's lead's, on
- * the issue its task came from; and Althar's own, as a task's pull request
- * opens (In Review) or merges (Done). One card holds a change to each of one
- * or more issues: "Move DEV-67 to Done, set DEV-142 to Low".
+ * the issue its task came from, the issues its task filed, and any the
+ * person named to it; and Althar's own, as a task's pull request opens (In
+ * Review) or merges (Done, or a comment where the task did only part of its
+ * issue). One card holds a change to each of one or more issues: "Move
+ * DEV-67 to Done, set DEV-142 to Low".
  *
- * What changes where the issue stands (its status, priority, assignee,
- * labels, project, title, closing it) waits on the person, who applies the
- * card with one press or discards it, unless the project's rules let changes
- * through (`changeIssues`), when it is applied at once and its card is a
- * line saying so. That default is this one place: `waitsOnThePerson`. A
- * comment and a link to a pull request apply at once, either way, and their
- * card is a line too. So do the moves of a task's own issue with its pull
- * request (In Review as it opens, Done as it merges) where the project moves
- * issues along with its tasks (`moveIssues`), whatever `changeIssues` says;
- * one the tracker refuses makes a card with the reason, to try again.
+ * What changes where the issue stands (its status, priority, assignees,
+ * labels, project, milestone, cycle, parent, estimate, type, components,
+ * due date, title, description, closing it) waits on the person, who applies
+ * the card with one press or discards it; or it is applied at once, and its
+ * card is a line saying so, where its agent says to (`atOnce`), as the
+ * person's note says or they just asked (DEV-182): there is no switch for
+ * it. A comment and a link to a pull request apply at once, and their card
+ * is a line too. So do the moves of a task's own issue with its pull request
+ * (In Review as it opens, Done as it merges) where the project moves issues
+ * along with its tasks (`moveIssues`); one the tracker refuses makes a card
+ * with the reason, to try again.
  *
- * Names are read against the tracker as the change is proposed, so a card
- * never asks the person to apply what the tracker can't take: a status its
- * team hasn't, someone it can't be assigned to. A change already so is left
- * off, and one with nothing left to change isn't made. Applying calls each
- * tracker outside any transaction, each issue's change as an outward action
- * with its receipt; a change made twice changes nothing more, so one whose
- * answer was lost, or that Althar closed in the middle of, can be applied
- * again. A comment can't: one whose answer was lost says to look first.
+ * Names are read against the tracker as the change is proposed, field by
+ * field (issueFields.ts), so a card never asks the person to apply what the
+ * tracker can't take: a status its team hasn't, someone it can't be
+ * assigned to. What can't be read is left off and said; what is so already
+ * is left off too; the rest goes ahead, so a batch is never all or nothing.
+ * Applying calls each tracker outside any transaction, each issue's change
+ * as an outward action with its receipt; a change made twice changes
+ * nothing more, so one whose answer was lost, or that Althar closed in the
+ * middle of, can be applied again. A comment can't: one whose answer was
+ * lost says to look first.
  */
-
-/** What an agent asks to change of an issue, in the tracker's names for things: each left out stays as it is. */
-export interface Wanted {
-  readonly status?: string
-  readonly close?: boolean
-  readonly priority?: Priority
-  /** Someone by name, login or email, or `me` for the person; null for nobody. */
-  readonly assignee?: string | null
-  readonly labels?: { readonly add?: ReadonlyArray<string>; readonly remove?: ReadonlyArray<string> }
-  /** A project or milestone by name; null for none. */
-  readonly project?: string | null
-  readonly title?: string
-}
 
 /** Who proposes a card: told apart for what each hears of it after. */
 export type Proposer = 'coordinator' | 'lead' | 'althar'
@@ -95,6 +88,8 @@ interface Entry {
   readonly link?: { readonly url: string; readonly title: string }
   /** The receipt's key, where it is shared with another action: a pull request's link, which Althar may have made as it opened. */
   readonly receipt?: string
+  /** Whether its tracker gives an issue one assignee or several, for how its people read. */
+  readonly assignees?: 'one' | 'many'
   readonly applied: boolean | null
   readonly error: string | null
 }
@@ -122,60 +117,14 @@ export class ChangesClosed extends Schema.TaggedError<ChangesClosed>()('ChangesC
   state: Schema.String,
 }) {}
 
-/**
- * Whether changes to issues wait on the person's card, by the project's
- * rules: they do, unless the person let them through. A comment or a link
- * never waits. Moving status is an open question (docs/open-questions.md);
- * this is where its answer goes.
- */
-export const waitsOnThePerson = (rules: Parameters<typeof changesIssues>[0]): boolean => !changesIssues(rules)
-
-/** How many choices are said to an agent at most. */
-const CHOICES = 25
-
-/** What a field is called, said to an agent. */
-const FIELD_WORDS: Readonly<Record<IssueField, string>> = {
-  status: 'status',
-  close: 'closing it',
-  priority: 'priority',
-  assignee: 'assignee',
-  labels: 'labels',
-  project: 'project or milestone',
-  title: 'title',
+/** What a proposal made: its card, where anything was left to change, and what was left off or so already, said per issue. */
+export interface Proposed {
+  readonly card: IssueChangesCard | null
+  /** What wasn't changed and why, a line each: `DEV-67: no status called Shipped. It has: …`. */
+  readonly left: ReadonlyArray<string>
+  /** What was so already, a line each: `DEV-67: status Done`. */
+  readonly already: ReadonlyArray<string>
 }
-
-/** Why a tracker can't change a field, said to an agent: what each product's issues lack, as its adapter says. */
-export const gapOf = (product: Product, field: IssueField): string => {
-  const name = products[product].name
-  if (field === 'priority') return `${name}'s issues have no priority`
-  if (field === 'project')
-    return product === 'trello'
-      ? 'a Trello card’s project is its board'
-      : product === 'jira_cloud' || product === 'jira_dc'
-        ? 'Jira moves an issue to another project only by its own Move'
-        : `${name} has no project for an issue`
-  return `Althar can’t change that on ${name} yet`
-}
-
-const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
-
-/** A choice by what was typed for it: its id, its name or another word it answers to, in any case; or the one name it begins. */
-const choiceNamed = (choices: ReadonlyArray<Choice>, typed: string): Choice | undefined =>
-  choices.find((choice) => same(choice.id, typed) || same(choice.name, typed) || (choice.also ?? []).some((word) => same(word, typed))) ??
-  (() => {
-    const starting = choices.filter((choice) => choice.name.toLowerCase().startsWith(typed.trim().toLowerCase()))
-    return starting.length === 1 ? starting[0] : undefined
-  })()
-
-const listed = (names: ReadonlyArray<string>) =>
-  names.length === 0
-    ? 'none'
-    : names.length > CHOICES
-      ? `${names.slice(0, CHOICES).join(', ')} and ${names.length - CHOICES} more`
-      : names.join(', ')
-
-/** Words that mean the person, for an assignee. */
-const ME = /^(me|myself|the person|the user|you)$/i
 
 const decodeEntries = (changes: string) => JSON.parse(changes) as ReadonlyArray<Entry>
 
@@ -236,83 +185,84 @@ const failureWords = (error: unknown, tracker: string, comment: boolean): string
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions | Issues | Policies | ToolServer
 
-/** An issue's change as a tool takes it: by the tracker's names, labels added and taken off in lists of their own. */
+/** An issue's change as a tool takes it: by the tracker's names, labels and people added and taken off in lists of their own. */
 const AskedChange = Schema.Struct({
-  status: Schema.optional(Schema.String),
+  ...AskedFields.fields,
   close: Schema.optional(Schema.Boolean),
-  priority: Schema.optional(Schema.String),
-  assignee: Schema.optional(Schema.NullOr(Schema.String)),
+  unassign: Schema.optional(Schema.Array(Schema.String)),
   add_labels: Schema.optional(Schema.Array(Schema.String)),
   remove_labels: Schema.optional(Schema.Array(Schema.String)),
-  project: Schema.optional(Schema.NullOr(Schema.String)),
   title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
 })
+
+/** A lead's change: to its own issue, or another it may change, by key or link. */
+const LeadChange = Schema.Struct({ ...AskedChange.fields, issue: Schema.optional(Schema.String), at_once: Schema.optional(Schema.Boolean) })
 
 const ChangesAsked = Schema.Struct({
   changes: Schema.Array(Schema.Struct({ issue: Schema.String, ...AskedChange.fields })),
   note: Schema.optional(Schema.String),
+  at_once: Schema.optional(Schema.Boolean),
 })
 
 const CommentAsked = Schema.Struct({ issue: Schema.optional(Schema.String), body: Schema.String })
 
-const PRIORITIES: ReadonlyArray<Priority> = ['urgent', 'high', 'medium', 'low', 'none']
-
-/** A priority as an agent may say it: Low, low, "no priority", none. */
-const priorityOf = (said: string): Priority | undefined => {
-  const word = said
-    .trim()
-    .toLowerCase()
-    .replace(/\s+priority$/, '')
-  return word === 'no' || word === 'no priority' ? 'none' : PRIORITIES.find((level) => level === word)
-}
-
 /** What a tool was asked, as a change. */
-const wantedOf = (asked: typeof AskedChange.Type): Effect.Effect<Wanted, ToolRefused> => {
-  const priority = asked.priority === undefined ? undefined : priorityOf(asked.priority)
-  if (asked.priority !== undefined && priority === undefined)
-    return Effect.fail(new ToolRefused({ message: `A priority is one of urgent, high, medium, low or none, not “${asked.priority}”.` }))
-  return Effect.succeed({
-    ...(asked.status === undefined ? {} : { status: asked.status }),
+const wantedOf = (asked: typeof AskedChange.Type): Effect.Effect<Wanted, ToolRefused> =>
+  Effect.map(wantedFields(asked), (fields) => ({
+    ...fields,
     ...(asked.close === true ? { close: true } : {}),
-    ...(priority === undefined ? {} : { priority }),
-    ...(asked.assignee === undefined ? {} : { assignee: asked.assignee }),
+    ...(asked.unassign === undefined || asked.unassign.length === 0 ? {} : { unassign: asked.unassign }),
     ...(asked.add_labels === undefined && asked.remove_labels === undefined
       ? {}
       : { labels: { add: asked.add_labels ?? [], remove: asked.remove_labels ?? [] } }),
-    ...(asked.project === undefined ? {} : { project: asked.project }),
     ...(asked.title === undefined ? {} : { title: asked.title }),
-  })
-}
+    ...(asked.description === undefined ? {} : { description: asked.description }),
+  }))
 
 const readInput = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
   )
 
-/** What a card's agent hears once it is made: waiting on the person, or applied at once, and how. */
-export const proposedWords = (card: IssueChangesCard): string => {
+/** What a card's agent hears once it is made: waiting on the person, or applied at once, and how; and what was left off or so already. */
+export const proposedWords = (proposed: Proposed): string => {
+  const { card } = proposed
+  const rest = [
+    ...(proposed.left.length === 0 ? [] : [`Not changed: ${proposed.left.join(' ')}`]),
+    ...(proposed.already.length === 0 ? [] : [`Already so: ${proposed.already.join('; ')}.`]),
+  ]
+  if (card === null)
+    return [
+      'Nothing changed.',
+      ...(proposed.left.length === 0 ? [] : [proposed.left.join(' ')]),
+      ...(proposed.already.length === 0 ? [] : [`Already so: ${proposed.already.join('; ')}.`]),
+    ].join(' ')
   const said = card.issues.map((issue) => `${issue.key}: ${issue.changes.map(lineWords).join(', ')}`).join('; ')
-  if (!card.direct)
-    return `Proposed ${said}. Nothing changes until the person applies it from its card in this thread, or discards it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
-  if (card.state === 'applied') return `Done: ${said}. The thread shows it as a line.`
-  return `Tried ${said}, and not all of it applied: ${card.issues.flatMap((issue) => (issue.error === null ? [] : [`${issue.key}: ${issue.error}`])).join(' ')} The person can apply it again from its card.`
+  const made = !card.direct
+    ? `Proposed ${said}. Nothing changes until the person applies it from its card in this thread, or discards it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+    : card.state === 'applied'
+      ? `Done: ${said}. The thread shows it as a line.`
+      : `Tried ${said}, and not all of it applied: ${card.issues.flatMap((issue) => (issue.error === null ? [] : [`${issue.key}: ${issue.error}`])).join(' ')} The person can apply it again from its card.`
+  return [made, ...rest].join(' ')
 }
 
 /** The fields an issue's change takes, as JSON Schema: the tracker's own names, which Althar reads against it. */
 const changeFields = {
-  status: {
-    type: 'string',
-    description: 'Any of its tracker’s statuses, by name: In Review, Done, Canceled; on GitHub or GitLab, Open or Closed.',
-  },
+  ...fieldSchema,
   close: { type: 'boolean', description: 'Close it as done, by its tracker’s own way.' },
-  priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low', 'none'] },
-  assignee: {
-    type: ['string', 'null'],
-    description: 'Who it is assigned to, by name, login or email; me for the person; null for nobody.',
-  },
+  unassign: { type: 'array', items: { type: 'string' }, description: 'People to take off it, by name, login or email.' },
   add_labels: { type: 'array', items: { type: 'string' }, description: 'Labels its tracker has, to add.' },
   remove_labels: { type: 'array', items: { type: 'string' }, description: 'Labels to take off.' },
   title: { type: 'string' },
+  description: { type: 'string', description: 'Its description anew, in Markdown, in place of what it says now.' },
+}
+
+/** Applied at once, rather than as a card: what the person's note says, or what they just said. */
+const atOnceField = {
+  type: 'boolean',
+  description:
+    'Apply it at once rather than as a card for the person, where the project’s notes say issues are changed at once, or the person just said to. Left out, it waits on their card.',
 }
 
 /** An issue as its tracker has it now, with where it is. */
@@ -333,10 +283,11 @@ export class IssueChanges extends Context.Service<
   {
     /**
      * Proposes changes to one or more issues, as a card in the thread they
-     * are proposed in, or applies them at once where the project's rules let
-     * changes through. Each name is read against its tracker first: one it
-     * hasn't, a field it can't change, or nothing left to change, is
-     * refused as `IssueChangeRefused`, before any card is made.
+     * are proposed in, or applies them at once where `direct` says. Each
+     * name is read against its tracker first, field by field: one it
+     * hasn't, a field it can't change, and what is so already, are left off
+     * and said, and the rest goes ahead. No card where nothing is left to
+     * change on any issue.
      */
     propose(input: {
       readonly projectId: ProjectId
@@ -345,11 +296,11 @@ export class IssueChanges extends Context.Service<
       readonly note?: string
       /** Where the pull request is and whose task it is, as the note links it: a pull request's move of its task's issue. */
       readonly why?: { readonly url: string; readonly task: string }
-      /** Applied at once, whatever the project's rules for changes say: set by what the project let through by its own rule. */
+      /** Applied at once rather than waiting on the person's card: as their note says or they just asked, or a move the project lets through. */
       readonly direct?: boolean
       readonly by: Proposer
       readonly actorId: ActorId
-    }): Effect.Effect<IssueChangesCard, unknown>
+    }): Effect.Effect<Proposed, unknown>
     /** Comments on an issue at once, and says so in the thread, as a line. */
     comment(input: {
       readonly projectId: ProjectId
@@ -476,132 +427,20 @@ export class IssueChanges extends Context.Service<
           return { connectionId: where.connectionId, product: adapters.info.product, name, tracker, issue }
         })
 
-      /** The choices for a field, or why the tracker can't give them, said to the agent. */
-      const choicesOf = (tracker: Tracker, issue: Issue, field: ChosenField, name: string, wanted?: string) =>
-        tracker
-          .choices(issue, field, wanted)
-          .pipe(
-            Effect.mapError((error) =>
-              refused(`Althar couldn’t ask ${name} what ${issue.key}’s ${FIELD_WORDS[field]} can be: ${error.message}`),
-            ),
-          )
-
-      /** A name read against the tracker's choices, or a refusal that says what it has. */
-      const pick = (choices: ReadonlyArray<Choice>, typed: string, what: string, where: string) => {
-        const chosen = choiceNamed(choices, typed)
-        return chosen === undefined
-          ? Effect.fail(
-              refused(`${where} has no ${what} called “${typed.trim()}”. It has: ${listed(choices.map((choice) => choice.name))}.`),
-            )
-          : Effect.succeed(chosen)
-      }
-
-      /**
-       * What an agent asked, read against the tracker: each name to the
-       * tracker's own, what is so already left off. Refused where a field
-       * can't change there, a name isn't the tracker's, or nothing is left.
-       */
-      const resolve = (
-        at: { readonly tracker: Tracker; readonly issue: Issue; readonly product: Product; readonly name: string },
-        wanted: Wanted,
-      ) =>
-        Effect.gen(function* () {
-          const { tracker, issue, product, name } = at
-          const where = `${issue.key} on ${name}`
-          const asked: ReadonlyArray<IssueField> = [
-            ...(wanted.status === undefined ? [] : ['status' as const]),
-            ...(wanted.close === true ? ['close' as const] : []),
-            ...(wanted.priority === undefined ? [] : ['priority' as const]),
-            ...(wanted.assignee === undefined ? [] : ['assignee' as const]),
-            ...(wanted.labels === undefined || ((wanted.labels.add ?? []).length === 0 && (wanted.labels.remove ?? []).length === 0)
-              ? []
-              : ['labels' as const]),
-            ...(wanted.project === undefined ? [] : ['project' as const]),
-            ...(wanted.title === undefined ? [] : ['title' as const]),
-          ]
-          if (asked.length === 0) return yield* refused(`Say what to change on ${issue.key}.`)
-          const cant = asked.find((field) => !tracker.capabilities.changes.includes(field))
-          if (cant !== undefined) return yield* refused(`Althar can’t change ${FIELD_WORDS[cant]} on ${name}: ${gapOf(product, cant)}.`)
-
-          const ended = issue.status.category === 'done' || issue.status.category === 'cancelled'
-          const status =
-            wanted.status === undefined
-              ? undefined
-              : yield* pick(yield* choicesOf(tracker, issue, 'status', name), wanted.status, 'status', where)
-          const assignee =
-            wanted.assignee === undefined
-              ? undefined
-              : wanted.assignee === null
-                ? null
-                : yield* Effect.gen(function* () {
-                    const typed = wanted.assignee ?? ''
-                    if (!ME.test(typed.trim()))
-                      return yield* pick(yield* choicesOf(tracker, issue, 'assignee', name, typed), typed, 'one to assign', where)
-                    // The person, as the connection signs in.
-                    const account = yield* tracker.account.pipe(Effect.mapError((error) => refused(error.message)))
-                    const choices = yield* choicesOf(tracker, issue, 'assignee', name, account.login)
-                    const mine = choices.find(
-                      (choice) =>
-                        choice.id === account.id ||
-                        same(choice.name, account.login) ||
-                        (choice.also ?? []).some((word) => same(word, account.login)),
-                    )
-                    return mine ?? (yield* refused(`${where} can’t be assigned to the account Althar signs in as, ${account.login}.`))
-                  })
-          const labels =
-            wanted.labels === undefined
-              ? undefined
-              : yield* Effect.gen(function* () {
-                  const all = yield* choicesOf(tracker, issue, 'labels', name)
-                  // A tracker that makes any label it is given offers the one asked for when asked for it.
-                  const label = (typed: string) =>
-                    choiceNamed(all, typed) !== undefined
-                      ? pick(all, typed, 'label', where)
-                      : Effect.flatMap(choicesOf(tracker, issue, 'labels', name, typed), (more) =>
-                          pick(more.length === 0 ? all : more, typed, 'label', where),
-                        )
-                  const has = (choice: Choice) => issue.labels.some((label) => same(label, choice.name))
-                  const add = (yield* Effect.forEach(wanted.labels?.add ?? [], label)).filter((choice) => !has(choice))
-                  // One it hasn't is nothing to take off.
-                  const remove = (yield* Effect.forEach(
-                    (wanted.labels?.remove ?? []).filter((typed) => issue.labels.some((label) => same(label, typed))),
-                    label,
-                  )).filter(has)
-                  return add.length === 0 && remove.length === 0 ? undefined : { add, remove }
-                })
-          const project =
-            wanted.project === undefined
-              ? undefined
-              : wanted.project === null
-                ? null
-                : yield* pick(yield* choicesOf(tracker, issue, 'project', name), wanted.project, 'project or milestone', where)
-          const title = wanted.title?.trim()
-          if (title === '') return yield* refused(`Give ${issue.key} a title, not an empty one.`)
-
-          // What is so already is left off.
-          const result: IssueChange = {
-            ...(status === undefined || same(status.name, issue.status.name) ? {} : { status }),
-            ...(wanted.close === true && !ended && status === undefined ? { close: true as const } : {}),
-            ...(wanted.priority === undefined || (issue.priority?.level ?? 'none') === wanted.priority
-              ? {}
-              : { priority: wanted.priority }),
-            ...(assignee === undefined ||
-            (assignee === null
-              ? issue.assignees.length === 0
-              : issue.assignees.length === 1 &&
-                issue.assignees.some((person) => person.id === assignee.id || same(person.login, assignee.name)))
-              ? {}
-              : { assignee }),
-            ...(labels === undefined ? {} : { labels }),
-            ...(project === undefined ? {} : { project }),
-            ...(title === undefined || title === issue.title ? {} : { title }),
-          }
-          if (fieldsOf(result).length === 0)
-            return yield* refused(
-              `${issue.key} is already as asked: ${issue.status.name}${issue.priority === null ? '' : `, ${issue.priority.name} priority`}${issue.assignees.length === 0 ? ', unassigned' : `, assigned to ${issue.assignees.map((person) => person.name ?? person.login).join(', ')}`}.`,
-            )
-          return result
-        })
+      /** What an agent asked of an issue, read against its tracker, field by field. */
+      const resolve = (at: Found, wanted: Wanted) =>
+        readFields(
+          {
+            tracker: at.tracker,
+            product: at.product,
+            name: at.name,
+            issue: at.issue,
+            // A code host's issue is `owner/repo#12`: a parent's `#7` is in its repository.
+            ...(at.issue.ref.includes('#') ? { repository: at.issue.ref.slice(0, at.issue.ref.lastIndexOf('#')) } : {}),
+            choices: (field: ChosenField, typed?: string) => at.tracker.choices(at.issue, field, typed),
+          },
+          wanted,
+        )
 
       /** Makes a card, its row and its item, in one transaction. */
       const make = (input: {
@@ -865,6 +704,7 @@ export class IssueChanges extends Context.Service<
         url: at.issue.url,
         title: at.issue.title,
         from: at.issue.status.name,
+        assignees: at.tracker.capabilities.assignees,
         change: {},
         applied: null,
         error: null,
@@ -875,24 +715,43 @@ export class IssueChanges extends Context.Service<
         provide(
           Effect.gen(function* () {
             if (input.issues.length === 0) return yield* refused('Name at least one issue to change.')
-            const entries = yield* Effect.forEach(input.issues, ({ target, change: wanted }) =>
+            // Each issue on its own: one that can't be read, or has nothing left to change, leaves the others to go ahead.
+            const read = yield* Effect.forEach(input.issues, ({ target, change: wanted }) =>
               Effect.gen(function* () {
-                const at = yield* found(input.projectId, target)
-                return entryOf(at, { change: yield* resolve(at, wanted), ...(input.why === undefined ? {} : { why: input.why }) })
+                const at = yield* Effect.result(found(input.projectId, target))
+                const named = 'issue' in target ? target.issue : target.ref
+                if (at._tag === 'Failure')
+                  return {
+                    left: [at.failure instanceof IssueChangeRefused ? at.failure.message : `${named}: Althar couldn’t read it.`],
+                    already: [],
+                  }
+                const fields = yield* resolve(at.success, wanted)
+                const key = at.success.issue.key
+                return {
+                  entry: anything(fields.change)
+                    ? entryOf(at.success, { change: fields.change, ...(input.why === undefined ? {} : { why: input.why }) })
+                    : undefined,
+                  left: fields.left.map((why) => `${key}: ${why}.`),
+                  already: fields.already.map((what) => `${key}: ${what}`),
+                }
               }),
             )
+            const entries = read.flatMap((one) => ('entry' in one && one.entry !== undefined ? [one.entry] : []))
             const keys = entries.map((entry) => `${entry.connectionId}:${entry.ref}`)
             if (new Set(keys).size !== keys.length) return yield* refused('Name each issue once, with everything that changes on it.')
-            const direct = input.direct ?? !waitsOnThePerson((yield* policies.current(input.projectId)).rules)
-            return yield* proposeEntries({
+            const left = read.flatMap((one) => one.left)
+            const already = read.flatMap((one) => one.already)
+            if (entries.length === 0) return { card: null, left, already }
+            const card = yield* proposeEntries({
               projectId: input.projectId,
               threadId: input.threadId,
               entries,
               ...(input.note === undefined ? {} : { note: input.note }),
               by: input.by,
               actorId: input.actorId,
-              direct,
+              direct: input.direct === true,
             })
+            return { card, left, already }
           }),
         )
 
@@ -932,14 +791,48 @@ export class IssueChanges extends Context.Service<
           }),
         )
 
+      /** What a task built, as its lead last said it, else its title: what a merge that did part of an issue says landed. */
+      const landed = (threadId: string, title: string) =>
+        Effect.map(
+          Effect.orElseSucceed(taskShown(threadId), () => ({ built: null })),
+          ({ built }) => (built === null || built.trim() === '' ? title : built.trim()),
+        )
+
       const followPullRequest: IssueChanges['Service']['followPullRequest'] = (taskId, event, pullRequest) =>
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const [own] = yield* sql<{ projectId: ProjectId; connectionId: string | null; ref: string; threadId: string | null }>`
-              SELECT x.project_id, x.connection_id, x.ref, (SELECT id FROM threads WHERE task_id = x.task_id AND kind = 'task') AS thread_id
+            const [own] = yield* sql<{
+              projectId: ProjectId
+              connectionId: string | null
+              ref: string
+              threadId: string | null
+              partOf: number
+            }>`
+              SELECT x.project_id, x.connection_id, x.ref, x.part_of,
+                (SELECT id FROM threads WHERE task_id = x.task_id AND kind = 'task') AS thread_id
               FROM external_links x WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at LIMIT 1`
             if (own === undefined || own.connectionId === null || own.threadId === null) return
+            const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+            // A merged task settles as done, so what it says goes where the person reads about the project: the coordinator's thread.
+            const [coordinator] =
+              event === 'merged'
+                ? yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${own.projectId} AND kind = 'coordinator' LIMIT 1`
+                : []
+            // A task that did only part of its issue leaves it open: its merge says on the issue what landed, whether or not issues move.
+            if (event === 'merged' && own.partOf === 1) {
+              const words = yield* landed(own.threadId, task?.title ?? '')
+              const card = yield* comment({
+                projectId: own.projectId,
+                threadId: coordinator?.id ?? own.threadId,
+                target: { connectionId: own.connectionId, ref: own.ref },
+                body: `Part of this landed in [${pullRequest.key}](${pullRequest.url}), merged:\n\n${words}`,
+                by: 'althar',
+                actorId: instance.systemId,
+              })
+              yield* Effect.logDebug('Said on a task’s issue what part of it landed', card.changesId)
+              return
+            }
             if (!movesIssues((yield* policies.current(own.projectId)).rules)) return
             const at = yield* found(own.projectId, { connectionId: own.connectionId, ref: own.ref })
             const { issue, tracker } = at
@@ -954,29 +847,24 @@ export class IssueChanges extends Context.Service<
                     if (!tracker.capabilities.changes.includes('status')) return undefined
                     // Its tracker's own review status, where it has one; one in review already is left as it is.
                     const review = (yield* tracker.choices(issue, 'status')).find((choice) => /\breview\b/i.test(choice.name))
-                    if (review === undefined || same(review.name, issue.status.name)) return undefined
+                    if (review === undefined || review.name.trim().toLowerCase() === issue.status.name.trim().toLowerCase())
+                      return undefined
                     // Not back from further along, as a status after In Review would be; only from where work is under way, or hasn't started.
                     return unstarted(issue.status.category) || issue.status.category === 'started' ? { status: review.name } : undefined
                   })
             if (wanted === undefined) return
-            // A merged task settles as done, so its card goes where the person reads about the project: the coordinator's thread.
-            const [coordinator] =
-              event === 'merged'
-                ? yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${own.projectId} AND kind = 'coordinator' LIMIT 1`
-                : []
-            const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
-            const card = yield* propose({
+            const proposed = yield* propose({
               projectId: own.projectId,
               threadId: coordinator?.id ?? own.threadId,
               issues: [{ target: { connectionId: own.connectionId, ref: own.ref }, change: wanted }],
               note: `${pullRequest.key} ${event}`,
               why: { url: pullRequest.url, task: task?.title ?? '' },
-              // The project moves issues along with its tasks: it doesn't wait on `changeIssues`. A move the tracker refuses stays a card to try again.
+              // The project moves issues along with its tasks: it doesn't wait on the person. A move the tracker refuses stays a card to try again.
               direct: true,
               by: 'althar',
               actorId: instance.systemId,
             })
-            yield* Effect.logDebug('Moved a task’s issue with its pull request', card.changesId)
+            yield* Effect.logDebug('Moved a task’s issue with its pull request', proposed.card?.changesId ?? proposed.left.join(' '))
           }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issue with its pull request', cause))),
         )
 
@@ -1032,11 +920,51 @@ export class IssueChanges extends Context.Service<
           if (own === undefined)
             return yield* new ToolRefused({
               message:
-                'This task didn’t come from an issue, so it has none of its own to change. For another issue, tell the person what it needs: the coordinator changes it for them.',
+                'This task didn’t come from an issue, so it has none of its own to change. Name one it filed, or one the person named to it, as issue; for any other, tell the person what it needs: the coordinator changes it for them.',
             })
           if (own.connectionId === null)
             return yield* new ToolRefused({ message: `The tracker ${own.key} is on isn’t connected to Althar any more.` })
           return { linkId: own.id, key: own.key, target: { connectionId: own.connectionId, ref: own.ref } }
+        })
+
+      /** Whether the person named an issue to a task: in its thread, or in what they asked the coordinator for it. */
+      const namedByThePerson = (access: ToolAccess, issue: { readonly key: string; readonly url: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const said = yield* sql<{ body: string }>`
+            SELECT body FROM user_inputs WHERE author_actor_id = ${instance.personId}
+              AND (thread_id = ${access.threadId}
+                OR id IN (SELECT user_input_id FROM task_request_inputs WHERE task_id = ${access.taskId ?? ''}))
+            ORDER BY accepted_at DESC LIMIT 200`
+          // DEV-67 as a word, not inside DEV-670; #12 not inside #123.
+          const key = new RegExp(`(^|[^\\w#-])${issue.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
+          return said.some((one) => key.test(one.body) || one.body.includes(issue.url))
+        })
+
+      /**
+       * The issue a lead may change or comment on, by its key or link: the
+       * one its task came from, those its task filed, and those the person
+       * named to it. Without one, its task's own.
+       */
+      const leadTarget = (access: ToolAccess, named: string | undefined) =>
+        Effect.gen(function* () {
+          if (named === undefined || named.trim() === '') return (yield* ownIssue(access)).target
+          const sql = yield* SqlClient.SqlClient
+          const read = yield* issues
+            .read(named, access.projectId)
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can’t find ${named} on a connected tracker.` })))
+          const target = { connectionId: read.connectionId, ref: read.ref }
+          const [own] = yield* sql<{ id: string }>`
+            SELECT id FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'issue'
+              AND connection_id = ${read.connectionId} AND ref = ${read.ref} LIMIT 1`
+          if (own !== undefined) return target
+          const [filed] = yield* sql<{ id: string }>`
+            SELECT id FROM issue_drafts WHERE thread_id = ${access.threadId} AND state = 'filed'
+              AND connection_id = ${read.connectionId} AND issue_ref = ${read.ref} LIMIT 1`
+          if (filed !== undefined || (yield* namedByThePerson(access, read))) return target
+          return yield* new ToolRefused({
+            message: `${read.key} isn’t this task’s issue, one it filed, or one the person named to it, so it isn’t yours to change. Tell the person what it needs: the coordinator changes it for them.`,
+          })
         })
 
       const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
@@ -1050,7 +978,7 @@ export class IssueChanges extends Context.Service<
               ? asked.issue === undefined
                 ? yield* new ToolRefused({ message: 'Say which issue, by its key or link, as issue.' })
                 : { issue: asked.issue }
-              : (yield* ownIssue(access)).target
+              : yield* leadTarget(access, asked.issue)
           const card = yield* comment({
             projectId: access.projectId as ProjectId,
             threadId: access.threadId,
@@ -1067,32 +995,37 @@ export class IssueChanges extends Context.Service<
 
       const changeTool = (access: ToolAccess, value: unknown) =>
         Effect.gen(function* () {
-          const own = yield* ownIssue(access)
-          const wanted = yield* wantedOf(yield* readInput(AskedChange, value))
-          const card = yield* propose({
-            projectId: access.projectId as ProjectId,
-            threadId: access.threadId,
-            issues: [{ target: own.target, change: wanted }],
-            by: 'lead',
-            actorId: instance.systemId,
-          })
-          return proposedWords(card)
+          const { issue, at_once: atOnce, ...asked } = yield* readInput(LeadChange, value)
+          const target = yield* leadTarget(access, issue)
+          const wanted = yield* wantedOf(asked)
+          return proposedWords(
+            yield* propose({
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              issues: [{ target, change: wanted }],
+              direct: atOnce === true,
+              by: 'lead',
+              actorId: instance.systemId,
+            }),
+          )
         })
 
       const changesTool = (access: ToolAccess, value: unknown) =>
         Effect.gen(function* () {
           const asked = yield* readInput(ChangesAsked, value)
-          const card = yield* propose({
-            projectId: access.projectId as ProjectId,
-            threadId: access.threadId,
-            issues: yield* Effect.forEach(asked.changes, ({ issue, ...rest }) =>
-              Effect.map(wantedOf(rest), (wanted) => ({ target: { issue }, change: wanted })),
-            ),
-            ...(asked.note === undefined ? {} : { note: asked.note }),
-            by: 'coordinator',
-            actorId: instance.coordinatorId,
-          })
-          return proposedWords(card)
+          return proposedWords(
+            yield* propose({
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              issues: yield* Effect.forEach(asked.changes, ({ issue, ...rest }) =>
+                Effect.map(wantedOf(rest), (wanted) => ({ target: { issue }, change: wanted })),
+              ),
+              ...(asked.note === undefined ? {} : { note: asked.note }),
+              direct: asked.at_once === true,
+              by: 'coordinator',
+              actorId: instance.coordinatorId,
+            }),
+          )
         })
 
       /** Links the task's pull requests to its issue: each at once, with the receipt Althar's own link of it as it opened has. */
@@ -1131,8 +1064,15 @@ export class IssueChanges extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'comment_on_issue',
-          'Comments on the issue this task came from, at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. Only this task’s own issue.',
-          { type: 'object', properties: { body: { type: 'string', description: 'Markdown.' } }, required: ['body'] },
+          'Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it.',
+          {
+            type: 'object',
+            properties: {
+              body: { type: 'string', description: 'Markdown.' },
+              issue: { type: 'string', description: 'Its key or link, where it isn’t this task’s own issue.' },
+            },
+            required: ['body'],
+          },
           commentTool,
         ),
         tool(
@@ -1143,15 +1083,22 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'change_issue',
-          'Proposes a change to the issue this task came from: its status (any of its tracker’s, such as In Review), closing it, its priority, assignee, labels or title. It changes nothing until the person applies it from a card in this thread, unless the project lets changes through; you hear what they decide. Only this task’s own issue: Althar says what its tracker has where a name isn’t one of them.',
-          { type: 'object', properties: changeFields },
+          'Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Althar reads each name against the tracker, changes what it can, and says what it couldn’t and why.',
+          {
+            type: 'object',
+            properties: {
+              issue: { type: 'string', description: 'Its key or link, where it isn’t this task’s own issue.' },
+              ...changeFields,
+              at_once: atOnceField,
+            },
+          },
           changeTool,
         ),
       ])
       yield* toolServer.serve('coordinator', [
         tool(
           'change_issues',
-          'Proposes changes to issues on the person’s trackers, by key or link, several on one card: “move DEV-67 to Done, set DEV-142 to Low”. Each can change its status (any of its tracker’s), close it, or set its priority, assignee, labels, project or milestone, or title. Nothing changes until the person applies the card in your thread, unless the project lets changes through; you hear what they decide. Althar reads each name against its tracker, and says what it has where a name isn’t one of them, or what that tracker can’t change.',
+          'Changes issues on the person’s trackers, by key or link, several on one card: “move DEV-67 to Done, set DEV-142 to Low”. Each can change its status (any of its tracker’s), close it, or set its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in your thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. Althar reads each name against its tracker, changes what it can, and says what it couldn’t and why: a name it hasn’t, with what it has, or a field that tracker hasn’t.',
           {
             type: 'object',
             properties: {
@@ -1159,18 +1106,12 @@ export class IssueChanges extends Context.Service<
                 type: 'array',
                 items: {
                   type: 'object',
-                  properties: {
-                    issue: { type: 'string', description: 'Its key or link: DEV-67, #12, a URL.' },
-                    ...changeFields,
-                    project: {
-                      type: ['string', 'null'],
-                      description: 'Its project (Linear) or milestone (GitHub, GitLab), by name; null for none.',
-                    },
-                  },
+                  properties: { issue: { type: 'string', description: 'Its key or link: DEV-67, #12, a URL.' }, ...changeFields },
                   required: ['issue'],
                 },
               },
               note: { type: 'string', description: 'Why, in a sentence, where it helps the person decide.' },
+              at_once: atOnceField,
             },
             required: ['changes'],
           },
