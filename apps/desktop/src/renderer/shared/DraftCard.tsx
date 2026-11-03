@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { IssuePriority, IssueDraftState as State } from '@althar/contracts'
+import type { IssueChangeLine, IssuePriority, IssueDraftState as State } from '@althar/contracts'
 import { IssueDraft, IssueDraftState, Markdown } from '@althar/ui'
 
 import { productBrand } from './products'
@@ -8,10 +8,13 @@ import type { IssueDraftContent } from './thread'
 
 /*
  * An issue the coordinator or a task's lead drafted, in their thread: the tracker and where
- * it goes there, what it says, and where it stands. Nothing is filed until
- * the person files it here; they can change it first, or discard it. Once
- * filed, its key and its link; not filed, why, and filing it again; perhaps
- * filed, its answer lost, a word to look on the tracker before filing again.
+ * it goes there, what it says and what else it is filed with, and where it
+ * stands. Nothing is filed until the person files it here; they can change
+ * it first, or discard it; or file it and every later one at once, which
+ * the coordinator keeps as a note. Once filed, its key and its link, and
+ * what its tracker left off; filed at once, a way to be asked first again.
+ * Not filed, why, and filing it again; perhaps filed, its answer lost, a
+ * word to look on the tracker before filing again.
  */
 
 export interface DraftActions {
@@ -21,6 +24,26 @@ export interface DraftActions {
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
   ) => Promise<void>
   readonly onDiscard: (draftId: string) => void
+  /** Issues filed and changed at once from now on, or each on a card first: said to the coordinator. */
+  readonly onPrefer: (atOnce: boolean) => void
+}
+
+/** What else an issue is filed with, as its card says it: Project: Q4 launch, Assignees: Sam, Ana. */
+export const detailOf = (line: IssueChangeLine): string => {
+  if ('add' in line) return `${line.field === 'labels' ? 'Labels' : 'Assignees'}: ${line.add.join(', ')}`
+  const named: Partial<Record<IssueChangeLine['field'], string>> = {
+    status: 'Status',
+    assignee: 'Assignee',
+    project: 'Project',
+    milestone: 'Milestone',
+    cycle: 'Cycle',
+    parent: 'Part of',
+    estimate: 'Estimate',
+    type: 'Type',
+    components: 'Components',
+    due: 'Due',
+  }
+  return `${named[line.field] ?? line.field}: ${line.to ?? 'none'}`
 }
 
 /** A priority as trackers show it; none shows nothing. */
@@ -55,6 +78,9 @@ export function DraftCard({ draft, actions }: { draft: IssueDraftContent; action
       bodyView={<Markdown source={draft.body} />}
       labels={draft.labels}
       {...(draft.priority === null || PRIORITIES[draft.priority] === null ? {} : { priority: PRIORITIES[draft.priority] ?? '' })}
+      details={(draft.fields ?? []).map(detailOf)}
+      leftOff={draft.leftOff ?? []}
+      direct={draft.direct === true}
       state={STATES[draft.state]}
       {...(draft.error === null ? {} : { error: draft.error })}
       {...(draft.issue === null ? {} : { issue: { key: draft.issue.key, href: draft.issue.url } })}
@@ -64,6 +90,12 @@ export function DraftCard({ draft, actions }: { draft: IssueDraftContent; action
         void actions.onChange(draft.draftId, edit).finally(() => setSaving(false))
       }}
       onDiscard={() => actions.onDiscard(draft.draftId)}
+      // Filed at once from now on: this one too.
+      onAlwaysAtOnce={() => {
+        actions.onFile(draft.draftId)
+        actions.onPrefer(true)
+      }}
+      onAlwaysAsk={() => actions.onPrefer(false)}
       saving={saving}
     />
   )

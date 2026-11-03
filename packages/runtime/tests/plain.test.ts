@@ -420,6 +420,15 @@ describe('a plain task', () => {
       yield* cardOnce(wrote.id, (one) => one.phase === 'ready')
       for (const task of [quiet, wrote]) {
         yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { task }), taskId: task.id })
+        // Its lead is gone before its folder is: one still finishing its turn could write in a folder put back meanwhile,
+        // and Althar would make it a branch by then, which a plain task is put back without.
+        const sessions = yield* SqlClient.SqlClient
+        yield* until(
+          sessions<{
+            state: string
+          }>`SELECT state FROM provider_sessions WHERE thread_id = ${task.threadId} AND state IN ('active', 'starting')`,
+          (rows) => rows.length === 0,
+        )
         const worktree = yield* worktreeOf(task.id)
         // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
         rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })

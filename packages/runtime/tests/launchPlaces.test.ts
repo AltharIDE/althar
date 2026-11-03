@@ -231,7 +231,7 @@ describe('a run that ends at once', () => {
   )
 
   // Not on Windows, which ends a process by no signal.
-  it.live.skipIf(process.platform === 'win32')('says how one killed by a signal ended, with no exit code', () =>
+  it.live.skipIf(process.platform === 'win32')('says which signal killed one, and that it crashed where it did', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
       const instance = yield* Instance
@@ -239,7 +239,18 @@ describe('a run that ends at once', () => {
       yield* launches.keep({ projectId, run: { command: 'kill -9 $$', setup: null }, actorId: instance.personId })
       assert.match(
         yield* callTool(access('coordinator', projectId), 'run_project', {}),
-        /^`kill -9 \$\$` in a fresh copy of the default branch ended at once\. Its last lines:\n\n\(nothing\)\n/,
+        /^`kill -9 \$\$` in a fresh copy of the default branch ended at once, killed by SIGKILL, and printed nothing, on stdout or stderr\.\n/,
+      )
+      for (const ended of yield* launches.ofProject(projectId)) yield* launches.clear(ended.id)
+      // What it runs crashing under the shell: the shell says so by its exit code, where it doesn't become what it runs.
+      yield* launches.keep({
+        projectId,
+        run: { command: `node -e "process.kill(process.pid, 'SIGSEGV')"`, setup: 'true' },
+        actorId: instance.personId,
+      })
+      assert.match(
+        yield* callTool(access('coordinator', projectId), 'run_project', {}),
+        /ended at once, (with exit code 139: )?killed by SIGSEGV, so it crashed/,
       )
     }).pipe(Effect.provide(withQueries())),
   )

@@ -44,6 +44,8 @@ export interface ContextRingProps {
   model?: ModelInfo
   /** Why it is as full as it is, or what happens when it fills. */
   note?: ReactNode
+  /** What the task, or the day, used of each account, under the context (ADR-084): its UsageLines. */
+  usage?: ReactNode
   /** Whether the detail shows, when the consumer holds it. */
   open?: boolean
   /** Show the detail from the start, as for a screenshot. */
@@ -65,7 +67,19 @@ const C = 2 * Math.PI * R
  * it, and with them Compact, which has the agent sum up what it holds so
  * each turn after reads less.
  */
-export function ContextRing({ used, total, model, note, open, defaultOpen, onOpenChange, onCompact, compacting, text }: ContextRingProps) {
+export function ContextRing({
+  used,
+  total,
+  model,
+  note,
+  usage,
+  open,
+  defaultOpen,
+  onOpenChange,
+  onCompact,
+  compacting,
+  text,
+}: ContextRingProps) {
   const t = { ...contextRingText, ...text }
   const pct = total > 0 ? Math.min(1, Math.max(0, used / total)) : 0
   const percent = Math.round(pct * 100)
@@ -75,7 +89,7 @@ export function ContextRing({ used, total, model, note, open, defaultOpen, onOpe
       label={t.panel}
       placement="above"
       align="end"
-      width={232}
+      width={usage === undefined ? 232 : 296}
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
@@ -105,6 +119,7 @@ export function ContextRing({ used, total, model, note, open, defaultOpen, onOpe
             </ActionButton>
           </span>
         )}
+        {usage !== undefined && <div className={s.usage}>{usage}</div>}
       </div>
     </Popover>
   )

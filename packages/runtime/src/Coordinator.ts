@@ -1,7 +1,6 @@
 import type { MessageSender } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
-import type { Priority } from '@althar/connectors'
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
@@ -18,13 +17,14 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
-import { Agents } from './Config'
+import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
-import { IssueDrafts, leadsNeedTheCard, refusedDraft } from './IssueDrafts'
-import { Issues } from './Issues'
+import { IssueDrafts, refusedDraft } from './IssueDrafts'
+import { AskedFields, fieldSchema, wantedFields } from './issueFields'
+import { Issues, keyRange, readRefusal } from './Issues'
 import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -38,7 +38,9 @@ import {
   replyOnPullRequest,
   reopenPullRequest,
   rerunChecks,
+  updateBranch,
 } from './coordinatorPullRequests'
+import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
@@ -113,11 +115,14 @@ type Store =
   | Runs
   | Connections
   | Automations
+  | RuntimeConfig
 
 const Drafted = Schema.Struct({
   title: Schema.String,
   description: Schema.optional(Schema.String),
   issue: Schema.optional(Schema.String),
+  /** It does only part of its issue: its merge comments on the issue rather than closing it. */
+  part_of: Schema.optional(Schema.Boolean),
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 /* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-052). */
@@ -130,16 +135,24 @@ const Attaching = Schema.Struct({
 })
 const Asked = Schema.Struct({ issue: Schema.String })
 const DraftedIssue = Schema.Struct({
+  ...AskedFields.fields,
   title: Schema.String,
   description: Schema.optional(Schema.String),
   tracker: Schema.optional(Schema.String),
   container: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
-  priority: Schema.optional(Schema.String),
+  file_now: Schema.optional(Schema.Boolean),
 })
-
-/** A priority as an agent may write it: Low, low, none. */
-const PRIORITY = /^(urgent|high|medium|low|none)$/
+/** A search for issues: words, where, how they stand, whose, or a run of keys. */
+const SoughtIssues = Schema.Struct({
+  text: Schema.optional(Schema.String),
+  tracker: Schema.optional(Schema.String),
+  container: Schema.optional(Schema.String),
+  state: Schema.optional(Schema.Literals(['open', 'closed', 'all'])),
+  mine: Schema.optional(Schema.Boolean),
+  keys: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.Number),
+})
 /*
  * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
  * thinks, where named: one of the model's efforts as list_models writes them.
@@ -550,7 +563,11 @@ export class Coordinator extends Context.Service<
        * Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before.
        * `plain`, for one started with no plan: its worktrees have no branch until its lead changes the repository.
        */
-      const drafting = (access: ToolAccess, { title, description, issue: from, repositories }: typeof Drafted.Type, plain = false) =>
+      const drafting = (
+        access: ToolAccess,
+        { title, description, issue: from, part_of: partOf, repositories }: typeof Drafted.Type,
+        plain = false,
+      ) =>
         Effect.gen(function* () {
           // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
           if (title.trim().length > TITLE_LENGTH)
@@ -608,8 +625,10 @@ export class Coordinator extends Context.Service<
                 ),
               ),
             )
-          if (issue !== undefined && from !== undefined)
+          if (issue !== undefined && from !== undefined) {
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+            if (partOf === true) yield* issues.setPart(created.taskId, true)
+          }
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
           if (again === undefined && request !== undefined) {
             const task = yield* taskOf(access, created.taskId)
@@ -632,7 +651,7 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           const { created, issue } = yield* drafting(access, drafted)
-          const from = issue === undefined ? '' : `, from ${issue.key}`
+          const from = issue === undefined ? '' : drafted.part_of === true ? `, part of ${issue.key}` : `, from ${issue.key}`
           if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
           // A new task has nothing of its own to lose: it starts on the pull request's head.
           const attached = yield* changes
@@ -1091,6 +1110,9 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          const sql = yield* SqlClient.SqlClient
+          const [held] = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
@@ -1099,6 +1121,8 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
           })
+          if (held !== undefined)
+            return `Changed ${task.slug}'s plan. It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           return `Planned ${task.slug}. It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -1124,21 +1148,38 @@ export class Coordinator extends Context.Service<
       const readIssue = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { issue: wanted } = yield* read(Asked, input)
-          const issue = yield* issues
-            .read(wanted, access.projectId)
-            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can't read ${wanted}: no connected tracker has it.` })))
-          return [
-            `${issue.key}: ${issue.title}`,
-            `${issue.status.name}${issue.priority === null || issue.priority.level === 'none' ? '' : `, ${issue.priority.name} priority`}${issue.container === null ? '' : `, in ${issue.container}`}. ${issue.url}`,
-            issue.body === '' ? 'No description.' : issue.body,
-          ].join('\n\n')
+          return yield* issues
+            .words(wanted, access.projectId)
+            .pipe(Effect.mapError((error) => new ToolRefused({ message: readRefusal(error, wanted) })))
         })
 
-      const findIssues = (access: ToolAccess) =>
+      /** Issues as a search narrows them, a line each; each tracker it couldn't read said as such, never as none found. */
+      const findIssues = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const found = yield* issues.mine(access.projectId)
-          if (found.length === 0) return 'The person has no open issues on the connected trackers.'
-          return found.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n')
+          const asked = yield* read(SoughtIssues, input)
+          if (asked.keys !== undefined && keyRange(asked.keys) === null)
+            return yield* new ToolRefused({ message: `“${asked.keys}” isn’t a run of keys: say it as DEV-170..DEV-185, at most 50.` })
+          const found = yield* issues.find(access.projectId, {
+            ...(asked.text === undefined ? {} : { text: asked.text }),
+            ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
+            ...(asked.container === undefined ? {} : { container: asked.container }),
+            ...(asked.state === undefined ? {} : { state: asked.state }),
+            ...(asked.mine === undefined ? {} : { mine: asked.mine }),
+            ...(asked.keys === undefined ? {} : { keys: asked.keys }),
+            ...(asked.limit === undefined ? {} : { limit: asked.limit }),
+          })
+          const asSaid = asked.text === undefined && asked.container === undefined && asked.state === undefined && asked.keys === undefined
+          const none = asSaid && asked.mine !== false ? 'The person has no open issues on the connected trackers.' : 'No issues found.'
+          return [
+            found.issues.length === 0
+              ? found.failed.length === 0
+                ? none
+                : ''
+              : found.issues.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n'),
+            ...found.failed,
+          ]
+            .filter((line) => line !== '')
+            .join('\n')
         })
 
       /** The pull requests in the project's repositories, whoever opened them: a short line each, and whether Althar holds it. */
@@ -1162,45 +1203,37 @@ export class Coordinator extends Context.Service<
        */
       const draftIssue = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const asked = yield* read(DraftedIssue, input)
-          const priority = asked.priority
-            ?.trim()
-            .toLowerCase()
-            .replace(/\s+priority$/, '')
-            .replace(/^no$/, 'none')
-          if (priority !== undefined && !PRIORITY.test(priority))
-            return yield* new ToolRefused({
-              message: `A priority is one of urgent, high, medium, low or none, not “${asked.priority ?? ''}”.`,
-            })
+          const { title, description, tracker, container, labels, file_now: fileNow, ...asked } = yield* read(DraftedIssue, input)
+          const { priority, ...fields } = yield* wantedFields(asked)
           const card = yield* issueDrafts
             .draft({
               projectId: access.projectId as ProjectId,
               threadId: access.threadId,
-              ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
-              ...(asked.container === undefined ? {} : { container: asked.container }),
-              title: asked.title,
-              body: asked.description ?? '',
-              labels: asked.labels ?? [],
-              ...(priority === undefined ? {} : { priority: priority as Priority }),
+              ...(tracker === undefined ? {} : { tracker }),
+              ...(container === undefined ? {} : { container }),
+              title,
+              body: description ?? '',
+              labels: labels ?? [],
+              ...(priority === undefined ? {} : { priority }),
+              ...(Object.keys(fields).length === 0 ? {} : { fields }),
+              ...(fileNow === true ? { direct: true } : {}),
               ...(access.taskId === null ? {} : { taskId: access.taskId }),
               actorId: access.role === 'coordinator' ? instance.coordinatorId : instance.systemId,
             })
             .pipe(Effect.catch((error) => Effect.fail(refusedDraft(error))))
-          // Where the person lets leads file on their own, the card is the record of it, and nothing waits on them.
-          if (access.role === 'lead' && !leadsNeedTheCard) {
-            const filed = yield* issueDrafts
-              .file(card.draftId, instance.systemId)
-              .pipe(Effect.catch((error) => Effect.fail(refusedDraft(error))))
-            return filed.issue === null
-              ? `Drafted the issue “${filed.title}”, but it wasn't filed: ${filed.error ?? 'the tracker did not take it'}. The person can file it again from its card.`
-              : `Filed the issue “${filed.title}” on ${filed.tracker}, in ${filed.container}, as ${filed.issue.key}: ${filed.issue.url}`
-          }
-          // A tracker without priorities files it at its own default: the agent hears so, rather than writing it in the description.
-          const unprioritised =
-            priority !== undefined && priority !== 'none' && card.priority === null
-              ? ` ${card.tracker}'s issues have no priority, so it has none.`
-              : ''
-          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}.${unprioritised} Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+          // What of what was asked was left off as it was drafted, and why: the agent hears it, rather than writing it in the description.
+          const left = [
+            ...(priority !== undefined && priority !== 'none' && card.priority === null
+              ? [`${card.tracker}'s issues have no priority.`]
+              : []),
+            ...card.left.map((why) => `${why}.`),
+          ]
+          const leftWords = left.length === 0 ? '' : ` Left off: ${left.join(' ')}`
+          if (fileNow === true)
+            return card.issue === null
+              ? `Drafted the issue “${card.title}”, but it wasn't filed: ${card.error ?? 'the tracker did not take it'}.${leftWords} The person can file it again from its card.`
+              : `Filed the issue “${card.title}” on ${card.tracker}, in ${card.container}, as ${card.issue.key}: ${card.issue.url}. Its card in this thread is the record of it.${leftWords}${card.leftOff.length === 0 ? '' : ` ${card.tracker} left off: ${card.leftOff.join(' ')}`}`
+          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}.${leftWords} Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
         })
 
       /* ---- Automations (docs/plans/automations.md) ---- */
@@ -1432,13 +1465,27 @@ export class Coordinator extends Context.Service<
       // person files it from a card in the task's thread.
       const findIssuesTool = tool(
         'find_issues',
-        'The person’s open issues on the connected trackers, and in the project’s repository, newest change first.',
-        nothing,
-        (access) => findIssues(access),
+        'Finds issues on the connected trackers and in the project’s repository, newest change first. With nothing given, the person’s open issues. Narrow by words in the title or description, a tracker, where on it (a team, project, repository or list), open, closed or all, only those assigned to the person, or a run of keys. A tracker that couldn’t be searched is said, never taken for none found.',
+        {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Words in its title or description.' },
+            tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+            container: {
+              type: 'string',
+              description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+            },
+            state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said.' },
+            mine: { type: 'boolean', description: 'Only those assigned to the person. So with nothing else given; otherwise everyone’s.' },
+            keys: { type: 'string', description: 'A run of keys, read one by one: DEV-170..DEV-185, #10..#20; at most 50.' },
+            limit: { type: 'number', description: 'How many at most: 50 unless said, 100 at most.' },
+          },
+        },
+        findIssues,
       )
       const draftIssueTool = tool(
         'draft_issue',
-        "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. It files nothing: the person sees it as a card, and files it, changes it or discards it. Give it a title and a description in Markdown with what whoever picks it up needs. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name.",
+        "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. As a card the person files, changes or discards, unless file_now: where the project's notes say issues are filed at once, or the person just said to. Give it a title and a description in Markdown with what whoever picks it up needs, and any of its tracker's fields: its project, milestone, cycle, parent, assignee, status, estimate, type, components or due date, each set as it is filed. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name. Althar reads each name against the tracker and says what it left off and why.",
         {
           type: 'object',
           properties: {
@@ -1454,11 +1501,17 @@ export class Coordinator extends Context.Service<
               description:
                 "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
             },
-            labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; others are left off.' },
+            labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; Althar says which it left off.' },
+            ...fieldSchema,
             priority: {
               type: 'string',
               enum: ['urgent', 'high', 'medium', 'low', 'none'],
               description: 'Its priority, where the tracker has priorities: set it here, not in the description.',
+            },
+            file_now: {
+              type: 'boolean',
+              description:
+                'File it at once rather than as a card, where the project’s notes say issues are filed at once, or the person just said to. Its card is the record of it.',
             },
           },
           required: ['title'],
@@ -1516,13 +1569,18 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.`,
           {
             type: 'object',
             properties: {
               title: { type: 'string', maxLength: TITLE_LENGTH },
               description: { type: 'string' },
               issue: { type: 'string', description: 'The issue it comes from: its link, or its key (MER-231, #12).' },
+              part_of: {
+                type: 'boolean',
+                description:
+                  'It does only part of its issue: as its pull request merges, Althar comments on the issue with what landed and leaves it open, rather than closing it.',
+              },
               pull_request: {
                 type: 'string',
                 description: 'An open pull request it works on: its link, or its number where the repository’s pull requests open (#123).',
@@ -1557,7 +1615,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_issue',
-          'An issue on a connected tracker, or in the project’s repository: its title, status and description. Takes its link or its key.',
+          'An issue on a connected tracker, or in the project’s repository: its title, status, assignees, labels, project, milestone, parent and the like, its description, and its latest comments. Takes its link or its key.',
           { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },
           readIssue,
         ),
@@ -1625,6 +1683,12 @@ export class Coordinator extends Context.Service<
           (access, input) => reopenPullRequest(access.projectId, input),
         ),
         tool(
+          'update_branch',
+          "Brings a pull request's branch up to date with the branch it goes into, by its link or number: merges that branch into it. A merge commit, never a rebase and never a forced push, so it can be undone. GitHub does it with its update-branch; GitLab and Bitbucket (Cloud and Data Center) by Althar's merge in a copy of its own, pushed plainly. Any of the project's pull requests, an outside author's included, where Althar's account may push to its branch; where it may not, nothing is done and it says so: asking the author is a reply, which waits for the person's word. A conflict stops and names the files; you don't settle it, a task's lead or the author does. A branch pushed to since you read it is left as it is. Use it when a pull request is behind and that holds up its merge or its checks.",
+          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
+          (access, input) => updateBranch(access.projectId, input),
+        ),
+        tool(
           'reply_on_pull_request',
           "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. For a pull request Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it waits for the person's word and is refused here. A change to the code is a task, not a reply.",
           {
@@ -1638,6 +1702,7 @@ export class Coordinator extends Context.Service<
               return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
             }),
         ),
+        ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
           'list_models',
@@ -1647,7 +1712,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
           {
             type: 'object',
             properties: {

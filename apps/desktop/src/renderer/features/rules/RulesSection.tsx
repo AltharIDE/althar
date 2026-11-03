@@ -42,10 +42,11 @@ import type { RulesModel } from './useRules'
  * them; how a task ends and is named; and what a usage limit does, with the
  * accounts work runs on. A kind of request sits in one sentence: moving it
  * writes it on one list and takes it off the others. The section names
- * them, so the charter has only its key above it. Above it, the few things
- * agents may do without asking that aren't a request the charter sorts:
- * reaching the web and changing issues, each a switch with a line on what
- * it lets through.
+ * them, so the charter has only its key above it. Above it, what agents may
+ * do without asking that isn't a request the charter sorts: reaching the
+ * web, a switch with a line on what it lets through. Whether issues are
+ * filed and changed at once isn't a switch: it is what the person says, on
+ * an issue's card or to the coordinator, kept as a project note (DEV-182).
  */
 
 export const text = {
@@ -53,10 +54,6 @@ export const text = {
   leadsReachWeb: {
     title: 'Leads can reach the web',
     line: 'Search and read websites without asking. Pages could steer a lead into sending private code in a URL. Outside pull request reviews stay offline. Applies to new sessions.',
-  },
-  changeIssues: {
-    title: 'Change issues without asking',
-    line: 'The coordinator, and a lead on its own task’s issue, change status, priority, assignee, labels, project or title, or close it, at once, on any connected tracker, with no card to apply first. New issues still come as a draft for you to file.',
   },
   /** Why a command can't go ahead: a sentence that comes first has it. */
   onOtherList: (pattern: string, list: 'ask' | 'never') => {
@@ -342,12 +339,6 @@ export function RulesSection({ model }: { model: RulesModel }) {
                 note={text.leadsReachWeb.line}
                 checked={rules.leadsReachWeb}
                 onChange={(leadsReachWeb) => model.change({ leadsReachWeb })}
-              />
-              <SettingSwitch
-                title={text.changeIssues.title}
-                note={text.changeIssues.line}
-                checked={rules.changeIssues}
-                onChange={(changeIssues) => model.change({ changeIssues })}
               />
             </SettingList>
           </SettingGroup>

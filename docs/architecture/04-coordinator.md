@@ -131,10 +131,17 @@ provisional.
 | `rerun_check` | Runs a failed check on a pull request of the project's, or on the default branch's latest commit, once more: the one named, or each that failed. GitHub's Actions job, GitLab's pipeline job, Bitbucket Cloud's pipeline whole on the same commit; Bitbucket Data Center's builds are another service's, so it says whose and links the build ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)) | Command, undone in a step |
 | `read_default_branch_checks` | The checks on a repository's default branch's latest commit, with the end of the first failed ones' logs | Read |
 | `mark_ready`, `close_pull_request`, `reopen_pull_request` | Marks ready, closes unmerged, or opens again a pull request Althar opened, by its number or link. Each can be taken back in a step. Bitbucket Cloud can't reopen a declined one, so closing there waits for the person's word, and is refused until that is built; a pull request a person opened is theirs | Command, undone in a step |
+| `update_branch` | Merges the pull request's target branch into its branch, at the head just read, on any of the project's pull requests: GitHub's update-branch, and on GitLab and both Bitbucket editions a merge in a copy of Althar's own, pushed plainly. A merge commit, never a rebase or a forced push. A conflict stops and names the files; a branch pushed to meanwhile is left as it is; a fork's branch the account can't push to is left for its author, whom only the person's word asks ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)) | Command, undone in a step |
 | `reply_on_pull_request` | Replies, signed as from Althar, in a thread or a pull request's conversation: on one Althar opened, or whose author is the connected account or one of the repository's own people. An outside author's waits for the person's word, since the notification can't be taken back | Command, undone in a step |
+| `push_tag` | Tags the commit the person's words name, or the default branch's latest, on any of the project's hosts; made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it; deleting one is asked for too ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md#a-release)) | Asked-for |
+| `read_release` | A tag's release as its host has it (GitHub's draft or published one, GitLab's release, Bitbucket's tag and Downloads), and the CI runs on the tag, with what each waits on and whose press it is, linked | Read |
+| `approve_release_run` | Approves what a run on a tag waits on: GitHub's environment, GitLab's deployment approval or manual job. Where the account can't, or only the person can (Bitbucket's manual steps), it does nothing and says so with the host's button | Asked-for |
+| `publish_release` | Publishes a tag's release as its host does: GitHub's draft made public, GitLab's release made, Bitbucket Cloud's files put in Downloads from the project's repository; Data Center's tag is the release | Asked-for |
+| `rerun_failed_jobs` | Runs the failed jobs of a tag's newest failed run again: GitHub's and GitLab's jobs, Bitbucket Cloud's pipeline whole | Command, undone in a step |
+| `read_release_steps` | How one of the project's repositories says it is released, from its CI files and release docs, to say as a line a step and keep as a project note | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
-| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
-| `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
+| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, with who has it, its fields and latest comments; and issues found by words, tracker, where, state or a run of keys, the person's open ones without ([06](06-integrations-and-skills.md#finding-and-reading-issues)) | Read |
+| `draft_issue` | Drafts an issue on a connected tracker with every field it has, as a card the person files, changes or discards; or files it at once where the project's notes say so or the person just did, its card the receipt ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task (a quick task), with no branch until its lead changes the repository, and then one that stays on this Mac | Command |
@@ -390,11 +397,11 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   three times at most, someone else writing to the target in between, then
   its errand pauses for the person.
 - **Althar's sweep** (every 30 seconds, and at once after a merge call) does
-  only what can be undone: it brings the slot's branch up to date by a merge
-  (GitHub's update-branch; elsewhere Althar's own, made in the project's
-  repository on this computer and pushed plainly, never forced, by
-  `branchUpdate.ts` until ADR-081's task 6 brings `update_branch`; where it
-  can't, a fork, no way to push, a push or the host's own update refused,
+  only what can be undone: it brings the slot's branch up to date by a merge,
+  the connectors' `updateBranch` that `update_branch` uses too (GitHub's
+  update-branch; elsewhere a merge in a copy of Althar's own, pushed plainly,
+  never forced; where it can't, a fork the account may not push to, a push
+  or the host's own update refused,
   the step steps out of line and it is said, once, to the lead too; a host
   that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
   queue, or settling one that landed, closed or moved, it wakes the

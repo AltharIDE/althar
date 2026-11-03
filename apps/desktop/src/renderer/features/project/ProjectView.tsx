@@ -97,6 +97,8 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  /** Whose usage the composer's ring says, under the context. */
+  usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
@@ -309,10 +311,12 @@ export function ProjectView({
     onFile: (draftId) => void model.fileIssueDraft(draftId),
     onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
   const changesActions: ChangesActions = {
     onApply: (changesId) => void model.applyIssueChanges(changesId),
     onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
 
   // The agent what the person says goes to, and whether it takes images.
@@ -434,7 +438,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact)}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (

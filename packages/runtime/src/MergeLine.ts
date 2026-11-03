@@ -6,7 +6,6 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { mergeTargetIn } from './branchUpdate'
 import { hostName } from './checkLogs'
 import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
@@ -875,20 +874,9 @@ export class MergeLine extends Context.Service<
                 .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not wake the coordinator for its merge line', cause)))
             })
 
-      /** Where the project's repository is on this computer, for Althar's own merge. */
-      const folderOf = (bindingId: string) =>
-        Effect.flatMap(SqlClient.SqlClient, (sql) =>
-          Effect.map(
-            sql<{
-              path: string
-            }>`SELECT path FROM repository_locations WHERE binding_id = ${bindingId} AND device_id = ${instance.deviceId}`,
-            (rows) => rows[0]?.path,
-          ),
-        )
-
       /**
-       * Brings the step's branch up to date by a merge: the host's own
-       * (GitHub's update-branch), else Althar's, made here and pushed plainly.
+       * Brings the step's branch up to date by a merge, the host's
+       * `updateBranch`: GitHub's update-branch, else a copy of Althar's pushed plainly.
        * Three tries at most, someone else writing to the target in between.
        */
       const bringUp = (projectId: string, entry: Entry, seen: Look) =>
@@ -914,46 +902,54 @@ export class MergeLine extends Context.Service<
               yield* note(projectId, stepOf(entry), 'cannot', `cannot:${seen.change.headSha}:${seen.base}:${yield* timestamp}`, {
                 head: seen.change.headSha,
                 base: seen.base,
-                reason: why,
+                // In the host's words, which end where the line's sentence goes on.
+                reason: why.trim().replace(/\.$/, ''),
                 passing,
               })
             })
-          if (seen.host.updateBranch !== undefined) {
-            // One that hadn't landed when read back is given a while, not asked for again.
-            const last = updates.at(-1)
-            if (
-              last?.to === null &&
-              last.from === seen.change.headSha &&
-              last.base === seen.base &&
-              (yield* Clock.currentTimeMillis) - Date.parse(String(last.at)) < Duration.toMillis(CHECKS_APPEAR)
-            )
-              return
-            // A refusal is the host's own, as a push refused: only a head that moved is read again.
-            return yield* seen.host.updateBranch(seen.repository, seen.change).pipe(
-              Effect.flatMap(updated),
+          // One GitHub hadn't landed when read back is given a while, not asked for again.
+          const last = updates.at(-1)
+          if (
+            last?.to === null &&
+            last.from === seen.change.headSha &&
+            last.base === seen.base &&
+            (yield* Clock.currentTimeMillis) - Date.parse(String(last.at)) < Duration.toMillis(CHECKS_APPEAR)
+          )
+            return
+          const from = seen.change.headSha
+          if (from === null) return
+          // A merge of the target in, never a rebase, at the head read (ADR-081's update_branch): GitHub's own call, elsewhere a copy of Althar's pushed plainly.
+          const done = yield* seen.host
+            .updateBranch(seen.repository, seen.change, { expectedHead: from })
+            .pipe(
               Effect.catchTag('ConnectorFailed', (failed) =>
-                failed.status === 422 && /expected head/i.test(failed.message) ? Effect.void : ask(...updateRefused(seen.host, failed)),
+                Effect.as(
+                  failed.status === 422 && /expected head/i.test(failed.message) ? Effect.void : ask(...updateRefused(seen.host, failed)),
+                  null,
+                ),
               ),
             )
-          }
-          const place = yield* placeAt(projectId, entry.request.repository, entry.request.number)
-          const folder = yield* folderOf(place.bindingId)
-          if (folder === undefined) return yield* ask('the repository isn’t on this computer')
-          const target = yield* seen.host.pushTarget(seen.repository).pipe(Effect.option)
-          if (Option.isNone(target)) return yield* ask(`${hostName(seen.host)} gives Althar no way to push to it`)
-          const done = yield* mergeTargetIn(folder, target.value, seen.change)
-          switch (done.kind) {
-            case 'pushed':
-              return yield* updated(done.head)
-            case 'conflicts':
-              yield* note(projectId, stepOf(entry), 'conflict', `conflict:${seen.change.headSha}:${seen.base}`, {
-                head: seen.change.headSha,
+          if (done === null) return
+          switch (done.outcome) {
+            case 'updated': {
+              // GitHub's lands in the background, and the head read after may be someone else's push: only the merge it made from the head it had is Althar's.
+              const made =
+                done.head === null || seen.host.madeFrom === undefined
+                  ? done.head
+                  : (yield* viaHost(seen.host.madeFrom(seen.repository, { ...seen.change, headSha: done.head }, from)))
+                    ? done.head
+                    : null
+              return yield* updated(made)
+            }
+            case 'conflict':
+              yield* note(projectId, stepOf(entry), 'conflict', `conflict:${from}:${seen.base}`, {
+                head: from,
                 base: seen.base,
                 files: done.files,
               })
               return
-            case 'cannot':
-              return yield* ask(done.reason, done.passing === true)
+            case 'no_access':
+              return yield* ask(done.reason)
             case 'current':
             case 'moved':
               // Read again on the next sweep.

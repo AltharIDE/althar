@@ -9,6 +9,7 @@ import { useRefocus } from '../../lib/refocus'
 import { Rhythm } from '../../lib/rhythm'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './IssueChanges.module.css'
 
@@ -16,11 +17,13 @@ import s from './IssueChanges.module.css'
  * Changes to issues on your trackers, as a card in the thread of whoever
  * proposed them: the coordinator, a task's lead, or Althar as a task's pull
  * request opened or merged. Nothing changes on the tracker until you apply
- * it; you can discard it instead. Several issues share one card. Where not
+ * it; you can discard it instead, or apply this one and every later one at
+ * once. Several issues share one card. Where not
  * all of it applied, each issue says why and applying it again tries what
- * didn't. Applied, by you or at once (a comment, a link, or a project that
- * lets changes through), or discarded, it folds to a line; a comment's line
- * keeps the start of what it said beneath.
+ * didn't. Applied, by you or at once (a comment, a link, or a change you
+ * prefer made at once), or discarded, it folds to a line; a comment's line
+ * keeps the start of what it said beneath, and one changed at once, without
+ * asking, can ask you first next time.
  *
  * Each issue leads with its title; what changes on it sits beneath, each
  * change a quiet name and the value it takes. A status moves from where it
@@ -29,14 +32,35 @@ import s from './IssueChanges.module.css'
  * request, beside the task's title.
  */
 
-/** One thing changed on an issue: its status, closing it, its priority, assignee, project or title; labels added and taken off; a comment; a link. */
+/**
+ * One thing changed on an issue: its status, closing it, its priority,
+ * assignee, project, milestone, cycle, parent, estimate, type, components,
+ * due date, title or description; labels, or people where it takes several,
+ * added and taken off; a comment; a link.
+ */
 export type IssueChange =
   | {
-      field: 'status' | 'close' | 'priority' | 'assignee' | 'project' | 'title' | 'comment' | 'link'
-      /** The status, priority, assignee, project or title it changes to (null for none); the comment's text; the link. */
+      field:
+        | 'status'
+        | 'close'
+        | 'priority'
+        | 'assignee'
+        | 'project'
+        | 'milestone'
+        | 'cycle'
+        | 'parent'
+        | 'estimate'
+        | 'type'
+        | 'components'
+        | 'due'
+        | 'title'
+        | 'description'
+        | 'comment'
+        | 'link'
+      /** What it changes to (null for none); the comment's text; the link. */
       to: string | null
     }
-  | { field: 'labels'; add: readonly string[]; remove: readonly string[] }
+  | { field: 'labels' | 'assignees'; add: readonly string[]; remove: readonly string[] }
 
 export interface IssueChangesIssue {
   /** The tracker's mark and name: Brand.Linear, 'Linear'. */
@@ -73,7 +97,10 @@ export interface IssueChangesText {
   discard: string
   apply: string
   applyAgain: string
-  /** Before the issues, once applied. */
+  /** Applies this one, and has every later change to an issue made at once, without a card. */
+  alwaysAtOnce: string
+  /** On changes made at once: have each later one wait on a card again. */
+  alwaysAsk: string
   /** Before the issues, where the change isn't a status moving from one place to another; none where it is. */
   changed: string
   commented: string
@@ -89,14 +116,25 @@ const CHANGE_PARTS = {
   priority: (to: string | null) => ['Priority', to ?? 'none'],
   assignee: (to: string | null) => (to === null ? ['Unassign', null] : ['Assignee', to]),
   project: (to: string | null) => (to === null ? ['Out of its project', null] : ['Project', to]),
+  milestone: (to: string | null) => (to === null ? ['Out of its milestone', null] : ['Milestone', to]),
+  cycle: (to: string | null) => (to === null ? ['Out of its cycle', null] : ['Cycle', to]),
+  parent: (to: string | null) => (to === null ? ['Out of its parent', null] : ['Part of', to]),
+  estimate: (to: string | null) => ['Estimate', to ?? 'none'],
+  type: (to: string | null) => ['Type', to ?? 'none'],
+  components: (to: string | null) => ['Components', to === null || to === '' ? 'none' : to],
+  due: (to: string | null) => (to === null ? ['No due date', null] : ['Due', to]),
   title: (to: string | null) => ['Title', `“${to ?? ''}”`],
+  description: () => ['New description', null],
   comment: () => ['Comment', null],
   link: () => ['Link the pull request', null],
 } satisfies Record<string, (to: string | null) => readonly [string, string | null]>
 
 const partsOf = (change: IssueChange): readonly [string, string | null] =>
-  change.field === 'labels'
-    ? ['Labels', [...change.add.map((label) => `+${label}`), ...change.remove.map((label) => `−${label}`)].join(' ')]
+  'add' in change
+    ? [
+        change.field === 'labels' ? 'Labels' : 'Assignees',
+        [...change.add.map((one) => `+${one}`), ...change.remove.map((one) => `−${one}`)].join(' '),
+      ]
     : CHANGE_PARTS[change.field](change.to)
 
 export const issueChangesText: IssueChangesText = {
@@ -106,7 +144,7 @@ export const issueChangesText: IssueChangesText = {
     if (from && (change.field === 'status' || change.field === 'close'))
       return `${from} → ${change.field === 'close' ? (became ?? issueChangesText.closedTo) : (change.to ?? 'none')}`
     const [what, to] = partsOf(change)
-    return to === null ? what : `${what}${change.field === 'labels' ? ' ' : ' → '}${to}`
+    return to === null ? what : `${what}${change.field === 'labels' || change.field === 'assignees' ? ' ' : ' → '}${to}`
   },
   closedTo: 'Done',
   applying: 'Applying…',
@@ -115,6 +153,8 @@ export const issueChangesText: IssueChangesText = {
   discard: 'Discard',
   apply: 'Apply',
   applyAgain: 'Apply again',
+  alwaysAtOnce: 'Always change at once',
+  alwaysAsk: 'Always ask first',
   changed: 'Changed',
   commented: 'Commented on',
   linked: 'Linked the pull request to',
@@ -135,6 +175,10 @@ export type IssueChangesProps = RootProps<
     state: IssueChangesState
     onApply?: () => void
     onDiscard?: () => void
+    /** Apply these, and every later change to an issue, at once. Without it, no such link. */
+    onAlwaysAtOnce?: () => void
+    /** On changes made at once, without asking: have each later one wait on its card. Without it, no such link. */
+    onAlwaysAsk?: () => void
     text?: Partial<IssueChangesText>
   }
 >
@@ -147,6 +191,8 @@ export function IssueChanges({
   state,
   onApply,
   onDiscard,
+  onAlwaysAtOnce,
+  onAlwaysAsk,
   text,
   ref,
   className,
@@ -208,6 +254,11 @@ export function IssueChanges({
                 </span>
               )}
             </span>
+            {state === IssueChangesState.Applied && onAlwaysAsk && (
+              <LinkButton className={s.lineAsk} onClick={onAlwaysAsk}>
+                {t.alwaysAsk}
+              </LinkButton>
+            )}
           </span>
           {/* what it said, in its own words, a couple of lines of it */}
           {comment !== null && <span className={s.lineQuote}>{comment}</span>}
@@ -227,6 +278,7 @@ export function IssueChanges({
           state={state}
           onApply={onApply}
           onDiscard={onDiscard}
+          onAlwaysAtOnce={onAlwaysAtOnce}
           t={t}
         />
       )
@@ -270,11 +322,12 @@ interface CardProps {
   state: IssueChangesState
   onApply: (() => void) | undefined
   onDiscard: (() => void) | undefined
+  onAlwaysAtOnce: (() => void) | undefined
   t: IssueChangesText
 }
 
 /** The changes before they apply: each issue and what changes on it, and the buttons that apply them or throw them away. */
-function Card({ root, issues, note, noteHref, task, state, onApply, onDiscard, t }: CardProps) {
+function Card({ root, issues, note, noteHref, task, state, onApply, onDiscard, onAlwaysAtOnce, t }: CardProps) {
   const { className, ...rest } = root
   const kickerId = useId()
   const applying = state === IssueChangesState.Applying
@@ -335,7 +388,13 @@ function Card({ root, issues, note, noteHref, task, state, onApply, onDiscard, t
       </ul>
       <div className={s.foot}>
         <span className={cx(s.note, failed && s.noteFailed)} aria-live="polite">
-          {applying ? t.applying : failed ? t.failed : null}
+          {applying ? (
+            t.applying
+          ) : failed ? (
+            t.failed
+          ) : onAlwaysAtOnce ? (
+            <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>
+          ) : null}
         </span>
         {onDiscard && !applying && (
           <Button variant="quiet" onClick={onDiscard}>

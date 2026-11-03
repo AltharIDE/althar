@@ -4,8 +4,10 @@ import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
+import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
+import { makeGitLabReleases } from './gitlabReleases'
 import { tail } from './github'
 import type {
   Account,
@@ -15,10 +17,13 @@ import type {
   Check,
   CheckState,
   Choice,
+  ChosenField,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueChange,
+  IssueComment,
   IssueField,
   ListedChange,
   MergeMethod,
@@ -26,6 +31,7 @@ import type {
   Repository,
   Review,
   Tracker,
+  TrackerCapabilities,
   Verdict,
 } from './model'
 import { cantChange, lacking, leftAsItIs, mergedForGood, noReviews, stillOpen, unchangeable } from './model'
@@ -188,6 +194,11 @@ const IssueAnswer = Schema.Struct({
   labels: Schema.optional(Schema.Array(Schema.String)),
   references: Schema.optional(Schema.Struct({ full: Schema.String })),
   updated_at: Schema.String,
+  milestone: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.Number, title: Schema.String }))),
+  // GitLab's weight, on its paid tiers: null, or left out, on its free one.
+  weight: Schema.optional(Schema.NullOr(Schema.Number)),
+  due_date: Schema.optional(Schema.NullOr(Schema.String)),
+  issue_type: Schema.optional(Schema.NullOr(Schema.String)),
 })
 type IssueAnswer = typeof IssueAnswer.Type
 
@@ -341,14 +352,70 @@ export const verdictOf = (note: NoteAnswer): Verdict | undefined =>
         ? 'changes_requested'
         : undefined
 
-/** What GitLab changes of an issue: all but a priority, which GitLab's issues haven't (a board's priority is a label each project names). */
-const ISSUE_CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'project', 'title']
+/** What GitLab changes of an issue: all but those `NOT_CHANGED` says why not. */
+const ISSUE_CHANGES: ReadonlyArray<IssueField> = [
+  'status',
+  'close',
+  'assignee',
+  'labels',
+  'milestone',
+  'estimate',
+  'type',
+  'due',
+  'title',
+  'description',
+]
+
+/** What GitLab sets as it files an issue, beside its title, body and labels; the rest Althar sets right after. */
+const ISSUE_CREATES: ReadonlyArray<IssueField> = ['assignee', 'milestone', 'estimate', 'type', 'due']
+
+/** Why GitLab's issues don't change what they don't, in words an agent can pass on. */
+const NOT_CHANGED: Partial<Record<IssueField, string>> = {
+  priority: 'GitLab’s issues have no priority (a board’s priority is a label each project names)',
+  project: 'a GitLab issue’s project is where it lives: moving it to another is GitLab’s own Move, on the issue',
+  parent: 'GitLab’s epics are a group’s, on its paid tiers: Althar can’t set one yet',
+  cycle: 'GitLab’s iterations are a group’s, on its paid tiers: Althar can’t set one yet',
+  components: 'GitLab’s issues have no components: a label says what part of the project one is about',
+}
+
+/** What GitLab does as a tracker: several people to an issue. */
+const TRACKING = {
+  links: false,
+  starts: false,
+  changes: ISSUE_CHANGES,
+  creates: ISSUE_CREATES,
+  assignees: 'many',
+} as const satisfies TrackerCapabilities
 
 /** An issue's statuses on GitLab: open or closed, by the event that takes it there. */
 const ISSUE_STATES: ReadonlyArray<Choice> = [
   { id: 'reopen', name: 'Open', also: ['opened', 'reopened'] },
   { id: 'close', name: 'Closed', also: ['done'] },
 ]
+
+/** GitLab's kinds of issue, by the name its API gives each; a test case is its Ultimate tier's. */
+const ISSUE_TYPES: ReadonlyArray<Choice> = [
+  { id: 'issue', name: 'Issue' },
+  { id: 'incident', name: 'Incident' },
+  { id: 'test_case', name: 'Test case' },
+  { id: 'task', name: 'Task' },
+]
+
+/** A kind of issue by its plain name; one GitLab adds later by its own. */
+const typeOf = (type: string): string => ISSUE_TYPES.find((one) => one.id === type)?.name ?? type
+
+/** GitLab's state for each a search for issues can ask for. */
+const FOUND_STATES = { open: 'opened', closed: 'closed', all: 'all' } as const
+
+/**
+ * Who an issue is assigned to after a change, by GitLab's ids: those added
+ * first, then those it had, less those taken off. GitLab's free tier keeps
+ * only the first, so there the one added takes it, as on a tracker of one.
+ */
+const assigneesAfter = (had: ReadonlyArray<User>, change: NonNullable<IssueChange['assignee']>): ReadonlyArray<number> => {
+  const off = new Set(change.remove.map((one) => Number(one.id)))
+  return [...new Set([...change.add.map((one) => Number(one.id)), ...had.map((one) => one.id)])].filter((id) => !off.has(id))
+}
 
 /** `group/sub/project#12`: the ref GitLab's issues go by. */
 const issueRef = /^(.+\/[^/#\s]+)#(\d+)$/
@@ -493,6 +560,10 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     labels: issue.labels ?? [],
     container,
     updatedAt: issue.updated_at,
+    milestone: issue.milestone == null ? null : { id: String(issue.milestone.id), name: issue.milestone.title },
+    type: issue.issue_type == null ? null : typeOf(issue.issue_type),
+    due: issue.due_date ?? null,
+    estimate: issue.weight ?? null,
   })
 
   /** The project an issue is in: from its full reference, or else its address. */
@@ -515,10 +586,20 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       })),
     )
 
-  const issueChoices: Tracker['choices'] = (issue, field, wanted) =>
+  /** A project by the path a container names it by, its groups then its own name: refused, without asking, where it can't be one. */
+  const projectIn = (container: string) =>
+    /^[^/\s#]+(\/[^/\s#]+)+$/.test(container)
+      ? Effect.succeed(container.split('/'))
+      : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitLab project: ${container}` }))
+
+  /** GitLab's refusal of a field it doesn't change, in its own words where it has them. */
+  const refusal = (field: IssueField, otherwise = 'GitLab’s issues haven’t one') =>
+    cantChange(product, field, NOT_CHANGED[field] ?? otherwise)
+
+  /** What a field of an issue in a project can be set to, by the project's path: the same for one filed there as for one still to be. */
+  const choicesAt = (path: ReadonlyArray<string>, field: ChosenField, wanted?: string) =>
     Effect.gen(function* () {
-      const { path } = yield* parseRef(issue.ref)
-      const at = project(path.split('/'))
+      const at = project(path)
       switch (field) {
         case 'status':
           return ISSUE_STATES
@@ -537,25 +618,44 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           }))
         }
         // A milestone, still active, is where GitLab groups an issue's work.
-        case 'project':
+        case 'milestone':
           return (yield* everyPage(Schema.Struct({ id: Schema.Number, title: Schema.String }), `${at}/milestones?state=active`)).map(
             (milestone): Choice => ({ id: String(milestone.id), name: milestone.title }),
           )
+        case 'type':
+          return ISSUE_TYPES
+        case 'project':
+        case 'cycle':
+        case 'components':
+          return yield* refusal(field)
       }
     })
 
+  const issueChoices: Tracker['choices'] = (issue, field, wanted) =>
+    Effect.flatMap(parseRef(issue.ref), ({ path }) => choicesAt(path.split('/'), field, wanted))
+
   const changeIssue: Tracker['update'] = (issue, wanted) =>
     Effect.gen(function* () {
-      const refused = unchangeable({ links: false, starts: false, changes: ISSUE_CHANGES }, wanted)
-      if (refused !== undefined) return yield* cantChange(product, refused, 'GitLab’s issues have no priority')
+      const refused = unchangeable(TRACKING, wanted)
+      if (refused !== undefined) return yield* refusal(refused)
       const { path, number } = yield* parseRef(issue.ref)
+      const at = `${project(path.split('/'))}/issues/${number}`
       const event = wanted.close === true && wanted.status === undefined ? 'close' : wanted.status?.id
-      // Labels are added and taken off by name; 0 takes the assignees or the milestone off.
+      // GitLab takes the whole list: worked out from who is on it now, not as Althar last read it, so no one else is taken off.
+      const assignees =
+        wanted.assignee == null
+          ? wanted.assignee
+          : assigneesAfter((yield* http.json(IssueAnswer, 'GET', at)).assignees ?? [], wanted.assignee)
+      // Labels are added and taken off by name; 0 takes the assignees or the milestone off, and null a weight or a due day.
       const edit = {
         ...(wanted.title === undefined ? {} : { title: wanted.title }),
+        ...(wanted.description === undefined ? {} : { description: wanted.description }),
         ...(event === undefined ? {} : { state_event: event }),
-        ...(wanted.assignee === undefined ? {} : { assignee_ids: wanted.assignee === null ? [0] : [Number(wanted.assignee.id)] }),
-        ...(wanted.project === undefined ? {} : { milestone_id: wanted.project === null ? 0 : Number(wanted.project.id) }),
+        ...(assignees === undefined ? {} : { assignee_ids: assignees === null || assignees.length === 0 ? [0] : assignees }),
+        ...(wanted.milestone === undefined ? {} : { milestone_id: wanted.milestone === null ? 0 : Number(wanted.milestone.id) }),
+        ...(wanted.estimate === undefined ? {} : { weight: wanted.estimate }),
+        ...(wanted.type === undefined ? {} : { issue_type: wanted.type.id }),
+        ...(wanted.due === undefined ? {} : { due_date: wanted.due }),
         ...(wanted.labels === undefined || wanted.labels.add.length === 0
           ? {}
           : { add_labels: wanted.labels.add.map((label) => label.name).join(',') }),
@@ -563,15 +663,70 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           ? {}
           : { remove_labels: wanted.labels.remove.map((label) => label.name).join(',') }),
       }
-      const at = `${project(path.split('/'))}/issues/${number}`
       return issueOf(
         Object.keys(edit).length === 0 ? yield* http.json(IssueAnswer, 'GET', at) : yield* http.json(IssueAnswer, 'PUT', at, edit),
         path,
       )
     })
 
+  /** The fork a merge request's branch is on, by its path; none where it is gone, and undefined where it is the project's own. */
+  const forkOf = (request: MergeAnswer) =>
+    request.source_project_id === undefined || request.source_project_id === request.target_project_id
+      ? Effect.succeed(undefined)
+      : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+          Effect.map((answer) => answer.path_with_namespace.split('/')),
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.succeed([]),
+          ),
+        )
+
+  const pushTarget = (repository: Repository) =>
+    Effect.map(options.credential, (credential) => ({
+      url: `${web}/${repository.path.join('/')}.git`,
+      // GitLab takes an OAuth token, or a personal one, as the password of the user `oauth2`.
+      header: `Authorization: Basic ${Buffer.from(`oauth2:${credential.token}`).toString('base64')}`,
+    }))
+
+  const findIssues: Tracker['find'] = (query) =>
+    Effect.gen(function* () {
+      const path = query.container === undefined ? undefined : yield* projectIn(query.container)
+      // Everywhere and anyone's, GitLab's bound is those the account made or those it is assigned, never both at once: those it made, as those it is assigned are `mine`.
+      const params = new URLSearchParams({
+        scope: query.mine === true ? 'assigned_to_me' : path === undefined ? 'created_by_me' : 'all',
+        state: FOUND_STATES[query.state],
+      })
+      if (query.text !== undefined && query.text.trim() !== '') params.set('search', query.text.trim())
+      params.set('order_by', 'updated_at')
+      params.set('sort', 'desc')
+      params.set('per_page', String(Math.min(Math.max(query.limit, 1), 100)))
+      const issues = yield* http.json(
+        Schema.Array(IssueAnswer),
+        'GET',
+        `${path === undefined ? api : project(path)}/issues?${params.toString()}`,
+      )
+      return issues.map((found) => issueOf(found, query.container ?? containerOf(found)))
+    })
+
+  const issueComments: Tracker['comments'] = (issue, limit) =>
+    Effect.gen(function* () {
+      const { path, number } = yield* parseRef(issue.ref)
+      // A page of the newest, a hundred: GitLab's own notes of what changed are among them, and are left out before the limit.
+      const notes = yield* http.json(
+        Schema.Array(NoteAnswer),
+        'GET',
+        `${project(path.split('/'))}/issues/${number}/notes?sort=desc&order_by=created_at&per_page=100`,
+      )
+      return notes
+        .filter((note) => !note.system)
+        .slice(0, Math.max(limit, 0))
+        .toReversed()
+        .map((note): IssueComment => ({ author: personOf(note.author), body: note.body, at: note.created_at }))
+    })
+
   return {
     product,
+    ...makeGitLabReleases({ http, project, mayNot }),
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
     capabilities: {
       drafts: true,
@@ -581,9 +736,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       pictures: true,
       reopen: true,
       rerun: true,
-      links: false,
-      starts: false,
-      changes: ISSUE_CHANGES,
+      ...TRACKING,
     },
     account,
     repository: (path) =>
@@ -622,17 +775,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
         const size = yield* sizeOf(repository, request)
-        // The fork its branch is on, by its path; none where it is gone.
-        const fork =
-          request.source_project_id === undefined || request.source_project_id === request.target_project_id
-            ? undefined
-            : yield* http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
-                Effect.map((answer) => answer.path_with_namespace.split('/')),
-                Effect.catchIf(
-                  (error) => error.reason === 'not_found',
-                  () => Effect.succeed([]),
-                ),
-              )
+        const fork = yield* forkOf(request)
         const change = fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
         return size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
@@ -652,6 +795,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         const requests = yield* http.cached(Schema.Array(MergeAnswer), `${project(repository)}/merge_requests?${params.toString()}`)
         return { changes: requests.slice(0, limit).map(listedOf), more: requests.length > limit } satisfies ChangeList
       }).pipe(Effect.mapError(lacking('read_api'))),
+    allowance: () => http.allowance(),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         // Its title as it is now, not as Althar last read it: a rename on GitLab since stays.
@@ -777,6 +921,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             () => Effect.void,
           ),
         )
+      }),
+    updateBranch: (repository, change, ask) =>
+      updateInCopy({
+        product,
+        words: { noun: 'merge request', short: 'MR', prefix: '!' },
+        repository,
+        change,
+        expectedHead: ask.expectedHead,
+        read: Effect.gen(function* () {
+          const request = yield* read(repository, change.number)
+          const fork = yield* forkOf(request)
+          return fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
+        }),
+        fork: (path) => Effect.succeed({ ...repository, path }),
+        pushTarget,
+        ...(options.merge === undefined ? {} : { merge: options.merge }),
       }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
@@ -904,12 +1064,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     // Reviews of a change Althar didn't open are GitHub's alone, for now.
     changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
     postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
-    pushTarget: (repository) =>
-      Effect.map(options.credential, (credential) => ({
-        url: `${web}/${repository.path.join('/')}.git`,
-        // GitLab takes an OAuth token, or a personal one, as the password of the user `oauth2`.
-        header: `Authorization: Basic ${Buffer.from(`oauth2:${credential.token}`).toString('base64')}`,
-      })),
+    pushTarget,
     issue: (ref) =>
       Effect.gen(function* () {
         const { path, number } = yield* parseRef(ref)
@@ -917,15 +1072,14 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         return issueOf(issue, path)
       }),
     mine: (options = {}) =>
-      Effect.gen(function* () {
-        const query = `scope=assigned_to_me&state=opened&order_by=updated_at&sort=desc&per_page=${options.limit ?? 50}`
-        const issues = yield* http.json(
-          Schema.Array(IssueAnswer),
-          'GET',
-          options.container === undefined ? `${api}/issues?${query}` : `${project(options.container.split('/'))}/issues?${query}`,
-        )
-        return issues.map((issue) => issueOf(issue, options.container ?? containerOf(issue)))
+      findIssues({
+        ...(options.container === undefined ? {} : { container: options.container }),
+        state: 'open',
+        mine: true,
+        limit: options.limit ?? 50,
       }),
+    find: findIssues,
+    comments: issueComments,
     comment: (issue, body) =>
       Effect.gen(function* () {
         const { path, number } = yield* parseRef(issue.ref)
@@ -959,18 +1113,29 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             })),
       ),
     create: (container, issue) =>
-      /^[^/\s#]+(\/[^/\s#]+)+$/.test(container)
-        ? Effect.map(
-            // GitLab makes a project label for any it lacks, so every label is sent as it is.
-            http.json(IssueAnswer, 'POST', `${project(container.split('/'))}/issues`, {
-              title: issue.title,
-              description: issue.body,
-              ...(issue.labels.length === 0 ? {} : { labels: issue.labels.join(',') }),
-            }),
-            (filed) => issueOf(filed, container),
-          )
-        : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitLab project: ${container}` })),
+      Effect.gen(function* () {
+        const path = yield* projectIn(container)
+        const fields = issue.fields ?? {}
+        const refused = unchangeable({ ...TRACKING, changes: ISSUE_CREATES }, fields)
+        if (refused !== undefined)
+          return yield* refusal(refused, 'GitLab files an issue without it: Althar sets it once the issue is filed')
+        // A new issue has no one on it to keep: those added are all it has.
+        const assignees = fields.assignee == null ? [] : assigneesAfter([], fields.assignee)
+        // GitLab makes a project label for any it lacks, so every label is sent as it is.
+        const filed = yield* http.json(IssueAnswer, 'POST', `${project(path)}/issues`, {
+          title: issue.title,
+          description: issue.body,
+          ...(issue.labels.length === 0 ? {} : { labels: issue.labels.join(',') }),
+          ...(assignees.length === 0 ? {} : { assignee_ids: assignees }),
+          ...(fields.milestone == null ? {} : { milestone_id: Number(fields.milestone.id) }),
+          ...(fields.estimate == null ? {} : { weight: fields.estimate }),
+          ...(fields.type === undefined ? {} : { issue_type: fields.type.id }),
+          ...(fields.due == null ? {} : { due_date: fields.due }),
+        })
+        return issueOf(filed, container)
+      }),
     choices: issueChoices,
+    choicesIn: (container, field, wanted) => Effect.flatMap(projectIn(container), (path) => choicesAt(path, field, wanted)),
     update: changeIssue,
   }
 }

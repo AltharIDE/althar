@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 
 import { fromOutside } from '../src/model'
 import { makeFakeService } from '../src/testing'
-import { hostContract, mergeContract, trackerContract } from './contract'
+import { hostContract, mergeContract, releaseContract, trackerContract } from './contract'
 
 const fake = makeFakeService({ pushUrl: (path) => `/tmp/fake/${path.join('/')}.git` })
 fake.addRepository(['meridian', 'api'])
@@ -19,7 +19,7 @@ hostContract({
 trackerContract({ name: 'The fake', tracker: fake, ref: 'MER-231' })
 
 // Merging on each host's fake, as each merges: GitHub plainly and through its merge queue, GitLab with auto-merge and through
-// its merge trains, Bitbucket Cloud plainly and with a merge queue entered only on its site, and Bitbucket Data Center with auto-merge.
+// its merge trains, Bitbucket Cloud plainly and through its merge queue, and Bitbucket Data Center with auto-merge.
 for (const [name, product, queue] of [
   ['GitHub', 'github', false],
   ['GitHub with a merge queue', 'github', true],
@@ -37,6 +37,27 @@ for (const [name, product, queue] of [
     host,
     path: ['meridian', 'api'],
     ready: Effect.sync(() => host.addPullRequest({ path: ['meridian', 'api'], title: 'Retry refunds', author: 'you' }).number),
+  })
+}
+
+// Releasing, as each host's adapter does it, on a fake of each: never on a real repository, where a tag and a release reach people.
+for (const product of ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const) {
+  const host = makeFakeService({ product })
+  const path = ['meridian', 'desktop']
+  host.addRepository(path)
+  let tags = 0
+  releaseContract({
+    name: `The ${product} fake`,
+    host,
+    path,
+    otherCommit: '5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e',
+    tagName: Effect.sync(() => `v0.7.${(tags += 1)}`),
+    startRun: (tag) =>
+      Effect.sync(() => {
+        host.startRun(path, { ref: tag, gates: [{ name: 'release' }, { name: 'production', approvable: false }] })
+      }),
+    draft: (tag) => Effect.sync(() => void host.draftRelease(path, tag, ['Althar-arm64.dmg'])),
+    failedRun: (tag) => Effect.sync(() => void host.startRun(path, { ref: tag, state: 'failed' })),
   })
 }
 
