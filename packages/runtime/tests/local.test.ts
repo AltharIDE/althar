@@ -294,6 +294,63 @@ describe('a task working Local', () => {
     }).pipe(Effect.provide(byHand()))
   })
 
+  it.live('holds a removed project’s checkout until its task has stopped, then gives it back, for the folder added again', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const removed = yield* opened(root)
+      const first = yield* drafted(removed, 'Dark mode')
+      assert.deepStrictEqual(yield* place(first.taskId, 'checkout'), { kind: 'ready' })
+      const held = (yield* spotOf(first.taskId)).branch
+      yield* (yield* Projects).remove(removed)
+
+      // The same folder, added again: what the removed project's task still runs there keeps it.
+      const again = yield* opened(root)
+      assert.notStrictEqual(again, removed)
+      const second = yield* drafted(again, 'Fix the login')
+      const working = new Set([first.taskId])
+      const atWork = Effect.sync(() => working)
+      const by = { taskId: first.taskId, title: 'Dark mode' }
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout', [], undefined, atWork), { kind: 'taken', by })
+      assert.deepStrictEqual(yield* localTakenFor(second.taskId), by)
+      assert.strictEqual(yield* giveBackSpot(yield* spotOf(first.taskId), undefined, atWork), 'held')
+      assert.strictEqual(branchOf(root), held)
+
+      // Stopped: it goes back, and the next task takes it.
+      working.delete(first.taskId)
+      assert.deepStrictEqual(yield* place(second.taskId, 'checkout', [], undefined, atWork), { kind: 'ready' })
+      assert.isNotNull((yield* spotOf(first.taskId)).returnedAt)
+      assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
+      assert.strictEqual(git(root, 'rev-parse', `${(yield* spotOf(second.taskId)).branch}`), git(root, 'rev-parse', 'main'))
+    }).pipe(Effect.provide(byHand()))
+  })
+
+  it.live('lets a removed project’s checkout go as it is where it has changes, and the next task asks about them', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const removed = yield* opened(root)
+      const first = yield* drafted(removed, 'Dark mode')
+      yield* place(first.taskId, 'checkout')
+      const held = (yield* spotOf(first.taskId)).branch
+      writeFileSync(join(root, 'README.md'), '# Its last edit\n')
+      yield* (yield* Projects).remove(removed)
+
+      // Nothing switches under the changes, and nothing is left holding it with no thread to say why.
+      assert.strictEqual(yield* giveBackSpot(yield* spotOf(first.taskId)), 'left')
+      assert.isNotNull((yield* spotOf(first.taskId)).returnedAt)
+      assert.strictEqual(branchOf(root), held)
+      assert.include(git(root, 'status', '--porcelain'), 'README.md')
+      // Looked at again, it is left alone.
+      assert.strictEqual(yield* giveBackSpot(yield* spotOf(first.taskId)), 'back')
+      assert.strictEqual(branchOf(root), held)
+
+      const second = yield* drafted(yield* opened(root), 'Fix the login')
+      assert.isNull(yield* localTakenFor(second.taskId))
+      const asked = yield* place(second.taskId, 'checkout')
+      assert.deepInclude(asked.kind === 'asks' ? asked.ask : {}, { holdup: 'changes', branch: held, files: ['README.md'] })
+      assert.strictEqual(branchOf(root), held)
+    }).pipe(Effect.provide(byHand()))
+  })
+
   it.live('asks about each repository’s checkout in turn, and again about one that changed since the person answered', () => {
     const app = repository()
     const api = repository()

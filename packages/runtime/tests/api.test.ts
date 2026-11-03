@@ -1700,6 +1700,43 @@ describe('a project’s menu, through the API', () => {
       }),
     ),
   )
+
+  it.live('removes a project whose task works Local: its checkout goes back to its branch once its lead has stopped', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Its lead stays in its turn until the removal stops it.
+        const { client, grant } = yield* connected({ countdown: Duration.minutes(5), agents: fakeAgents({ holds: holds() }) })
+        const root = repository()
+        const branchOf = Effect.sync(() => execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim())
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, worksIn: 'checkout' })
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Add docs. [coordinator:plan] [coordinator:plan-no-review] [lead:slowly]',
+          disposition: 'after_current',
+        })
+        const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null && item.content.phase === 'planned'),
+        )
+        const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
+        const [planId, threadId] = card?.kind === 'task' ? [card.content.plan?.id ?? '', card.content.threadId] : ['', '']
+        yield* client.StartPlan({ commandId: commandId(), planId })
+        // Its lead at work in the person's checkout, on the task's branch.
+        yield* until(client.GetThread({ threadId }), (thread) => thread.session?.turnRunning === true)
+        const taken = yield* branchOf
+        assert.notStrictEqual(taken, 'main')
+
+        yield* client.RemoveProject({ commandId: commandId(), projectId: project.id })
+        yield* until(branchOf, (on) => on === 'main', 'the checkout goes back to main')
+        // The task's branch stays, with what was on it; the same folder, added again, is free to work in.
+        assert.strictEqual(execFileSync('git', ['-C', root, 'branch', '--list', taken], { encoding: 'utf8' }).trim(), taken)
+        const again = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        assert.notStrictEqual(again.id, project.id)
+      }),
+    ),
+  )
 })
 
 describe('a fork’s branches upstream, through the API', () => {

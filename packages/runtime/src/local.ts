@@ -53,6 +53,8 @@ export interface Spot {
   readonly taskSlug: string
   readonly title: string
   readonly taskState: string
+  /** Whether its project was removed: its task is over here, as a settled one is. */
+  readonly removed: number
   /** The checkout, Local; null for a worktree. */
   readonly kind: 'checkout' | null
   readonly state: string
@@ -71,7 +73,7 @@ export interface Spot {
 
 const SPOT = `
   SELECT w.id, w.project_id, w.task_id, h.id AS thread_id, w.binding_id, b.display_name AS name, b.slug AS binding_slug,
-    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
+    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
     w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target
   FROM workspaces w
   JOIN repository_bindings b ON b.id = w.binding_id
@@ -132,14 +134,17 @@ export type AtWork = Effect.Effect<ReadonlySet<string>>
 const nobodyAtWork: AtWork = Effect.succeed(new Set())
 
 const settledState = (state: string) => state === 'done' || state === 'abandoned'
+/** Whether a workspace's task is over: settled, or its project removed. */
+const overHere = (spot: Spot) => settledState(spot.taskState) || spot.removed === 1
 
 /** Whether a task works Local: any of its workspaces here is its repository's checkout. */
 export const worksLocal = (taskId: string) => Effect.map(spotsOf(taskId), (spots) => spots.some((spot) => spot.kind === 'checkout'))
 
 /**
- * Checkouts here that tasks other than `taskId` hold, in any project: taken
- * and not given back, settled or not, oldest first. One a removed project's
- * task held is read as the checkout it is, for the person to answer.
+ * Checkouts here that tasks other than `taskId` hold, in any project, a
+ * removed one too: taken and not given back, settled or not, oldest first.
+ * A removed project's task holds its checkout until all of it has stopped,
+ * as a settled one does; then it goes back, or is let go as it is.
  */
 const holding = (taskId: string) =>
   Effect.gen(function* () {
@@ -147,8 +152,19 @@ const holding = (taskId: string) =>
     const instance = yield* Instance
     return yield* sql<Spot>`${sql.unsafe(SPOT)}
       WHERE w.device_id = ${instance.deviceId} AND w.kind = 'checkout' AND w.state = 'ready' AND w.returned_at IS NULL
-        AND w.task_id <> ${taskId} AND p.archived_at IS NULL
+        AND w.task_id <> ${taskId}
       ORDER BY w.created_at, w.rowid`
+  })
+
+/** The tasks of a project that have its repositories' checkouts here, or are to take them: what removing it stops first (Api's RemoveProject). */
+export const localTasksIn = (projectId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const rows = yield* sql<{ taskId: string }>`
+      SELECT DISTINCT task_id FROM workspaces
+      WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND kind = 'checkout' AND returned_at IS NULL`
+    return rows.map((row) => row.taskId)
   })
 
 /**
@@ -290,6 +306,9 @@ export type Placed =
  * still at work (`held`): settling stops its agents and what they ran first.
  * With changes not committed it stays, said in the task's thread the first
  * time (`told`). One the person switched themselves is left where they put it.
+ * A removed project's task gives its checkout back as a settled one does;
+ * with changes, there is no thread left to say so in, so it is let go as it
+ * is (`left`), and the next task that wants it asks the person about them.
  */
 export const giveBackSpot = (spot: Spot, told: (spot: Spot) => boolean = () => false, atWork: AtWork = nobodyAtWork) =>
   lockingCheckouts([spot.repository], givingBack(spot, told, atWork))
@@ -299,9 +318,13 @@ const givingBack = (was: Spot, told: (spot: Spot) => boolean, atWork: AtWork) =>
     const spot = yield* spotById(was.id)
     if (spot === null || spot.kind !== 'checkout' || spot.state !== 'ready' || spot.returnedAt !== null) return 'back' as const
     // Opened again, or still stopping: it is the task's yet. Read under the lock, as nothing starts a settled task's agent.
-    if (!settledState(spot.taskState) || (yield* atWork).has(spot.taskId)) return 'held' as const
+    if (!overHere(spot) || (yield* atWork).has(spot.taskId)) return 'held' as const
     const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
     const gave = yield* giveBack(spot.repository, spot.branch, returnsTo)
+    if (gave.kind === 'changes' && spot.removed === 1) {
+      yield* record(spot, { returnedAt: yield* timestamp }, 'workspace.returned', { to: returnsTo, moved: false, left: true })
+      return 'left' as const
+    }
     if (gave.kind === 'changes') {
       if (!told(spot))
         yield* say(
@@ -375,8 +398,9 @@ const placing = (
     const taking: Array<{ readonly spot: Spot; readonly start: string; readonly baseRef: string; readonly was: Checkout }> = []
     for (const spot of waiting) {
       const holder = yield* holderOf(spot.repository, taskId)
-      // One settled, all of it stopped, whose checkout stayed for changes not committed then: given back now, if they are.
-      const freed = holder !== null && settledState(holder.taskState) ? (yield* givingBack(holder, told, atWork)) === 'back' : false
+      // One settled, or of a removed project, all of it stopped: given back now where it can be, or let go as it is.
+      const gave = holder !== null && overHere(holder) ? yield* givingBack(holder, told, atWork) : null
+      const freed = gave === 'back' || gave === 'left'
       if (holder !== null && !freed) return { kind: 'taken', by: { taskId: holder.taskId, title: holder.title } } as Placed
       const was = yield* readCheckout(spot.repository)
       // Taken already, by this task, as Althar stopped before it said so: it is the task's.
@@ -431,13 +455,13 @@ const begun = (spot: Spot) =>
     return Option.isSome(tip) && tip.value !== spot.baseCommit
   })
 
-/** Checkouts settled tasks still hold, to give back: those whose changes kept them on their task's branch. */
+/** Checkouts settled tasks still hold, a removed project's tasks too, to give back: as they settle, or whose changes kept them on their task's branch. */
 export const settledHolding = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const instance = yield* Instance
   return yield* sql<Spot>`${sql.unsafe(SPOT)}
     WHERE w.device_id = ${instance.deviceId} AND w.kind = 'checkout' AND w.state = 'ready' AND w.returned_at IS NULL
-      AND k.state IN ('done', 'abandoned') AND p.archived_at IS NULL`
+      AND (k.state IN ('done', 'abandoned') OR p.archived_at IS NOT NULL)`
 })
 
 /**

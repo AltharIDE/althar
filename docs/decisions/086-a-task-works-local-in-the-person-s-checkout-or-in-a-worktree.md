@@ -62,13 +62,18 @@
     is clean and still on the task's branch, and not until everything of the
     task has stopped: no agent of it left, in a turn or idle, and its
     settling done stopping what they ran (LeftBehind's `stopping`, counted
-    from before a task is abandoned or marked done). Until then it is the
-    task's, for a task waiting for it too. With uncommitted changes it stays,
-    says so in the task's thread, and goes back once they are committed. A
-    checkout the
-    person switched themselves is left where they put it. A settled task
-    opened again whose checkout went back carries on in a worktree of its
-    own, on its branch.
+    from before a task is abandoned, marked done or merged). Until then it is
+    the task's, for a task waiting for it too. With uncommitted changes it
+    stays, says so in the task's thread, and goes back once they are
+    committed. A checkout the person switched themselves is left where they
+    put it. A settled task opened again whose checkout went back carries on
+    in a worktree of its own, on its branch.
+  - **Removing a project gives its checkouts back the same way.** Its tasks
+    hold them, against the same folder added again too, while removing it
+    stops their agents and what they ran, counted as stopping from before it
+    is removed. Then each goes back where it is clean. One with uncommitted
+    changes is let go as it is, as there is no thread left to say so in: the
+    next task that wants it asks the person about them.
   - **A quick task in the checkout has its branch from the start,** made
     when it takes the checkout, so the person's branch never gets its
     commits. It stays a quick task (ADR-035): its branch stays on this Mac.
