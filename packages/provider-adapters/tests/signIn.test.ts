@@ -56,6 +56,44 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('', 0))
   })
 
+  it('reads OpenCode 2’s JSON, a Console account as a sign-in like a key', () => {
+    const { read, status } = agents.opencode.signIn
+    assert.deepStrictEqual(status?.('node').args, ['auth', 'list', '--standalone', '--format', 'json'])
+    // Seen on 2.2.5, 2 November 2026, ids redacted.
+    const console_ = [
+      { id: 'opencode', name: 'OpenCode Console', connections: [{ type: 'credential', id: 'cred_x', label: 'Default', method: 'oauth' }] },
+    ]
+    const key = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_y', label: 'default', method: 'key' }] },
+    ]
+    assert.isTrue(read(JSON.stringify(console_, null, 2), 0))
+    assert.isTrue(read(JSON.stringify(key, null, 2) + '\n', 0))
+    assert.isTrue(read(JSON.stringify([...key, ...console_]), 0))
+    // None is "can't tell": the free models run signed out.
+    assert.isUndefined(read('[]', 0))
+    assert.isUndefined(read(JSON.stringify([{ id: 'opencode', connections: [] }]), 0))
+    // The table 2.x prints without --format json carries no count.
+    assert.isUndefined(read('OpenCode Go       default                     stored\n', 0))
+  })
+
+  it('lists the providers OpenCode has a sign-in for, and the provider a model goes through', () => {
+    const providers = agents.opencode.signIn.providers
+    assert.isDefined(providers)
+    const listing = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_b', label: 'default', method: 'key' }] },
+      { id: 'anthropic', name: 'Anthropic', connections: [{ type: 'credential', id: 'cred_a', label: 'default', method: 'oauth' }] },
+      { id: 'google', name: 'Google', connections: [] },
+    ]
+    assert.deepStrictEqual(providers?.read(JSON.stringify(listing, null, 2)), [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: 'cred_b' },
+      { id: 'anthropic', name: 'Anthropic', connections: 'cred_a' },
+    ])
+    // 1.x prints a count only: no providers, not an error.
+    assert.deepStrictEqual(providers?.read('2 credentials'), [])
+    assert.strictEqual(providers?.of('opencode-go/deepseek-v4.1-flash'), 'opencode-go')
+    assert.isUndefined(providers?.of('big-pickle'))
+  })
+
   it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -180,6 +218,29 @@ describe('an agent’s homes', () => {
 })
 
 describe('signInStatus', () => {
+  it.live('falls back to the plain command where OpenCode 1.x rejects the JSON flags', () =>
+    Effect.gen(function* () {
+      // 1.x exits 1 on --standalone / --format json; its plain `auth list` prints a count.
+      const script =
+        "if (process.argv.includes('json')) { console.error('Unknown argument: standalone'); process.exit(1) } console.log('2 credentials')"
+      const spec = (...extra: string[]) => ({ command: 'bun', args: ['-e', script, ...extra] })
+      const old: AgentDefinition = {
+        ...agents.opencode,
+        signIn: {
+          ...agents.opencode.signIn,
+          status: () => spec('json'),
+          statusFallback: () => spec(),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(old)).status, 'signed_in')
+      // With no fallback the rejected flags would read as "can't tell".
+      const { statusFallback: _dropped, ...withoutFallback } = old.signIn
+      const bare: AgentDefinition = { ...old, signIn: withoutFallback }
+      assert.strictEqual((yield* signInCheck(bare)).status, 'unknown')
+      assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
+    }),
+  )
+
   it.live('runs the status command and reads it', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* signInStatus(withStatus("console.log('Logged in using ChatGPT')")), 'signed_in')

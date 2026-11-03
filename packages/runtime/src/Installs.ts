@@ -263,31 +263,46 @@ export class Installs extends Context.Service<
           return outThere(cli.name)
         }
 
-        /** The agent's latest release, and its file for this device with the digest GitHub gives it. */
+        /** The agent's latest release, or the newest on its line, and its file for this device with the digest GitHub gives it. */
         const latest = (definition: AgentDefinition, install: Exclude<AgentDownload, PinnedDownload>) =>
           Effect.gen(function* () {
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
+            const line = install.line
             const response = yield* Effect.tryPromise({
               try: () =>
-                fetch(`https://api.github.com/repos/${install.repository}/releases/latest`, {
+                fetch(`https://api.github.com/repos/${install.repository}/releases${line === undefined ? '/latest' : '?per_page=30'}`, {
                   headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' },
                 }),
               catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
             })
             if (!response.ok)
               return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
-            const body = (yield* Effect.tryPromise({
+            const answer = yield* Effect.tryPromise({
               try: () => response.json() as Promise<unknown>,
               catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
-            })) as {
+            })
+            type Answer = {
               readonly tag_name?: unknown
+              readonly draft?: unknown
+              readonly prerelease?: unknown
               readonly assets?: ReadonlyArray<{
                 readonly name?: unknown
                 readonly browser_download_url?: unknown
                 readonly digest?: unknown
               }>
             }
+            // Newest first, as GitHub lists them: the first published release on the line.
+            const body: Answer =
+              line === undefined
+                ? (answer as Answer)
+                : ((Array.isArray(answer) ? (answer as ReadonlyArray<Answer>) : []).find(
+                    (each) =>
+                      each.draft !== true &&
+                      each.prerelease !== true &&
+                      typeof each.tag_name === 'string' &&
+                      each.tag_name.startsWith(line),
+                  ) ?? {})
             const found = body.assets?.find((each) => each.name === asset)
             const digest = typeof found?.digest === 'string' ? /^sha256:([0-9a-f]{64})$/.exec(found.digest)?.[1] : undefined
             if (typeof body.tag_name !== 'string' || !/^[\w.-]{1,40}$/.test(body.tag_name) || found === undefined)

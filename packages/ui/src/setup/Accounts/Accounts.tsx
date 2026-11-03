@@ -49,6 +49,8 @@ export interface AccountEntry {
   who?: string
   /** The plan that pays for it, when the agent says: Claude Max. */
   plan?: string
+  /** For an agent with a sign-in for each provider it reaches (OpenCode): the one that refused work lately, though the account is signed in. */
+  refused?: string
 }
 
 /** A folder an account switcher keeps one of the agent's accounts in, not added yet. */
@@ -81,6 +83,8 @@ export interface AccountsText {
   out: (back: string) => string
   signIn: string
   signInAgain: string
+  /** A provider within the agent that refused its sign-in, as the button that signs it in. */
+  providerSignIn: (provider: string) => string
   more: (name: string) => string
   rename: string
   up: string
@@ -105,6 +109,7 @@ export const accountsText: AccountsText = {
   out: (back) => `until ${back}`,
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
+  providerSignIn: (provider) => `${provider}: sign in again`,
   more: (name) => `More for ${name}`,
   rename: 'Rename',
   up: 'Move up',
@@ -217,6 +222,12 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
   const end = ((): ReactNode => {
     switch (state.kind) {
       case 'ready':
+        if (account.refused !== undefined && onSignIn && !busy)
+          return (
+            <ActionButton tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+              {t.providerSignIn(account.refused)}
+            </ActionButton>
+          )
         return account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null)
       case 'out':
         return (

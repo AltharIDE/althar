@@ -9,8 +9,10 @@ import s from './RunCard.module.css'
  * A run of the project Althar started itself, in the thread it was asked for
  * in: where it runs, the command, and where it answers, to open, with Stop.
  * It follows the run: starting until it says where it answers, then up, then
- * how it ended, by itself with its last line, or stopped, with Run again. It
- * stays in the thread once the run is over. Calm: its dot stays still.
+ * how it ended, by itself with the line that says why, or stopped, with Run
+ * again. It stays in the thread once the run is over. Calm: its dot stays
+ * still. What the project keeps it as leads, the command under it, quiet; each
+ * keeps to a line, the whole on hover.
  */
 
 export interface RunCardText {
@@ -47,6 +49,8 @@ export const runCardText: RunCardText = {
 export interface RunCardProps {
   /** Where it runs, in words: the task's title, or the default branch. */
   where: string
+  /** What the project keeps it as, in its Run list: Storybook. It leads, the command quiet under it. Without it, the command leads. */
+  name?: string
   command: string
   /** Where it answers, as the card says it: localhost:5173. Without it, it is starting. */
   url?: string
@@ -64,7 +68,7 @@ export interface RunCardProps {
   text?: Partial<RunCardText>
 }
 
-export function RunCard({ where, command, url, since, ended, onOpen, onStop, onRunAgain, className, text }: RunCardProps) {
+export function RunCard({ where, name, command, url, since, ended, onOpen, onStop, onRunAgain, className, text }: RunCardProps) {
   const t = { ...runCardText, ...text }
   const bad = ended !== undefined && !ended.stopped && ended.code !== 0
   return (
@@ -76,8 +80,26 @@ export function RunCard({ where, command, url, since, ended, onOpen, onStop, onR
             {ended === undefined ? t.running : t.ran} · <span className={s.where}>{where}</span>
           </span>
         </span>
-        <code className={s.command}>{command}</code>
+        {name === undefined ? (
+          <code className={s.command} title={command}>
+            {command}
+          </code>
+        ) : (
+          <>
+            <span className={s.name} title={name}>
+              {name}
+            </span>
+            <code className={s.sub} title={command}>
+              {command}
+            </code>
+          </>
+        )}
       </div>
+      {ended !== undefined && !ended.stopped && ended.last !== undefined && (
+        <code className={s.last} title={ended.last}>
+          {ended.last}
+        </code>
+      )}
       <div className={s.foot}>
         {ended === undefined && url === undefined && (
           <span className={s.status}>
@@ -97,12 +119,7 @@ export function RunCard({ where, command, url, since, ended, onOpen, onStop, onR
           </>
         )}
         {ended?.stopped === true && <span className={s.quiet}>{t.stopped(since)}</span>}
-        {ended !== undefined && !ended.stopped && (
-          <span className={s.status}>
-            <span className={cx(bad && s.bad)}>{t.exited(ended.code)}</span>
-            {ended.last !== undefined && <code className={s.last}>{ended.last}</code>}
-          </span>
-        )}
+        {ended !== undefined && !ended.stopped && <span className={cx(s.status, bad && s.bad)}>{t.exited(ended.code)}</span>}
         <span className={s.gap} />
         {ended === undefined && onStop && (
           <LinkButton className={s.act} aria-label={t.stopLabel(command)} onClick={onStop}>

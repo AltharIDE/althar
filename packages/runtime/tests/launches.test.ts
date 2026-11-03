@@ -275,11 +275,14 @@ describe('running the project', () => {
         /^Althar can't tell how .* runs: .* keep how it runs with set_run_command/,
       )
       assert.match(yield* callTool(coordinator, 'run_project', { task: 'nothing' }), /no task nothing/)
-      // One that ends at once: the coordinator hears how, with what it printed last, to tell the person.
-      yield* callTool(lead, 'set_run_command', { command: `node -e "console.log('Error: Port 5173 is already in use'); process.exit(1)"` })
+      // One that ends at once: the coordinator hears how, with what it printed last on either stream, to tell the person.
+      yield* callTool(lead, 'set_run_command', {
+        // Apart, as the two streams come by pipes of their own.
+        command: `node -e "console.log('vite v7 building'); setTimeout(() => { console.error('Error: Port 5173 is already in use'); process.exit(1) }, 200)"`,
+      })
       assert.match(
         yield* callTool(coordinator, 'run_project', {}),
-        /ended at once, with exit code 1\. Its last lines:\n\nError: Port 5173 is already in use\n/,
+        /ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nvite v7 building\nError: Port 5173 is already in use\n/,
       )
       for (const ended of yield* launches.ofProject(projectId)) yield* launches.clear(ended.id)
       assert.match(
@@ -339,7 +342,7 @@ describe('running the project', () => {
       )
       assert.match(
         yield* callTool(coordinator, 'run_project', { repository: name }),
-        /in a fresh copy of the default branch ended at once, with exit code 2\. Its last lines:\n\n\(nothing\)\n/,
+        /in a fresh copy of the default branch ended at once, with exit code 2, and printed nothing, on stdout or stderr\.\n/,
       )
       const [ended] = yield* launches.ofProject(projectId)
       yield* launches.stop(ended?.id ?? '')

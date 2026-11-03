@@ -13,7 +13,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/Board/CardTitle.tsx': 'a card’s or row’s title, stretched over it',
   'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
-  'setup/RepositoryPick/RepositoryPick.tsx': 'Add a folder, a row of the list of repositories, the whole of which adds one',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
@@ -36,6 +35,7 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
+  'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
   'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
   'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',

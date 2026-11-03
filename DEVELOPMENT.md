@@ -67,6 +67,7 @@ everything, Windows' tests, coverage and the packages too, after merge.
 | [`docs/glossary.md`](docs/glossary.md) | The words the interface uses, beside the words the architecture uses |
 | [`docs/open-questions.md`](docs/open-questions.md) | What is not decided yet |
 | [`docs/plans`](docs/plans) | Temporary plans, such as the current demo's. Not architecture |
+| [`docs/research`](docs/research) | Research behind a decision: how other products do something, from their docs, source and issues |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The engineering standards every app and package follows |
 | [`THESIS.md`](THESIS.md) | The research hypothesis Althar comes out of |
 

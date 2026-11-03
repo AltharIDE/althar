@@ -5,7 +5,7 @@
 - **Amended:** 2026-10-18: before any push Althar makes for a task, it
   holds back skill and OpenSpec files the task's commits changed unless the
   project allows them
-  ([ADR-085](085-skill-and-openspec-files-stay-off-the-repository.md)).
+  ([ADR-089](089-skill-and-openspec-files-stay-off-the-repository.md)).
 - **Owner:** Repository maintainers
 - **Context:** A task without a pull request ended on its branch. The
   person could merge it into the default branch on this Mac and push that,
@@ -72,3 +72,5 @@
     servers it gives: use that instead of switching servers off by name.
   - A host Althar has no connector for becomes common: a connector for it,
     or a way to open its pull requests without one.
+- **See also:** [ADR-085](085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md),
+  for where a fork's branches go when a connection opens its pull requests.

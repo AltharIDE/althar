@@ -37,6 +37,8 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(grok.sessionMeta?.(), { yoloMode: false, autoMode: false })
     assert.deepStrictEqual(grok.sessionMeta?.('reader'), { yoloMode: false, autoMode: false })
     assert.includeMembers([...agents['qwen-code'].launch('/usr/bin/node').args], ['--approval-mode', 'default'])
+    // Claude Code writes no auto memory into the person's own ~/.claude/projects/<checkout>/memory.
+    assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' })
     assert.deepInclude(agents['mistral-vibe'].launch('/usr/bin/node').env ?? {}, {
       VIBE_DEFAULT_AGENT: 'ask',
       VIBE_BYPASS_TOOL_PERMISSIONS: 'false',

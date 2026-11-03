@@ -18,6 +18,7 @@ import {
   offersEffort,
   togglePin,
   useModelPrefs,
+  withoutModel,
 } from './models'
 
 /*
@@ -45,6 +46,8 @@ export interface ModelChoiceProps {
   onChange: (choice: Choice) => void
   /** Take the pick off what it was for, like a step's review. */
   onRemove?: () => void
+  /** A model it doesn't offer, by key: for a step handed on, the one that failed it. */
+  without?: string | null
   /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
   projectId?: string
   /** A conversation under way, which another agent's model hands over. */
@@ -54,19 +57,27 @@ export interface ModelChoiceProps {
   text?: Partial<ModelPickText>
 }
 
-export function ModelChoice({ owner, agents, value, onChange, onRemove, projectId, handover, variant, placement, text }: ModelChoiceProps) {
+export function ModelChoice({
+  owner,
+  agents,
+  value,
+  onChange,
+  onRemove,
+  without = null,
+  projectId,
+  handover,
+  variant,
+  placement,
+  text,
+}: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
-  const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [asking, setAsking] = useState<ModelInfo | null>(null)
-  const catalog = useMemo(() => catalogOf(known ?? [], agents), [known, agents])
-  // The browser shows the ones switched off too, to switch them on again.
-  const every = useMemo(() => catalogOf(known ?? [], agents, { withBlocked: true }), [known, agents])
-  const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
+  const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
   const current = infoOf(catalog, value)
   const pins = prefs.pins ?? defaultPins(catalog)
   const pinned = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
@@ -115,37 +126,83 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
         {...(text === undefined ? {} : { text })}
       />
       {browsing && (
-        <ModelBrowser
-          models={every.models}
-          runtimes={every.runtimes}
-          blocked={blocked}
-          onToggleBlocked={(key) => {
-            const { agentId, model } = choiceOf(key)
-            if (model !== null) void setBlocked({ agentId, model, blocked: !blocked.includes(key) })
-          }}
+        <ModelsBrowser
+          agents={agents}
+          without={without}
           value={current.id}
-          pins={pins}
-          defaultEffort={defaultOf}
-          room={room}
-          onPick={(key) => {
+          {...(projectId === undefined ? {} : { projectId })}
+          onPick={(picked) => {
             setBrowsing(false)
-            const picked = every.models.find((info) => info.id === key)
             // A pick that asks first asks in the picker, opened again on it.
-            if (picked !== undefined && confirm?.(picked) !== undefined) {
+            if (confirm?.(picked) !== undefined) {
               setAsking(picked)
               setOpen(true)
-            } else choose(key)
+            } else choose(picked.id)
           }}
           onClose={() => setBrowsing(false)}
-          onTogglePin={(key) => togglePin(key, pins)}
-          onSetDefaultEffort={makeDefault}
-          text={{
-            columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' },
-            // The pin's shortcut as this system writes it.
-            keys: { ...modelBrowserText.keys, pin: modKey('P') },
-          }}
         />
       )}
     </>
+  )
+}
+
+export interface ModelsBrowserProps {
+  /** The agents whose models it lists: installed, and signed in or not saying (see `canPick`). */
+  agents: ReadonlyArray<AgentStatus>
+  /** A model it doesn't list, by key: for a step handed on, the one that failed it. */
+  without?: string | null
+  /** The model in use, by key; none where nothing is. */
+  value: string
+  projectId?: string
+  onPick: (model: ModelInfo) => void
+  onClose: () => void
+}
+
+/**
+ * Every model of every agent, as the kit's model browser: pins, each
+ * model's default effort, its room, and the ones switched off, to switch
+ * them on again. What picking one does is the consumer's.
+ */
+export function ModelsBrowser({ agents, without = null, value, projectId, onPick, onClose }: ModelsBrowserProps) {
+  const known = useModels()
+  const room = useModelRooms(projectId)
+  const setDefault = useSetDefaultEffort()
+  const setBlocked = useSetModelBlocked()
+  const prefs = useModelPrefs()
+  const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
+  const every = useMemo(() => withoutModel(catalogOf(known ?? [], agents, { withBlocked: true }), without), [known, agents, without])
+  const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
+  const pins = prefs.pins ?? defaultPins(catalog)
+  /** Makes an effort a model's default; an agent's own default, whose model isn't known, has none to keep. */
+  const makeDefault = (key: string, name: string) => {
+    const { agentId, model } = choiceOf(key)
+    if (model !== null) void setDefault({ agentId, model, effort: effortId(catalog, key, name) })
+  }
+  return (
+    <ModelBrowser
+      models={every.models}
+      runtimes={every.runtimes}
+      blocked={blocked}
+      onToggleBlocked={(key) => {
+        const { agentId, model } = choiceOf(key)
+        if (model !== null) void setBlocked({ agentId, model, blocked: !blocked.includes(key) })
+      }}
+      value={value}
+      pins={pins}
+      defaultEffort={(info) => defaultEffortOf(catalog, info)}
+      room={room}
+      onPick={(key) => {
+        const picked = every.models.find((info) => info.id === key)
+        if (picked !== undefined) onPick(picked)
+      }}
+      onClose={onClose}
+      onTogglePin={(key) => togglePin(key, pins)}
+      onSetDefaultEffort={makeDefault}
+      text={{
+        columns: { model: 'Model', runtime: 'Agent', room: 'Usage', context: 'Context', effort: 'Default effort' },
+        // The pin's shortcut as this system writes it.
+        keys: { ...modelBrowserText.keys, pin: modKey('P') },
+      }}
+    />
   )
 }

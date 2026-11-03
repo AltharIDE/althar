@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -7,6 +7,7 @@ import type { IssuePriority, IssueStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
+import { Switch } from '../../primitives/Switch/Switch'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 import s from './Issue.module.css'
@@ -161,6 +162,53 @@ export function IssueRef({ mark, id, linear }: IssueRefProps) {
     <span className={s.from}>
       {mark && <BrandMark brand={mark} size={11} className={linear ? s.fromLinear : undefined} />}
       <span className={s.fromId}>{id}</span>
+    </span>
+  )
+}
+
+export interface IssuePartText {
+  /** The switch's name, for the issue's key: Only part of MER-231. */
+  label: (id: string) => string
+  /** What its merge does, on: says what landed and leaves the issue open. */
+  on: string
+  /** What its merge does, off: closes it, as a task that did all of it. */
+  off: string
+}
+
+export const issuePartText: IssuePartText = {
+  label: (id) => `Only part of ${id}`,
+  on: 'When its pull request merges, Althar says on the issue what landed and leaves it open.',
+  off: 'Its pull request’s merge closes the issue, where issues move along with their tasks.',
+}
+
+export interface IssuePartProps {
+  /** The issue's key: MER-231. */
+  id: string
+  /** The task does only part of the issue. */
+  partOf: boolean
+  onChange: (partOf: boolean) => void
+  text?: Partial<IssuePartText>
+}
+
+/**
+ * Under a task's issue: whether the task does all of it, so its merge closes
+ * it, or only part, so its merge says what landed and leaves it open.
+ */
+export function IssuePart({ id, partOf, onChange, text }: IssuePartProps) {
+  const t = { ...issuePartText, ...text }
+  const labelId = useId()
+  const noteId = useId()
+  return (
+    <span className={s.part}>
+      <Switch checked={partOf} onChange={onChange} labelledBy={labelId} describedBy={noteId} />
+      <span className={s.partWords}>
+        <span id={labelId} className={s.partLabel}>
+          {t.label(id)}
+        </span>
+        <span id={noteId} className={s.partNote}>
+          {partOf ? t.on : t.off}
+        </span>
+      </span>
     </span>
   )
 }

@@ -9,13 +9,17 @@ import {
   type Account,
   type Choice,
   type Container,
+  fieldsOf,
   type Issue,
+  type IssueChange,
+  type IssueComment,
   type IssueField,
+  type IssueState,
   leftAsItIs,
   type Person,
   type StatusCategory,
   type Tracker,
-  unchangeable,
+  type TrackerCapabilities,
   unstarted,
 } from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
@@ -26,7 +30,10 @@ import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from '
  * and which is its key: a card's number is only its board's, and `#12` names
  * a repository's issue everywhere else. A card's status is its list; it has
  * no priority. Its description is Markdown already. The person's API key and
- * the token made for it go in a header, never in a URL.
+ * the token made for it go in a header, never in a URL. A due date is a
+ * moment on Trello, shown in each reader's own zone, and a day here: a day
+ * set goes as noon UTC, the same day from UTC−12 to UTC+11, and one read is
+ * its day in UTC.
  */
 
 const Member = Schema.Struct({
@@ -50,6 +57,7 @@ const Card = Schema.Struct({
   shortLink: Schema.String,
   dateLastActivity: Schema.String,
   closed: Schema.Boolean,
+  due: Schema.optional(Schema.NullOr(Schema.String)),
   dueComplete: Schema.optional(Schema.Boolean),
   labels: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.optional(Schema.NullOr(Schema.String)) }))),
   idBoard: Schema.String,
@@ -59,7 +67,7 @@ const Card = Schema.Struct({
 type Card = typeof Card.Type
 
 /** What Althar reads of a card, and of its people, wherever it reads one. */
-const CARD_FIELDS = 'name,desc,url,shortLink,dateLastActivity,closed,dueComplete,labels,idBoard,idList'
+const CARD_FIELDS = 'name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList'
 const MEMBER_FIELDS = 'fullName,username'
 
 /**
@@ -124,6 +132,10 @@ const cardCategory = (card: Card, list: List, board: Board): StatusCategory => {
 const labelsOf = (labels: Card['labels']): ReadonlyArray<string> =>
   (labels ?? []).flatMap((label) => (label.name == null || label.name === '' ? [] : [label.name]))
 
+/** The day a card is due, in UTC; null where it has no due date, or one that isn't a moment. */
+const dayOf = (due: string | null | undefined): string | null =>
+  due == null || Number.isNaN(Date.parse(due)) ? null : new Date(due).toISOString().slice(0, 10)
+
 /** A card, on its list and board. */
 const issueOf = (card: Card, list: List, board: Board): Issue => ({
   id: card.id,
@@ -138,9 +150,29 @@ const issueOf = (card: Card, list: List, board: Board): Issue => ({
   labels: labelsOf(card.labels),
   container: board.name,
   updatedAt: card.dateLastActivity,
+  due: dayOf(card.due),
 })
 
-/** The account, with its open cards and every open board's lists, in one call. */
+/** Whether a card in a category is in the state a search asks for: open is neither done nor cancelled. */
+const inState = (state: IssueState, category: StatusCategory): boolean =>
+  state === 'all' || (state === 'closed') === (category === 'done' || category === 'cancelled')
+
+/** Whether a card has every word asked for in its name or description, where Trello doesn't search them itself. */
+const matching =
+  (text: string | undefined) =>
+  (issue: Issue): boolean => {
+    const said = `${issue.title}\n${issue.body}`.toLowerCase()
+    return (text ?? '')
+      .toLowerCase()
+      .split(/\s+/)
+      .every((word) => said.includes(word))
+  }
+
+/** Cards newest activity first, to a limit. */
+const newest = (issues: ReadonlyArray<Issue>, limit: number): ReadonlyArray<Issue> =>
+  issues.toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, limit)
+
+/** The account, with its cards and its boards' lists, in one call. */
 const Mine = Schema.Struct({
   cards: Schema.Array(Card),
   boards: Schema.Array(Schema.Struct({ ...Board.fields, lists: Schema.Array(List) })),
@@ -158,10 +190,46 @@ const Created = Schema.Struct({
   desc: Schema.optional(Schema.String),
   dateLastActivity: Schema.optional(Schema.String),
   labels: Card.fields.labels,
+  due: Card.fields.due,
 })
 
-/** What Trello changes of a card: no priority, which a card hasn't, nor a project, which its board is. */
-const CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'title']
+/** What Trello answers a search with: cards, each with its list and board. */
+const Found = Schema.Struct({ cards: Schema.Array(Schema.Struct({ ...Card.fields, list: List, board: Board })) })
+
+/** A comment on a card, as Trello lists its actions: who wrote it, its words, and when. */
+const CommentAction = Schema.Struct({
+  date: Schema.String,
+  data: Schema.Struct({ text: Schema.optional(Schema.String) }),
+  memberCreator: Schema.optional(Schema.NullOr(Member)),
+})
+
+/** What Trello changes of a card: its list, its archive, its people, labels, due day, name and description. */
+const CHANGES = ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description'] as const satisfies ReadonlyArray<IssueField>
+type Unchanged = Exclude<IssueField, (typeof CHANGES)[number]>
+
+/** Why a card hasn't each field Trello can't change, in words an agent can pass on. */
+const HASNT: Record<Unchanged, string> = {
+  priority: 'a Trello card has no priority',
+  project: 'a card’s project is its board',
+  milestone: 'a Trello card has no milestone',
+  cycle: 'a Trello card has no cycle',
+  parent: 'a Trello card isn’t part of another card',
+  estimate: 'a Trello card has no estimate',
+  type: 'a Trello card has no type',
+  components: 'a Trello card has no components',
+}
+
+/** A field a card hasn't. */
+const unchanged = (field: IssueField): field is Unchanged => field in HASNT
+
+/** Trello files a card with its people and due date as well as its name, description and labels. */
+const CAPABILITIES: TrackerCapabilities = {
+  links: true,
+  starts: true,
+  changes: CHANGES,
+  creates: ['assignee', 'due'],
+  assignees: 'many',
+}
 
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
@@ -180,6 +248,12 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
     /^[A-Za-z0-9]+$/.test(id)
       ? Effect.succeed(id)
       : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a Trello ${what}: ${id}` }))
+
+  /** A day as Trello takes a due date: noon UTC, so it is the same day nearly everywhere it is read. */
+  const dueAt = (day: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(day) && dayOf(`${day}T12:00:00.000Z`) === day
+      ? Effect.succeed(`${day}T12:00:00.000Z`)
+      : Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a day: ${day}` }))
 
   const read = (ref: string) =>
     Effect.flatMap(named(ref, 'card'), (card) =>
@@ -201,10 +275,9 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       return { card, board: yield* named(idBoard, 'board') }
     })
 
-  const choices: Tracker['choices'] = (issue, field) =>
+  /** What a field of a card on a board can be set to: Trello's choices are its board's. */
+  const choicesOn = (board: string, field: 'status' | 'labels' | 'assignee') =>
     Effect.gen(function* () {
-      if (field === 'project') return yield* cantChange(product, 'project', 'a card’s project is its board')
-      const { board } = yield* boardOf(issue)
       switch (field) {
         // A card's status is its list: its board's open lists, left to right.
         case 'status':
@@ -224,34 +297,58 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       }
     })
 
+  const choices: Tracker['choices'] = (issue, field) =>
+    Effect.gen(function* () {
+      if (unchanged(field)) return yield* cantChange(product, field, HASNT[field])
+      const { board } = yield* boardOf(issue)
+      return yield* choicesOn(board, field)
+    })
+
+  // A card filed on a list is on the list's board, and has its board's choices.
+  const choicesIn: Tracker['choicesIn'] = (container, field) =>
+    Effect.gen(function* () {
+      if (unchanged(field)) return yield* cantChange(product, field, HASNT[field])
+      const list = yield* named(container, 'list')
+      const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/lists/${list}?fields=idBoard`)
+      return yield* choicesOn(yield* named(idBoard, 'board'), field)
+    })
+
+  /** The ids of the people a change puts on a card, and takes off it, checked before anything is asked. */
+  const membersOf = (change: IssueChange['assignee']) =>
+    Effect.all({
+      add: Effect.forEach(change?.add ?? [], (member) => named(member.id, 'member')),
+      remove: Effect.forEach(change?.remove ?? [], (member) => named(member.id, 'member')),
+    })
+
   const changeIssue: Tracker['update'] = (issue, wanted) =>
     Effect.gen(function* () {
-      const refused = unchangeable({ links: true, starts: true, changes: CHANGES }, wanted)
-      if (refused !== undefined)
-        return yield* cantChange(
-          product,
-          refused,
-          refused === 'priority' ? 'a Trello card has no priority' : 'a card’s project is its board',
-        )
+      const refused = fieldsOf(wanted).find(unchanged)
+      if (refused !== undefined) return yield* cantChange(product, refused, HASNT[refused])
       const card = yield* named(issue.id, 'card')
-      // Its title, its list, its people (one, or none), and archived to close it, in one edit.
-      const assignee =
-        wanted.assignee === undefined ? undefined : wanted.assignee === null ? '' : yield* named(wanted.assignee.id, 'member')
       const list = wanted.status === undefined ? undefined : yield* named(wanted.status.id, 'list')
+      const members = yield* membersOf(wanted.assignee)
+      const due = wanted.due === undefined || wanted.due === null ? wanted.due : yield* dueAt(wanted.due)
+      // Its title, description, list and due date, everyone taken off, and archived to close it, in one edit.
       const edit = {
         ...(wanted.title === undefined ? {} : { name: wanted.title }),
+        ...(wanted.description === undefined ? {} : { desc: wanted.description }),
         ...(list === undefined ? {} : { idList: list }),
-        ...(assignee === undefined ? {} : { idMembers: assignee }),
+        ...(due === undefined ? {} : { due }),
+        ...(wanted.assignee === null ? { idMembers: '' } : {}),
         ...(wanted.close === true ? { closed: true } : {}),
       }
       if (Object.keys(edit).length > 0) yield* call(Schema.Unknown, 'PUT', `${api}/cards/${card}`, edit)
-      // A label is added and taken off by its id; one already on, or already off, Trello refuses, and nothing changes.
+      // A person or a label is added and taken off by its id, leaving the others; one already on, or already off, Trello refuses, and nothing changes.
       const settled = (effect: Effect.Effect<unknown, ConnectorFailed>) =>
         Effect.catchIf(
           effect,
-          (error) => error.reason === 'rejected' && /already|not found|isn['’]?t/i.test(error.message),
+          (error) => error.reason === 'rejected' && /already|not found|not on|isn['’]?t/i.test(error.message),
           () => Effect.void,
         )
+      for (const member of members.add)
+        if (!issue.assignees.some((had) => had.id === member))
+          yield* settled(call(Schema.Unknown, 'POST', `${api}/cards/${card}/idMembers`, { value: member }))
+      for (const member of members.remove) yield* settled(call(Schema.Unknown, 'DELETE', `${api}/cards/${card}/idMembers/${member}`))
       for (const label of wanted.labels?.add ?? [])
         if (!issue.labels.some((had) => had.toLowerCase() === label.name.toLowerCase()))
           yield* settled(call(Schema.Unknown, 'POST', `${api}/cards/${card}/idLabels`, { value: yield* named(label.id, 'label') }))
@@ -260,37 +357,118 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       return yield* read(card)
     })
 
+  /**
+   * The cards the account is on, each on its list and board: those not
+   * archived, on open boards, or all of them, archived boards' too.
+   */
+  const memberCards = (filter: 'open' | 'all') =>
+    Effect.map(
+      call(
+        Mine,
+        'GET',
+        `${api}/members/me?fields=id&cards=${filter}&card_fields=${CARD_FIELDS}&card_members=true&card_member_fields=${MEMBER_FIELDS}&boards=${filter}&board_fields=name,closed&board_lists=all`,
+      ),
+      ({ cards, boards }) => {
+        const byId = new Map(boards.map((board) => [board.id, board]))
+        return cards.flatMap((card) => {
+          const board = byId.get(card.idBoard)
+          const list = board?.lists.find((candidate) => candidate.id === card.idList)
+          return board === undefined || list === undefined ? [] : [issueOf(card, list, board)]
+        })
+      },
+    )
+
+  /** A list's cards, on it and its board: those not archived, or all of them. */
+  const listCards = (container: string, filter: 'open' | 'all') =>
+    Effect.gen(function* () {
+      const list = yield* named(container, 'list')
+      const cards = yield* call(
+        Schema.Array(Card),
+        'GET',
+        `${api}/lists/${list}/cards?filter=${filter}&fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}`,
+      )
+      const onList = yield* call(
+        Schema.Struct({ ...List.fields, idBoard: Schema.String }),
+        'GET',
+        `${api}/lists/${list}?fields=name,closed,idBoard`,
+      )
+      const board = yield* call(Board, 'GET', `${api}/boards/${yield* named(onList.idBoard, 'board')}?fields=name,closed`)
+      return cards.map((card) => issueOf(card, onList, board))
+    })
+
+  /**
+   * Cards Trello's search finds by words, in their name, description or
+   * comments. It leaves archived cards out unless asked for them alone, so
+   * closed and all ask twice: a card done is often in a Done list, not archived.
+   */
+  const searchCards = (text: string, state: IssueState, mine: boolean, limit: number) =>
+    Effect.gen(function* () {
+      const asked = yield* Effect.forEach(state === 'open' ? ['is:open'] : ['is:open', 'is:archived'], (archive) =>
+        call(
+          Found,
+          'GET',
+          `${api}/search?query=${encodeURIComponent([text, archive, ...(mine ? ['member:me'] : [])].join(' '))}&modelTypes=cards&cards_limit=${Math.min(limit, 1000)}&card_fields=${CARD_FIELDS}&card_board=true&card_list=true&card_members=true`,
+        ),
+      )
+      const byId = new Map(asked.flatMap(({ cards }) => cards).map((card) => [card.id, issueOf(card, card.list, card.board)]))
+      return [...byId.values()]
+    })
+
+  const find: Tracker['find'] = (query) =>
+    Effect.gen(function* () {
+      const text = query.text?.trim() ?? ''
+      const filter = query.state === 'open' ? 'open' : 'all'
+      const issues =
+        query.container !== undefined
+          ? yield* listCards(query.container, filter)
+          : text !== ''
+            ? yield* searchCards(text, query.state, query.mine === true, query.limit)
+            : yield* memberCards(filter)
+      // Within a list, only the account's where asked: elsewhere Trello's search, or the account's own cards, keep to them already.
+      const me = query.container !== undefined && query.mine === true ? (yield* account).id : undefined
+      return newest(
+        issues.filter(
+          (issue) =>
+            inState(query.state, issue.status.category) &&
+            (me === undefined || issue.assignees.some((person) => person.id === me)) &&
+            (query.container === undefined || matching(text)(issue)),
+        ),
+        query.limit,
+      )
+    })
+
   return {
     product,
-    capabilities: { links: true, starts: true, changes: CHANGES },
+    capabilities: CAPABILITIES,
     account,
     issue: read,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
     mine: (options = {}) =>
-      Effect.map(
-        call(
-          Mine,
-          'GET',
-          `${api}/members/me?fields=id&cards=open&card_fields=${CARD_FIELDS}&card_members=true&card_member_fields=${MEMBER_FIELDS}&boards=open&board_fields=name&board_lists=all`,
+      Effect.map(memberCards('open'), (issues) =>
+        newest(
+          issues.filter(
+            (issue) => inState('open', issue.status.category) && (options.container === undefined || issue.container === options.container),
+          ),
+          options.limit ?? 50,
         ),
-        ({ cards, boards }) => {
-          const byId = new Map(boards.map((board) => [board.id, board]))
-          return cards
-            .flatMap((card) => {
-              const board = byId.get(card.idBoard)
-              const list = board?.lists.find((candidate) => candidate.id === card.idList)
-              return board === undefined || list === undefined ? [] : [issueOf(card, list, board)]
-            })
-            .filter(
-              (issue) =>
-                issue.status.category !== 'done' &&
-                issue.status.category !== 'cancelled' &&
-                (options.container === undefined || issue.container === options.container),
-            )
-            .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-            .slice(0, options.limit ?? 50)
-        },
       ),
+    find,
+    // Trello lists a card's comments newest first, as actions on it.
+    comments: (issue, limit) =>
+      Effect.gen(function* () {
+        if (limit < 1) return []
+        const card = yield* named(issue.id, 'card')
+        const actions = yield* call(
+          Schema.Array(CommentAction),
+          'GET',
+          `${api}/cards/${card}/actions?filter=commentCard&limit=${Math.min(limit, 1000)}&fields=data,date&memberCreator=true&memberCreator_fields=${MEMBER_FIELDS}`,
+        )
+        return actions.toReversed().map((action): IssueComment => ({
+          author: action.memberCreator == null ? null : personOf(action.memberCreator),
+          body: action.data.text ?? '',
+          at: action.date,
+        }))
+      }),
     comment: (issue, body) => Effect.asVoid(call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/actions/comments`, { text: body })),
     link: (issue, link) =>
       Effect.gen(function* () {
@@ -336,6 +514,15 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
     create: (container, draft) =>
       Effect.gen(function* () {
         const list = yield* named(container, 'list')
+        // What else it is filed with is checked before anything is asked: only its people and due date go with it.
+        const fields = draft.fields ?? {}
+        const refused = fieldsOf(fields).find((field) => !CAPABILITIES.creates.includes(field))
+        if (refused !== undefined)
+          return yield* unchanged(refused)
+            ? cantChange(product, refused, HASNT[refused])
+            : new ConnectorFailed({ product, reason: 'rejected', message: `Trello files a card without its ${refused}: it is set after` })
+        const members = yield* membersOf(fields.assignee)
+        const due = fields.due == null ? undefined : yield* dueAt(fields.due)
         // A label belongs to a board, and a card takes it by id: the list's board's are read only when some are asked for.
         const wanted = new Set(draft.labels.map((label) => label.trim().toLowerCase()).filter((label) => label !== ''))
         const { onList, idLabels } =
@@ -362,6 +549,8 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
           name: draft.title,
           desc: draft.body,
           ...(idLabels.length === 0 ? {} : { idLabels: idLabels.join(',') }),
+          ...(members.add.length === 0 ? {} : { idMembers: members.add.join(',') }),
+          ...(due === undefined ? {} : { due }),
         })
         // Filed: a failed read of it now is no reason to file it again, so it is as Trello answered the filing.
         const now = yield* Clock.currentTimeMillis
@@ -379,10 +568,12 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
             labels: labelsOf(card.labels),
             container: null,
             updatedAt: card.dateLastActivity ?? new Date(now).toISOString(),
+            due: dayOf(card.due),
           })),
         )
       }),
     choices,
+    choicesIn,
     update: changeIssue,
   }
 }
