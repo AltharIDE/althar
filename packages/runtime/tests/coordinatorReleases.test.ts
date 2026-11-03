@@ -140,6 +140,22 @@ describe('the coordinator tagging', () => {
       assert.deepStrictEqual(host.tagsDeleted, ['v0.6.9'])
     }).pipe(Effect.provide(withHost(host)))
   })
+
+  it.live('pushes a tag again that someone deleted since, on the person’s word again, and only once more', () => {
+    const { host, repository, working } = github()
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      const word = yield* turn(coordinator, 'Tag 0.7.0')
+      yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', message: word })
+      // Someone deletes it on GitHub; done before isn't done now.
+      yield* host.deleteTag(repository, 'v0.7.0')
+      const again = yield* turn(coordinator, 'Tag 0.7.0 again, it’s gone')
+      assert.include(yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', message: again }), 'Pushed the tag v0.7.0')
+      assert.isNotNull(yield* host.tag(repository, 'v0.7.0'))
+      assert.include(yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', message: again }), 'is on')
+      assert.lengthOf(host.tagsPushed, 2)
+    }).pipe(Effect.provide(withHost(host)))
+  })
 })
 
 describe('the coordinator approving and publishing', () => {
@@ -171,6 +187,26 @@ describe('the coordinator approving and publishing', () => {
       })
       assert.include(approved, 'Approved release for homebrew-tap on v0.7.0')
       assert.lengthOf(host.approvals, 1)
+    }).pipe(Effect.provide(withHost(host)))
+  })
+
+  it.live('approves again after a rerun waits on the same gate anew, and never says approved where it wasn’t', () => {
+    const { host, working } = github()
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      const args = { tag: 'v0.7.0', gate: 'release', workflow: 'release' }
+      host.startRun(PATH, { ref: 'v0.7.0', name: 'release', gates: [{ name: 'release' }] })
+      const word = yield* turn(coordinator, 'Approve the release')
+      assert.include(yield* callTool(coordinator, 'approve_release_run', { ...args, message: word }), 'Approved release')
+      // Given, the run goes on: asked again, it isn't said to be approved again.
+      assert.include(yield* callTool(coordinator, 'approve_release_run', { ...args, message: word }), 'goes on')
+      assert.lengthOf(host.approvals, 1)
+      // A job failed, it ran again, and its run waits on release anew.
+      host.startRun(PATH, { ref: 'v0.7.0', name: 'release', gates: [{ name: 'release' }] })
+      const again = yield* turn(coordinator, 'Approve it again')
+      assert.include(yield* callTool(coordinator, 'approve_release_run', { ...args, message: again }), 'Approved release')
+      assert.lengthOf(host.approvals, 2)
     }).pipe(Effect.provide(withHost(host)))
   })
 
@@ -233,6 +269,40 @@ describe('the coordinator releasing on Bitbucket', () => {
       )
       assert.deepStrictEqual(host.published, ['v0.7.0'])
     }).pipe(Effect.provide(withHost(host)))
+  })
+
+  it.live('puts the rest in Downloads after a publish refused half way, and nothing twice', () => {
+    const host = makeFakeService({ product: 'bitbucket_cloud' })
+    const repository = host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    writeFileSync(join(working, 'Althar-0.7.0.zip'), 'zip')
+    writeFileSync(join(working, 'Althar-0.7.0.dmg'), 'dmg')
+    // The first file goes up, and the host stops answering before the second.
+    let half = true
+    const halting: FakeService = {
+      ...host,
+      publishRelease: (repo, tag, release) => {
+        if (!half) return host.publishRelease(repo, tag, release)
+        half = false
+        return Effect.flatMap(host.publishRelease(repo, tag, { files: (release.files ?? []).slice(0, 1) }), () =>
+          Effect.fail(
+            new ConnectorFailed({ product: 'bitbucket_cloud', reason: 'unreachable', message: 'The service did not answer in time' }),
+          ),
+        )
+      },
+    }
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      const word = yield* turn(coordinator, 'Publish 0.7.0')
+      const files = ['Althar-0.7.0.zip', 'Althar-0.7.0.dmg']
+      assert.notInclude(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', files, message: word }), 'Put ')
+      // Read back: one is there, the other isn't, so the rest goes up.
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', files, message: word }), 'Put Althar-0.7.0.zip')
+      const names = ((yield* host.release(repository, 'v0.7.0'))?.files ?? []).map((file) => file.name)
+      assert.sameMembers(names, files)
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', files, message: word }), 'holds')
+    }).pipe(Effect.provide(withHost(halting)))
   })
 })
 
@@ -337,17 +407,16 @@ describe('a release errand', () => {
         const coordinator = yield* session(before.projectId, before.threadId)
         yield* turn(coordinator, 'The release run goes on', { kind: 'internal' })
         const args = { tag: 'v0.7.0', gate: 'release', workflow: 'release', errand: before.errand, step: 'approve' }
-        // Still going: whether it was approved isn't read yet as done, and nothing is approved again.
-        assert.include(yield* callTool(coordinator, 'approve_release_run', args), 'goes on')
+        // Read back: nothing waits for release any more while the run goes on, so it was given; nothing is approved again.
+        assert.include(yield* callTool(coordinator, 'approve_release_run', args), 'any more: it was given')
         assert.include(
           yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', errand: before.errand, step: 'publish' }),
-          'earlier step',
+          'no draft release of v0.7.0 yet',
         )
         const [run] = yield* host.runs(repository, 'v0.7.0')
         host.finishRun(run!.id, 'passed')
         host.draftRelease(PATH, 'v0.7.0', ['Althar-0.7.0-arm64.dmg'])
         yield* turn(coordinator, 'The draft is there', { kind: 'internal' })
-        assert.include(yield* callTool(coordinator, 'approve_release_run', args), 'Nothing on v0.7.0 waits for release')
         assert.include(
           yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', errand: before.errand, step: 'publish' }),
           'Published v0.7.0',

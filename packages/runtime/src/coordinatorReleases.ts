@@ -28,15 +28,18 @@ import type { Tool, ToolAccess } from './ToolServer'
  * step (Errands.ts). Each reads the host before it acts and skips what's
  * done: a tag already on the commit, a release out, an approval given. So a
  * lost answer, or a restart in the middle of a release, is read back and
- * never done twice. Running failed jobs again and reading can be undone, and
+ * never done twice. Each may recur, as an approval does after a rerun, or a
+ * tag someone deleted: done before is answered again only where the host
+ * still says so. Running failed jobs again and reading can be undone, and
  * go in any turn.
  */
 
 const refused = (message: string) => new ToolRefused({ message })
 
 /** An asked-for action before it is given its context: its read and act still need the coordinator's services. */
-type Made = Omit<AskedAction, 'read' | 'act'> & {
+type Made = Omit<AskedAction, 'read' | 'readBack' | 'act'> & {
   readonly read: Effect.Effect<FreshAction, ToolRefused, Needs>
+  readonly readBack?: Effect.Effect<FreshAction, ToolRefused, Needs>
   readonly act: (fresh: FreshAction) => Effect.Effect<AskedResult, unknown, Needs>
 }
 
@@ -162,6 +165,7 @@ const pushTag = (projectId: string, input: unknown) =>
         ...(move ? { move } : {}),
         ...(remove ? { delete: remove } : {}),
       },
+      recurs: true,
       read,
       act,
     }
@@ -231,7 +235,6 @@ const ApproveAsked = Schema.Struct({
   repository: Schema.optional(Schema.NullOr(Schema.String)),
   gate: Schema.optional(Schema.NullOr(Schema.String)),
   workflow: Schema.optional(Schema.NullOr(Schema.String)),
-  round: Schema.optional(Schema.Number),
   ...Word,
 })
 
@@ -264,18 +267,22 @@ const approveRun = (projectId: string, input: unknown) =>
         `Bitbucket Data Center's builds are another service's (Jenkins, Bamboo or the like): whoever runs them approves them there. read_release links each.`,
       )
     let found: { readonly run: Run; readonly gate: Gate } | undefined
-    const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+    // What waits on the gate now: found, it is to approve; still waiting after a lost answer is proof it wasn't given.
+    const waits = Effect.gen(function* () {
       const runs = yield* viaHost(host.runs(repository, name))
       const waiting = waitingOn(runs, gate, workflow)
-      if (waiting.run !== undefined && waiting.gate !== undefined) {
-        if (!waiting.gate.approvable)
-          return yield* refused(
-            `${waiting.run.name} on ${name} ${gateLine(host, waiting.gate)}. Nothing was approved: tell the person, with that link.`,
-          )
-        found = { run: waiting.run, gate: waiting.gate }
-        // Still waiting is proof it wasn't given: a lost answer is tried again.
-        return { state: 'absent', ...(waiting.run.sha === null ? {} : { head: waiting.run.sha }) }
-      }
+      if (waiting.run === undefined || waiting.gate === undefined) return { of: waiting.of, fresh: undefined }
+      if (!waiting.gate.approvable)
+        return yield* refused(
+          `${waiting.run.name} on ${name} ${gateLine(host, waiting.gate)}. Nothing was approved: tell the person, with that link.`,
+        )
+      found = { run: waiting.run, gate: waiting.gate }
+      const fresh: FreshAction = { state: 'absent', ...(waiting.run.sha === null ? {} : { head: waiting.run.sha }) }
+      return { of: waiting.of, fresh }
+    })
+    const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+      const waiting = yield* waits
+      if (waiting.fresh !== undefined) return waiting.fresh
       if (waiting.of.length === 0)
         return {
           state: 'waiting',
@@ -287,6 +294,16 @@ const approveRun = (projectId: string, input: unknown) =>
         state: 'done',
         answer: `Nothing on ${name} waits for ${what}: its runs are done (${waiting.of.map((run) => `${run.name}: ${run.state}`).join(', ')}).`,
       }
+    })
+    // Asked for and its answer lost, nothing waiting for it any more is its answer, whoever gave it: the run goes on past it.
+    const readBack: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+      const waiting = yield* waits
+      return (
+        waiting.fresh ?? {
+          state: 'done',
+          answer: `Nothing on ${name} waits for ${what} any more: it was given, or its run ended. read_release shows how the run goes.`,
+        }
+      )
     })
     const act = (): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
       found === undefined
@@ -305,9 +322,10 @@ const approveRun = (projectId: string, input: unknown) =>
         tag: name,
         ...(gate === null ? {} : { gate }),
         ...(workflow === null ? {} : { workflow }),
-        ...(asked.round === undefined || asked.round <= 1 ? {} : { round: asked.round }),
       },
+      recurs: true,
       read,
+      readBack,
       act,
     }
   })
@@ -410,11 +428,11 @@ const publishRelease = (projectId: string, input: unknown) =>
       if (release === null) return yield* refused(`There is no tag ${name} on ${repository.path.join('/')} yet: push_tag makes it first.`)
       const there = new Set(release.files.map((file) => file.name))
       const names = paths.map((path) => basename(path))
-      return names.every((one) => there.has(one))
+      const missing = names.filter((one) => !there.has(one))
+      // Some there and some not, as after a refusal half way, is the rest to put there: publishing skips what Downloads holds.
+      return missing.length === 0
         ? { state: 'done', answer: `Downloads holds ${names.join(', ')} already.` }
-        : names.some((one) => there.has(one))
-          ? { state: 'ready' }
-          : { state: 'absent' }
+        : { state: 'absent', reason: `Downloads lacks ${missing.join(', ')}.` }
     })
     const act = (): Effect.Effect<AskedResult, unknown, SqlClient.SqlClient | Instance> =>
       Effect.gen(function* () {
@@ -440,6 +458,7 @@ const publishRelease = (projectId: string, input: unknown) =>
         ...(asked.notes == null ? {} : { notes: asked.notes }),
         ...(paths.length === 0 ? {} : { files: paths }),
       },
+      recurs: true,
       read,
       act,
     }
@@ -570,10 +589,11 @@ export const releaseTools = (
     input,
     action: (value, access) =>
       provide(action(access.projectId, value)).pipe(
-        Effect.map((made): AskedAction => ({
+        Effect.map(({ read, readBack, act, ...made }): AskedAction => ({
           ...made,
-          read: provide(made.read),
-          act: (fresh) => provide(Effect.mapError(made.act(fresh), plainly)),
+          read: provide(read),
+          ...(readBack === undefined ? {} : { readBack: provide(readBack) }),
+          act: (fresh) => provide(Effect.mapError(act(fresh), plainly)),
         })),
         Effect.mapError((error) => {
           const said = plainly(error)
@@ -584,7 +604,7 @@ export const releaseTools = (
   return [
     asked(
       'push_tag',
-      "Tags a commit on the code host, on the person's word: the commit their words name (commit: a commit or a branch), or else the default branch's latest. Made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it (move); delete deletes one. A tag often starts a release's CI. It can't be taken back, so it needs their message in this turn (message) or an open errand's step (errand, step). An errand's step binds target `<owner/repo> tag <tag>` and request {tag, commit?, move?, delete?}, as given.",
+      "Tags a commit on the code host, on the person's word: the commit their words name (commit: a commit or a branch), or else the default branch's latest. Made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it (move); delete deletes one. A tag often starts a release's CI. It can't be taken back, so it needs their message in this turn (message) or an open errand's step (errand, step). An errand's step binds target `<owner/repo> tag <tag>` and request {tag, commit?, move?, delete?}, as given, and no head or branch: the commit goes in the request.",
       {
         type: 'object',
         properties: {
@@ -607,14 +627,13 @@ export const releaseTools = (
     ),
     asked(
       'approve_release_run',
-      "Approves what a run on a tag waits on, on the person's word: GitHub's environment (here `release`, which lets the run use the signing secrets), GitLab's deployment approval or manual job. Name the gate (gate: the environment or job) and, where several workflows run on the tag, the workflow (`release`, `homebrew-tap`). Where the account can't approve it (not one of its reviewers, or \"Prevent self-review\" on a run the person's tag started), or only the person can (Bitbucket's manual steps), nothing is done and it says so with the host's button: pass that on. Bitbucket Data Center's builds are another service's. It can't be taken back: their message (message) or an errand's step (errand, step). A step binds target `<owner/repo> tag <tag> approval` and request {tag, gate?, workflow?, round?}; round 2 for a second approval of the same workflow on the tag, after a rerun.",
+      "Approves what a run on a tag waits on, on the person's word: GitHub's environment (here `release`, which lets the run use the signing secrets), GitLab's deployment approval or manual job. Name the gate (gate: the environment or job) and, where several workflows run on the tag, the workflow (`release`, `homebrew-tap`). Where the account can't approve it (not one of its reviewers, or \"Prevent self-review\" on a run the person's tag started), or only the person can (Bitbucket's manual steps), nothing is done and it says so with the host's button: pass that on. Bitbucket Data Center's builds are another service's. It can't be taken back: their message (message) or an errand's step (errand, step). A step binds target `<owner/repo> tag <tag> approval` and request {tag, gate?, workflow?}, and no head or branch. After a rerun the same call approves the gate anew, where it waits again.",
       {
         type: 'object',
         properties: {
           tag: { type: 'string' },
           gate: { type: 'string', description: 'What it waits on, by name: the environment, the job.' },
           workflow: { type: 'string', description: 'The run’s workflow, by name, where several run on the tag.' },
-          round: { type: 'integer', description: 'Which approval of this workflow on this tag it is: 2 after a rerun asked again.' },
           repository: { type: 'string' },
           ...wordInput,
         },
@@ -624,7 +643,7 @@ export const releaseTools = (
     ),
     asked(
       'publish_release',
-      "Publishes a tag's release as its host does, on the person's word: GitHub's draft made public (once its run has drafted it); GitLab's release made, with name and notes, which is publishing it; on Bitbucket Cloud, which has no releases, files put in Downloads (files: paths in the project's repository on this computer). Bitbucket Data Center has no releases: the tag is the release. One out already is done. It reaches everyone at once and can't be taken back: their message (message), given when they say \"publish\", or an errand's step (errand, step). A step binds target `<owner/repo> release <tag>` and request {tag, name?, notes?, files?}.",
+      "Publishes a tag's release as its host does, on the person's word: GitHub's draft made public (once its run has drafted it); GitLab's release made, with name and notes, which is publishing it; on Bitbucket Cloud, which has no releases, files put in Downloads (files: paths in the project's repository on this computer). Bitbucket Data Center has no releases: the tag is the release. One out already is done. It reaches everyone at once and can't be taken back: their message (message), given when they say \"publish\", or an errand's step (errand, step). A step binds target `<owner/repo> release <tag>` and request {tag, name?, notes?, files?}, and no head or branch.",
       {
         type: 'object',
         properties: {
