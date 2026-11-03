@@ -530,6 +530,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     fetch: options.fetch,
     authorization: Effect.map(options.credential, authorizationOf),
     headers: HEADERS,
+    // GitHub leaves a 304 out of what it counts against the account.
+    freeWhenUnchanged: true,
   })
   const repo = (repository: Repository | ReadonlyArray<string>) =>
     `${api}/repos/${('path' in repository ? repository.path : repository).map(encodeURIComponent).join('/')}`
@@ -777,6 +779,22 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         listings.set(key, { at: now, list })
         return list
       }),
+    // REST, not the search: its list has an ETag, so a quiet repository answers 304 for nothing.
+    openChanges: (repository) =>
+      Effect.map(
+        http.cached(Schema.Array(PullAnswer), `${repo(repository)}/pulls?state=open&sort=updated&direction=desc&per_page=100`),
+        (pulls) =>
+          pulls.map((pull): ListedChange => {
+            const change = changeOf(pull)
+            return {
+              ...change,
+              forkOwner: change.headRepository == null ? null : (change.headRepository[0] ?? ''),
+              reviewDecision: null,
+              checks: null,
+            }
+          }),
+      ).pipe(Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)'))),
+    allowance: () => http.allowance(),
     markReady: (repository, change) =>
       http
         .graphql(

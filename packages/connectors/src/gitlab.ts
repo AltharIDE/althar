@@ -644,6 +644,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         const requests = yield* http.cached(Schema.Array(MergeAnswer), `${project(repository)}/merge_requests?${params.toString()}`)
         return { changes: requests.slice(0, limit).map(listedOf), more: requests.length > limit } satisfies ChangeList
       }).pipe(Effect.mapError(lacking('read_api'))),
+    allowance: () => http.allowance(),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         // Its title as it is now, not as Althar last read it: a rename on GitLab since stays.
