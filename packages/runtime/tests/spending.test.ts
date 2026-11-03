@@ -1,15 +1,22 @@
+import { randomUUID } from 'node:crypto'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
+import { agents as registry } from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { type AgentEntry, Agents } from '../src/Config'
 import { PlanUsage } from '../src/PlanUsage'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { atListPrices, boundingReadings, LONG_STRETCH, spentOf, tookOf, type TurnSpan } from '../src/Spending'
-import { runtime, task, turns, until } from './support'
+import { fakeAgents, runtime, task, turns, until } from './support'
 
 /*
  * What a task, or the coordinator's day, used of each account its agents ran
@@ -220,5 +227,197 @@ describe('a task’s usage', () => {
       )
       assert.deepStrictEqual(yield* usage.paidBy(accountId), { paidBy: 'plan', plan: null })
     }).pipe(Effect.provide(runtime())),
+  )
+})
+
+/*
+ * An OpenCode account mixes providers, each paid its own way: Zen per use, Go a plan, ChatGPT the plan Codex reads. A task's
+ * turns on it are seeded as they were kept, each on the provider its model names.
+ */
+describe('an OpenCode account’s usage, by the provider each turn ran on', () => {
+  const HOUR = 60 * MINUTE
+  const hex = () => randomUUID().replaceAll('-', '')
+  /** The fake agents, OpenCode with the registry's providers: a model is `provider/model`. */
+  const agentsWithProviders = (perUse: ReadonlyArray<string>) =>
+    Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const fake = yield* Agents
+        const real = (entry: AgentEntry): AgentEntry =>
+          entry.definition.id === 'opencode'
+            ? {
+                ...entry,
+                definition: { ...entry.definition, signIn: { ...entry.definition.signIn, providers: registry.opencode.signIn.providers! } },
+              }
+            : entry
+        return Agents.of({ list: fake.list.map(real), get: (agentId) => Effect.map(fake.get(agentId), real) })
+      }),
+    ).pipe(Layer.provide(fakeAgents({}, [], {}, perUse)))
+  /** GPT-6 Astra at $10 in and $50 out a million, as OpenRouter's list says. */
+  const prices = () => {
+    const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
+    writeFileSync(cache, JSON.stringify({ data: [{ id: 'openai/gpt-6-astra', pricing: { prompt: '0.00001', completion: '0.00005' } }] }))
+    return { url: 'https://models.test', cache, fetch: () => Promise.reject(new Error('No network in tests')) }
+  }
+  /** OpenCode signed in to Zen, Go and ChatGPT; Codex on a ChatGPT plan unless the test says it's paid per use. */
+  const withMixed = (perUse: ReadonlyArray<string> = []) =>
+    Queries.layer.pipe(
+      Layer.provideMerge(
+        runtime(
+          ':memory:',
+          {},
+          {
+            agents: agentsWithProviders(perUse),
+            perUse,
+            modelFacts: prices(),
+            usage: {
+              every: Duration.zero,
+              kept: Duration.zero,
+              readVersion: async () => '2.2.5',
+              readCredentials: async () => ({
+                kind: 'credentials',
+                credentials: [
+                  { provider: 'opencode', pays: 'key' },
+                  { provider: 'opencode-go', pays: 'key' },
+                  { provider: 'openai', pays: 'plan' },
+                ],
+              }),
+              readAgent: async () => ({
+                kind: 'usage',
+                usage: {
+                  source: 'agent',
+                  plan: 'plus',
+                  windows: [{ kind: 'five_hour', usedPercent: 5 }],
+                  observedAt: new Date().toISOString(),
+                },
+              }),
+            },
+          },
+        ),
+      ),
+    )
+
+  const at = (by: number) => new Date(Date.now() - HOUR + by).toISOString()
+  /** A session on the account, and its one turn, from and to minutes into an hour ago. */
+  const ran = (
+    where: { readonly projectId: string; readonly threadId: string },
+    agentId: string,
+    accountId: string,
+    model: string,
+    from: number,
+    to: number,
+    usage: { readonly inputTokens: number; readonly outputTokens: number },
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessionId = `sess_${hex()}`
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: sessionId,
+        projectId: where.projectId,
+        threadId: where.threadId,
+        agentId,
+        model,
+        state: 'completed',
+        startedAt: at(from * MINUTE),
+        accountId,
+      })}`
+      yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+        id: `turn_${hex()}`,
+        projectId: where.projectId,
+        threadId: where.threadId,
+        providerSessionId: sessionId,
+        controllerGeneration: 1,
+        model,
+        usage: JSON.stringify({ ...usage, totalTokens: usage.inputTokens + usage.outputTokens }),
+        state: 'completed',
+        requestedAt: at(from * MINUTE),
+        deliveredAt: at(from * MINUTE),
+        endedAt: at(to * MINUTE),
+      })}`
+    })
+  const weekOf = (accountId: string, ...readings: ReadonlyArray<readonly [minutes: number, usedPercent: number]>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO plan_usage_weeks ${sql.insert(
+        readings.map(([minutes, usedPercent]) => ({ accountId, usedPercent, resetsAt: 'Thu', observedAt: at(minutes * MINUTE) })),
+      )}`
+    })
+  /** A task with turns on Zen, Go and ChatGPT through OpenCode, and the two accounts. */
+  const mixedTask = Effect.gen(function* () {
+    yield* (yield* PlanUsage).now(true)
+    const openCode = (yield* (yield* Accounts).of('opencode'))[0]!.id
+    const codex = (yield* (yield* Accounts).of('codex'))[0]!.id
+    const { project, task: created } = yield* task()
+    const here = { projectId: project.projectId, threadId: created.threadId }
+    yield* ran(here, 'opencode', openCode, 'opencode/gpt-6-astra', 0, 1, { inputTokens: 100_000, outputTokens: 10_000 })
+    yield* ran(here, 'opencode', openCode, 'opencode-go/glm-5.3', 2, 3, { inputTokens: 40_000, outputTokens: 10_000 })
+    yield* ran(here, 'opencode', openCode, 'openai/gpt-6-sol', 4, 6, { inputTokens: 25_000, outputTokens: 5_000 })
+    return { openCode, codex, created }
+  })
+  const usageOf = (threadId: string) =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      return (yield* Effect.orDie(queries.thread(threadId))).usage ?? []
+    })
+
+  it.live('prices each part as its provider is paid: Zen in dollars, Go and ChatGPT a share of their weeks', () =>
+    Effect.gen(function* () {
+      const { openCode, codex, created } = yield* mixedTask
+      // Codex ran as much on the same ChatGPT plan meanwhile, in another task: the week's rise is shared with it.
+      const { project: elsewhere, task: other } = yield* task('Another')
+      yield* ran({ projectId: elsewhere.projectId, threadId: other.threadId }, 'codex', codex, 'gpt-6-sol', 4, 6, {
+        inputTokens: 25_000,
+        outputTokens: 5_000,
+      })
+      yield* weekOf(codex, [3.5, 20], [6.5, 23])
+      const lines = yield* usageOf(created.threadId)
+      assert.deepStrictEqual(
+        lines.map((line) => line.provider),
+        ['opencode', 'opencode-go', 'openai'],
+      )
+      const [zen, go, chatGpt] = lines
+      // 100k in at $10 and 10k out at $50 a million, at list prices as OpenCode didn't say.
+      assert.deepInclude(zen, {
+        accountId: openCode,
+        paidBy: 'key',
+        took: null,
+        estimated: true,
+        models: ['opencode/gpt-6-astra'],
+        tokens: 110_000,
+      })
+      assert.closeTo(zen?.spent ?? 0, 1.5, 1e-9)
+      assert.isUndefined(zen?.why)
+      // Go's week was never read: no figure, and why.
+      assert.deepInclude(go, { paidBy: 'plan', took: null, spent: null, models: ['opencode-go/glm-5.3'], tokens: 50_000 })
+      assert.include(go?.why ?? '', 'OpenCode Go')
+      // Half of Codex's three points, as Codex's own turn had as many tokens.
+      assert.deepInclude(chatGpt, { paidBy: 'plan', spent: null, estimated: true, models: ['openai/gpt-6-sol'] })
+      assert.closeTo(chatGpt?.took ?? 0, 1.5, 1e-9)
+    }).pipe(Effect.provide(withMixed())),
+  )
+
+  it.live('gives Go its share of the account’s own week, which a Zen turn then doesn’t draw on', () =>
+    Effect.gen(function* () {
+      const { openCode, created } = yield* mixedTask
+      // A Zen turn in another task while Go's ran: paid per use, it takes none of Go's week.
+      const { project: elsewhere, task: other } = yield* task('Another')
+      yield* ran({ projectId: elsewhere.projectId, threadId: other.threadId }, 'opencode', openCode, 'opencode/gpt-6-astra', 2, 3, {
+        inputTokens: 40_000,
+        outputTokens: 10_000,
+      })
+      yield* weekOf(openCode, [1.5, 10], [3.5, 12])
+      const go = (yield* usageOf(created.threadId)).find((line) => line.provider === 'opencode-go')
+      assert.closeTo(go?.took ?? 0, 2, 1e-9)
+      assert.isUndefined(go?.why)
+    }).pipe(Effect.provide(withMixed())),
+  )
+
+  it.live('has no ChatGPT figure where Codex isn’t on a ChatGPT plan here, and says why', () =>
+    Effect.gen(function* () {
+      const { created } = yield* mixedTask
+      const chatGpt = (yield* usageOf(created.threadId)).find((line) => line.provider === 'openai')
+      assert.deepInclude(chatGpt, { paidBy: 'plan', took: null, spent: null })
+      assert.include(chatGpt?.why ?? '', 'through Codex')
+    }).pipe(Effect.provide(withMixed(['codex']))),
   )
 })

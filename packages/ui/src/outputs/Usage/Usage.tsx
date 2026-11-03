@@ -1,6 +1,7 @@
 import type { Brand } from '../../foundations/brands/brands'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
+import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import s from './Usage.module.css'
 
 /*
@@ -8,7 +9,8 @@ import s from './Usage.module.css'
  * on (ADR-084): a line each, its figure at the end, the models and their
  * tokens under it. On a plan, the figure is the share of its week; paid per
  * use, the dollars. There is no total: a share of a week and dollars don't
- * add up.
+ * add up. A figure that can't be known stays a quiet "—", which says why as
+ * it is pointed at or focused.
  */
 
 /** One account's line. */
@@ -26,6 +28,8 @@ export interface UsageLine {
   /** The models that ran on it, by name. */
   readonly models: ReadonlyArray<string>
   readonly tokens: number
+  /** Why there is no figure, where it can't be known: said on the "—". */
+  readonly why?: string
 }
 
 export interface UsageText {
@@ -111,13 +115,29 @@ export function UsageLines({ lines, heading, text }: UsageLinesProps) {
             <span className={s.what} data-marked={line.mark !== undefined || undefined}>
               {t.what(line.models, line.tokens)}
             </span>
-            <b className={s.figure} title={line.estimated === true ? t.estimateNote : undefined}>
-              {figureOf(line, t)}
-            </b>
+            <Figure line={line} t={t} />
           </li>
         ))}
       </ul>
     </div>
+  )
+}
+
+/** A line's figure; one that can't be known, with why, says it on hover or focus. */
+function Figure({ line, t }: { line: UsageLine; t: UsageText }) {
+  const figure = figureOf(line, t)
+  if (figure !== t.unknown || line.why === undefined)
+    return (
+      <b className={s.figure} title={line.estimated === true ? t.estimateNote : undefined}>
+        {figure}
+      </b>
+    )
+  return (
+    <HoverCard card={line.why} placement="above" align="end" width={240}>
+      <button type="button" className={s.figure} data-why>
+        {figure}
+      </button>
+    </HoverCard>
   )
 }
 

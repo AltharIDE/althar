@@ -3,12 +3,14 @@ import type { UsageLine } from '@althar/ui'
 import { useSyncExternalStore } from 'react'
 
 import { brandOf } from './agents'
-import type { NameModel } from './modelNames'
+import type { NameModel, NameProvider } from './modelNames'
 
 /*
  * What a task, or the coordinator's day, used of each account its agents ran
  * on (ADR-084), as the kit's lines: an account named as the plan gauge's
  * peek names it, with its plan, and its own name where the agent has several.
+ * An agent that reaches several providers (OpenCode) has a line for each its
+ * turns ran on, named as the agent names the provider: OpenCode Zen.
  *
  * Whether Outputs' Usage is open is the person's, kept by this window across
  * launches for every task alike, as the board keeps its folded lanes: closed
@@ -23,18 +25,41 @@ export const accountWords = (use: Pick<AccountUse, 'agentName' | 'accountName' |
   return use.several ? `${agent} · ${use.accountName}` : agent
 }
 
-/** The kit's lines, from what a snapshot says each account was used. */
-export const usageLines = (usage: ReadonlyArray<AccountUse> | undefined, named: NameModel): ReadonlyArray<UsageLine> =>
+/** OpenCode's own providers, as it names them, where none of its models listed says: Zen, and Go. */
+const PROVIDERS: Readonly<Record<string, string>> = { opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }
+
+/**
+ * A provider's line as it is named: OpenCode Zen, a provider of the agent's own; OpenCode · OpenAI, another's; with the
+ * account's own name where the agent has several.
+ */
+export const providerWords = (
+  use: Pick<AccountUse, 'agentId' | 'agentName' | 'accountName' | 'several' | 'models'>,
+  provider: string,
+  nameProvider?: NameProvider,
+) => {
+  const named = nameProvider?.(use.agentId, use.models[0] ?? null, provider)
+  const name = named === undefined || named === provider ? (PROVIDERS[provider] ?? provider) : named
+  const line = name.toLowerCase().startsWith(use.agentName.toLowerCase()) ? name : `${use.agentName} · ${name}`
+  return use.several ? `${line} · ${use.accountName}` : line
+}
+
+/** The kit's lines, from what a snapshot says each account was used, and each provider of an agent that reaches several. */
+export const usageLines = (
+  usage: ReadonlyArray<AccountUse> | undefined,
+  named: NameModel,
+  nameProvider?: NameProvider,
+): ReadonlyArray<UsageLine> =>
   (usage ?? []).map((use) => {
     const mark = brandOf(use.agentId)
     return {
-      id: use.accountId,
-      name: accountWords(use),
+      id: use.provider === undefined ? use.accountId : `${use.accountId}:${use.provider}`,
+      name: use.provider === undefined ? accountWords(use) : providerWords(use, use.provider, nameProvider),
       ...(mark === undefined ? {} : { mark }),
       ...(use.paidBy === 'plan' ? { took: use.took } : { spent: use.spent }),
       estimated: use.estimated,
       models: use.models.map((model) => named(use.agentId, model).name),
       tokens: use.tokens,
+      ...(use.why === undefined ? {} : { why: use.why }),
     }
   })
 

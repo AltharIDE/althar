@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -107,6 +107,35 @@ describe('what a task used of each account', () => {
     expect(lines.getByText('$1.24').getAttribute('title')).toBeNull()
   })
 
+  it('has a line for each provider an OpenCode account ran on, and a "—" that says why where there is no figure', async () => {
+    const openCode = { accountId: 'opencode', agentId: 'opencode', agentName: 'OpenCode', plan: null }
+    show(
+      task({
+        usage: [
+          accountUse({ ...openCode, provider: 'opencode', paidBy: 'key', took: null, spent: 1.2, models: ['opencode/gpt-6-astra'] }),
+          accountUse({
+            ...openCode,
+            provider: 'opencode-go',
+            took: null,
+            models: ['opencode-go/glm-5.3'],
+            why: 'OpenCode Go doesn’t report its usage to Althar.',
+          }),
+          accountUse({ ...openCode, provider: 'openai', took: 1.5, models: ['openai/gpt-6-sol'] }),
+        ],
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Usage/ }))
+    const lines = within(screen.getByRole('list'))
+    expect(lines.getByText('OpenCode Zen')).toBeTruthy()
+    expect(lines.getByText('OpenCode Go')).toBeTruthy()
+    expect(lines.getByText('OpenCode · openai')).toBeTruthy()
+    expect(lines.getByText('~$1.20')).toBeTruthy()
+    expect(lines.getByText('~2% of week')).toBeTruthy()
+    // Focused, as from the keyboard, its "—" says why.
+    act(() => lines.getByRole('button', { name: '—' }).focus())
+    expect((await screen.findByRole('tooltip')).textContent).toContain('OpenCode Go doesn’t report its usage to Althar.')
+  })
+
   it('shows no card where nothing was used', () => {
     show(task({ usage: [] }))
     expect(screen.queryByRole('button', { name: /Usage/ })).toBeNull()
@@ -120,7 +149,7 @@ describe('what a task used of each account', () => {
 
   it('says it under the context in the composer’s ring, headed by whose it is', async () => {
     const session = { ...snapshot().session!, context: { used: 120_000, size: 200_000 } }
-    render(
+    withServices(
       <>
         {contextMeter(
           session,
@@ -129,6 +158,7 @@ describe('what a task used of each account', () => {
           { usage: USAGE, heading: 'This task so far' },
         )}
       </>,
+      fakeClient().client,
     )
     await userEvent.click(screen.getByRole('button', { name: /60%/ }))
     expect(screen.getByText('This task so far')).toBeTruthy()

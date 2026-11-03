@@ -2214,7 +2214,9 @@ export type ContextUse = typeof ContextUse.Type
 /**
  * What a task, or the coordinator's day, used of one account its agents ran
  * on (ADR-084): on a plan, the share of its week; paid per use, the dollars.
- * No total across accounts: a share of a week and dollars don't add up.
+ * No total across accounts: a share of a week and dollars don't add up. An
+ * agent that reaches several providers, each paid its own way (OpenCode), has
+ * one for each provider its turns ran on.
  */
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
@@ -2235,6 +2237,10 @@ export const AccountUse = Schema.Struct({
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,
+  /** The provider within the agent these turns ran on, by id (OpenCode's `opencode`, Zen); absent for an agent with one. */
+  provider: Schema.optional(Schema.String),
+  /** Why there is no figure, where it can't be known: said on the figure, as its place stays quiet. */
+  why: Schema.optional(Schema.String),
 })
 export type AccountUse = typeof AccountUse.Type
 

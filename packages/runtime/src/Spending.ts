@@ -1,4 +1,5 @@
 import type { AccountUse } from '@althar/contracts'
+import { noReadingOf, usagePairs } from '@althar/provider-adapters'
 import { Clock, Effect } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -20,6 +21,11 @@ import { PlanUsage } from './PlanUsage'
  *
  * Dollars are what the agent said a session cost (its usage_update), else the
  * turns' tokens at the model's list prices.
+ *
+ * An OpenCode account mixes providers, each paid its own way: `opencode/…` is
+ * Zen (prepaid, per use), `opencode-go/…` Go (a plan), `openai/…` with a
+ * ChatGPT sign-in the plan Codex reads, the rest keys. Its use is split by the
+ * provider each turn ran on, and each part priced as its provider is paid.
  */
 
 /** A turn as a share reads it: when it ran, its tokens, and whether it is one of those asked about. */
@@ -172,10 +178,43 @@ export const spentOf = (sessions: ReadonlyArray<SessionSpend>): { readonly spent
   return { spent, estimated }
 }
 
+/** OpenCode's own providers, paid as they always are: Zen per use, from prepaid credit; Go a plan with limits. */
+const OPENCODE_PAYS: Readonly<Record<string, 'plan' | 'key'>> = { opencode: 'key', 'opencode-go': 'plan' }
+/** OpenCode Go, whose week is the OpenCode account's own: the only plan Plan usage reads of an OpenCode account. */
+const GO = 'opencode-go'
+/** ChatGPT through OpenCode: the same plan Codex reads, by its sign-in. */
+const CHATGPT = 'openai'
+
+/**
+ * How a provider an agent reaches is paid (OpenCode's `provider/model`): Zen
+ * and Go always as they are, the rest as the account's listing says, and per
+ * use where it didn't say: a provider OpenCode has no sign-in for runs on a key.
+ */
+export const providerPays = (provider: string, listed: Readonly<Record<string, 'plan' | 'key'>> | undefined): 'plan' | 'key' =>
+  OPENCODE_PAYS[provider] ?? listed?.[provider] ?? 'key'
+
+/** Why a plan's share can't be known, said on its "—". */
+export const why = {
+  /** A plan whose week was never read. */
+  unread: 'Althar hasn’t read this plan’s week yet.',
+  /** OpenCode Go, where its pair says no more. */
+  go: 'OpenCode Go doesn’t report its usage to Althar.',
+  /** ChatGPT through OpenCode, with no Codex on a ChatGPT plan here. */
+  noCodex: 'Althar reads ChatGPT’s week through Codex, which isn’t signed in to a ChatGPT plan here.',
+  /** ChatGPT through OpenCode, with Codex on several. */
+  severalCodex: 'Codex is signed in to several ChatGPT plans here, and Althar can’t tell which one OpenCode used.',
+  /** Another plan a provider bills by. */
+  plan: (provider: string) => `${provider} doesn’t report its usage to Althar.`,
+  /** Paid per use, with no price for the model and no cost said. */
+  unpriced: 'The agent didn’t say what it cost, and no price is known for its model.',
+} as const
+
 interface TurnRow {
   readonly id: string
   readonly sessionId: string
   readonly model: string | null
+  /** The session's model, where a turn didn't say its own: which provider it ran on. */
+  readonly sessionModel: string | null
   readonly usage: string | null
   readonly fromAt: string
   readonly toAt: string | null
@@ -188,7 +227,14 @@ interface TurnRow {
 /** Whose usage: a task's, every thread of it; or one thread's since a time, as the coordinator's day. */
 export type SpendingOf = { readonly taskId: string } | { readonly threadId: string; readonly since: string }
 
-/** What the turns asked about used of each account they ran on, in the order the accounts were first used. */
+/**
+ * What the turns asked about used of each account they ran on, in the order
+ * the accounts were first used. An agent that reaches several providers, each
+ * paid its own way (OpenCode), has a line for each provider its turns ran on:
+ * Zen and keys in dollars; Go its share of the account's week; ChatGPT its
+ * share of Codex's week, where Codex is on the one ChatGPT plan here; any
+ * other plan no figure, and why.
+ */
 export const spendingOf = (
   of: SpendingOf,
 ): Effect.Effect<ReadonlyArray<AccountUse>, SqlError.SqlError, SqlClient.SqlClient | Agents | ModelFacts | PlanUsage> =>
@@ -199,7 +245,7 @@ export const spendingOf = (
     const planUsage = yield* PlanUsage
     const now = yield* Clock.currentTimeMillis
     const turns = yield* sql<TurnRow>`
-      SELECT d.id, d.provider_session_id AS session_id, d.model, d.usage,
+      SELECT d.id, d.provider_session_id AS session_id, d.model, s.model AS session_model, d.usage,
         coalesce(d.delivered_at, d.requested_at) AS from_at, d.ended_at AS to_at,
         s.account_id, s.agent_id, s.reported_cost, s.reported_currency
       FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
@@ -226,13 +272,92 @@ export const spendingOf = (
       ]),
     )
     const timeOf = (at: string | null) => (at === null ? now : Date.parse(at))
+    const definitionOf = (agentId: string) => agents.list.find((each) => each.definition.id === agentId)?.definition
+    /** The provider within its agent a turn ran on, for an agent that reaches several (OpenCode); undefined for the rest. */
+    const providerOf = (turn: { readonly agentId: string; readonly model: string | null; readonly sessionModel: string | null }) => {
+      const providers = definitionOf(turn.agentId)?.signIn.providers
+      const model = turn.model ?? turn.sessionModel
+      return providers === undefined ? undefined : ((model === null ? undefined : providers.of(model)) ?? '')
+    }
+
+    /**
+     * The share of one account's week the turns took: from its readings around them, shared with every turn that ran
+     * on the accounts `alongside` then and `counts` says draws on that week. Null where the week was never read.
+     */
+    const shareOf = (
+      weekOf: string,
+      alongside: ReadonlyArray<string>,
+      counts: (turn: { readonly agentId: string; readonly model: string | null; readonly sessionModel: string | null }) => boolean,
+      its: ReadonlyArray<TurnRow>,
+    ) =>
+      Effect.gen(function* () {
+        const from = Math.min(...its.map((turn) => timeOf(turn.fromAt)))
+        const to = Math.max(...its.map((turn) => timeOf(turn.toAt)))
+        const readings = boundingReadings(
+          (yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
+            SELECT used_percent, resets_at, observed_at FROM plan_usage_weeks
+            WHERE account_id = ${weekOf} ORDER BY observed_at`).map((row) => ({
+            at: Date.parse(row.observedAt),
+            usedPercent: row.usedPercent,
+            resetsAt: row.resetsAt,
+          })),
+          from,
+          to,
+        )
+        if (readings.length === 0) return null
+        const ours = new Set(its.map((turn) => turn.id))
+        const first = new Date(readings[0]!.at).toISOString()
+        const last = new Date(readings.at(-1)!.at).toISOString()
+        const around = yield* sql<{
+          id: string
+          agentId: string
+          model: string | null
+          sessionModel: string | null
+          usage: string | null
+          fromAt: string
+          toAt: string | null
+        }>`
+          SELECT d.id, s.agent_id, d.model, s.model AS session_model, d.usage,
+            coalesce(d.delivered_at, d.requested_at) AS from_at, d.ended_at AS to_at
+          FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+          WHERE s.account_id IN ${sql.in([weekOf, ...alongside])} AND coalesce(d.delivered_at, d.requested_at) <= ${last}
+            AND (d.ended_at IS NULL OR d.ended_at >= ${first})`
+        return tookOf(
+          readings,
+          around.filter(counts).map((turn) => ({
+            from: timeOf(turn.fromAt),
+            to: timeOf(turn.toAt),
+            tokens: tokensIn(turn.usage),
+            ours: ours.has(turn.id),
+          })),
+        )
+      })
+
+    /** The Codex accounts on a ChatGPT plan on the device an account is on: whose week a ChatGPT plan elsewhere draws on. */
+    const codexOnPlan = (accountId: string) =>
+      Effect.gen(function* () {
+        const codex = yield* sql<{ id: string }>`
+          SELECT c.id FROM agent_accounts c JOIN agent_accounts o ON o.device_id = c.device_id
+          WHERE o.id = ${accountId} AND c.agent_id = 'codex' AND c.removed_at IS NULL ORDER BY c.position`
+        const onPlan: string[] = []
+        for (const { id } of codex) if ((yield* planUsage.paidBy(id))?.paidBy === 'plan') onPlan.push(id)
+        return onPlan
+      })
+
+    // Each account's turns, and an agent's that reaches several providers by the provider each ran on, in the order first used.
+    const parts = new Map<string, { readonly accountId: string; readonly provider: string | undefined; readonly its: TurnRow[] }>()
+    for (const turn of turns) {
+      const provider = providerOf(turn)
+      const key = provider === undefined ? turn.accountId : `${turn.accountId}\u0000${provider}`
+      const part = parts.get(key)
+      if (part === undefined) parts.set(key, { accountId: turn.accountId, provider, its: [turn] })
+      else part.its.push(turn)
+    }
 
     const used: AccountUse[] = []
-    for (const accountId of accountIds) {
-      const its = turns.filter((turn) => turn.accountId === accountId)
+    for (const { accountId, provider, its } of parts.values()) {
       const agentId = its[0]!.agentId
-      const entry = agents.list.find((each) => each.definition.id === agentId)
-      const agent = { id: agentId, name: entry?.definition.name ?? agentId }
+      const agent = { id: agentId, name: definitionOf(agentId)?.name ?? agentId }
       const account = accounts.find((each) => each.id === accountId)
       const tokens = its.reduce((sum, turn) => sum + tokensIn(turn.usage), 0)
       const models = [...new Set(its.flatMap((turn) => (turn.model === null ? [] : [turn.model])))]
@@ -256,58 +381,83 @@ export const spendingOf = (
         }),
       )
 
-      // On a plan: the share of its week, from the readings around these turns.
-      const from = Math.min(...its.map((turn) => timeOf(turn.fromAt)))
-      const to = Math.max(...its.map((turn) => timeOf(turn.toAt)))
-      const readings = boundingReadings(
-        (yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
-          SELECT used_percent, resets_at, observed_at FROM plan_usage_weeks
-          WHERE account_id = ${accountId} ORDER BY observed_at`).map((row) => ({
-          at: Date.parse(row.observedAt),
-          usedPercent: row.usedPercent,
-          resetsAt: row.resetsAt,
-        })),
-        from,
-        to,
-      )
-      let took: number | null = null
-      if (readings.length > 0) {
-        const ours = new Set(its.map((turn) => turn.id))
-        const first = new Date(readings[0]!.at).toISOString()
-        const last = new Date(readings.at(-1)!.at).toISOString()
-        const around = yield* sql<{ id: string; usage: string | null; fromAt: string; toAt: string | null }>`
-          SELECT d.id, d.usage, coalesce(d.delivered_at, d.requested_at) AS from_at, d.ended_at AS to_at
-          FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
-          WHERE s.account_id = ${accountId} AND coalesce(d.delivered_at, d.requested_at) <= ${last}
-            AND (d.ended_at IS NULL OR d.ended_at >= ${first})`
-        took = tookOf(
-          readings,
-          around.map((turn) => ({
-            from: timeOf(turn.fromAt),
-            to: timeOf(turn.toAt),
-            tokens: tokensIn(turn.usage),
-            ours: ours.has(turn.id),
-          })),
-        )
-      }
-
       const held = yield* planUsage.paidBy(accountId)
-      // Where nothing was read of how it is paid, a week kept for it says a plan.
-      const paidBy = held?.paidBy ?? (readings.length > 0 ? 'plan' : 'key')
-      used.push({
+      const line = {
         accountId,
         agentId,
         agentName: agent.name,
         accountName: account?.name ?? agent.name,
         several: account !== undefined && account.several === 1,
-        paidBy,
-        plan: held?.plan ?? null,
-        took: paidBy === 'plan' ? took : null,
-        spent: paidBy === 'key' ? spent : null,
-        estimated: paidBy === 'plan' || listPriced,
         models,
         tokens,
-      })
+        // A model OpenCode named without its provider: the agent's own line, priced per use.
+        ...(provider === undefined || provider === '' ? {} : { provider }),
+      }
+      /** Its line on a plan: the share of a week, or none and why. */
+      const onPlan = (took: number | null, unknown: string, plan: string | null = null) =>
+        used.push({
+          ...line,
+          paidBy: 'plan',
+          plan,
+          took,
+          spent: null,
+          estimated: true,
+          ...(took === null ? { why: unknown } : {}),
+        })
+
+      if (provider === undefined) {
+        // On a plan: the share of its week, from the readings around these turns, among every turn on the account then.
+        const took = yield* shareOf(accountId, [], () => true, its)
+        // Where nothing was read of how it is paid, a week kept for it says a plan.
+        const paidBy = held?.paidBy ?? (took !== null ? 'plan' : 'key')
+        if (paidBy === 'plan') {
+          onPlan(took, held?.noReading ?? why.unread, held?.plan ?? null)
+          continue
+        }
+        used.push({
+          ...line,
+          paidBy,
+          plan: null,
+          took: null,
+          spent,
+          estimated: listPriced,
+          ...(spent === null ? { why: why.unpriced } : {}),
+        })
+        continue
+      }
+
+      // A provider of its own: priced by how it is paid, whatever pays for the agent's others.
+      const sameProvider = (turn: { readonly agentId: string; readonly model: string | null; readonly sessionModel: string | null }) =>
+        turn.agentId === agentId && providerOf(turn) === provider
+      if (providerPays(provider, held?.providers) === 'key') {
+        used.push({
+          ...line,
+          paidBy: 'key',
+          plan: null,
+          took: null,
+          spent,
+          estimated: listPriced,
+          ...(spent === null ? { why: why.unpriced } : {}),
+        })
+        continue
+      }
+      const pair = usagePairs.find((one) => one.agent === agentId && one.provider === provider && one.pays === 'plan')
+      if (provider === GO) {
+        // Go's week is the account's own, which only its turns on Go draw on.
+        onPlan(yield* shareOf(accountId, [], sameProvider, its), (pair === undefined ? null : noReadingOf(pair)) ?? why.go)
+        continue
+      }
+      if (provider === CHATGPT) {
+        // The ChatGPT plan Codex reads: its week, which Codex's turns and these draw on alike, where Codex is on the one plan here.
+        const codex = yield* codexOnPlan(accountId)
+        if (codex.length !== 1) {
+          onPlan(null, codex.length === 0 ? why.noCodex : why.severalCodex)
+          continue
+        }
+        onPlan(yield* shareOf(codex[0]!, [accountId], (turn) => turn.agentId === 'codex' || sameProvider(turn), its), why.unread)
+        continue
+      }
+      onPlan(null, (pair === undefined ? null : noReadingOf(pair)) ?? why.plan(provider))
     }
     return used
   })
