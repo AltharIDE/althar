@@ -1,4 +1,5 @@
 export * from './access'
+export { type CopyMerge, type CopyMerged, type MergeInCopy, mergeInCopy } from './branchCopy'
 export { makeBitbucketCloud } from './bitbucketCloud'
 export { makeBitbucketDataCenter } from './bitbucketDataCenter'
 export { authorizationOf, type AdapterOptions, type Credential } from './credential'

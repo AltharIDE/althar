@@ -16,6 +16,8 @@ import { ToolRefused } from './ToolServer'
  *
  * - run again, read: any pull request, and the default branch;
  * - mark ready, close, reopen: Althar's own, the ones a task opened;
+ * - bring up to date: any pull request, a merge of the default branch into
+ *   its branch, never a rebase and never forced;
  * - reply: Althar's own, the connected account's, and the repository's own
  *   people's. An outside author's, and closing on Bitbucket Cloud (where
  *   declining is final), are *asked-for*: they wait for the person's word,
@@ -320,6 +322,52 @@ export const reopenPullRequest = (projectId: string, input: unknown) =>
     if (change.state === 'open') return `${name} is open already.`
     const opened = yield* viaHost(host.reopenChange(repository, change))
     return `${name} is open again.${opened.draft ? ' It is a draft.' : ''}`
+  })
+
+// ---- Bringing a branch up to date -------------------------------------------
+
+/**
+ * What to say to an outside author who can be asked to update their own
+ * branch, for the coordinator to offer the person. Posting it is a reply on
+ * an outside author's pull request, which waits for the person's word.
+ */
+const askAuthor = (target: string) =>
+  `Could you bring this branch up to date with ${target}? It has fallen behind, and Althar's account can't push to your fork. Thank you!`
+
+/**
+ * Merges a pull request's target branch into its branch on the host (ADR-081),
+ * at the head just read: GitHub's update-branch, and elsewhere a merge in a
+ * copy of Althar's own, pushed plainly. A merge commit, never a rebase, never
+ * a forced push, so it can be undone by the branch's author resetting to its
+ * old head. A conflict stops and names the files, and Althar settles none. On
+ * a fork's branch the account can't push to, nothing is done and the answer
+ * says the author can be asked, which is a reply and waits for the person's
+ * word. Shared by the coordinator's `update_branch` and, once row 15 gives
+ * leads the call, theirs.
+ */
+export const updateBranch = (projectId: string, input: unknown) =>
+  Effect.gen(function* () {
+    const { host, repository, change, name } = yield* readOne(projectId, yield* decodePull(input))
+    if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so its branch isn't brought up to date.`)
+    if (change.headSha === null) return yield* refused(`${name} has no commits to bring up to date.`)
+    const result = yield* viaHost(host.updateBranch(repository, change, { expectedHead: change.headSha }))
+    const target = change.target
+    switch (result.outcome) {
+      case 'updated':
+        return result.head === null
+          ? `${hostName(host)} is merging ${target} into ${name}'s branch. Its checks run again on the result; read_pull_request shows how it goes.`
+          : `Merged ${target} into ${name}'s branch, now at ${result.head.slice(0, 12)}. Its checks run again on the result. It is a merge commit, nothing rebased or forced.`
+      case 'current':
+        return `${name}'s branch has all of ${target} already, so there was nothing to merge.`
+      case 'conflict':
+        return `${name}'s branch conflicts with ${target}, so nothing was merged. ${
+          result.files.length === 0 ? `${hostName(host)} didn't say in which files.` : `It conflicts in ${result.files.join(', ')}.`
+        } Althar doesn't settle conflicts here: it is a task's lead that merges ${target} in and resolves them, or the author.`
+      case 'moved':
+        return `${name}'s branch moved on since it was read${result.head === null ? '' : ` (now at ${result.head.slice(0, 12)})`}, so nothing was merged, to leave that push as it is. Read it again with read_pull_request and call this again if it is still behind.`
+      case 'no_access':
+        return `Althar's account can't push to ${name}'s branch, so it wasn't updated: ${result.reason} The author can bring it up to date. Asking them is a reply on an outside author's pull request, which waits for the person's word: tell the person, with something like “${askAuthor(target)}”`
+    }
   })
 
 // ---- Replying -------------------------------------------------------------

@@ -4,6 +4,7 @@ import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
 import type {
   Account,
+  BranchUpdate,
   ChangeList,
   ChangeRequest,
   ChangeState,
@@ -33,6 +34,7 @@ import {
   noPictures,
   noReopen,
   noReviews,
+  notOpen,
   notOurBuild,
   stillOpen,
   unchangeable,
@@ -226,6 +228,18 @@ export interface FakeControls {
     /** Whose review it asks for, by login. */
     readonly reviewers?: ReadonlyArray<string>
   }): ChangeRequest
+  /**
+   * The target branch moves on, so the change's branch is behind it. With
+   * `conflicts`, it changed those files too, so bringing it up to date would
+   * conflict in them.
+   */
+  fallBehind(number: number, conflicts?: ReadonlyArray<string>): void
+  /** Someone pushes to the change's branch on the host, so it is at a commit the caller hasn't read. */
+  pushByHand(number: number): void
+  /** The account may push to the branch of a change from a fork (an outside author's, which allows it): by default it may not. */
+  allowForkPush(number: number): void
+  /** Every branch brought up to date, in order, by the number of the change and the commit it is at after. */
+  readonly branchesUpdated: ReadonlyArray<{ readonly number: number; readonly head: string }>
   /** Every picture uploaded, in order, with the address the host gave it. */
   readonly uploads: ReadonlyArray<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }>
   /** Someone deletes a comment on the host itself, Althar's included. */
@@ -266,6 +280,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   /** Where each change's target branch is, by number, where a test says. */
   const bases = new Map<number, string>()
   const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
+  /** How far each change's branch is behind its target, in commits, and the files it would conflict in. */
+  const behind = new Map<number, { readonly commits: number; readonly conflicts: ReadonlyArray<string> }>()
+  /** Changes from a fork whose branch the account may push to. */
+  const pushable = new Set<number>()
+  const updated: Array<{ readonly number: number; readonly head: string }> = []
   const comments = new Map<number, Array<Comment>>()
   const uploaded: Array<{ readonly name: string; readonly mediaType: string; readonly bytes: number; readonly url: string }> = []
   const reviews = new Map<number, Array<Review>>()
@@ -529,6 +548,29 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
         if (!deleted.includes(change.number)) deleted.push(change.number)
         return Effect.void
+      }),
+    updateBranch: (_repository, change, ask) =>
+      Effect.andThen(called('updateBranch'), (): Effect.Effect<BranchUpdate, ConnectorFailed> => {
+        const now = changeNumbered(change.number)
+        if (now.state !== 'open') return Effect.fail(notOpen(product, service.words, change.number, now.state))
+        // A push since the caller read it: never merged unseen, or overwritten.
+        const head = options.headOf?.(change.number) ?? now.headSha
+        if (head !== ask.expectedHead) return Effect.succeed({ outcome: 'moved', head } as const)
+        // A branch from a fork is the author's: the account pushes to it only where they allowed it.
+        if (forks.has(change.number) && !pushable.has(change.number))
+          return Effect.succeed({
+            outcome: 'no_access',
+            reason: `The account may not push to ${now.source} on the author’s fork.`,
+          } as const)
+        const behindBy = behind.get(change.number)
+        if (behindBy === undefined || behindBy.commits === 0) return Effect.succeed({ outcome: 'current' } as const)
+        if (behindBy.conflicts.length > 0) return Effect.succeed({ outcome: 'conflict', files: behindBy.conflicts } as const)
+        const merged = `merge-${change.number}-${updated.length + 1}`
+        update(change.number, { headSha: merged })
+        behind.delete(change.number)
+        updated.push({ number: change.number, head: merged })
+        // GitHub merges in the background and says only that it will; the others, in a copy, know the commit they pushed.
+        return Effect.succeed({ outcome: 'updated', head: product === 'github' ? null : merged } as const)
       }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
@@ -966,6 +1008,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       if (input.baseSha !== undefined) bases.set(number, input.baseSha)
       if (input.reviewers !== undefined) asked.set(number, input.reviewers)
       return opened
+    },
+    fallBehind: (number, conflicts = []) => {
+      changeNumbered(number)
+      behind.set(number, { commits: (behind.get(number)?.commits ?? 0) + 1, conflicts })
+    },
+    pushByHand: (number) => update(number, { headSha: `${changeNumbered(number).headSha ?? 'head'}-pushed` }),
+    allowForkPush: (number) => {
+      pushable.add(number)
+    },
+    get branchesUpdated() {
+      return [...updated]
     },
     get reviewsPosted() {
       return [...posted]

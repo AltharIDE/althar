@@ -1235,3 +1235,81 @@ describe('GitLab opening a closed merge request again, and running a pipeline’
     }),
   )
 })
+
+describe('GitLab bringing a merge request’s branch up to date', () => {
+  const MR = `${PROJECT}/merge_requests/12`
+  const merging = (routes: ReadonlyArray<Route>, merge: NonNullable<Parameters<typeof makeGitLab>[0]['merge']>) => {
+    const { fetch, sent } = stubFetch(routes)
+    return {
+      host: makeGitLab({
+        fetch,
+        apiUrl: `${API}/`,
+        webUrl: 'https://gitlab.com/',
+        credential: Effect.succeed({ kind: 'bearer', token: 'glpat-t' }),
+        merge,
+      }),
+      sent,
+    }
+  }
+  const sha = 'a4f0330b1b8cfb0a3392696524005025d3342099'
+  const seen = (into: Array<string>) => (merge: Parameters<NonNullable<Parameters<typeof makeGitLab>[0]['merge']>>[0]) => {
+    into.push(`${merge.into.target.url} ${merge.into.branch}@${merge.into.head} <- ${merge.from.branch}`)
+    return Effect.succeed({ outcome: 'updated', head: 'merged' } as const)
+  }
+
+  it.effect('merges the target in a copy and pushes it plainly, signed in as GitLab’s git is, and never calls its rebase', () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = []
+      const { host, sent } = merging([['GET', MR, { json: request() }]], seen(calls))
+      assert.deepStrictEqual(yield* host.updateBranch(repository, change, { expectedHead: sha }), { outcome: 'updated', head: 'merged' })
+      assert.deepStrictEqual(calls, [`https://gitlab.com/meridian/payments/api.git althar/mer-231@${sha} <- main`])
+      assert.deepStrictEqual(
+        sent.map((one) => `${one.method} ${one.url}`),
+        [`GET ${MR}`],
+      )
+    }),
+  )
+
+  it.effect('pushes a fork’s branch to the fork, and passes on what the fork’s refusal says', () =>
+    Effect.gen(function* () {
+      const { host } = merging(
+        [
+          ['GET', MR, { json: request({ source_project_id: 99, target_project_id: 34675721 }) }],
+          [
+            'GET',
+            `${API}/projects/99`,
+            { json: { id: 99, path_with_namespace: 'stranger/api', web_url: 'https://gitlab.com/stranger/api' } },
+          ],
+        ],
+        (merge) =>
+          Effect.succeed(
+            merge.into.target.url.includes('stranger/api')
+              ? { outcome: 'refused', message: 'remote: You are not allowed to push code to this project.' }
+              : { outcome: 'updated', head: 'wrong' },
+          ),
+      )
+      assert.deepStrictEqual(yield* host.updateBranch(repository, change, { expectedHead: sha }), {
+        outcome: 'no_access',
+        reason: 'remote: You are not allowed to push code to this project.',
+      })
+    }),
+  )
+
+  it.effect('says a fork that is gone has no branch, and leaves a moved branch or a closed request', () =>
+    Effect.gen(function* () {
+      const never = () => Effect.die('merged')
+      const gone = merging(
+        [
+          ['GET', MR, { json: request({ source_project_id: 99, target_project_id: 34675721 }) }],
+          ['GET', `${API}/projects/99`, { status: 404, json: { message: '404 Project Not Found' } }],
+        ],
+        never,
+      )
+      assert.strictEqual((yield* gone.host.updateBranch(repository, change, { expectedHead: sha })).outcome, 'no_access')
+      const moved = merging([['GET', MR, { json: request({ sha: 'newer' }) }]], never)
+      assert.deepStrictEqual(yield* moved.host.updateBranch(repository, change, { expectedHead: sha }), { outcome: 'moved', head: 'newer' })
+      const closed = merging([['GET', MR, { json: request({ state: 'closed' }) }]], never)
+      assert.deepInclude(yield* Effect.flip(closed.host.updateBranch(repository, change, { expectedHead: sha })), { reason: 'rejected' })
+    }),
+  )
+})

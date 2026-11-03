@@ -4,6 +4,7 @@ import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
+import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { tail } from './github'
@@ -562,6 +563,25 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       )
     })
 
+  /** The fork a merge request's branch is on, by its path; none where it is gone, and undefined where it is the project's own. */
+  const forkOf = (request: MergeAnswer) =>
+    request.source_project_id === undefined || request.source_project_id === request.target_project_id
+      ? Effect.succeed(undefined)
+      : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+          Effect.map((answer) => answer.path_with_namespace.split('/')),
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.succeed([]),
+          ),
+        )
+
+  const pushTarget = (repository: Repository) =>
+    Effect.map(options.credential, (credential) => ({
+      url: `${web}/${repository.path.join('/')}.git`,
+      // GitLab takes an OAuth token, or a personal one, as the password of the user `oauth2`.
+      header: `Authorization: Basic ${Buffer.from(`oauth2:${credential.token}`).toString('base64')}`,
+    }))
+
   return {
     product,
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
@@ -614,17 +634,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
         const size = yield* sizeOf(repository, request)
-        // The fork its branch is on, by its path; none where it is gone.
-        const fork =
-          request.source_project_id === undefined || request.source_project_id === request.target_project_id
-            ? undefined
-            : yield* http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
-                Effect.map((answer) => answer.path_with_namespace.split('/')),
-                Effect.catchIf(
-                  (error) => error.reason === 'not_found',
-                  () => Effect.succeed([]),
-                ),
-              )
+        const fork = yield* forkOf(request)
         const change = fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
         return size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
@@ -711,6 +721,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             () => Effect.void,
           ),
         )
+      }),
+    updateBranch: (repository, change, ask) =>
+      updateInCopy({
+        product,
+        words: { noun: 'merge request', short: 'MR', prefix: '!' },
+        repository,
+        change,
+        expectedHead: ask.expectedHead,
+        read: Effect.gen(function* () {
+          const request = yield* read(repository, change.number)
+          const fork = yield* forkOf(request)
+          return fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
+        }),
+        fork: (path) => Effect.succeed({ ...repository, path }),
+        pushTarget,
+        ...(options.merge === undefined ? {} : { merge: options.merge }),
       }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
@@ -838,12 +864,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     // Reviews of a change Althar didn't open are GitHub's alone, for now.
     changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
     postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
-    pushTarget: (repository) =>
-      Effect.map(options.credential, (credential) => ({
-        url: `${web}/${repository.path.join('/')}.git`,
-        // GitLab takes an OAuth token, or a personal one, as the password of the user `oauth2`.
-        header: `Authorization: Basic ${Buffer.from(`oauth2:${credential.token}`).toString('base64')}`,
-      })),
+    pushTarget,
     issue: (ref) =>
       Effect.gen(function* () {
         const { path, number } = yield* parseRef(ref)
