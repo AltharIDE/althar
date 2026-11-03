@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { CODEX } from '../../fixtures/models'
+import { UsageLines } from '../../outputs/Usage/Usage'
 import { States, statesParameters } from '../../storybook/States'
 import { ContextRing } from './ContextRing'
 
@@ -47,6 +49,34 @@ export const WithCompact: Story = {
     await expect(ring).not.toHaveFocus()
     await userEvent.click(within(panel).getByRole('button', { name: 'Compact' }))
     await expect(args.onCompact).toHaveBeenCalledOnce()
+  },
+}
+/** Under the context, what the task so far used of each account: the share of a plan's week, the dollars of a credit. */
+export const WithUsage: Story = {
+  args: {
+    defaultOpen: true,
+    usage: (
+      <UsageLines
+        heading="This task so far"
+        lines={[
+          {
+            id: 'max',
+            name: 'Claude Code Max',
+            mark: Brand.ClaudeCode,
+            took: 8.2,
+            estimated: true,
+            models: ['Claude Opus 5'],
+            tokens: 13_400_000,
+          },
+          { id: 'zen', name: 'OpenCode', mark: Brand.OpenCode, spent: 1.24, models: ['DeepSeek V3.2'], tokens: 2_100_000 },
+        ]}
+      />
+    ),
+  },
+  play: async () => {
+    const panel = within(document.body).getByRole('dialog', { name: 'Context' })
+    await expect(within(panel).getByText('~8% of week')).toBeInTheDocument()
+    await expect(within(panel).getByText('$1.24')).toBeInTheDocument()
   },
 }
 /** Asked for and not yet done: Compact is off, and says so. */

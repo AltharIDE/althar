@@ -11,6 +11,8 @@ export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
 export interface SignInCheck {
   readonly status: SignInStatus
   readonly paidBy: PaidBy | 'unknown'
+  /** For an agent with a sign-in for each provider it reaches: the providers it lists as signed in. */
+  readonly providers?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
 }
 
 /**
@@ -39,10 +41,12 @@ export const signInCheck = (
         const output = `${stdout}\n${stderr}`
         if (fallback !== undefined && agent.signIn.statusRejected?.(output, exitCode) === true) return run(fallback, undefined)
         const signedIn = agent.signIn.read(output, exitCode)
+        const providers = agent.signIn.providers?.read(output) ?? []
         resume(
           Effect.succeed({
             status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
             paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
+            ...(providers.length === 0 ? {} : { providers }),
           }),
         )
       })

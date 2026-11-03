@@ -595,12 +595,14 @@ export enum RepositoryRole {
   Other = 'other',
 }
 
-/** Where a fork's tasks open their pull requests. */
+/** Where a fork's tasks' work goes. */
 export enum ChangeTarget {
-  /** On the repository it was forked from. */
+  /** Pull requests on the repository it was forked from, from the fork's branches. */
   Upstream = 'upstream',
-  /** On the fork itself. */
+  /** Branches and pull requests on the fork itself. */
   Fork = 'fork',
+  /** Branches and pull requests on the repository it was forked from, where the person can push there. */
+  UpstreamBranch = 'upstream_branch',
 }
 
 /** Whether Althar reaches the code host a repository's work goes to, as the person's sign-in there stands. */

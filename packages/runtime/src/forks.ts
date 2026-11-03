@@ -25,3 +25,25 @@ export const forkOf = (remotes: ReadonlyArray<{ readonly name: string; readonly 
   if (own.path.join('/').toLowerCase() === from.path.join('/').toLowerCase()) return null
   return { fork: { url: origin.url, path: own.path }, upstream: { url: upstream.url, path: from.path } }
 }
+
+/**
+ * Where a repository's work goes, best first: its `origin` as its clone has
+ * it now, then the rest it was added with. `git remote -v` lists remotes by
+ * name, so a clone whose remotes were renamed by hand, the repository it was
+ * forked from as `origin` and the fork as `fork`, would otherwise have the
+ * fork first; it is no fork Althar can tell, and its work goes to `origin`.
+ */
+export const workRemotes = (
+  remotes: ReadonlyArray<{ readonly name: string; readonly url: string }>,
+  recorded: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const origin = remotes.find((remote) => remote.name === 'origin')?.url
+  return origin === undefined ? recorded : [origin, ...recorded.filter((url) => url !== origin)]
+}
+
+/**
+ * The branch a task's base names on the repository: `origin/…` or `upstream/…`
+ * as its clone's remotes had it when the task started, which a rename by hand
+ * since hasn't changed. A branch of the clone's own called that stays as it is.
+ */
+export const baseBranch = (baseRef: string, local: boolean) => (local ? baseRef : baseRef.replace(/^(origin|upstream)\//, ''))

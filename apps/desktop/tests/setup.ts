@@ -8,6 +8,7 @@ import { welcome } from '../src/renderer/features/start/welcome'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
+import { forgetUsageOpen } from '../src/renderer/shared/usage'
 
 /*
  * A findBy or waitFor gives up where every other wait does, near the test's own time (@althar/testing), not after
@@ -57,6 +58,7 @@ if (typeof window !== 'undefined') {
     forgetDrafts()
     forgetSessions()
     forgetHiddenCards()
+    forgetUsageOpen()
     welcome.end()
   })
 }

@@ -177,9 +177,7 @@ function ConnectingHere({ connecting, back, onClose }: { connecting: Connecting;
   return (
     <div className={s.here}>
       <LinkButton onClick={onClose}>{back}</LinkButton>
-      <div className={s.card}>
-        <ConnectFlow model={flow} />
-      </div>
+      <ConnectFlow model={flow} align="start" />
     </div>
   )
 }

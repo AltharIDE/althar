@@ -44,7 +44,7 @@ describe('the models every agent offers', () => {
       via: 'via Claude Code',
     })
     expect(catalog.runtimes).toEqual([
-      { id: 'claude-code', name: 'Claude Code', how: 'signed in', brand: Brand.ClaudeCode },
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode },
       { id: 'codex', name: 'Codex', how: 'this Mac', brand: Brand.Codex },
     ])
     expect(choiceOf(keyOf('opencode', 'anthropic/claude-sonnet:thinking'))).toEqual({
@@ -122,7 +122,7 @@ describe('the models every agent offers', () => {
     expect([named('opencode:local')?.efforts, named('opencode:v2')?.efforts]).toEqual([['Extra high'], []])
     expect([effortName(both, 'opencode:local', 'xhigh'), effortId(both, 'opencode:local', 'Extra high')]).toEqual(['Extra high', 'xhigh'])
     expect([effortName(both, 'opencode:v2', 'xhigh'), effortId(both, 'opencode:v2', 'Extra high')]).toEqual([null, 'Extra high'])
-    expect(both.runtimes.at(-1)).toEqual({ id: 'opencode', name: 'OpenCode', how: 'signed in' })
+    expect(both.runtimes.at(-1)).toEqual({ id: 'opencode', name: 'OpenCode' })
     expect([makerOf('opencode', 'gemini-3-pro'), makerOf('opencode', 'o4-mini'), makerOf('codex', 'whatever')]).toEqual([
       Brand.Google,
       Brand.OpenAI,

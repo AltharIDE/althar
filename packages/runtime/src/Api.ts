@@ -22,7 +22,7 @@ import {
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Context, Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Cause, Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -32,7 +32,7 @@ import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { Changes } from './Changes'
 import { codeRootOf } from './code'
-import { NotFound } from './errors'
+import { NotFound, ProjectRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
@@ -58,7 +58,6 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
-  changesIssues,
   Policies,
   type ProjectRules,
   resolvesConflicts,
@@ -112,7 +111,23 @@ const FEED_FALLBACK = '1 second'
 /** How many session commands' results are kept for retries, per launch. */
 const RECENT_COMMANDS = 1_000
 
+/** How long what a host said about who can push to a repository is kept: opening a project again soon after doesn't ask again. */
+const PUSHABLE_KEPT = 5 * 60_000
+
+/** How long a repository's page waits for a host to say who can push: it reads on without. */
+const PUSHABLE_WAIT = Duration.seconds(5)
+
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
+/** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
+export const text = {
+  issuesAtOnce: 'From now on, file and change issues at once, without a card for me first. Keep that as a note.',
+  issuesAskFirst: 'From now on, ask me first: each issue, and each change to one, as a card for me to file or apply. Keep that as a note.',
+  leadIssuesAtOnce:
+    'The person wants issues filed and changed at once from now on: use draft_issue’s file_now and change_issue’s at_once. Each card is the record of it.',
+  leadIssuesAskFirst:
+    'The person wants to be asked first from now on: each issue, and each change to one, as a card for them to file or apply.',
+}
+
 const realpathOf = (path: string) => {
   try {
     return realpathSync(path)
@@ -305,13 +320,52 @@ export const handlers = Api.toLayer(
       workspace: info.workspace,
     })
 
+    /** What a host last said about who can push where, by the repository's address, and when it said it. */
+    const pushable = new Map<string, { readonly at: number; readonly can: boolean }>()
+
+    /**
+     * Whether the person can push to a repository, as its host says through
+     * the connection that reaches it (ADR-085): asked as a project's
+     * repositories are read, and kept a few minutes, so opening the project
+     * again doesn't ask again; `fresh` asks now. Null where no connection
+     * reaches it, or the host couldn't say.
+     */
+    const canPushTo = (url: string, fresh = false) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        const kept = pushable.get(url)
+        if (!fresh && kept !== undefined && now - kept.at < PUSHABLE_KEPT) return kept.can
+        const found = yield* Effect.orElseSucceed(connections.hostOf([url]), () => null)
+        if (found === null) return null
+        // Read as the repositories' page is: a host that doesn't answer soon doesn't hold it up.
+        const can = yield* found.host.repository(found.path).pipe(
+          Effect.map((repository) => repository.canPush),
+          Effect.timeout(PUSHABLE_WAIT),
+          Effect.orElseSucceed(() => null),
+        )
+        if (can !== null) pushable.set(url, { at: now, can })
+        return can
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
-     * as; a host it doesn't know by its address alone.
+     * as; a host it doesn't know by its address alone. A fork says whether
+     * the person can push to the repository it was forked from, and offers
+     * once to push its tasks' branches there, once they can.
      */
-    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+    const repositoryOf = ({ remote, fork: forked, ...repository }: ProjectRepository) =>
       Effect.gen(function* () {
+        const fork =
+          forked === null
+            ? null
+            : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
+                fork: forked.fork,
+                upstream: forked.upstream,
+                target: forked.target,
+                canPush,
+                offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
+              }))
         const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
         const path = place?.path.join('/')
         const host =
@@ -325,7 +379,7 @@ export const handlers = Api.toLayer(
                 url: place.url,
                 account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
               }
-        return { ...repository, host }
+        return { ...repository, fork, host }
       })
 
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
@@ -394,7 +448,6 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
-        changeIssues: changesIssues(rules),
       }
     }
 
@@ -403,6 +456,7 @@ export const handlers = Api.toLayer(
       Effect.gen(function* () {
         const check = yield* signIns.account(account, recheck)
         const out = yield* limits.outAccount(account.id)
+        const providers = yield* signIns.providers(account, check)
         return {
           id: account.id,
           name: account.name,
@@ -411,6 +465,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
         contained(
@@ -714,17 +769,28 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, setup }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.set_repository', { projectId, repositoryId, role, changeTarget, setup }, commandId)
+              const said = yield* envelope(
+                'project.set_repository',
+                { projectId, repositoryId, role, changeTarget, notNow, setup },
+                commandId,
+              )
+              // Its branches go upstream only where its host says now that the person can push there.
+              if (changeTarget === 'upstream_branch') {
+                const fork = (yield* projects.repositories(projectId)).find((one) => one.id === repositoryId)?.fork ?? null
+                if (fork !== null && (yield* canPushTo(fork.upstreamUrl, true)) !== true)
+                  return yield* new ProjectRefused({ reason: 'no_upstream_access' })
+              }
               yield* projects.setRepository({
                 projectId,
                 repositoryId,
                 ...(role === undefined ? {} : { role }),
                 ...(changeTarget === undefined ? {} : { changeTarget }),
+                ...(notNow === undefined ? {} : { notNow }),
                 ...(setup === undefined ? {} : { setup }),
                 commandId: said.commandId,
               })
@@ -1109,6 +1175,45 @@ export const handlers = Api.toLayer(
       ApplyIssueChanges: ({ commandId, changesId }) =>
         once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, instance.personId)))),
       DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, instance.personId))),
+      PreferIssueCards: ({ commandId, threadId, atOnce }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              // Said to the coordinator as the person said it, from an issue's card: it keeps it as one of the project's notes.
+              const [thread] = yield* sql<{ projectId: string; kind: string; taskId: string | null }>`
+                SELECT project_id, kind, task_id FROM threads WHERE id = ${threadId}`
+              if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
+              const [home] = yield* sql<{ id: string }>`
+                SELECT id FROM threads WHERE project_id = ${thread.projectId} AND kind = 'coordinator' LIMIT 1`
+              if (home === undefined) return yield* new NotFound({ kind: 'coordinator thread', id: thread.projectId })
+              const body = atOnce ? text.issuesAtOnce : text.issuesAskFirst
+              yield* coordinator.say({
+                envelope: yield* envelope('thread.send', { threadId: home.id, body, disposition: 'after_current' }, commandId),
+                threadId: home.id,
+                body,
+                disposition: 'after_current',
+                sender,
+              })
+              // A task's lead, where it was said on its card, hears it now: its brief had the notes as they were.
+              if (thread.kind === 'task' && thread.taskId !== null) {
+                const [open] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${thread.taskId} AND state = 'open'`
+                if (open !== undefined)
+                  yield* sessions.send({
+                    envelope: yield* Effect.provideContext(
+                      Runtime.envelope('thread.send', { threadId, preferIssueCards: atOnce }, undefined, instance.systemId),
+                      context,
+                    ),
+                    threadId,
+                    body: atOnce ? text.leadIssuesAtOnce : text.leadIssuesAskFirst,
+                    disposition: 'after_current',
+                    quiet: true,
+                  })
+              }
+            }),
+          ),
+        ),
+      SetTaskIssuePart: ({ commandId, taskId, partOf }) => once(commandId, api(issues.setPart(taskId, partOf))),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,

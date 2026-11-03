@@ -41,11 +41,14 @@ export const text = {
   /** The welcome, in this computer's words, with the keys this system has. */
   first: () => ({
     welcome: {
-      agents: { ...welcomeText.agents, list: `Agents on ${device.this}`, noneHere: `None on ${device.this} yet` },
+      agents: { ...welcomeText.agents, here: `On ${device.this}`, list: `Agents on ${device.this}` },
       project: { ...welcomeText.project, makeKbd: modKey(keys.return) },
     },
     away: { title: `Not on ${device.this}`, label: `Agents not on ${device.this}` },
-    repositories: { add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') } },
+    repositories: {
+      find: `Find a repository on ${device.this}`,
+      add: { title: 'Choose a folder…', note: 'or drop one here', kbd: modKey('N') },
+    },
     runtimes: { missing: `Not installed on ${device.this}` },
   }),
 }
@@ -211,7 +214,7 @@ function First({
   // with no projects read, because the runtime didn't answer, it isn't a first run: it starts on the agents, where that
   // is said, with no tour.
   const [seen] = useState(() => toured() || model.projects === null)
-  const [step, setStep] = useState<WelcomeStep>(seen ? 'agents' : 'ask')
+  const [step, setStep] = useState<WelcomeStep>(seen ? 'agents' : 'projects')
   const [made, setMade] = useState<ProjectSummary | null>(null)
   const firstRun = model.projects !== null && model.projects.length === 0
   // A first run's welcome stays on show until its last step opens the project made on its way.
@@ -234,7 +237,7 @@ function First({
     onProject(made.id)
   }
 
-  // ⌘N adds a folder, ⌘↵ makes the project, on its step, as the screen says; Ctrl off a Mac. Keys typed into an account's
+  // ⌘N chooses a folder, ⌘↵ makes the project, on its step, as the screen says; Ctrl off a Mac. Keys typed into an account's
   // form, or into what is open over the screen, are theirs.
   useEffect(() => {
     if (step !== 'project' || made !== null) return

@@ -210,3 +210,54 @@ describe('handing a lead to a fresh session', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 })
+
+describe('a session its agent has lost', () => {
+  // Claude Code's adapter drops a session whose process died (a `pkill -f` matched it, on 2 November 2026), and answers its
+  // next prompt with "Resource not found": the turn is given to a fresh session, briefed from the task, not failed.
+  it.live('starts the lead afresh with what the person said, rather than fail the turn', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:finish]')
+      yield* finished(task.threadId)
+
+      yield* say(task.threadId, 'Look again. [lead:lost-once]')
+      const [old, fresh] = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      assert.strictEqual(old?.state, 'superseded')
+      assert.deepStrictEqual([fresh?.agentId, fresh?.accountId], [old?.agentId, old?.accountId])
+      const [, lost, first] = yield* until(prompts(task.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
+      assert.deepStrictEqual([lost?.providerSessionId, lost?.state], [old?.id, 'failed'])
+      const [failed] = yield* sql<{ errorClass: string | null }>`
+        SELECT error_class FROM turn_deliveries WHERE thread_id = ${task.threadId} AND state = 'failed'`
+      assert.strictEqual(failed?.errorClass, 'session_lost')
+      // What the person said goes to the fresh session, after its brief.
+      assert.strictEqual(first?.providerSessionId, fresh?.id)
+      assert.match(
+        first?.prompt ?? '',
+        /^You are carrying on a task an earlier session of yours worked on, in the same worktree: Althar started you afresh because that session was lost\./,
+      )
+      assert.match(first?.prompt ?? '', /\n\nLook again\. \[lead:lost-once\]$/)
+      // Said plainly, once, and not as a turn that couldn't answer.
+      const said = yield* titles(task.threadId)
+      assert.include(said, 'Fake codex had lost this conversation. Started it afresh.')
+      assert.isFalse(said.some((title) => title?.includes("couldn't answer") === true))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('carries a step on from its first turn, the fresh session briefed with it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Do it. [lead:lost-once] [lead:finish]')
+      const [, fresh] = yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
+      yield* until(sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE provider_session_id = ${fresh?.id ?? ''}`, (rows) =>
+        rows.some((row) => row.state === 'completed'),
+      )
+      const [step] = yield* until(sql<{ state: string }>`SELECT state FROM nodes WHERE node_key = 'implement'`, (rows) =>
+        rows.some((row) => row.state !== 'running' && row.state !== 'ready' && row.state !== 'pending'),
+      )
+      assert.strictEqual(step?.state, 'succeeded')
+      assert.include(yield* titles(task.threadId), 'Fake codex had lost this conversation. Started it afresh.')
+    }).pipe(Effect.provide(withQueries())),
+  )
+})

@@ -56,6 +56,7 @@ import type { ConnectionsModel } from '../connections/useConnections'
 import { ProjectSettingsPage } from '../projectSettings/ProjectSettingsPage'
 import { FIRST_PROJECT_SECTION, type ProjectSection } from '../projectSettings/sections'
 import { connectionsNeedYou } from '../projectSettings/standing'
+import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
@@ -96,6 +97,8 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  /** Whose usage the composer's ring says, under the context. */
+  usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
@@ -262,6 +265,7 @@ export function ProjectView({
   const coordinator = model.coordinator
   // Every run in the project, the tasks' too, each saying where, over the composer.
   const launches = coordinator?.launches ?? []
+  const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   const now = useNow(
     (coordinator?.session?.turnRunning ?? false) ||
@@ -307,10 +311,12 @@ export function ProjectView({
     onFile: (draftId) => void model.fileIssueDraft(draftId),
     onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
   const changesActions: ChangesActions = {
     onApply: (changesId) => void model.applyIssueChanges(changesId),
     onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
 
   // The agent what the person says goes to, and whether it takes images.
@@ -403,17 +409,22 @@ export function ProjectView({
           ) : null
         }
         above={
-          launches.length > 0 && (
-            <Running
-              processes={runningOf(launches, now, { where: true })}
-              onStop={(id) => void model.stopLaunch(id)}
-              onDismiss={(id) => void model.clearLaunch(id)}
-              // Where it answers opens in the person's browser.
-              onOpenUrl={(id) => {
-                const url = launches.find((launch) => launch.id === id)?.url
-                if (url != null) window.open(url, '_blank')
-              }}
-            />
+          (offer.offering !== null || launches.length > 0) && (
+            <>
+              <ForkOffer offer={offer} />
+              {launches.length > 0 && (
+                <Running
+                  processes={runningOf(launches, now, { where: true })}
+                  onStop={(id) => void model.stopLaunch(id)}
+                  onDismiss={(id) => void model.clearLaunch(id)}
+                  // Where it answers opens in the person's browser.
+                  onOpenUrl={(id) => {
+                    const url = launches.find((launch) => launch.id === id)?.url
+                    if (url != null) window.open(url, '_blank')
+                  }}
+                />
+              )}
+            </>
           )
         }
         onSubmit={(body) => send(body, false)}
@@ -427,7 +438,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact)}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (

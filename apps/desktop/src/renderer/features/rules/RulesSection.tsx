@@ -9,7 +9,18 @@ import {
   type SandboxEdits,
   type TallyKind,
 } from '@althar/contracts'
-import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
+import {
+  CommandMatch,
+  LimitPolicy,
+  PermissionPolicy,
+  RuleKind,
+  RulePlace,
+  SettingGroup,
+  SettingList,
+  SettingSwitch,
+  TaskEnd,
+  unreachable,
+} from '@althar/ui'
 import {
   type CommandPlace,
   ProjectRules,
@@ -31,10 +42,19 @@ import type { RulesModel } from './useRules'
  * them; how a task ends and is named; and what a usage limit does, with the
  * accounts work runs on. A kind of request sits in one sentence: moving it
  * writes it on one list and takes it off the others. The section names
- * them, so the charter has only its key above it.
+ * them, so the charter has only its key above it. Above it, what agents may
+ * do without asking that isn't a request the charter sorts: reaching the
+ * web, a switch with a line on what it lets through. Whether issues are
+ * filed and changed at once isn't a switch: it is what the person says, on
+ * an issue's card or to the coordinator, kept as a project note (DEV-182).
  */
 
 export const text = {
+  mayTitle: 'Agents may',
+  leadsReachWeb: {
+    title: 'Leads can reach the web',
+    line: 'Search and read websites without asking. Pages could steer a lead into sending private code in a URL. Outside pull request reviews stay offline. Applies to new sessions.',
+  },
   /** Why a command can't go ahead: a sentence that comes first has it. */
   onOtherList: (pattern: string, list: 'ask' | 'never') => {
     const named = list === 'never' ? 'Never' : 'Ask me'
@@ -54,7 +74,11 @@ export const text = {
       .replace(/[^a-z]/gi, '')
       .slice(0, 3)
       .toUpperCase()
-    return { key: `${letters.length < 2 ? 'PROJ' : letters}-128`, slug: 'fix-login', title: 'Fix login' }
+    return {
+      key: `${letters.length < 2 ? 'PROJ' : letters}-128`,
+      slug: 'fix-login',
+      title: 'Fix login',
+    }
   },
   /** The modes as a new project offers them, before its rules are read as sentences. */
   permission: {
@@ -264,7 +288,9 @@ const sandboxEntryOf = (list: SandboxList, typed: string): { readonly value: str
   const value = list === 'hosts' ? hostOf(typed) : commandStartOf(typed)
   if (value !== null) return { value }
   if (list === 'commands') return { problem: runsOutside(typed) ? text.noCommand : text.bunStays }
-  return { problem: typed.includes('*') ? text.wildHost : text.notAHost(typed) }
+  return {
+    problem: typed.includes('*') ? text.wildHost : text.notAHost(typed),
+  }
 }
 
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */
@@ -272,7 +298,11 @@ export const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
 
 /** What each repository's docs say of a kind of name. */
 const namingOf = (rules: ProjectRulesView, kind: 'branch' | 'title') =>
-  rules.conventions.map((repository) => ({ id: repository.repository, name: repository.repository, found: repository[kind] }))
+  rules.conventions.map((repository) => ({
+    id: repository.repository,
+    name: repository.repository,
+    found: repository[kind],
+  }))
 
 /** The agents with more than one account, as the accounts are said. */
 export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
@@ -281,7 +311,10 @@ export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
     .map((agent) => ({
       id: agent.id,
       name: agent.name,
-      accounts: agent.accounts.map((account) => ({ id: account.id, label: account.name })),
+      accounts: agent.accounts.map((account) => ({
+        id: account.id,
+        label: account.name,
+      })),
     }))
 
 export function RulesSection({ model }: { model: RulesModel }) {
@@ -298,81 +331,110 @@ export function RulesSection({ model }: { model: RulesModel }) {
       {rules === null ? (
         <PartPending label={pendingText.page} />
       ) : (
-        <ProjectRules
-          project={project}
-          titled={false}
-          headingLevel={HEADING.title}
-          mode={modeOf(rules.permissions)}
-          onModeChange={(mode) => model.change({ permissions: permissionsOf(mode) })}
-          allowAll={rules.allowEverything}
-          onAllowAllChange={(allowEverything) => model.change({ allowEverything })}
-          kinds={Object.fromEntries(KINDS.map((kind) => [kind, placeOf(rules, kind)])) as Record<RuleKind, RulePlace>}
-          onKindChange={(kind, place) => model.change((now) => listsWith(now, kind, place))}
-          commands={commandsOf(rules)}
-          onRemoveCommand={(id) => model.change((now) => ({ commands: now.commands.filter((rule) => commandId(rule) !== id) }))}
-          onAddCommand={(place, pattern, match) => {
-            // Said at once against the rules shown; kept against the rules as they are when it is saved.
-            const added = withCommand(rules, place, pattern, match)
-            if (added === null) return undefined
-            if ('problem' in added) return added.problem
-            model.change((now) => {
-              const again = withCommand(now, place, pattern, match)
-              return again === null || 'problem' in again ? null : { commands: again.commands }
-            })
-            return undefined
-          }}
-          end={endOf(rules.end)}
-          onEndChange={(end) => model.change({ end: endsAs(end) })}
-          branches={{
-            value: rules.branchPattern,
-            onChange: (pattern) => model.setPattern('branch', pattern),
-            error: model.patternErrors.branch,
-            exampleOf: (pattern) => fillPattern(pattern, example),
-            fallback: OWN.branch,
-            repositories: namingOf(rules, 'branch'),
-          }}
-          titles={{
-            value: rules.titlePattern,
-            onChange: (pattern) => model.setPattern('title', pattern),
-            error: model.patternErrors.title,
-            exampleOf: (pattern) => fillPattern(pattern, example),
-            fallback: OWN.title,
-            repositories: namingOf(rules, 'title'),
-          }}
-          templates={rules.conventions.map((repository) => ({
-            id: repository.repository,
-            name: repository.repository,
-            path: repository.template,
-          }))}
-          limit={limitOf(rules.usageLimit)}
-          onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
-          agentAccounts={agentAccountsOf(model.agents)}
-          rotate={rules.rotateAccounts}
-          onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
-          allowed={rules.onlyAccounts ?? {}}
-          onAllowedChange={(agentId, ids) => {
-            const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
-            model.change((now) => {
-              const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
-              const only = ids.length === every ? others : { ...others, [agentId]: ids }
-              return { onlyAccounts: Object.keys(only).length === 0 ? null : only }
-            })
-          }}
-          sandbox={{
-            commands: rules.sandbox.commands,
-            hosts: rules.sandbox.hosts,
-            onAdd: (list, typed) => {
-              const entry = sandboxEntryOf(list, typed)
-              if ('problem' in entry) return entry.problem
-              if (rules.sandbox[list].includes(entry.value)) return undefined
-              model.change((now) => ({ sandbox: { [list]: sandboxEdited(now.sandbox.edits[list], entry.value, 'add') } }))
+        <>
+          <SettingGroup title={text.mayTitle} headingLevel={HEADING.part}>
+            <SettingList>
+              <SettingSwitch
+                title={text.leadsReachWeb.title}
+                note={text.leadsReachWeb.line}
+                checked={rules.leadsReachWeb}
+                onChange={(leadsReachWeb) => model.change({ leadsReachWeb })}
+              />
+            </SettingList>
+          </SettingGroup>
+          <ProjectRules
+            project={project}
+            titled={false}
+            headingLevel={HEADING.title}
+            mode={modeOf(rules.permissions)}
+            onModeChange={(mode) => model.change({ permissions: permissionsOf(mode) })}
+            allowAll={rules.allowEverything}
+            onAllowAllChange={(allowEverything) => model.change({ allowEverything })}
+            kinds={Object.fromEntries(KINDS.map((kind) => [kind, placeOf(rules, kind)])) as Record<RuleKind, RulePlace>}
+            onKindChange={(kind, place) => model.change((now) => listsWith(now, kind, place))}
+            commands={commandsOf(rules)}
+            onRemoveCommand={(id) =>
+              model.change((now) => ({
+                commands: now.commands.filter((rule) => commandId(rule) !== id),
+              }))
+            }
+            onAddCommand={(place, pattern, match) => {
+              // Said at once against the rules shown; kept against the rules as they are when it is saved.
+              const added = withCommand(rules, place, pattern, match)
+              if (added === null) return undefined
+              if ('problem' in added) return added.problem
+              model.change((now) => {
+                const again = withCommand(now, place, pattern, match)
+                return again === null || 'problem' in again ? null : { commands: again.commands }
+              })
               return undefined
-            },
-            onRemove: (list, value) =>
-              model.change((now) => ({ sandbox: { [list]: sandboxEdited(now.sandbox.edits[list], value, 'remove') } })),
-          }}
-          tally={rules.tally.map((each) => ({ ...each, kind: tallyKindOf(each.kind) }))}
-        />
+            }}
+            end={endOf(rules.end)}
+            onEndChange={(end) => model.change({ end: endsAs(end) })}
+            branches={{
+              value: rules.branchPattern,
+              onChange: (pattern) => model.setPattern('branch', pattern),
+              error: model.patternErrors.branch,
+              exampleOf: (pattern) => fillPattern(pattern, example),
+              fallback: OWN.branch,
+              repositories: namingOf(rules, 'branch'),
+            }}
+            titles={{
+              value: rules.titlePattern,
+              onChange: (pattern) => model.setPattern('title', pattern),
+              error: model.patternErrors.title,
+              exampleOf: (pattern) => fillPattern(pattern, example),
+              fallback: OWN.title,
+              repositories: namingOf(rules, 'title'),
+            }}
+            templates={rules.conventions.map((repository) => ({
+              id: repository.repository,
+              name: repository.repository,
+              path: repository.template,
+            }))}
+            limit={limitOf(rules.usageLimit)}
+            onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
+            agentAccounts={agentAccountsOf(model.agents)}
+            rotate={rules.rotateAccounts}
+            onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+            allowed={rules.onlyAccounts ?? {}}
+            onAllowedChange={(agentId, ids) => {
+              const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
+              model.change((now) => {
+                const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
+                const only = ids.length === every ? others : { ...others, [agentId]: ids }
+                return {
+                  onlyAccounts: Object.keys(only).length === 0 ? null : only,
+                }
+              })
+            }}
+            sandbox={{
+              commands: rules.sandbox.commands,
+              hosts: rules.sandbox.hosts,
+              onAdd: (list, typed) => {
+                const entry = sandboxEntryOf(list, typed)
+                if ('problem' in entry) return entry.problem
+                if (rules.sandbox[list].includes(entry.value)) return undefined
+                model.change((now) => ({
+                  sandbox: {
+                    [list]: sandboxEdited(now.sandbox.edits[list], entry.value, 'add'),
+                  },
+                }))
+                return undefined
+              },
+              onRemove: (list, value) =>
+                model.change((now) => ({
+                  sandbox: {
+                    [list]: sandboxEdited(now.sandbox.edits[list], value, 'remove'),
+                  },
+                })),
+            }}
+            tally={rules.tally.map((each) => ({
+              ...each,
+              kind: tallyKindOf(each.kind),
+            }))}
+          />
+        </>
       )}
     </>
   )

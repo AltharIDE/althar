@@ -91,7 +91,14 @@ test('closes from the first screen, before any project', async () => {
     // The close really closes: it is the last window and there is no project yet, so the app goes with it.
     const closed = new Promise<void>((resolve) => page.on('close', () => resolve()))
     const exited = new Promise<void>((resolve) => electronApp.process().once('exit', () => resolve()))
-    await page.getByRole('button', { name: 'Close the window' }).click()
+    // The launch's veil is decoration over the first screen until the launch has opened, then lets the pointer through.
+    // Waiting for that is waiting for the window to be usable, as a person waits for the launch to open.
+    await page.waitForFunction(() => {
+      const veil = document.querySelector('[class*="veil"]')
+      return veil === null || getComputedStyle(veil).pointerEvents === 'none'
+    })
+    // The window goes as it is clicked, so there is nothing after the click to wait for.
+    await page.getByRole('button', { name: 'Close the window' }).click({ noWaitAfter: true })
     await closed
     await exited
   } finally {

@@ -54,8 +54,11 @@ import { statements as decisionKind } from './0049_decision_kind'
 import { statements as moreInks } from './0050_more_inks'
 import { statements as pullRequestPictures } from './0051_pull_request_pictures'
 import { statements as onePressSettles } from './0052_one_press_settles'
-import { statements as personsWord } from './0054_persons_word'
 import { statements as recordedSetups } from './0053_recorded_setups'
+import { statements as personsWord } from './0054_persons_word'
+import { statements as upstreamBranches } from './0055_upstream_branches'
+import { statements as usage } from './0056_usage'
+import { statements as issueFields } from './0057_issue_fields'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -129,6 +132,9 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0052_one_press_settles', statements: onePressSettles },
   { key: '0053_recorded_setups', statements: recordedSetups },
   { key: '0054_persons_word', statements: personsWord },
+  { key: '0055_upstream_branches', statements: upstreamBranches },
+  { key: '0056_usage', statements: usage },
+  { key: '0057_issue_fields', statements: issueFields },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -1910,3 +1910,126 @@ describe('Bitbucket Data Center: reopening, and whose builds they are', () => {
     }),
   )
 })
+
+describe('Bitbucket bringing a pull request’s branch up to date', () => {
+  type Merge = NonNullable<Parameters<typeof makeBitbucketCloud>[0]['merge']>
+  const asked: Array<string> = []
+  const record: Merge = (merge) => {
+    asked.push(
+      `${merge.into.target.url} ${merge.into.branch}@${merge.into.head} <- ${merge.from.target.url} ${merge.from.branch} push=${merge.push}`,
+    )
+    return Effect.succeed({ outcome: 'updated', head: 'merged' })
+  }
+  const never: Merge = () => Effect.die('merged')
+  const cloudMerging = (routes: ReadonlyArray<Route>, merge: Merge) => {
+    const { fetch, sent } = stubFetch(routes)
+    return {
+      host: makeBitbucketCloud({
+        fetch,
+        apiUrl: CLOUD,
+        webUrl: 'https://bitbucket.org',
+        credential: Effect.succeed({ kind: 'bearer', token: 'ATCTT3x' }),
+        merge,
+      }),
+      sent,
+    }
+  }
+  const centerMerging = (routes: ReadonlyArray<Route>, merge: Merge) => {
+    const { fetch, sent } = stubFetch(routes)
+    return {
+      host: dc.makeBitbucketDataCenter({
+        fetch,
+        apiUrl: `${DC}/`,
+        webUrl: `${SERVER}/`,
+        credential: Effect.succeed({ kind: 'bearer', token: 'BBDC-t' }),
+        merge,
+      }),
+      sent,
+    }
+  }
+  const THEIRS = 'babecafebabecafebabecafebabecafebabecafe'
+
+  it.effect('Cloud merges master into the branch in a copy, pushed plainly, with nothing called but the read', () =>
+    Effect.gen(function* () {
+      asked.length = 0
+      const { host, sent } = cloudMerging([['GET', PR, { json: pull() }]], record)
+      assert.deepStrictEqual(yield* host.updateBranch(ace, yield* host.change(ace, 552), { expectedHead: '7f9d4e6279c8' }), {
+        outcome: 'updated',
+        head: 'merged',
+      })
+      assert.deepStrictEqual(asked, [
+        'https://bitbucket.org/atlassian/atlassian-connect-express.git ONECLOUD-13657/add-on-settings@7f9d4e6279c8 <- https://bitbucket.org/atlassian/atlassian-connect-express.git master push=true',
+      ])
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
+    }),
+  )
+
+  it.effect('Cloud pushes a fork’s branch to the fork, and leaves a moved branch, a gone fork and a declined pull request', () =>
+    Effect.gen(function* () {
+      const fork = cloudMerging(
+        [['GET', PR, { json: pull({ source: { ...pull().source, repository: { type: 'repository', full_name: 'stranger/ace' } } }) }]],
+        (merge) =>
+          Effect.succeed(
+            merge.into.target.url.endsWith('stranger/ace.git')
+              ? { outcome: 'refused', message: 'remote: Access denied' }
+              : { outcome: 'updated', head: 'wrong' },
+          ),
+      )
+      assert.deepStrictEqual(yield* fork.host.updateBranch(ace, yield* fork.host.change(ace, 552), { expectedHead: '7f9d4e6279c8' }), {
+        outcome: 'no_access',
+        reason: 'remote: Access denied',
+      })
+      const gone = cloudMerging([['GET', PR, { json: pull({ source: { ...pull().source, repository: null } }) }]], never)
+      assert.strictEqual(
+        (yield* gone.host.updateBranch(ace, yield* gone.host.change(ace, 552), { expectedHead: '7f9d4e6279c8' })).outcome,
+        'no_access',
+      )
+      const moved = cloudMerging(
+        [['GET', PR, { json: pull({ source: { ...pull().source, commit: { hash: 'ffffffffffff', type: 'commit' } } }) }]],
+        never,
+      )
+      assert.deepStrictEqual(yield* moved.host.updateBranch(ace, yield* moved.host.change(ace, 552), { expectedHead: '7f9d4e6279c8' }), {
+        outcome: 'moved',
+        head: 'ffffffffffff',
+      })
+      const declined = cloudMerging([['GET', PR, { json: pull({ state: 'DECLINED' }) }]], never)
+      assert.deepInclude(
+        yield* Effect.flip(declined.host.updateBranch(ace, yield* declined.host.change(ace, 552), { expectedHead: '7f9d4e6279c8' })),
+        { reason: 'rejected' },
+      )
+    }),
+  )
+
+  it.effect('Data Center merges in a copy by its own clone URL and bearer header, and a fork goes to the fork’s project', () =>
+    Effect.gen(function* () {
+      asked.length = 0
+      const own = centerMerging([['GET', PULL, { json: pr() }]], record)
+      assert.deepStrictEqual(yield* own.host.updateBranch(prj, yield* own.host.change(prj, 101), { expectedHead: THEIRS }), {
+        outcome: 'updated',
+        head: 'merged',
+      })
+      assert.deepStrictEqual(asked, [
+        `${SERVER}/scm/prj/my-repo.git feature-ABC-123@${THEIRS} <- ${SERVER}/scm/prj/my-repo.git master push=true`,
+      ])
+      const targets: Array<string> = []
+      const fork = centerMerging([['GET', PULL, { json: pr({ fromRef: ref('feature-ABC-123', THEIRS, '~STRANGER') }) }]], (merge) => {
+        targets.push(merge.into.target.url)
+        return Effect.succeed({ outcome: 'refused', message: 'remote: You do not have write permission' })
+      })
+      assert.strictEqual(
+        (yield* fork.host.updateBranch(prj, yield* fork.host.change(prj, 101), { expectedHead: THEIRS })).outcome,
+        'no_access',
+      )
+      assert.deepStrictEqual(targets, [`${SERVER}/scm/~stranger/my-repo.git`])
+      const moved = centerMerging([['GET', PULL, { json: pr({ fromRef: ref('feature-ABC-123', 'ffffffffffffffff') }) }]], never)
+      assert.deepStrictEqual(yield* moved.host.updateBranch(prj, yield* moved.host.change(prj, 101), { expectedHead: THEIRS }), {
+        outcome: 'moved',
+        head: 'ffffffffffffffff',
+      })
+      const merged = centerMerging([['GET', PULL, { json: pr({ state: 'MERGED' }) }]], never)
+      assert.deepInclude(yield* Effect.flip(merged.host.updateBranch(prj, yield* merged.host.change(prj, 101), { expectedHead: THEIRS })), {
+        reason: 'rejected',
+      })
+    }),
+  )
+})

@@ -17,8 +17,11 @@ export type RepositoryAccess = typeof RepositoryAccess.Type
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
 export type RepositoryRole = typeof RepositoryRole.Type
 
-/** Where a fork's tasks open their pull requests: on the repository it was forked from, or on the fork. */
-export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
+/**
+ * Where a fork's tasks' work goes: pull requests on the repository it was forked from, from the fork's branches; on the fork; or
+ * branches and pull requests both on the repository it was forked from, where the person can push there (ADR-085).
+ */
+export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branch'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
 export const LocationKind = Schema.Literals(['existing', 'managed'])

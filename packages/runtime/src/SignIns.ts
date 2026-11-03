@@ -47,6 +47,22 @@ export interface SignedIn {
 export const anyOf = (statuses: ReadonlyArray<SignInStatus>): SignInStatus =>
   statuses.includes('signed_in') ? 'signed_in' : statuses.includes('unknown') || statuses.length === 0 ? 'unknown' : 'signed_out'
 
+/**
+ * For each provider a model goes through, when its latest turn that said whether its sign-in works was refused, or null where it went
+ * through. `turns` are newest first; one cancelled or failed another way says nothing, and isn't among them.
+ */
+export const latestRefusals = (
+  turns: ReadonlyArray<{ readonly model: string; readonly endedAt: string; readonly errorClass: string | null }>,
+  providerOf: (model: string) => string | undefined,
+): ReadonlyMap<string, string | null> => {
+  const latest = new Map<string, string | null>()
+  for (const turn of turns) {
+    const id = providerOf(turn.model)
+    if (id !== undefined && !latest.has(id)) latest.set(id, turn.errorClass === 'auth_required' ? turn.endedAt : null)
+  }
+  return latest
+}
+
 export class SignIns extends Context.Service<
   SignIns,
   {
@@ -56,6 +72,14 @@ export class SignIns extends Context.Service<
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
     /** The agent's version as its copy says it, read again if older than a minute, or now with `recheck`; null where it doesn't say. */
     version(agentId: string, recheck?: boolean): Effect.Effect<string | null>
+    /**
+     * For an agent whose providers each have a sign-in (OpenCode): the ones its listing has as signed in, and any whose last turn
+     * was refused, when. A refusal is let go when a later turn on the provider went through, or its sign-in changed since.
+     */
+    providers(
+      account: Account,
+      check: SignInCheck,
+    ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null }> | undefined>
     /** Each agent as it is found signed in, or signed in, from now on. */
     readonly signedIn: Stream.Stream<SignedIn>
   }
@@ -117,6 +141,41 @@ export class SignIns extends Context.Service<
           }
           return yield* paid(of, checked)
         })
+      /** What an account's sign-in looked like when a refusal was first seen in Settings: another since means it was put right. */
+      const refusals = new Map<string, { readonly at: string; readonly connections: string }>()
+      const providers = (of: Account, check: SignInCheck) =>
+        Effect.gen(function* () {
+          const spec = agents.list.find((candidate) => candidate.definition.id === of.agentId)?.definition.signIn.providers
+          if (spec === undefined) return undefined
+          // The latest turn of each provider that said whether its sign-in works; a cancelled or failed-otherwise one says nothing.
+          const turns = yield* sql<{ model: string; endedAt: string; errorClass: string | null }>`
+            SELECT t.model, t.ended_at, t.error_class FROM turn_deliveries t
+            JOIN provider_sessions s ON s.id = t.provider_session_id
+            WHERE s.account_id = ${of.id} AND t.model IS NOT NULL AND t.ended_at IS NOT NULL
+              AND (t.error_class = 'auth_required' OR (t.error_class IS NULL AND t.state = 'completed'))
+            ORDER BY t.ended_at DESC LIMIT 300`.pipe(Effect.orElseSucceed(() => []))
+          const latest = latestRefusals(turns, spec.of)
+          const listed = check.providers ?? []
+          const refusedAt = (id: string): string | null => {
+            const at = latest.get(id) ?? null
+            const key = `${of.id}\u0000${id}`
+            if (at === null) {
+              refusals.delete(key)
+              return null
+            }
+            const connections = listed.find((each) => each.id === id)?.connections ?? ''
+            const seen = refusals.get(key)
+            if (seen === undefined || seen.at !== at) {
+              refusals.set(key, { at, connections })
+              return at
+            }
+            return seen.connections === connections ? at : null
+          }
+          const rows = listed.map((each) => ({ id: each.id, name: each.name, refusedAt: refusedAt(each.id) }))
+          // One refused whose sign-in is gone from the listing is still one to sign in to.
+          const gone = [...latest.keys()].filter((id) => !listed.some((each) => each.id === id))
+          return [...rows, ...gone.flatMap((id) => (refusedAt(id) === null ? [] : [{ id, name: id, refusedAt: latest.get(id) ?? null }]))]
+        })
       /** Each of the agent's accounts, checked; none where its accounts can't be read. */
       const checks = (agentId: string, recheck = false) =>
         accounts.of(agentId).pipe(
@@ -130,6 +189,7 @@ export class SignIns extends Context.Service<
           const entry = agents.list.find((candidate) => candidate.definition.id === agentId)
           return entry === undefined ? Effect.succeed(null) : versionOf(entry, recheck ? Duration.zero : TTL)
         },
+        providers,
         signedIn: Stream.fromPubSub(arrived),
       })
     }),

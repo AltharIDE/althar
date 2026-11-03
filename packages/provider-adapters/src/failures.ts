@@ -7,7 +7,8 @@ import { Predicate } from 'effect'
  * lost connection, a short rate limit or a failing service is transient: its
  * step is waited out while the computer is offline, and retried after a
  * growing pause while it is online (ADR-060); a full context starts a new
- * session from a brief (docs/architecture/05).
+ * session from a brief (docs/architecture/05), and so does a session the
+ * agent no longer has.
  *
  * Claude Code and Codex report failures in structured form when asked (see
  * `structuredFailure`), on a `session_info_update` or on the prompt's
@@ -16,7 +17,7 @@ import { Predicate } from 'effect'
  * host that refused, dropped or failed them (tests/failures.test.ts).
  */
 
-export type FailureClass = 'usage_limit' | 'context_full' | 'auth_required' | 'invalid_request' | 'transient' | 'unknown'
+export type FailureClass = 'usage_limit' | 'context_full' | 'session_lost' | 'auth_required' | 'invalid_request' | 'transient' | 'unknown'
 
 export interface Classified {
   readonly failure: FailureClass
@@ -33,6 +34,19 @@ const METHOD_NOT_FOUND = -32601
 const JUNIE_BALANCE = -32010
 /** Mistral Vibe's rate limit, said only once its own retries, which wait as long as Mistral asks, have run out (vibe/acp/exceptions.py). */
 const VIBE_RATE_LIMIT = -31001
+/**
+ * ACP's "Resource not found". Said of a session (`data.sessionId`), it is one
+ * the agent no longer has: claude-agent-acp 0.100.0 drops a session whose
+ * Claude Code process died, and answers its next prompt with this. Said of a
+ * resource (`data.uri`), it isn't.
+ */
+const RESOURCE_NOT_FOUND = -32002
+/** A session the agent no longer has, as an agent says it in words. */
+const sessionGone = /\bsession(?: [\w-]{1,80})? not found\b|\bno such session\b|\bunknown session\b/i
+
+/** Whether an error is about a session the agent no longer has. */
+const lostSession = (code: number | undefined, data: unknown, text: string) =>
+  code === RESOURCE_NOT_FOUND ? !(Predicate.isObject(data) && 'uri' in data) : sessionGone.test(text)
 
 /**
  * A plan or account allowance used up until a reset, in the words each agent
@@ -252,6 +266,7 @@ const withReset = (failure: FailureClass, message: string, text: string, now: Da
 export const classify = (error: unknown, now: Date): Classified => {
   const { code, message, data } = messageOf(error)
   const text = `${message} ${Predicate.isString(data) ? data : data === undefined ? '' : JSON.stringify(data)}`
+  if (lostSession(code, data, text)) return { failure: 'session_lost', message }
   if (sessionCap.test(text)) return { failure: 'context_full', message }
   if (passing.test(text)) return { failure: 'transient', message }
   if (gone.test(text)) return { failure: 'auth_required', message }

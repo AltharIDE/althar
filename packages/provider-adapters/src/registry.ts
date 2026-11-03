@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
+import { openCodeProviders } from './usageSources'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -169,6 +170,15 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /**
+     * For an agent that reaches several providers, each with a sign-in of its
+     * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
+     * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
+     */
+    readonly providers?: {
+      readonly read: (output: string) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+      readonly of: (model: string) => string | undefined
+    }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
     /**
@@ -851,11 +861,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * `fetch` ignores without it, so a Node tool's download (Electron's
      * build, through `@electron/get`) fails inside the sandbox even to a host
      * it allows. Where no proxy is named it changes nothing.
+     *
+     * `CLAUDE_CODE_DISABLE_AUTO_MEMORY`: Claude Code's auto memory writes
+     * notes into the person's own `~/.claude/projects/<main checkout>/memory`,
+     * where their own sessions in that repository, and later leads, would
+     * read them. Althar keeps a project's notes and handovers itself.
      */
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
-      env: { NODE_USE_ENV_PROXY: '1' },
+      env: { NODE_USE_ENV_PROXY: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
@@ -1081,6 +1096,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
+      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work.
+      providers: { read: openCodeProviders, of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined) },
       login: 'opencode auth login',
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),

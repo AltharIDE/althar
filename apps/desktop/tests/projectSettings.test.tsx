@@ -395,14 +395,13 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', postScreenshots: true }))
   })
 
-  it('lets changes to issues apply without a card once switched on, off until then', async () => {
-    const { client } = windowAt('/projects/p1')
-    await openSettings()
-    const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
-    expect(change.getAttribute('aria-checked')).toBe('false')
-    await userEvent.click(change)
-    expect(change.getAttribute('aria-checked')).toBe('true')
-    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
+  it('has no switch for changing issues without asking: an issue card’s Always file at once says it, kept as a note', async () => {
+    windowAt('/projects/p1')
+    await openSettings('Rules')
+    const may = within(await screen.findByRole('region', { name: 'Agents may' }))
+    expect(may.getAllByRole('switch').map((one) => one.getAttribute('aria-label') ?? one.textContent)).toHaveLength(1)
+    expect(may.getByRole('switch', { name: 'Leads can reach the web' })).toBeTruthy()
+    expect(may.queryByRole('switch', { name: 'Change issues without asking' })).toBeNull()
   })
 
   it('switches back, saying why under the one that didn’t hold, and the other says nothing of it', async () => {
@@ -1288,7 +1287,7 @@ describe('a project’s repositories, in its settings', () => {
 })
 
 it('keeps the project web switch, default on, with the privacy trade-off visible', async () => {
-  const { client } = windowAt('/projects/p1?room=settings&section=general')
+  const { client } = windowAt('/projects/p1?room=settings&section=rules')
   const toggle = await screen.findByRole('switch', { name: 'Leads can reach the web' })
   expect(toggle.getAttribute('aria-checked')).toBe('true')
   expect(descriptionOf(toggle)).toContain('Pages could steer a lead into sending private code in a URL')
