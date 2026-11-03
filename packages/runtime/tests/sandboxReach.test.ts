@@ -356,7 +356,7 @@ describe('a lead’s brief', () => {
   it('names what runs outside its sandbox, how one does, and the hosts it reaches', () => {
     assert.strictEqual(
       upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'], writes: [] }),
-      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
+      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` or a pipe into `tail` included, stays in the sandbox, so change folder in a call of its own first. On macOS, Electron and Chromium can't start inside the sandbox at all (it never lets them register a Mach service), so run the project's end-to-end tests this way. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
     )
     assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [], writes: [] }).includes('hosts'), false)
     assert.include(
