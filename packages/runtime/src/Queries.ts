@@ -38,6 +38,7 @@ import {
   FieldAnswer,
   type OutputText,
   PushRequestItem,
+  TaskAskItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
@@ -409,6 +410,7 @@ const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
+const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -663,6 +665,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodePushRequest(content), {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
+      })
+    // The coordinator asking the person to move a task on, written whole as it is asked and answered.
+    case 'task_ask':
+      return Option.match(decodeTaskAsk(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'task_ask', content: asked }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
@@ -1884,6 +1892,7 @@ export class Queries extends Context.Service<
             planState: string | null
             parameters: string | null
             startsAt: string | null
+            proposedAt: string | null
             runState: string | null
             runAt: string | null
             attemptAt: string | null
@@ -1906,7 +1915,7 @@ export class Queries extends Context.Service<
             runPlan: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
-              p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
+              p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
               (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
@@ -2147,6 +2156,9 @@ export class Queries extends Context.Service<
                     id: task.planId,
                     steps: planned,
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
+                    ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
+                      ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
+                      : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).

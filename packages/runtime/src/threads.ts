@@ -601,6 +601,11 @@ export const transcript = (
             `[the lead asked the person to push] ${count === 1 ? '1 commit' : `${count} commits`} to ${text('where')}: ${how ?? 'not pushed yet'}`,
           ]
         }
+        case 'task_ask': {
+          // What the coordinator asked the person to do to a task, and how they answered: one taking over doesn't ask again.
+          const states: Readonly<Record<string, string>> = { open: 'not answered yet', done: 'done', declined: 'they said not now' }
+          return [`[asked the person] ${text('move').replaceAll('_', ' ')} ${text('slug')}: ${states[text('state')] ?? text('said')}`]
+        }
         default:
           return []
       }

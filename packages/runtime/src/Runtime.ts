@@ -26,6 +26,7 @@ import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
+import { TaskActions } from './TaskActions'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
@@ -137,7 +138,9 @@ export const layer = (options: RuntimeLayerOptions) => {
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
   // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
   return MergeLine.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating))),
+    Layer.provideMerge(
+      Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating)),
+    ),
   )
 }
 

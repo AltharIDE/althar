@@ -272,7 +272,8 @@ export const runtime = (
   more: {
     readonly signedOut?: ReadonlyArray<string>
     readonly agents?: Layer.Layer<Agents>
-    readonly countdown?: Duration.Duration
+    /** A plan's countdown; null leaves it to the person's setting (plansAndReviews.ts). */
+    readonly countdown?: Duration.Duration | null
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
     /** How often the merge line is swept by itself; never, with an infinite one, where a test sweeps it. */
@@ -338,7 +339,7 @@ export const runtime = (
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
-    countdown: more.countdown ?? Duration.millis(300),
+    ...(more.countdown === null ? {} : { countdown: more.countdown ?? Duration.millis(300) }),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
