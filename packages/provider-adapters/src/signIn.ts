@@ -12,7 +12,12 @@ export interface SignInCheck {
   readonly status: SignInStatus
   readonly paidBy: PaidBy | 'unknown'
   /** For an agent with a sign-in for each provider it reaches: the providers it lists as signed in. */
-  readonly providers?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+  readonly providers?: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly connections: string
+    readonly pays?: 'plan' | 'key'
+  }>
 }
 
 /**
@@ -40,7 +45,8 @@ export const signInCheck = (
         const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
         const output = `${stdout}\n${stderr}`
         const signedIn = agent.signIn.read(output, exitCode)
-        if (signedIn === undefined && again !== undefined) return again()
+        // The fallback is for a version that rejects the first's flags: one that answered, even with nothing to read, said what it knows.
+        if (signedIn === undefined && exitCode !== 0 && again !== undefined) return again()
         const providers = agent.signIn.providers?.read(output) ?? []
         resume(
           Effect.succeed({

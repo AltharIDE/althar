@@ -158,7 +158,7 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
-    /** Run when `status` read nothing (an older version that rejects its flags); read the same way. */
+    /** Run when `status` failed and read nothing (an older version that rejects its flags); read the same way. */
     readonly statusFallback?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
@@ -174,8 +174,12 @@ export interface AgentDefinition {
      * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
      */
     readonly providers?: {
-      readonly read: (output: string) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+      readonly read: (
+        output: string,
+      ) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string; readonly pays?: 'plan' | 'key' }>
       readonly of: (model: string) => string | undefined
+      /** The providers that are a plan with limits (OpenCode Go): a model through one is on that plan, whatever pays for the rest. */
+      readonly plans?: ReadonlyArray<string>
     }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
@@ -203,6 +207,12 @@ export interface AgentDefinition {
    * (`usage.ts`). Without one, its usage comes from ACP or not at all.
    */
   readonly usage?: { readonly run: (node: string) => LaunchSpec }
+  /**
+   * A command that prints a plan's limits as JSON, run in an account's home
+   * (OpenCode's own server asked for OpenCode Go's: `usageSources.ts`'s
+   * `openCodeGoUsage`). A plain read, the same a person can run.
+   */
+  readonly usageLimits?: (node: string) => LaunchSpec
   /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
@@ -1062,7 +1072,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     signIn: {
       // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
       status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
-      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead.
+      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead. Run only where the first failed: on 2.x, without `--standalone`, the background service would answer for another home.
       statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
@@ -1088,13 +1098,28 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
-      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work.
-      providers: { read: openCodeProviders, of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined) },
-      login: 'opencode auth login',
+      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work. OpenCode Go is a plan with limits; Zen, and the rest, are paid per use.
+      providers: {
+        read: openCodeProviders,
+        of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined),
+        plans: ['opencode-go'],
+      },
+      /*
+       * `--standalone` keeps the sign-in in the home the line names: without it, 2.x hands it to its user-wide background
+       * service, which keeps it in the home that service started in, the usual one, so a new account's own home stayed
+       * empty and its check couldn't tell (seen 3 November 2026, 2.2.5).
+       */
+      login: 'opencode auth login --standalone',
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
+    /*
+     * OpenCode Go's limits as OpenCode's own server reads them, through the account's OpenCode Console sign-in: `data.go`'s
+     * rolling five hours, week and month, or `data: null` with no Console sign-in (seen 3 November 2026, 2.2.5). Althar reads
+     * the answer, never the sign-in.
+     */
+    usageLimits: () => ({ command: 'opencode', args: ['api', '--standalone', 'experimental.usage.limits'] }),
     /*
      * Its sign-ins and its history are under the data folder's `opencode`;
      * its config stays the person's, under XDG_CONFIG_HOME. The data folder

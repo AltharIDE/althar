@@ -73,10 +73,18 @@ export const AccountStatus = Schema.Struct({
   adoptedFrom: Schema.NullOr(Schema.String),
   /**
    * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
-   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   * a turn on it was refused since, when; how it is paid for where that is known (OpenCode Go a plan, Zen per use). Not given
+   * where the agent has one sign-in for everything.
    */
   providers: Schema.optional(
-    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        refusedAt: Schema.NullOr(Schema.String),
+        pays: Schema.optional(Schema.Literals(['plan', 'key'])),
+      }),
+    ),
   ),
 })
 export type AccountStatus = typeof AccountStatus.Type

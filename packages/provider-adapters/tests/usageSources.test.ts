@@ -20,7 +20,9 @@ import {
   noReadingOf,
   openCodeCannotList,
   openCodeCredentials,
+  openCodeGoUsage,
   readOpenCodeCredentials,
+  readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsagePair,
   usagePairs,
@@ -74,7 +76,6 @@ describe('every agent’s plan', () => {
       'opencode/github-copilot',
       'opencode/google',
       'opencode/openai',
-      'opencode/opencode',
       'qwen-code/qwen',
     ])
     for (const pair of unread) expect(noReadingOf(pair), `${pair.agent}/${pair.provider}`).toMatch(/^[A-Z].+\.$/)
@@ -745,7 +746,7 @@ describe('every OpenCode sign-in lands on a declared pair', () => {
     openCodeCredentials(JSON.stringify([{ id: provider, name: provider, connections: [{ type: 'credential', method, label: 'x' }] }]))![0]!
 
   it('covers the plan providers the registry declares, and a key as a key', () => {
-    for (const provider of ['openai', 'opencode', 'github-copilot', 'google']) {
+    for (const provider of ['openai', 'opencode-go', 'github-copilot', 'google']) {
       const pair = usagePairs.find((p) => p.agent === 'opencode' && p.provider === provider)!
       expect(pair.sources.length).toBeGreaterThan(0)
       expect(resolveOpenCodeCredential({ provider, pays: 'plan' })).toMatchObject({ kind: 'covered', pair: { provider } })
@@ -769,6 +770,19 @@ describe('OpenCode: plan or key per provider, from auth list', () => {
       { provider: 'openai', pays: 'plan' },
       { provider: 'x', pays: 'unknown' },
     ])
+  })
+
+  it('takes OpenCode Go for a plan and Zen for per use, whatever their sign-in is', () => {
+    // Go's sign-in is a key, and Zen's a key or an OpenCode Console sign-in (2.2.5, 3 November 2026).
+    expect(openCodeCredentials(output(['opencode-go', 'key'], ['opencode', 'key'], ['opencode', 'oauth']))).toEqual([
+      { provider: 'opencode-go', pays: 'plan' },
+      { provider: 'opencode', pays: 'key' },
+      { provider: 'opencode', pays: 'key' },
+    ])
+    expect(resolveOpenCodeCredential({ provider: 'opencode-go', pays: 'plan' })).toMatchObject({
+      kind: 'covered',
+      pair: { provider: 'opencode-go', pays: 'plan' },
+    })
   })
 
   it('has nothing for output that is not that shape, which 1.x’s count is', () => {
@@ -814,5 +828,79 @@ describe('listing an OpenCode account’s sign-ins', () => {
     expect(agents.opencode.signIn.credentials?.('node').args).toEqual(['auth', 'list', '--standalone', '--format', 'json'])
     expect(agents['claude-code'].signIn.credentials).toBeUndefined()
     expect(agents.codex.signIn.credentials).toBeUndefined()
+  })
+})
+
+describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
+  const now = new Date('2026-11-03T18:00:00Z')
+  // As 2.2.5 answered on 3 November 2026 for an account signed in to OpenCode Console with Go, its workspace's ids made up.
+  const answer = (go: unknown) =>
+    JSON.stringify({
+      location: { directory: '/tmp' },
+      data: {
+        workspace: { id: 'wrk_x', name: 'Mine', usageURL: 'https://opencode.ai/workspace/wrk_x' },
+        ...(go === undefined ? {} : { go }),
+        budgets: [],
+      },
+    })
+
+  it('reads the rolling five hours, the week and the month, each with its reset', () => {
+    const read = openCodeGoUsage(
+      answer({
+        rolling: { percent: 12, limited: false, resetsAt: Date.parse('2026-11-03T22:54:00Z') },
+        weekly: { percent: 40, limited: false, resetsAt: Date.parse('2026-11-09T00:00:00Z') },
+        monthly: { percent: 3, limited: false, resetsAt: '2026-12-03T10:19:39.000Z' },
+      }),
+      now,
+    )
+    expect(read).toEqual({
+      kind: 'usage',
+      usage: {
+        source: 'agent',
+        plan: 'OpenCode Go',
+        observedAt: now.toISOString(),
+        windows: [
+          { kind: 'five_hour', minutes: 300, usedPercent: 12, resetsAt: '2026-11-03T22:54:00.000Z' },
+          { kind: 'weekly', usedPercent: 40, resetsAt: '2026-11-09T00:00:00.000Z' },
+          { kind: 'monthly', usedPercent: 3, resetsAt: '2026-12-03T10:19:39.000Z' },
+        ],
+      },
+    })
+  })
+
+  it('takes a rate-limited window for out, however much it says is used', () => {
+    const read = openCodeGoUsage(
+      answer({ rolling: { percent: 97, status: 'rate-limited', resetsAt: Date.parse('2026-11-03T20:00:00Z') } }),
+      now,
+    )
+    expect(read).toMatchObject({ kind: 'usage', usage: { windows: [{ kind: 'five_hour', usedPercent: 100 }] } })
+  })
+
+  it('has no reading without an OpenCode Console sign-in, or a workspace without Go', () => {
+    expect(openCodeGoUsage(JSON.stringify({ location: { directory: '/tmp' }, data: null }), now)).toEqual({ kind: 'none' })
+    expect(openCodeGoUsage(answer(undefined), now)).toEqual({ kind: 'none' })
+  })
+
+  it('is a fault for an answer of another shape, never a quiet zero', () => {
+    expect(openCodeGoUsage('Error: not found', now)).toMatchObject({ kind: 'failed' })
+    expect(openCodeGoUsage('{"other":1}', now)).toMatchObject({ kind: 'failed' })
+    expect(openCodeGoUsage(answer({ weekly: { status: 'ok' } }), now)).toMatchObject({ kind: 'failed' })
+  })
+
+  const limits = (script: string) => ({ ...agents.opencode, usageLimits: () => ({ command: 'bun', args: ['-e', script] }) })
+
+  it('asks OpenCode in the account’s home, and says why where it couldn’t', async () => {
+    const script = `console.log(JSON.stringify({ data: process.env.XDG_DATA_HOME === '/accounts/a' ? { go: { weekly: { percent: 5, resetsAt: 1794182400000 } } } : null }))`
+    expect(await readOpenCodeGoUsage(limits(script), { home: { XDG_DATA_HOME: '/accounts/a' }, now: () => now })).toMatchObject({
+      kind: 'usage',
+      usage: { windows: [{ kind: 'weekly', usedPercent: 5 }] },
+    })
+    expect(await readOpenCodeGoUsage(limits(script), { now: () => now })).toEqual({ kind: 'none' })
+    expect(await readOpenCodeGoUsage(limits(`console.error('Error: no server'); process.exit(1)`), { now: () => now })).toEqual({
+      kind: 'failed',
+      message: 'OpenCode couldn’t read Go’s usage: Error: no server.',
+    })
+    expect(await readOpenCodeGoUsage(agents.codex, { now: () => now })).toEqual({ kind: 'none' })
+    expect(agents.opencode.usageLimits?.('node').args).toEqual(['api', '--standalone', 'experimental.usage.limits'])
   })
 })

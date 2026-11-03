@@ -200,5 +200,6 @@ export const usingLocated = (
     },
     ...(definition.version === undefined ? {} : { version: pointed(definition.version) }),
     ...(definition.usage === undefined ? {} : { usage: { ...definition.usage, run: pointed(definition.usage.run) } }),
+    ...(definition.usageLimits === undefined ? {} : { usageLimits: pointed(definition.usageLimits) }),
   }
 }

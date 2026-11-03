@@ -64,7 +64,10 @@ export class SignIns extends Context.Service<
     providers(
       account: Account,
       check: SignInCheck,
-    ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null }> | undefined>
+    ): Effect.Effect<
+      | ReadonlyArray<{ readonly id: string; readonly name: string; readonly refusedAt: string | null; readonly pays?: 'plan' | 'key' }>
+      | undefined
+    >
     /** Each agent as it is found signed in, or signed in, from now on. */
     readonly signedIn: Stream.Stream<SignedIn>
   }
@@ -138,7 +141,12 @@ export class SignIns extends Context.Service<
             }
             return seen.connections === connections ? at : null
           }
-          const rows = listed.map((each) => ({ id: each.id, name: each.name, refusedAt: refusedAt(each.id) }))
+          const rows = listed.map((each) => ({
+            id: each.id,
+            name: each.name,
+            refusedAt: refusedAt(each.id),
+            ...(each.pays === undefined ? {} : { pays: each.pays }),
+          }))
           // One refused whose sign-in is gone from the listing is still one to sign in to.
           const gone = [...latest.keys()].filter((id) => !listed.some((each) => each.id === id))
           return [...rows, ...gone.flatMap((id) => (refusedAt(id) === null ? [] : [{ id, name: id, refusedAt: latest.get(id) ?? null }]))]
