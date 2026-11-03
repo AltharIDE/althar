@@ -62,7 +62,8 @@ Per agent and provider, today:
 | Mistral Vibe | none: usage only in Mistral's console, behind a browser session | % of the month | Mistral gives keys a usage read |
 | Qwen Code | none: its quota said only when it runs out (Qwen OAuth's free tier ended 15 April 2026) | n/a | Qwen gives a usage read |
 | Antigravity | none: Althar runs its ACP server, not the `agy` CLI whose `/usage` Orca reads | 5 hours, 1 week | the server reports it |
-| OpenCode, any plan sign-in | none: OpenCode keeps them in its own database | as the provider | OpenCode reports plan usage over ACP (#49693) |
+| OpenCode Go | OpenCode's own `opencode api --standalone experimental.usage.limits`, in the account's home, through its OpenCode Console sign-in; with Go's key alone, shown connected, unread | 5 hours, 1 week, 1 month | n/a |
+| OpenCode, any other plan sign-in | none: OpenCode keeps them in its own database | as the provider | OpenCode reports plan usage over ACP (#49693) |
 | Any agent, API key | No plan window exists: it says it is a key | n/a | n/a |
 
 ### The exception to rule 3
@@ -117,9 +118,10 @@ Zen sign-in under the API-key row and skip its source. So:
   an empty row.
 
 **The 1-month window.** No source found offers one for Claude or Codex:
-Codex's snapshot has `primary`, `secondary` and `credits`. OpenCode's Go and
-Zen plans may (claim). The `windows` list carries any window a source
-returns, so it shows when a source reports it; nothing else is built for it.
+Codex's snapshot has `primary`, `secondary` and `credits`. OpenCode Go
+reports one beside its rolling five hours and its week. The `windows` list
+carries any window a source returns, so it shows when a source reports it;
+nothing else is built for it.
 
 ## Where the window shows it
 

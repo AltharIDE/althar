@@ -126,7 +126,11 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
-      const account = wanted.accounts.find((one) => one.signIn === 'signed_out') ?? wanted.accounts[0]
+      // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
+      const account =
+        wanted.accounts.find((one) => one.signIn === 'signed_out') ??
+        wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
+        wanted.accounts[0]
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }

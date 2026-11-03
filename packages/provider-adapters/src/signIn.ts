@@ -5,6 +5,9 @@ import { Effect } from 'effect'
 import { adapterNode, asNode } from './process'
 import type { AgentDefinition, LaunchSpec, PaidBy } from './registry'
 
+/** How many more times a command is asked whose agent says its own server didn't start in time (`notStarted`). */
+export const ASKED_AGAIN = 2
+
 export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
 
 /** An agent's sign-in, and how it is paid for, where its status says. */
@@ -12,7 +15,14 @@ export interface SignInCheck {
   readonly status: SignInStatus
   readonly paidBy: PaidBy | 'unknown'
   /** For an agent with a sign-in for each provider it reaches: the providers it lists as signed in. */
-  readonly providers?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+  readonly providers?: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly connections: string
+    readonly pays?: 'plan' | 'key'
+    /** The agent itself says this one's sign-in must be done again (OpenCode's `needs_auth`). */
+    readonly needsSignIn?: true
+  }>
 }
 
 /**
@@ -31,7 +41,7 @@ export const signInCheck = (
     const unknown: SignInCheck = { status: 'unknown', paidBy: 'unknown' }
     const first = agent.signIn.status?.(node)
     if (first === undefined) return resume(Effect.succeed(unknown))
-    const run = (spec: LaunchSpec, again: (() => void) | undefined) => {
+    const run = (spec: LaunchSpec, again: (() => void) | undefined, tries = ASKED_AGAIN) => {
       const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
       // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
@@ -39,8 +49,11 @@ export const signInCheck = (
         if (error !== null && typeof error.code !== 'number') return again === undefined ? resume(Effect.succeed(unknown)) : again()
         const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
         const output = `${stdout}\n${stderr}`
+        // Its own server didn't start in time (OpenCode 2's private one, loading the person's plugins): the same, asked again.
+        if (exitCode !== 0 && tries > 0 && agent.notStarted?.(output) === true) return run(spec, again, tries - 1)
         const signedIn = agent.signIn.read(output, exitCode)
-        if (signedIn === undefined && again !== undefined) return again()
+        // The fallback is for a version that rejects the first's flags: one that answered, even with nothing to read, said what it knows.
+        if (signedIn === undefined && exitCode !== 0 && again !== undefined) return again()
         const providers = agent.signIn.providers?.read(output) ?? []
         resume(
           Effect.succeed({
