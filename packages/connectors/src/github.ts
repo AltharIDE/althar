@@ -694,9 +694,16 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       return merged.outcome === 'conflict' ? merged.files : []
     }).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
 
+  /** The web address without trailing slashes, trimmed by hand: a pattern for it backtracks on a long run of them. */
+  const webBase = (() => {
+    let end = options.webUrl.length
+    while (end > 0 && options.webUrl[end - 1] === '/') end--
+    return options.webUrl.slice(0, end)
+  })()
+
   const pushTarget = (repository: Repository) =>
     Effect.map(options.credential, (credential) => ({
-      url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
+      url: `${webBase}/${repository.path.join('/')}.git`,
       header: `Authorization: Basic ${Buffer.from(`x-access-token:${credential.token}`).toString('base64')}`,
     }))
 
