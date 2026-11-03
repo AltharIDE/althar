@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import { Ids, type ProjectId } from '@althar/domain'
 import { codexLikeMeanings } from '@althar/provider-adapters/testing'
@@ -12,7 +12,7 @@ import { Instance } from '../src/Instance'
 import { Permissions, type RequestContext } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { guard, guardHolds } from '../src/pushGuard'
-import { decide, decideInside, decideLeaving, decideReader, type Hold, runsInside, type RuleContext, tallyKindOf } from '../src/rules'
+import { decide, decideInside, decideReader, type Hold, runsInside, type RuleContext, tallyKindOf } from '../src/rules'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { stoppedIn, tallyOf } from '../src/tally'
@@ -153,81 +153,39 @@ describe('what crosses a lead’s sandbox', () => {
     for (const line of ['git push origin main', 'git push --force origin althar/retry', 'git push origin +althar/retry'])
       assert.strictEqual(decide(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'ask', line)
     // What else crosses goes ahead with everything allowed.
-    assert.strictEqual(decideLeaving(command('bunx playwright test'), context('allow')).verdict, 'allow')
+    assert.strictEqual(decide(command('bunx playwright test'), context('allow')).verdict, 'allow')
     assert.strictEqual(
-      decideLeaving(command('git push origin althar/retry', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
+      decide(command('git push origin althar/retry', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
       'allow',
     )
-    assert.strictEqual(decideLeaving(command('git push origin main', { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'ask')
   })
 
-  it('isn’t a script Althar can’t read, with everything allowed: outside, nothing would stop it writing to the person’s checkout', () => {
-    const writes = "python3 - <<'EOF'\nimport pathlib\npathlib.Path('/work/meridian/main/src/app.ts').write_text('x')\nEOF"
+  it('goes ahead where Althar can’t read it, with everything allowed, as any agent’s does (ADR-067): leads worked around its refusal', () => {
+    const writes = "python3 - <<'EOF'\nimport pathlib\npathlib.Path('src/app.ts').write_text('x')\nEOF"
     const pushes = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push', 'origin', 'HEAD:main'])\nEOF"
     for (const line of [
       writes,
       pushes,
       'python3 tools/fix.py',
       './tools/fix.sh',
-      '/tmp/fix.sh',
-      'tools/fix.sh --all',
       'bash < fix.sh',
       'bun tools/fix.ts',
-      'bun run tools/fix.ts',
-      "bun -e \"require('fs').writeFileSync('/work/meridian/main/src/app.ts', 'x')\"",
-      'deno run tools/fix.ts',
+      "bun -e \"require('fs').writeFileSync('src/app.ts', 'x')\"",
       'bunx tsx tools/fix.ts',
-      'npx ts-node tools/fix.ts',
-      'n=$(date +%s); echo $n > /work/meridian/main/stamp',
+      'n=$(date +%s); echo $n > stamp',
+      // A lead's end-to-end run, retried outside after Electron died inside on Chromium's Mach port.
+      'git log --oneline -1 && EV=after env -i HOME="$HOME" PATH="/opt/homebrew/bin:/usr/bin:/bin" node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -25',
     ]) {
-      const verdict = decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'))
-      assert.strictEqual(verdict.verdict, 'deny', line)
-      assert.include((verdict as { reason: string }).reason, 'Run it inside your sandbox, where it runs without asking', line)
-      // Inside, it runs; where no sandbox could hold it, everything allowed lets it through as before (ADR-067).
-      assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'allow', line)
       assert.strictEqual(decide(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow', line)
+      assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'allow', line)
     }
-    // What the project's own scripts and installed tools run, Althar reads as it always has.
-    for (const line of ['bun run build', 'bun test', 'bunx playwright test', './node_modules/.bin/vp build', '/usr/bin/git status'])
-      assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow', line)
-    // What the project runs outside from the start goes as it said, and so does what Althar can read.
-    assert.strictEqual(decideLeaving(command('node scripts/e2e.ts'), context('allow')).verdict, 'allow')
-    assert.strictEqual(decideLeaving(command('bash -c "ls"', { dangerouslyDisableSandbox: true }), context('allow')).verdict, 'allow')
+    // What it reads as what can't be undone still asks, beside what it can't read; git's guard stops a script's push to main outside too.
     assert.strictEqual(
-      decideLeaving(command('git status && ls docs', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
-      'allow',
-    )
-    // Where the person is asked anyway, they read it on the card.
-    assert.strictEqual(decideLeaving(command(writes, { dangerouslyDisableSandbox: true }), context('ask')).verdict, 'ask')
-  })
-
-  it('is what the project runs outside from the start, asked to or not: Electron can’t start inside a Mac’s sandbox', () => {
-    const outside = ['node scripts/e2e.ts', 'env -i', 'bunx playwright']
-    // The two lines a lead was refused when its end-to-end run died inside on Chromium's Mach port.
-    for (const line of [
-      'node scripts/e2e.ts e2e/zz-evidence.spec.ts e2e/webReach.spec.ts',
-      'git log --oneline -1 && EV=after env -i HOME="$HOME" PATH="/opt/homebrew/bin:/usr/bin:/bin" EV=after node scripts/e2e.ts e2e/zz-evidence.spec.ts 2>&1 | tail -25',
-      'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15',
-    ])
-      assert.strictEqual(
-        decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict,
-        'allow',
-        line,
-      )
-    // Only by how it starts, word by word: another script, one named to look like it, or one beside it, is still unread.
-    for (const line of [
-      'node scripts/fix.ts',
-      'node scripts/e2e.tsx',
-      "node 'scripts/e2e.ts other.js'",
-      'node "scripts/e2e.ts" && python3 tools/fix.py',
-    ])
-      assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict, 'deny', line)
-    // And it still meets the project's rules: a push to main asks.
-    assert.strictEqual(
-      decideLeaving(command('node scripts/e2e.ts && git push origin main', { dangerouslyDisableSandbox: true }), context('allow'), outside)
-        .verdict,
+      decide(command('node scripts/e2e.ts && git push origin main', { dangerouslyDisableSandbox: true }), context('allow')).verdict,
       'ask',
     )
+    // Where the person is asked anyway, they read it on the card.
+    assert.strictEqual(decide(command(writes, { dangerouslyDisableSandbox: true }), context('ask')).verdict, 'ask')
   })
 
   it('is counted by the kind that kept it', () => {
@@ -412,14 +370,51 @@ describe('a lead whose sandbox Althar holds', () => {
       const piped = 'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15'
       // Piped, it stays in the sandbox and runs unread, where Electron can't register its Mach service.
       assert.strictEqual((yield* permissions.decide(requestContext, command(piped))).decision, 'allow')
-      // Asked again outside, it goes: it is what the project runs outside anyway.
+      // Asked again outside, it goes, with everything allowed: what Althar can't read crosses as it does for any agent.
       const retry = command(piped, { dangerouslyDisableSandbox: true })
       assert.strictEqual((yield* permissions.decide(requestContext, retry)).decision, 'allow')
-      // A file named to look like it is another script, still refused.
-      const lookalike = command("node 'scripts/e2e.ts other.js'", { dangerouslyDisableSandbox: true })
-      assert.strictEqual((yield* permissions.decide(requestContext, lookalike)).decision, 'reject')
-      // Where the project doesn't run it outside, the hold doesn't let it go either.
-      assert.strictEqual((yield* permissions.decide({ ...requestContext, sandbox: lead }, retry)).decision, 'reject')
+      assert.strictEqual((yield* permissions.decide({ ...requestContext, sandbox: lead }, retry)).decision, 'allow')
+      const script = command('python3 tools/fix.py', { dangerouslyDisableSandbox: true })
+      assert.strictEqual((yield* permissions.decide(requestContext, script)).decision, 'allow')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('reads what crosses from where its agent says its shell is, not from the worktree’s top', () =>
+    Effect.gen(function* () {
+      const made = yield* held()
+      const { project, sql } = made
+      const permissions = yield* Permissions
+      const rules = (made.requestContext.rules as { readonly context: RuleContext }).context
+      const { worktree } = rules
+      // The test's folders are in the temp folder, which the rules read as anyone's to write: here it isn't.
+      const requestContext: RequestContext = {
+        ...made.requestContext,
+        rules: { role: 'task', context: { ...rules, scratch: ['/dev/null'] } },
+      }
+      mkdirSync(join(worktree, 'packages', 'ui'), { recursive: true })
+      mkdirSync(join(worktree, 'keep'), { recursive: true })
+      // What the same words name from the top: a folder two above the worktree, someone else's.
+      mkdirSync(join(dirname(dirname(worktree)), 'keep'), { recursive: true })
+      const line = command('rm -rf ../../keep', { dangerouslyDisableSandbox: true })
+      // From where its shell is, two folders down, it deletes the worktree's own: no card.
+      const there: RequestContext = { ...requestContext, shell: () => join(worktree, 'packages', 'ui') }
+      assert.strictEqual((yield* permissions.decide(there, line)).decision, 'allow')
+      // Not knowing where it is, the rules read it from the top, where it can't be undone, and ask.
+      const asking = yield* Effect.forkChild(permissions.decide(requestContext, line))
+      const [card] = yield* until(
+        sql<{ id: string; reason: string }>`
+          SELECT id, json_extract(payload, '$.reason') AS reason
+          FROM attention_requests WHERE project_id = ${project.projectId} AND state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      assert.include(card?.reason ?? '', "Deleting or moving away what's outside the task's worktree")
+      const attentionId = card?.id ?? ''
+      yield* permissions.answer({
+        envelope: yield* Runtime.envelope('attention.answer', { attentionId, decision: 'reject' }),
+        attentionId,
+        decision: 'reject',
+      })
+      assert.strictEqual((yield* Fiber.join(asking)).decision, 'reject')
     }).pipe(Effect.provide(runtime())),
   )
 

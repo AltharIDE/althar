@@ -35,7 +35,6 @@ import {
   commandOf,
   decide,
   decideInside,
-  decideLeaving,
   decideReader,
   essentials,
   gitRunsOf,
@@ -103,6 +102,16 @@ export interface RequestContext {
       }
   /** How the session's sandbox holds its shell commands, where it has one Althar relies on (ADR-071). */
   readonly sandbox?: Hold
+  /** Where a lead's shell is now, as its agent's own record says, read again for each command; none where it can't tell. */
+  readonly shell?: () => string | undefined
+}
+
+/** A lead's request with where its shell is now, where its agent says: what a command names relatively is read from there. */
+const withShell = (context: RequestContext, request: PermissionRequest): RequestContext => {
+  if (context.rules.role !== 'task' || context.shell === undefined || (request.kind !== 'execute' && request.kind !== 'other'))
+    return context
+  const shell = context.shell()
+  return shell === undefined ? context : { ...context, rules: { ...context.rules, context: { ...context.rules.context, shell } } }
 }
 
 interface Waiting {
@@ -370,14 +379,7 @@ export class Permissions extends Context.Service<
         })
 
       /** A task's request as the rules decide it now, with the context they read it in and the revision they are. */
-      const byRules = (
-        projectId: ProjectId,
-        taskId: string | null,
-        rules: RuleContext,
-        request: PermissionRequest,
-        inside = false,
-        hold?: Hold,
-      ) =>
+      const byRules = (projectId: ProjectId, taskId: string | null, rules: RuleContext, request: PermissionRequest, inside = false) =>
         Effect.gen(function* () {
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
@@ -387,11 +389,8 @@ export class Permissions extends Context.Service<
           return {
             context,
             project,
-            verdict: inside
-              ? decideInside(request, context)
-              : hold !== undefined
-                ? decideLeaving(request, context, hold.outside)
-                : decide(request, context),
+            // What crosses meets the rules as any request does: with everything allowed, only what they read as lasting asks.
+            verdict: inside ? decideInside(request, context) : decide(request, context),
             policyId: policy.id,
           }
         })
@@ -480,7 +479,6 @@ export class Permissions extends Context.Service<
                 waiter.rules,
                 waiter.request,
                 waiter.inside,
-                waiter.context.sandbox,
               )
               if (settles(verdict)) yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
             }).pipe(Effect.ignore),
@@ -570,8 +568,9 @@ export class Permissions extends Context.Service<
           )
         })
 
-      const decideRequest = (requestContext: RequestContext, request: PermissionRequest) =>
+      const decideRequest = (asked: RequestContext, request: PermissionRequest) =>
         Effect.gen(function* () {
+          const requestContext = withShell(asked, request)
           const sql = yield* SqlClient.SqlClient
           const requestId = yield* newId(Ids.permissionRequest)
           return yield* Effect.gen(function* () {
@@ -638,7 +637,7 @@ export class Permissions extends Context.Service<
             }
             const rules = requestContext.rules.context
             // The rules first, the allow rules among them: the coordinator judges only what none of them answers.
-            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside, requestContext.sandbox)
+            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
             const kind = tallyKindOf(request, ruled.context)
             let ruleContext = ruled.context
             let policyId = ruled.policyId
@@ -730,7 +729,7 @@ export class Permissions extends Context.Service<
             // then it is decided again now.
             const now = yield* rulesNow(requestContext.projectId, requestContext.taskId)
             if (now.policy.id !== policyId || now.project.mode !== ruleContext.project?.mode) {
-              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside, requestContext.sandbox)
+              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
               if (settles(again.verdict)) yield* settle(attentionId, waiter, decisionOf(again.verdict, again.policyId))
             }
             if (waiting.has(attentionId))
@@ -834,14 +833,8 @@ export class Permissions extends Context.Service<
                 keep = {
                   scope: always,
                   rule,
-                  context: (yield* byRules(
-                    waiter.context.projectId,
-                    waiter.context.taskId,
-                    waiter.rules,
-                    waiter.request,
-                    waiter.inside,
-                    waiter.context.sandbox,
-                  )).context,
+                  context: (yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request, waiter.inside))
+                    .context,
                 }
               }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }

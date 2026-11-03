@@ -7,6 +7,7 @@
   read goes ahead; only what they read as one of the kinds below asks
   ([Amendment](#amendment-what-the-rules-cant-read-goes-ahead)).
 - **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): only what crosses a lead's sandbox meets these kinds; what it holds runs, and git's guard stops a push to the default branch, a force push and deleting another branch wherever they come from.
+- **Amended:** 2026-11-03 ([ADR-089](089-the-asks-and-refusals-left-are-what-can-t-be-undone.md)): tearing down, deleting and publishing are irreversible and ask with everything allowed; `git branch -d` isn't.
 - **Owner:** Repository maintainers
 - **Context:** ADR-043's amendment (DEV-69) kept everything that could lose
   work or a secret asking with everything allowed: the floor. The floor
