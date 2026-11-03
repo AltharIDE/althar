@@ -274,6 +274,42 @@ export const defaultEffortOf = (catalog: Catalog, info: ModelInfo): string | nul
 export const defaultPins = (catalog: Catalog): ReadonlyArray<string> =>
   catalog.runtimes.map((runtime) => infoOf(catalog, { agentId: runtime.id, model: null }).id)
 
+/** The models of a catalog but one, by key: the one that failed a step isn't offered it again. */
+export const withoutModel = (catalog: Catalog, key: string | null): Catalog =>
+  key === null ? catalog : { ...catalog, models: catalog.models.filter((info) => info.id !== key) }
+
+/**
+ * The models a stuck step is offered to at once: the best bet first, the
+ * first of those pinned, then of every other, that another maker made than
+ * the one that failed and that isn't of the agent that couldn't start; then
+ * the other models pinned, that agent's last.
+ */
+export const handOnModels = (
+  catalog: Catalog,
+  pins: ReadonlyArray<string>,
+  step: { readonly failed: ModelInfo | null; readonly avoidAgent: string | null },
+): ReadonlyArray<ModelInfo> => {
+  const pinned = pins.flatMap((key) => catalog.models.filter((info) => info.id === key))
+  const candidates = [...pinned, ...catalog.models.filter((info) => !pinned.includes(info))]
+  const away = (info: ModelInfo) => info.runtime === step.avoidAgent
+  const another = (info: ModelInfo) => step.failed?.mark !== undefined && info.mark !== undefined && info.mark !== step.failed.mark
+  const best = candidates.find((info) => !away(info) && another(info)) ?? candidates.find((info) => !away(info)) ?? candidates[0]
+  if (best === undefined) return []
+  const rest = pinned.filter((info) => info !== best)
+  return [best, ...rest.filter((info) => !away(info)), ...rest.filter(away)]
+}
+
+/** A stuck step handed to a model: on the step's effort where the same agent offers it, else the person's default for it. */
+export const handOnChoice = (
+  catalog: Catalog,
+  key: string,
+  step: { readonly agentId: string | null; readonly effort: string | null },
+): Choice => {
+  const { agentId, model } = choiceOf(key)
+  const kept = agentId === step.agentId && offersEffort(catalog, key, step.effort) ? step.effort : null
+  return { agentId, model, effort: kept ?? catalog.defaults.get(key) ?? null }
+}
+
 /** The person's pins, by key; null until they pin one. */
 export interface ModelPrefs {
   readonly pins: ReadonlyArray<string> | null

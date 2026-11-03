@@ -71,6 +71,13 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /**
+   * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
+   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   */
+  providers: Schema.optional(
+    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+  ),
 })
 export type AccountStatus = typeof AccountStatus.Type
 
@@ -1424,8 +1431,9 @@ export const NoticeItem = Schema.Struct({
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
-     * (`auth_required`, `usage_limit`, `context_full`, `invalid_request`,
-     * `unknown`, `agent_exited`…), so the thread offers the way out that fits.
+     * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
+     * `invalid_request`, `unknown`, `agent_exited`…), so the thread offers the
+     * way out that fits.
      */
     failure: Schema.optional(Schema.String),
   }),
@@ -2228,6 +2236,33 @@ export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Numb
 export type ContextUse = typeof ContextUse.Type
 
 /**
+ * What a task, or the coordinator's day, used of one account its agents ran
+ * on (ADR-084): on a plan, the share of its week; paid per use, the dollars.
+ * No total across accounts: a share of a week and dollars don't add up.
+ */
+export const AccountUse = Schema.Struct({
+  accountId: Schema.String,
+  agentId: Schema.String,
+  agentName: Schema.String,
+  accountName: Schema.String,
+  /** Whether the agent has more than one account here, so the account's own name tells them apart. */
+  several: Schema.Boolean,
+  paidBy: Schema.Literals(['plan', 'key']),
+  /** The plan as the agent names it: pro, max; null paid per use, or where it didn't say. */
+  plan: Schema.NullOr(Schema.String),
+  /** On a plan, the points of its week's percent it took: an estimate, from the week's readings; null where none was read. */
+  took: Schema.NullOr(Schema.Number),
+  /** Paid per use, the dollars spent: what the agent said, else its tokens at list prices; null where neither is known. */
+  spent: Schema.NullOr(Schema.Number),
+  /** Whether the figure is an estimate: a plan's share always; dollars where a session was priced at list prices, not said by its agent. */
+  estimated: Schema.Boolean,
+  /** The models that ran on it, by id, in the order they first did. */
+  models: Schema.Array(Schema.String),
+  tokens: Schema.Number,
+})
+export type AccountUse = typeof AccountUse.Type
+
+/**
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
  * the default branch, or of a branch or pull request Althar fetched for it
@@ -2384,6 +2419,8 @@ export const StuckStep = Schema.Struct({
   detail: Schema.NullOr(Schema.String),
   /** The agent on the step. */
   agentId: Schema.NullOr(Schema.String),
+  /** How hard it thought, where it said. */
+  effort: Schema.optional(Schema.String),
   /** The review round, from 0. */
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
@@ -2394,6 +2431,9 @@ export const StuckStep = Schema.Struct({
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
   service: Schema.optional(Schema.String),
+  /** The model it last ran on, where it had one: the one that failed, so handing on can leave it out; for a sign-in refused, the provider within the agent that refused it (OpenCode Go). */
+  model: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -2581,6 +2621,8 @@ export type GraphRound = typeof GraphRound.Type
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   cursor: Cursor,
+  /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
+  usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
@@ -2815,6 +2857,8 @@ export type BoardSnapshot = typeof BoardSnapshot.Type
 export const CoordinatorSnapshot = Schema.Struct({
   threadId: Schema.String,
   cursor: Cursor,
+  /** What the coordinator used today, since this computer's midnight, of each account it ran on (ADR-084). */
+  usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   session: Schema.NullOr(SessionSummary),
   /** The agent, model and effort it starts on: whatever you used last. Unavailable when that agent isn't signed in. */
@@ -3610,6 +3654,8 @@ export const Api = RpcGroup.make(
           agentId: Schema.String,
           accountId: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
+          /** How hard the agent it is handed to thinks, as the model offers it; without it, the model's own default. */
+          effort: Schema.optional(Schema.String),
         }),
         Schema.Struct({ kind: Schema.Literal('wait') }),
         Schema.Struct({ kind: Schema.Literal('abandon') }),

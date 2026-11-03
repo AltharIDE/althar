@@ -2,8 +2,9 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@althar/domain'
-import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import { agents } from '@althar/provider-adapters'
+import { fakeAgent, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -19,9 +20,9 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
-import { anyOf, SignIns } from '../src/SignIns'
+import { anyOf, latestRefusals, SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
+import { definition, fakeAgents, fakeConnectors, items, launches, repository, runtime, task, until } from './support'
 
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
@@ -371,6 +372,117 @@ describe('accounts', () => {
       }
     }).pipe(Effect.provide(withAccounts())),
   )
+
+  it('tells which provider within an agent refused its sign-in, from its latest turns', () => {
+    const providerOf = agents.opencode.signIn.providers?.of ?? (() => undefined)
+    const turn = (model: string, endedAt: string, errorClass: string | null) => ({ model, endedAt, errorClass })
+    // Newest first: Go was refused twice, Anthropic went through after a refusal, and a model with no provider says nothing.
+    const latest = latestRefusals(
+      [
+        turn('opencode-go/deepseek-v4.1-flash', '2026-11-02T20:43:44.187Z', 'auth_required'),
+        turn('anthropic/claude-sonnet-5-5', '2026-11-02T20:30:00.000Z', null),
+        turn('opencode-go/gemini-4-argon', '2026-11-02T20:43:19.132Z', 'auth_required'),
+        turn('anthropic/claude-sonnet-5-5', '2026-11-02T19:00:00.000Z', 'auth_required'),
+        turn('sonnet', '2026-11-02T18:00:00.000Z', 'auth_required'),
+      ],
+      providerOf,
+    )
+    assert.deepStrictEqual(
+      [...latest],
+      [
+        ['opencode-go', '2026-11-02T20:43:44.187Z'],
+        ['anthropic', null],
+      ],
+    )
+  })
+
+  it.live('says which of a provider agent’s providers refused, and lets one go when its sign-in changes or a later turn works', () => {
+    const base = definition('opencode')
+    const withProviders = {
+      ...base,
+      signIn: {
+        ...base.signIn,
+        providers: {
+          read: () => [],
+          of: (model: string) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined),
+        },
+      },
+    }
+    const layer = Queries.layer.pipe(
+      Layer.provideMerge(
+        runtime(
+          ':memory:',
+          {},
+          {
+            agents: Layer.succeed(
+              Agents,
+              Agents.from([{ definition: withProviders, transport: () => ({ _tag: 'InProcess', agent: fakeAgent() }) }]),
+            ),
+          },
+        ),
+      ),
+    )
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const signIns = yield* SignIns
+      const sql = yield* SqlClient.SqlClient
+      const { project, task: created } = yield* task('Ask the provider')
+      const [account] = yield* accounts.of('opencode')
+      if (account === undefined) return assert.fail('OpenCode has its usual account')
+      const sessionId = yield* newId(Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: sessionId,
+        projectId: project.projectId,
+        threadId: created.threadId,
+        agentId: 'opencode',
+        accountId: account.id,
+        state: 'active',
+        startedAt: new Date().toISOString(),
+      })}`
+      const turn = (state: 'completed' | 'failed', errorClass: string | null, endedAt: string, model = 'opencode-go/glm-5.3') =>
+        Effect.gen(function* () {
+          const id = yield* newId(Ids.turnDelivery)
+          yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+            id,
+            projectId: project.projectId,
+            threadId: created.threadId,
+            providerSessionId: sessionId,
+            controllerGeneration: 1,
+            state,
+            origin: 'person',
+            model,
+            errorClass,
+            endedAt,
+            requestedAt: endedAt,
+          })}`
+        })
+      const listed = [{ id: 'opencode-go', name: 'OpenCode Go', connections: 'key' }]
+      const check = (providers = listed) => ({ status: 'signed_in' as const, paidBy: 'key' as const, providers })
+      // Nothing refused yet: the provider is there, with nothing to say.
+      assert.deepStrictEqual(yield* signIns.providers(account, check()), [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: null }])
+      // Its latest turn was refused: said, and kept as it says on the next look.
+      yield* turn('failed', 'auth_required', '2026-11-02T20:43:44.187Z')
+      const refused = [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z' }]
+      assert.deepStrictEqual(yield* signIns.providers(account, check()), refused)
+      assert.deepStrictEqual(yield* signIns.providers(account, check()), refused)
+      // The sign-in it listed changed meanwhile: what was refused is put right.
+      assert.deepStrictEqual(yield* signIns.providers(account, check([{ ...listed[0]!, connections: 'key, oauth' }])), [
+        { id: 'opencode-go', name: 'OpenCode Go', refusedAt: null },
+      ])
+      // A later turn that went through lets the refusal go.
+      yield* turn('completed', null, '2026-11-02T21:00:00.000Z')
+      assert.deepStrictEqual(yield* signIns.providers(account, check()), [{ id: 'opencode-go', name: 'OpenCode Go', refusedAt: null }])
+      // Refused again, and gone from what the status lists: still one to sign in to, by its id.
+      yield* turn('failed', 'auth_required', '2026-11-02T21:30:00.000Z')
+      assert.deepStrictEqual(yield* signIns.providers(account, check([])), [
+        { id: 'opencode-go', name: 'opencode-go', refusedAt: '2026-11-02T21:30:00.000Z' },
+      ])
+      // An agent with one sign-in, not one per provider, says nothing of providers.
+      const [codex] = yield* accounts.of('codex')
+      if (codex === undefined) return assert.fail('Codex has its usual account')
+      assert.isUndefined(yield* signIns.providers(codex, check()))
+    }).pipe(Effect.provide(layer))
+  })
 
   it.effect('are each signed in on their own, and a session runs on the first one that can, in its home', () => {
     const away = folder('away')

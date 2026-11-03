@@ -76,7 +76,8 @@ test('sends a PDF, a log and a folder to the coordinator and to a lead, which op
     await composer(page).click()
     await expect(composerForm(page).getByRole('button', { name: 'Add files' })).toBeVisible()
     await pick(page, [join(downloads, 'refund-spec.pdf')])
-    await expect(page.getByRole('list', { name: '1 attachment to send' }).getByText('refund-spec.pdf')).toBeVisible()
+    // The chip's own name, beside the "Reading refund-spec.pdf" line: exact, or both match.
+    await expect(page.getByRole('list', { name: '1 attachment to send' }).getByText('refund-spec.pdf', { exact: true })).toBeVisible()
     await startTask(page, 'Fix the refunds layout')
     await expect(
       page.getByText(/saw files: refund-spec\.pdf \(linked, application\/pdf, 43 B\): %PDF-1\.4 Refunds share/).first(),

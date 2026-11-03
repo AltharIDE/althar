@@ -1,37 +1,58 @@
-import type { SessionSummary } from '@althar/contracts'
-import { ContextRing } from '@althar/ui'
+import type { AccountUse, SessionSummary } from '@althar/contracts'
+import { ContextRing, UsageLines } from '@althar/ui'
 import { useEffect, useState } from 'react'
 
 import type { NameModel } from './modelNames'
+import { usageLines } from './usage'
 
 /*
  * How full the context of the agent on a conversation is, for its composer:
  * the kit's ring, from what the agent last said of it while it runs. Nothing
  * where it hasn't said. Its detail, as you point at it, holds Compact, which
  * has the agent sum up what it holds; it says it is compacting until the
- * agent says how full it is again.
+ * agent says how full it is again. Under the context, what the task, or
+ * the coordinator's day, used of each account (ADR-084).
  */
 
 /** Tokens, as the ring counts them: in thousands, to a tenth. */
 const thousands = (tokens: number) => Math.round(tokens / 100) / 10
 
+/** The ring's usage, where the conversation used any account. */
+const usageOf = (usage: MeterUsage | undefined, named: NameModel) => {
+  const lines = usageLines(usage?.usage, named)
+  return usage === undefined || lines.length === 0 ? {} : { usage: <UsageLines lines={lines} heading={usage.heading} /> }
+}
+
 /** How long Compact stays off, at most, for an agent that never says how full it is after. */
 const COMPACTING_AT_MOST = 120_000
 
-export function contextMeter(session: SessionSummary | null | undefined, named: NameModel, onCompact?: () => Promise<void>) {
+/** What the conversation's usage says, and whose it is, as the ring's panel heads it. */
+export interface MeterUsage {
+  readonly usage: ReadonlyArray<AccountUse> | undefined
+  readonly heading: string
+}
+
+export function contextMeter(
+  session: SessionSummary | null | undefined,
+  named: NameModel,
+  onCompact?: () => Promise<void>,
+  usage?: MeterUsage,
+) {
   const context = session?.context
   if (session == null || context == null || context.size <= 0) return undefined
-  return <ContextMeter session={session} named={named} onCompact={onCompact} />
+  return <ContextMeter session={session} named={named} onCompact={onCompact} usage={usage} />
 }
 
 function ContextMeter({
   session,
   named,
   onCompact,
+  usage,
 }: {
   readonly session: SessionSummary
   readonly named: NameModel
   readonly onCompact: (() => Promise<void>) | undefined
+  readonly usage: MeterUsage | undefined
 }) {
   const used = session.context?.used ?? 0
   const size = session.context?.size ?? 0
@@ -58,6 +79,7 @@ function ContextMeter({
       total={thousands(size)}
       model={named(session.agentId, session.model, session.account)}
       {...compact}
+      {...usageOf(usage, named)}
     />
   )
 }

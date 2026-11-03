@@ -52,13 +52,25 @@ export const Found: Story = {
   },
 }
 
+/** Found by typing: every word in a name or a place, and Return ticks the first found. */
+export const Finding: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('searchbox'), 'meridian')
+    await expect(c.getAllByRole('checkbox')).toHaveLength(2)
+    await userEvent.keyboard('{Enter}')
+    await expect(c.getAllByRole('checkbox')[0]).toBeChecked()
+    await expect(onPick).toHaveBeenCalledWith('meridian')
+  },
+}
+
 /** Two ticked into one project. */
 export const Picked: Story = { args: { picked: ['meridian', 'meridian-web'] } }
 
 /** Still looking in the usual places. */
 export const Looking: Story = { args: { repositories: null } }
 
-/** Nothing found: Add a folder stays. */
+/** Nothing found: Choose a folder stays, and there is nothing to find. */
 export const NoneFound: Story = { args: { repositories: [] } }
 
 /** A long path is cut short, whole on hover. */

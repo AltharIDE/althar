@@ -2680,6 +2680,8 @@ describe('words', () => {
     assert.strictEqual(failed('usage_limit'), "The agent's usage limit is reached.")
     assert.strictEqual(failed('usage_limit', '15:00'), "The agent's usage limit is reached until 15:00.")
     assert.strictEqual(failed('context_full'), "The agent's context is full.")
+    // Claude Code's "Resource not found", for a session its adapter had dropped: what happened, never the bare words.
+    assert.strictEqual(failed('session_lost'), 'The agent had lost this conversation.')
     assert.strictEqual(failed('unknown'), 'Something odd.')
     assert.strictEqual(
       agentSaid(new OptionUnavailable({ configId: 'model', value: 'huge', available: [] })),
@@ -2740,6 +2742,12 @@ describe('steps that need the person', () => {
     for (const why of ['no_report', 'session_ended', 'restarted', 'transient', 'signed_out']) assert.strictEqual(stuckOf({ why }).why, why)
     // A service that kept failing keeps its name, for the call to say whose.
     assert.strictEqual(stuckOf({ why: 'transient', service: 'Anthropic' }).service, 'Anthropic')
+    // A sign-in one provider within the agent refused keeps the model and the provider, for the call to name them.
+    assert.deepInclude(stuckOf({ why: 'signed_out', model: 'opencode-go/deepseek-v4.1-flash', provider: 'opencode-go' }), {
+      model: 'opencode-go/deepseek-v4.1-flash',
+      provider: 'opencode-go',
+    })
+    assert.notProperty(stuckOf({ why: 'signed_out' }), 'provider')
     assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
     assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })

@@ -17,7 +17,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { whenWords } from '../src/Limits'
-import { describeModels, type Route, routeTo } from '../src/usableModels'
+import { bestFirst, describeModels, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
 
 /*
@@ -162,6 +162,31 @@ describe('the models as the coordinator reads them', () => {
       said,
       `- Tight: no scores known; on a plan, nearly out, 3% of its five-hour limit left, until ${whenWords(resetsAt, now)}; no effort to set`,
     )
+  })
+
+  it('takes a model through a provider that didn’t refuse its sign-in, and says where only one that did goes', () => {
+    // As OpenCode lists DeepSeek V4.1 Flash: through Go, whose key expired, first, and through Zen.
+    const go = route({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      model: 'opencode-go/deepseek-v4.1-flash',
+      refusedProvider: 'OpenCode Go',
+    })
+    const zen = route({ agentId: 'opencode', agentName: 'OpenCode', model: 'opencode/deepseek-v4.1-flash' })
+    const usable = [
+      { name: 'DeepSeek V4.1 Flash', maker: 'DeepSeek', fact: null, routes: bestFirst([go, zen]) },
+      {
+        name: 'Qwen3.8 Max',
+        maker: 'Alibaba',
+        fact: null,
+        routes: [route({ agentId: 'opencode', model: 'opencode-go/qwen3.8-max', refusedProvider: 'OpenCode Go' })],
+      },
+    ]
+    assert.strictEqual(routeTo(usable, 'DeepSeek V4.1 Flash')?.model, 'opencode/deepseek-v4.1-flash')
+    assert.strictEqual(routeTo(usable, 'DeepSeek V4.1 Flash', 'opencode')?.model, 'opencode/deepseek-v4.1-flash')
+    const said = describeModels(usable, 0)
+    assert.notInclude(said, '- DeepSeek V4.1 Flash: no scores known; per use; no effort to set; needs')
+    assert.include(said, '- Qwen3.8 Max: no scores known; per use; no effort to set; needs OpenCode Go signed in again first')
   })
 
   it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {

@@ -449,6 +449,7 @@ export const handlers = Api.toLayer(
       Effect.gen(function* () {
         const check = yield* signIns.account(account, recheck)
         const out = yield* limits.outAccount(account.id)
+        const providers = yield* signIns.providers(account, check)
         return {
           id: account.id,
           name: account.name,
@@ -457,6 +458,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
         contained(

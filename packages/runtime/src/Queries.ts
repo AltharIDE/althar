@@ -47,6 +47,8 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } fro
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
+import { ModelFacts } from './ModelFacts'
+import { PlanUsage } from './PlanUsage'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
@@ -72,6 +74,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
+import { spendingOf } from './Spending'
 import { actionsOf, standingOf } from './Tasks'
 
 /*
@@ -266,6 +269,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   const service = field(payload, 'service')
+  const model = field(payload, 'model')
+  const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -297,6 +302,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       : {}),
     ...(limit === undefined ? {} : { limit }),
     ...(typeof service === 'string' ? { service } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof provider === 'string' ? { provider } : {}),
   }
 }
 
@@ -699,6 +706,8 @@ type Store =
   | SqlClient.SqlClient
   | Instance
   | Agents
+  | ModelFacts
+  | PlanUsage
   | Sessions
   | Coordinator
   | Changes
@@ -2795,9 +2804,12 @@ export class Queries extends Context.Service<
               concurrency: 'unbounded',
             },
           )
+          // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
+          const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {
@@ -2899,9 +2911,14 @@ export class Queries extends Context.Service<
             [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
             { concurrency: 'unbounded' },
           )
+          // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
+          const midnight = new Date(yield* Clock.currentTimeMillis)
+          midnight.setHours(0, 0, 0, 0)
+          const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: projectId, name: project.name },
             session,
             suggested,

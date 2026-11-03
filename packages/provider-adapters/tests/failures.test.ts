@@ -15,6 +15,8 @@ describe('classify', () => {
     ['prompt is too long: 210000 tokens > 200000 maximum', 'context_full'],
     ["This model's maximum context length is 128000 tokens", 'context_full'],
     ['Authentication required', 'auth_required'],
+    // What a review stored when OpenCode Go refused its expired key (OpenCode 2.2.5, 2 November 2026): a sign-in refused, rightly read.
+    ['Authentication required: provider authentication required', 'auth_required'],
     ['Please log in to continue', 'auth_required'],
     ['401 Unauthorized', 'auth_required'],
     ['The author of this commit logged in yesterday', 'unknown'],
@@ -36,6 +38,20 @@ describe('classify', () => {
     assert.strictEqual(
       classify({ code: -32603, message: 'Internal error', data: { reason: 'quota exhausted' } }, now).failure,
       'usage_limit',
+    )
+  })
+
+  it('reads a session the agent no longer has as lost', () => {
+    // What claude-agent-acp 0.99.1 answered a prompt on 2 November 2026, once a `pkill -f` had ended its Claude Code process
+    // and it had dropped the session: the turn failed with these words alone.
+    const said = { code: -32002, message: 'Resource not found', data: { sessionId: '689c92e9-0c51-41e8-ba3b-a5ae4c08db98' } }
+    assert.deepStrictEqual(classify(said, now), { failure: 'session_lost', message: 'Resource not found' })
+    assert.strictEqual(classify({ code: -32002, message: 'Resource not found' }, now).failure, 'session_lost')
+    assert.strictEqual(classify(new Error('Session 4f1c2e not found'), now).failure, 'session_lost')
+    // A resource the agent was asked for that isn't there is not the session.
+    assert.strictEqual(
+      classify({ code: -32002, message: 'Resource not found: file:///a.ts', data: { uri: 'file:///a.ts' } }, now).failure,
+      'unknown',
     )
   })
 

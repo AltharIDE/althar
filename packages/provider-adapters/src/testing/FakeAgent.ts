@@ -513,6 +513,9 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/** Worktrees where a lead's session has been lost once (`[lead:lost-once]`): a fresh session there carries on. */
+const lostIn = new Set<string>()
+
 /** How many more times a lead goes on its own in each worktree, as `[lead:gone-once]` and `[lead:gone-twice]` say: kept across sessions. */
 const goneLeft = new Map<string, number>()
 
@@ -535,8 +538,9 @@ const goesOnItsOwn = (session: SessionState) => {
  * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
  * failing \`npm test\` three times in a row, every turn, then waits until
  * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
- * at its output limit, `[lead:refuse]` refuses, and `[lead:signed-out]` fails
- * as its account is signed out. `[lead:explore]` reads
+ * at its output limit, `[lead:refuse]` refuses, `[lead:signed-out]` fails
+ * as its account is signed out, and `[lead:lost-once]` has lost its first
+ * session in its worktree. `[lead:explore]` reads
  * a few files, changes none, and works on until cancelled. Otherwise, nothing: the
  * turn goes on as it would.
  */
@@ -551,6 +555,12 @@ const playStall = async (
   const hang = async (stubborn = false) => {
     while ((stubborn || !session.cancelled) && !session.closed) await pause(10)
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
+  }
+  // Its first session in its worktree is lost, as claude-agent-acp drops one whose Claude Code process died, and it answers
+  // the prompt as that did on 2 November 2026; the coordinator that plans it only passes the marker on.
+  if (session.markers.has('[lead:lost-once]') && !session.coordinator && !lostIn.has(session.cwd)) {
+    lostIn.add(session.cwd)
+    throw new acp.RequestError(-32002, 'Resource not found', { sessionId: 'lost' })
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
   // The coordinator that plans it only passes the marker on.
@@ -1202,13 +1212,20 @@ const playRole = async (
       }
       return undefined
     }
+    // The person's newest ask: the last line of the prompt that carries a coordinator marker, as said, or as the thread so
+    // far quotes it (`[person] …`). A session briefed again after a restart carries the thread, where earlier asks still are.
+    const ask =
+      text
+        .split('\n')
+        .filter((line) => /\[coordinator:[a-z-]+\]/.test(line))
+        .at(-1) ?? text
     // Told a decision, it keeps it as one of the project's notes: what the person said before the marker, as they said it.
-    if (available.has('keep_note') && text.includes('[coordinator:keep-note]')) {
-      const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+    if (available.has('keep_note') && ask.includes('[coordinator:keep-note]')) {
+      const said = (ask.slice(0, ask.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
     // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
-    if (available.has('propose_automation') && text.includes('[coordinator:automate]')) {
+    if (available.has('propose_automation') && ask.includes('[coordinator:automate]')) {
       return await call('propose_automation', {
         name: 'Release notes',
         prompt: 'Write release notes from what merged this week.',
@@ -1218,15 +1235,15 @@ const playRole = async (
       })
     }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
-    if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
-      const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
+    if (available.has('review_pull_request') && ask.includes('[coordinator:review]')) {
+      const asked = ask.slice(0, ask.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
       const link = /https?:\/\/\S+/.exec(asked)?.[0] ?? /#\d+/.exec(asked)?.[0] ?? ''
       return await call('review_pull_request', { pull_request: link, lead: { agent: 'claude-code', reason: 'Careful.' } })
     }
     // Asked for something small, it starts it at once, passing its lead the markers it was given.
-    if (available.has('start_task') && text.includes('[coordinator:start]')) {
-      const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
-      const asked = (text.slice(0, text.indexOf('[coordinator:start]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+    if (available.has('start_task') && ask.includes('[coordinator:start]')) {
+      const markers = ask.match(/\[(lead|review):[a-z-]+\]/g) ?? []
+      const asked = (ask.slice(0, ask.indexOf('[coordinator:start]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       const title = asked.split(/[.!?]/)[0]?.trim() || 'Try it'
       return await call('start_task', {
         title,
@@ -1234,11 +1251,11 @@ const playRole = async (
         lead: { agent: 'claude-code', reason: 'Quick to start.' },
       })
     }
-    if (available.has('draft_task') && text.includes('[coordinator:plan')) {
-      const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
+    if (available.has('draft_task') && ask.includes('[coordinator:plan')) {
+      const markers = ask.match(/\[(lead|review):[a-z-]+\]/g) ?? []
       // The task is what the person asked for: the line with the marker, up to its first stop.
       // As the thread so far quotes it, after who said it: "[person] Add a retry."
-      const asked = (text.slice(0, text.indexOf('[coordinator:plan')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      const asked = (ask.slice(0, ask.indexOf('[coordinator:plan')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       const title =
         asked
           .replace(/https?:\/\/\S+/g, '')
@@ -1260,10 +1277,10 @@ const playRole = async (
         lead: {
           agent: 'claude-code',
           // `[coordinator:plan-effort]`: on its large model, thinking hard.
-          ...(text.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          ...(ask.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
           reason: 'It knows the code.',
         },
-        review: text.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
+        review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
       })
     }
     return undefined
