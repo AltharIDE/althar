@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from 'effect'
+import { Clock, Duration, Effect, Schema } from 'effect'
 
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
@@ -71,6 +71,9 @@ const RepositoryAnswer = Schema.Struct({
   allow_merge_commit: Schema.optional(Schema.Boolean),
   allow_rebase_merge: Schema.optional(Schema.Boolean),
 })
+
+/** How many times, a second apart, the head GitHub's update-branch made is read back before it is left unknown. */
+const UPDATE_READS = 8
 
 const PullAnswer = Schema.Struct({
   id: Schema.Number,
@@ -882,21 +885,37 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             (answer) => answer.behind_by === 0,
           ),
     // GitHub's update-branch is a merge of the target into the branch, at the head read; one up to date already is left as it is.
+    // It lands a moment later: the head it made is read back, a merge whose first parent is the head it had, so no one else's is taken for it.
     updateBranch: (repository, change) =>
-      http
-        .json(
-          Schema.Unknown,
-          'PUT',
-          `${repo(repository)}/pulls/${change.number}/update-branch`,
-          change.headSha === null ? {} : { expected_head_sha: change.headSha },
-        )
-        .pipe(
-          Effect.asVoid,
-          Effect.catchIf(
-            (error) => error.status === 422 && /no new commits/i.test(error.message),
-            () => Effect.void,
-          ),
-        ),
+      Effect.gen(function* () {
+        const current = yield* http
+          .json(
+            Schema.Unknown,
+            'PUT',
+            `${repo(repository)}/pulls/${change.number}/update-branch`,
+            change.headSha === null ? {} : { expected_head_sha: change.headSha },
+          )
+          .pipe(
+            Effect.as(false),
+            Effect.catchIf(
+              (error) => error.status === 422 && /no new commits/i.test(error.message),
+              () => Effect.succeed(true),
+            ),
+          )
+        if (current || change.headSha === null) return change.headSha
+        for (let read = 0; read < UPDATE_READS; read++) {
+          if (read > 0) yield* Effect.sleep(Duration.seconds(1))
+          const head = (yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)).head.sha
+          if (head === change.headSha) continue
+          const made = yield* http.json(
+            Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
+            'GET',
+            `${repo(repository)}/commits/${encodeURIComponent(head)}`,
+          )
+          return made.parents.length === 2 && made.parents[0]?.sha === change.headSha ? head : null
+        }
+        return null
+      }),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

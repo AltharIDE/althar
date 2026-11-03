@@ -484,7 +484,7 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
-  it.effect('merges in the way asked, reads a branch’s head and whether a pull request has it; no auto-merge, and no queue from here', () =>
+  it.effect('merges in the way asked, reads a branch’s head and whether a pull request has it; no auto-merge, and no queue set', () =>
     Effect.gen(function* () {
       const { host, sent } = cloud([
         ['GET', PR, { json: pull({ draft: false }) }],
@@ -505,8 +505,60 @@ describe('Bitbucket Cloud as a code host', () => {
       assert.isFalse(yield* host.contains(ace, seen, 'newer'))
       assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: null, autoMerge: false, server: null })
       assert.strictEqual((yield* Effect.flip(host.merge(ace, seen, { auto: true }))).reason, 'rejected')
-      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /only on its site/)
-      assert.match((yield* Effect.flip(host.leaveQueue(ace, seen))).message, /only on its site/)
+      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /only from its site/)
+      // In no queue, it is left as it is.
+      assert.isFalse((yield* host.leaveQueue(ace, seen)).queued ?? true)
+      assert.isFalse(sent.some((request) => request.method === 'DELETE'))
+    }),
+  )
+
+  it.effect('reads the merge queue on a branch and whether a pull request is in it, and takes it out; entered only on its site', () =>
+    Effect.gen(function* () {
+      let queued = true
+      const QUEUES = `${ACE}/merge-queues`
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull({ draft: false }) }],
+        [
+          'GET',
+          `${QUEUES}?target_branch=master`,
+          {
+            json: {
+              values: [
+                { uuid: '{old}', name: 'Old', state: 'INACTIVE' },
+                { uuid: '{q1}', name: 'Main', state: 'ACTIVE' },
+              ],
+            },
+          },
+        ],
+        ['GET', `${QUEUES}?target_branch=develop`, { json: { values: [] } }],
+        ['GET', `${QUEUES}/%7Bq1%7D/queue/552`, () => (queued ? { json: { status: 'QUEUED', rank: 1 } } : { status: 404, json: {} })],
+        [
+          'DELETE',
+          `${QUEUES}/%7Bq1%7D/queue/552`,
+          () => {
+            queued = false
+            return { status: 202 }
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), {
+        queue: 'merge_queue',
+        addedOnSite: true,
+        autoMerge: false,
+        server: null,
+      })
+      // An INACTIVE queue, or none, doesn't require queueing.
+      assert.strictEqual((yield* host.mergeWays(ace, 'develop')).queue, null)
+      const seen = yield* host.change(ace, 552, { queue: true })
+      assert.isTrue(seen.queued)
+      assert.isUndefined((yield* host.change(ace, 552)).queued)
+      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /Add to merge queue/)
+      assert.isFalse((yield* host.leaveQueue(ace, seen)).queued)
+      assert.strictEqual(sent.filter((request) => request.method === 'DELETE').length, 1)
+      assert.isFalse((yield* host.change(ace, 552, { queue: true })).queued)
+      // Out already, nothing more is asked.
+      yield* host.leaveQueue(ace, seen)
+      assert.strictEqual(sent.filter((request) => request.method === 'DELETE').length, 1)
     }),
   )
 

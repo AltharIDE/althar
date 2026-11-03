@@ -19,13 +19,14 @@ hostContract({
 trackerContract({ name: 'The fake', tracker: fake, ref: 'MER-231' })
 
 // Merging on each host's fake, as each merges: GitHub plainly and through its merge queue, GitLab with auto-merge and through
-// its merge trains, Bitbucket Cloud plainly, and Bitbucket Data Center with auto-merge.
+// its merge trains, Bitbucket Cloud plainly and with a merge queue entered only on its site, and Bitbucket Data Center with auto-merge.
 for (const [name, product, queue] of [
   ['GitHub', 'github', false],
   ['GitHub with a merge queue', 'github', true],
   ['GitLab', 'gitlab', false],
   ['GitLab with merge trains', 'gitlab', true],
   ['Bitbucket Cloud', 'bitbucket_cloud', false],
+  ['Bitbucket Cloud with a merge queue', 'bitbucket_cloud', true],
   ['Bitbucket Data Center', 'bitbucket_dc', false],
 ] as const) {
   const host = makeFakeService({ product })

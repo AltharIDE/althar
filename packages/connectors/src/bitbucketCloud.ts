@@ -164,6 +164,11 @@ const ActivityAnswer = Schema.Struct({
 })
 type ActivityAnswer = typeof ActivityAnswer.Type
 
+/** A merge queue set on a branch, and whether it is in use: an INACTIVE one doesn't require queueing. */
+const MergeQueues = Schema.Struct({ values: Schema.Array(Schema.Struct({ uuid: Schema.String, state: Schema.String })) })
+/** A pull request in a queue, as it stands there: REMOVING once it is being taken out. */
+const Queued = Schema.Struct({ status: Schema.optional(Schema.String) })
+
 /** A file the pull request changes, and by how many lines. */
 const Diffstat = Schema.Struct({ lines_added: Schema.optional(Schema.Number), lines_removed: Schema.optional(Schema.Number) })
 
@@ -321,8 +326,41 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const noQueue = new ConnectorFailed({
     product,
     reason: 'rejected',
-    message: 'Bitbucket Cloud’s merge queue can’t be entered or left through its API: only on its site',
+    message: 'Bitbucket Cloud’s merge queue takes a pull request only from its site, with Add to merge queue',
   })
+  /** The merge queue in use on a branch, by its id: none where it has none, or the workspace hasn't the feature. */
+  const queueOn = (repository: Repository, branch: string) =>
+    http.json(MergeQueues, 'GET', `${repo(repository.path)}/merge-queues?target_branch=${encodeURIComponent(branch)}`).pipe(
+      Effect.map((answer) => answer.values.find((queue) => queue.state !== 'INACTIVE')?.uuid ?? null),
+      Effect.catchIf(
+        (error) => error.reason === 'not_found',
+        () => Effect.succeed(null),
+      ),
+    )
+  const inQueue = (repository: Repository, queue: string, number: number) =>
+    http.json(Queued, 'GET', `${repo(repository.path)}/merge-queues/${encodeURIComponent(queue)}/queue/${number}`).pipe(
+      Effect.map((answer) => answer.status !== 'REMOVING'),
+      Effect.catchIf(
+        (error) => error.reason === 'not_found',
+        () => Effect.succeed(false),
+      ),
+    )
+
+  /** A pull request as read, with its size, file by file. */
+  const readChange = (repository: Repository, number: number, answer: PullAnswer) =>
+    Effect.gen(function* () {
+      // Its size, file by file; a diff Bitbucket won't count in time leaves it unsaid, not the pull request unread.
+      const files = yield* all(Diffstat, `${pull(repository, number)}/diffstat`).pipe(Effect.orElseSucceed(() => null))
+      const size =
+        files === null
+          ? null
+          : {
+              additions: files.reduce((sum, file) => sum + (file.lines_added ?? 0), 0),
+              deletions: files.reduce((sum, file) => sum + (file.lines_removed ?? 0), 0),
+              changedFiles: files.length,
+            }
+      return changeOf(repository, answer, size)
+    })
 
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(http.json(User, 'GET', `${api}/user`), (user) => {
     const { id, login, name } = personOf(user)
@@ -507,20 +545,13 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           )
       }),
     listChanges,
-    change: (repository, number) =>
+    change: (repository, number, ask) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
-        // Its size, file by file; a diff Bitbucket won't count in time leaves it unsaid, not the pull request unread.
-        const files = yield* all(Diffstat, `${pull(repository, number)}/diffstat`).pipe(Effect.orElseSucceed(() => null))
-        const size =
-          files === null
-            ? null
-            : {
-                additions: files.reduce((sum, file) => sum + (file.lines_added ?? 0), 0),
-                deletions: files.reduce((sum, file) => sum + (file.lines_removed ?? 0), 0),
-                changedFiles: files.length,
-              }
-        return changeOf(repository, answer, size)
+        const read = yield* readChange(repository, number, answer)
+        if (ask?.queue !== true || read.state !== 'open') return read
+        const queue = yield* queueOn(repository, read.target)
+        return { ...read, queued: queue === null ? false : yield* inQueue(repository, queue, number) }
       }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
@@ -565,10 +596,26 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         )
         return changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
       }),
-    // Bitbucket Cloud has no auto-merge, and its merge queue can't be entered through its API: Althar's own line stands in.
-    mergeWays: () => Effect.succeed({ queue: null, autoMerge: false, server: null }),
+    // Bitbucket Cloud has no auto-merge. Its merge queue is read and left through its API, but entered only on its site.
+    mergeWays: (repository, target) =>
+      Effect.map(queueOn(repository, target), (queue) =>
+        queue === null
+          ? { queue: null, autoMerge: false, server: null }
+          : { queue: 'merge_queue' as const, addedOnSite: true, autoMerge: false, server: null },
+      ),
     enqueue: () => Effect.fail(noQueue),
-    leaveQueue: () => Effect.fail(noQueue),
+    // Taken out as Bitbucket does it, a moment later: one in no queue is left as it is.
+    leaveQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const queue = yield* queueOn(repository, change.target)
+        if (queue === null || !(yield* inQueue(repository, queue, change.number))) return { ...change, queued: false }
+        yield* http.json(
+          Schema.Unknown,
+          'DELETE',
+          `${repo(repository.path)}/merge-queues/${encodeURIComponent(queue)}/queue/${change.number}`,
+        )
+        return { ...change, queued: false }
+      }),
     branchHead: (repository, branch) =>
       Effect.map(
         http.json(Schema.Struct({ target: Schema.Struct({ hash: Schema.String }) }), 'GET', branchOf(repository, branch)),

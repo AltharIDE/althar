@@ -181,24 +181,45 @@ describe('GitHub as a code host', () => {
 
   it.effect('reads a branch’s head, whether a pull request has a commit, and brings it up to date by a merge at its head', () =>
     Effect.gen(function* () {
+      let updated = false
       const { host, sent } = github([
         ['GET', `${REPO}/branches/release/1.0`, { json: { commit: { sha: 'tip' } } }],
         ['GET', `${REPO}/compare/tip...abc`, { json: { behind_by: 0, ahead_by: 2 } }],
         ['GET', `${REPO}/compare/newer...abc`, { json: { behind_by: 3, ahead_by: 2 } }],
-        ['PUT', `${REPO}/pulls/12/update-branch`, { status: 202, json: { message: 'Updating pull request branch.' } }],
-        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'PUT',
+          `${REPO}/pulls/12/update-branch`,
+          () => {
+            updated = true
+            return { status: 202, json: { message: 'Updating pull request branch.' } }
+          },
+        ],
+        [
+          'GET',
+          `${REPO}/pulls/12`,
+          () => ({ json: updated ? { ...pull({ draft: false }), head: { ...pull().head, sha: 'made' } } : pull({ draft: false }) }),
+        ],
+        ['GET', `${REPO}/commits/made`, { json: { parents: [{ sha: 'abc' }, { sha: 'tip' }] } }],
       ])
       assert.strictEqual(yield* host.branchHead(repository, 'release/1.0'), 'tip')
       const open = yield* host.change(repository, 12)
       assert.isTrue(yield* host.contains(repository, open, 'tip'))
       assert.isFalse(yield* host.contains(repository, open, 'newer'))
-      yield* host.updateBranch!(repository, open)
+      // The head it made is read back: a merge whose first parent is the head it had.
+      assert.strictEqual(yield* host.updateBranch!(repository, open), 'made')
       assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { expected_head_sha: 'abc' })
+      // A head someone else pushed on top isn't taken for it.
+      const pushed = github([
+        ['PUT', `${REPO}/pulls/12/update-branch`, { status: 202, json: {} }],
+        ['GET', `${REPO}/pulls/12`, { json: { ...pull({ draft: false }), head: { ...pull().head, sha: 'theirs' } } }],
+        ['GET', `${REPO}/commits/theirs`, { json: { parents: [{ sha: 'made' }] } }],
+      ])
+      assert.isNull(yield* pushed.host.updateBranch!(repository, open))
       // Up to date already, it is left as it is.
       const current = github([
         ['PUT', `${REPO}/pulls/12/update-branch`, { status: 422, json: { message: 'There are no new commits on the base branch.' } }],
       ])
-      yield* current.host.updateBranch!(repository, open)
+      assert.strictEqual(yield* current.host.updateBranch!(repository, open), 'abc')
       // A head that moved is refused, as GitHub says.
       const moved = github([
         ['PUT', `${REPO}/pulls/12/update-branch`, { status: 422, json: { message: 'expected head sha didn’t match current head ref.' } }],

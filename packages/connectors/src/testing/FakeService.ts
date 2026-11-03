@@ -184,7 +184,8 @@ export interface FakeControls {
   /**
    * Target branches merge through a merge queue, as GitHub's can: a merge
    * puts a change in it, open and queued, until `mergeByHand` lands it or
-   * `dequeue` takes it out.
+   * `dequeue` takes it out. GitLab's is its merge train; Bitbucket Cloud's
+   * refuses a plain merge and is entered only on its site (`enqueueByHand`).
    */
   mergeQueue(): void
   /** Someone puts a change in the merge queue outside Althar, as on the host's site. */
@@ -570,6 +571,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           autoMerging.add(change.number)
           return Effect.succeed({ ...changeNumbered(change.number), autoMerge: true })
         }
+        if (queues && product === 'bitbucket_cloud')
+          return Effect.fail(
+            new ConnectorFailed({ product, reason: 'rejected', message: 'This branch merges only through its merge queue' }),
+          )
         if (queues && product === 'github') {
           mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
           inQueue.add(change.number)
@@ -582,7 +587,13 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     mergeWays: () =>
       Effect.andThen(called('mergeWays'), () =>
         Effect.succeed({
-          queue: queues && product === 'github' ? 'merge_queue' : queues && product === 'gitlab' ? 'merge_train' : null,
+          queue:
+            queues && (product === 'github' || product === 'bitbucket_cloud')
+              ? 'merge_queue'
+              : queues && product === 'gitlab'
+                ? 'merge_train'
+                : null,
+          ...(queues && product === 'bitbucket_cloud' ? { addedOnSite: true } : {}),
           autoMerge: autoMerges,
           server:
             product === 'gitlab' ? 'GitLab 18.5 (the fake)' : product === 'bitbucket_dc' ? 'Bitbucket Data Center 9.4 (the fake)' : null,
@@ -605,8 +616,6 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }),
     leaveQueue: (_repository, change) =>
       Effect.andThen(called('leaveQueue'), () => {
-        if (product === 'bitbucket_cloud')
-          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Only on Bitbucket’s site' }))
         if (inQueue.delete(change.number)) leftQueue.set(change.number, 'removed')
         autoMerging.delete(change.number)
         return Effect.succeed({ ...changeNumbered(change.number), queued: false, autoMerge: false })
@@ -633,8 +642,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               const target = historyOf(repository.id, now.target).at(-1) ?? ''
               upTo.set(change.number, target)
               updates.push(change.number)
-              update(change.number, { headSha: `${now.headSha ?? 'head'}+${target}` })
-              return Effect.void
+              const made = `${now.headSha ?? 'head'}+${target}`
+              update(change.number, { headSha: made })
+              return Effect.succeed(made)
             }),
         }
       : {}),

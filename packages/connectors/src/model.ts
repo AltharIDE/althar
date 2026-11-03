@@ -281,8 +281,13 @@ export interface ChangeWords {
  * once its checks pass; or plainly, where Althar's own line stands in.
  */
 export interface MergeWays {
-  /** GitHub's merge queue on the branch, or GitLab's merge trains on the project; null where it has none Althar can enter. */
+  /** GitHub's or Bitbucket Cloud's merge queue on the branch, or GitLab's merge trains on the project; null where it has none. */
   readonly queue: 'merge_queue' | 'merge_train' | null
+  /**
+   * The queue takes changes only from the host's own site: Bitbucket Cloud's,
+   * whose API reads and leaves it but can't add to it. `enqueue` refuses.
+   */
+  readonly addedOnSite?: boolean
   /** The host merges a change itself once its checks pass, as Althar asks: GitLab's, and Data Center's from 8.15. */
   readonly autoMerge: boolean
   /** What the server said it is, where that decided the above: GitLab's version and tier, Data Center's version. */
@@ -416,14 +421,13 @@ export interface CodeHost {
   contains(repository: Repository, change: ChangeRequest, sha: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Brings a change's branch up to date with its target by a merge, never a
-   * rebase, at its head: GitHub's update-branch. Absent where the host has
-   * none from its API.
-   *
-   * TODO(bring-a-pr-s-branch-up-to-date-with-main): that task's
-   * `update_branch` brings the rest, Althar's own merge, pushed; the merge
-   * line then uses it where this is absent.
+   * rebase, at its head: GitHub's update-branch. The head it made, read
+   * back; the head it had where it was up to date; null where it hadn't
+   * landed when read. Absent where the host has none from its API: the merge
+   * line then merges in a copy of Althar's own and pushes
+   * (runtime `branchUpdate.ts`), until ADR-081's task 6 brings `update_branch`.
    */
-  updateBranch?(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
+  updateBranch?(repository: Repository, change: ChangeRequest): Effect.Effect<string | null, ConnectorFailed>
   /**
    * Closes a change without merging it, because the person said to: never
    * on an agent's word. Read back as the host has it after; one already
