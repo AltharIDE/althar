@@ -8,6 +8,8 @@ import { at, ref, table } from './0001_initial/columns'
  *   running total for the session, in its currency: what was paid per use.
  * - An account on a plan keeps each reading of its week as it moves, so the
  *   rise between two readings can be put on the turns that ran on it then.
+ * - An agent's accounts here are found by the agent, so a line can say which
+ *   of several it was.
  */
 export const statements: ReadonlyArray<string> = [
   'ALTER TABLE provider_sessions ADD COLUMN reported_cost REAL CHECK (reported_cost IS NULL OR reported_cost >= 0)',
@@ -20,4 +22,5 @@ export const statements: ReadonlyArray<string> = [
     at('observed_at'),
     'PRIMARY KEY (account_id, observed_at)',
   ]),
+  'CREATE INDEX agent_accounts_of_agent ON agent_accounts (device_id, agent_id) WHERE removed_at IS NULL',
 ]

@@ -1394,3 +1394,5 @@ CREATE TABLE plan_usage_weeks (
   observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   PRIMARY KEY (account_id, observed_at)
 ) STRICT;
+
+CREATE INDEX agent_accounts_of_agent ON agent_accounts (device_id, agent_id) WHERE removed_at IS NULL;
