@@ -46,6 +46,8 @@ import {
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
+  type PlansAndReviewsChange,
+  type NewProjectDefaultsChange,
   type IssueList,
   type Load,
   type ModelRoom,
@@ -204,6 +206,10 @@ export interface Client {
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-056). */
   readonly setFolderWait: (wait: FolderWait) => Promise<void>
+  /** How long work goes on alone, from the next plan, round or look at a running turn; what isn't given stays. */
+  readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
+  /** What the rules of projects made from now on start with; what isn't given stays. */
+  readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -716,6 +722,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     uninstallSkill: (id) => command((commandId) => api.UninstallSkill({ commandId, id })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
+    setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
+    setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),

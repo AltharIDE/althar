@@ -93,5 +93,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [084](084-what-a-task-used-of-each-plan-and-credit.md) | What a task, or the coordinator's day, used is said per plan and per credit, as the share of a week or dollars, in the context ring and a Usage card in Outputs, with no total |
 | [085](085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md) | A fork's branches go upstream by a choice of the project's, offered once on what its host says; remotes are never rewritten, and open pull requests stay where they are |
 | [087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) | A lead starts helpers on any agent, each in a copy of its own, and hears each one's result as a new turn (proposed) |
-| [088](088-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [089](089-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [088](088-plan-countdown-review-rounds-and-new-project-defaults-are-settings.md) | The plan countdown, review rounds and new-project defaults are settings, read where they apply and seeding a project's first rules |
+| [089](089-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [090](090-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
