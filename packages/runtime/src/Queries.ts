@@ -2055,8 +2055,9 @@ export class Queries extends Context.Service<
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
-          // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent (ADR-070).
-          const going = task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing !== null && !fixing.spent }) : null
+          // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent, the lead brought
+          // them to the person, or the person stopped it since (ADR-070).
+          const going = task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing?.failuresGo === true }) : null
           // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
           // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
           const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going

@@ -21,13 +21,23 @@ import { fakeConnectors, HOST, notices, runtime, turns, until } from './support'
 /* What the conflicts tests share: the runtime they run on, git, a host that reports conflicts, and what they read back. */
 
 /** A lead that has left something running is done a moment after, not half a minute: a test doesn't wait that long. */
-export const runtimeWith = (services: { readonly github?: FakeService } = {}, idle: IdleOptions = {}) =>
+export const runtimeWith = (
+  services: { readonly github?: FakeService } = {},
+  idle: IdleOptions = {},
+  /** How long checks may run before Althar gives up on them; its own default unless a test says. */
+  checksStuck?: Duration.Duration,
+) =>
   Queries.layer.pipe(
     Layer.provideMerge(
       runtime(
         ':memory:',
         {},
-        { connectors: fakeConnectors(services), listenEvery: Duration.millis(100), idle: { quiet: Duration.millis(300), ...idle } },
+        {
+          connectors: fakeConnectors(services),
+          listenEvery: Duration.millis(100),
+          idle: { quiet: Duration.millis(300), ...idle },
+          ...(checksStuck === undefined ? {} : { checksStuck }),
+        },
       ),
     ),
   )

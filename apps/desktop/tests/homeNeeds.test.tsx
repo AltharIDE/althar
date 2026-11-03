@@ -82,6 +82,18 @@ describe('a ready task’s line', () => {
     expect(briefOf(task({ kind: 'review', reviewing }))).toBe('api #1199 · by ninemate · no findings')
     expect(briefOf(task({ kind: 'review', reviewing: { ...reviewing, findings: 1 } }))).toBe('api #1199 · by ninemate · 1 finding')
   })
+
+  it('says why a conflict wasn’t asked of its lead, beside its button', () => {
+    const why = '“Resolve conflicts automatically” is off for this task.'
+    const [need] = needsOf({
+      calls: [],
+      ready: [task({ kind: 'change', change: change({ conflicts: true }), conflictUnsent: why })],
+      refs,
+      agentName,
+    })
+    expect(need?.brief).toBe(`api #12 · ${why}`)
+    expect(need?.ready).toBeDefined()
+  })
 })
 
 describe('calls answered here', () => {

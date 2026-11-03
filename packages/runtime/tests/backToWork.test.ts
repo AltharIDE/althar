@@ -1,8 +1,10 @@
+import { randomBytes } from 'node:crypto'
+
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Changes, OFF_FOR_PROJECT, OFF_FOR_TASK } from '../src/Changes'
+import { Changes, FIX_ROUNDS, OFF_FOR_PROJECT, OFF_FOR_TASK } from '../src/Changes'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
@@ -53,6 +55,16 @@ const stopped = (taskId: string, threadId: string) =>
     yield* (yield* Changes).leadStopped({ threadId })
     yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
   })
+
+/** The task's pull request: its link's id, and its address. */
+const linkOf = (taskId: string) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    Effect.map(
+      sql<{ id: string; projectId: string; url: string }>`
+        SELECT id, project_id, url FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`,
+      ([one]) => one,
+    ),
+  )
 
 describe('a conflict alone', () => {
   it.live('is the lead’s by default, and the card is under way while the checks on its merge run', () => {
@@ -162,6 +174,33 @@ describe('failed checks alone', () => {
         ([one]) => one?.change?.checks?.failed === 1 && one.change.checks.running === 1 && one.phase === 'running',
       )
       assert.strictEqual(now?.step, 'checks_running')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('go to the lead while a round is under way on another of the task’s pull requests', () => {
+    const { working, bare } = hosted()
+    let broken = false
+    const github = hostOf(bare, (sha) => (broken && !holdsFix(bare, sha) ? FAILED : PASSED))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix]')
+      // A round waiting on its merge's checks in another repository of the task, as a plan across two has.
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+        id: `cres_${randomBytes(16).toString('hex')}`,
+        projectId,
+        taskId,
+        pullRequestUrl: 'https://github.com/meridian/web/pull/7',
+        conflicts: '[]',
+        attempt: 1,
+        state: 'checking',
+        pushedHead: randomBytes(20).toString('hex'),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      broken = true
+      // This one's failure is its lead's all the same, not held for the other's round.
+      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed on PR #1: test.')))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
@@ -311,5 +350,63 @@ describe('checks that keep failing on the merge', () => {
       assert.lengthOf(yield* rounds(taskId), 1)
       assert.strictEqual(github.reruns.length, 2)
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('come back to the person at once where the change’s tries were spent in earlier rounds', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? FAILED : PASSED))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      // Its checks failed on as many commits as its lead may fix, and once more, as main kept moving: its tries are spent.
+      const link = yield* linkOf(taskId)
+      for (let n = 0; n <= FIX_ROUNDS; n++) {
+        const sha = randomBytes(20).toString('hex')
+        yield* sql`INSERT INTO observations ${sql.insert({
+          id: `obs_${randomBytes(16).toString('hex')}`,
+          projectId: link?.projectId ?? '',
+          subjectType: 'external_link',
+          subjectId: link?.id ?? '',
+          kind: 'checks',
+          payload: JSON.stringify({ id: `checks:${sha}:failed:0`, sha, outcome: 'failed', failing: ['test'] }),
+          source: 'althar',
+          observedAt: new Date().toISOString(),
+        })}`
+      }
+      moveHostMainOn(working, bare)
+      // The merge's checks fail: run again once, then the person's, though the round asked its lead only the once.
+      const [round] = yield* until(rounds(taskId), (all) => all[0]?.state === 'failed')
+      assert.strictEqual(round?.attempt, 1)
+      const [card] = yield* until(
+        Effect.map(cardOf(projectId), (one) => [one]),
+        ([one]) => one?.phase === 'ready' && one.handedBack != null,
+      )
+      assert.match(card?.handedBack ?? '', /The checks failed on it: test\./)
+      yield* Effect.sleep('800 millis')
+      // Never asked to fix them, and the same failure, heard again, doesn't wake it.
+      assert.isFalse((yield* given(threadId)).some((body) => body.startsWith('Checks failed')))
+      assert.lengthOf(yield* asked(threadId), 1)
+      assert.lengthOf(yield* rounds(taskId), 1)
+      assert.strictEqual(github.reruns.length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('checks on the merge that run too long', () => {
+  it.live('end the round, and are the person’s, not under way for ever', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? RUNNING : PASSED))
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved')
+      yield* titled(threadId, 'The checks on what was pushed to PR #1 are still running after')
+      const [card] = yield* until(
+        Effect.map(cardOf(projectId), (one) => [one]),
+        ([one]) => one?.phase === 'ready',
+      )
+      assert.strictEqual(card?.change?.checks?.outcome, 'running')
+    }).pipe(Effect.provide(runtimeWith({ github }, {}, Duration.seconds(3))))
   })
 })

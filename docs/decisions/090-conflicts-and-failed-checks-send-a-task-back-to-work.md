@@ -36,11 +36,12 @@
     which failed and the ends of their logs, to fix in the one commit on top
     of the merge that Althar pushes with it. While the pull request
     conflicts, Althar doesn't run the failed checks again first, since the
-    merge's checks run anew. While a round is under way, failed checks
-    aren't told to the lead apart from it.
+    merge's checks run anew. While a round is under way on a pull request,
+    its failed checks aren't told to the lead apart from it; another pull
+    request of the same task goes on as ever.
   - **Checks still running with some failed are under way** where failures
-    go to the lead once they end. They are the person's only once its tries
-    are spent.
+    go to the lead once they end. They are the person's once its tries are
+    spent, its lead brought them to the person, or the person stopped it.
   - **Flaky failures on a round's merge are run again once** before the lead
     is asked to fix them, as other failed checks are. The round reads the
     checks as the pull request's look did, so the two never disagree.
@@ -48,7 +49,9 @@
     tries at its checks count across rounds (FIX_ROUNDS), so a check that
     keeps failing as main keeps moving doesn't go round again. A round that
     gives up hands the checks to the person, so the same failure heard again
-    wakes no one, and the card says why.
+    wakes no one, and the card says why. A round whose merge's checks run
+    too long (STUCK_AFTER) or can't be read ends, and they are the person's,
+    as such checks always are (ADR-041), never under way for ever.
   - **About to go back is under way.** The host says the pull request
     conflicts before Althar has looked again (the same poll, or after a
     restart): where the lead is to be asked, the card is under way, on
@@ -56,9 +59,12 @@
     merged cleanly as Althar last looked though the host said it conflicts:
     nothing goes to the lead then.
   - **Waiting on the person always says why.** Turned off, a conflict the
-    host reports says "“Resolve merge conflicts automatically” is off for
-    this task" or "… in the project's settings", beside Resolve now. Failed
-    checks on a task the person stopped say so. A task the person stopped
+    host reports says "“Resolve conflicts automatically” is off for this
+    task" (as its menu names it) or "“Resolve merge conflicts
+    automatically” is off in the project's settings", beside Resolve now,
+    on the board's card and on its line in Needs you. Failed checks on a
+    task the person stopped say so; those Althar gave up on as running too
+    long, or couldn't read, say that instead. A task the person stopped
     stays stopped. The card works out why from the task and the project's
     rules, not only from what Althar remembers of its last look.
 - **Alternatives considered:**
