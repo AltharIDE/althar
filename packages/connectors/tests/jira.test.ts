@@ -1008,11 +1008,12 @@ describe('Jira Cloud', () => {
               ],
             },
             duedate: '2026-11-30',
-            fixVersions: [{ id: '32100' }],
             components: [{ id: '10220' }, { id: '10221' }],
             parent: { key: 'HHH-20000' },
             issuetype: { id: '10003' },
           },
+          // Added beside the fix versions it has, not in their place.
+          update: { fixVersions: [{ add: { id: '32100' } }] },
         })
         yield* tracker.update(issue(), { description: '', due: null, milestone: null, components: [], parent: null })
         assert.deepStrictEqual(sent[2]?.body, {

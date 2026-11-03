@@ -17,7 +17,7 @@ import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
-import { DraftClosed, DraftUntitled, IssueDrafts, refusedDraft } from '../src/IssueDrafts'
+import { DraftClosed, DraftUntitled, IssueDrafts, labelsLeftOff, refusedDraft } from '../src/IssueDrafts'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -170,6 +170,11 @@ describe('issue drafts', () => {
       assert.deepStrictEqual([second?.state, second?.leftOff], ['filed', ['status not set: The fake update failed (forbidden)']])
       assert.strictEqual((yield* linear.issue('MER-2')).status.name, 'Todo')
     }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it('take a label Jira kept with hyphens for its spaces as the one asked for, not left off', () => {
+    assert.deepStrictEqual(labelsLeftOff('jira_cloud', ['needs test', 'docs', 'gone'], ['needs-test', 'docs']), ['gone'])
+    assert.deepStrictEqual(labelsLeftOff('github', ['needs test'], ['needs-test']), ['needs test'])
   })
 
   it.live('are a card the coordinator drafts, filed only when the person says, then told to the coordinator', () => {

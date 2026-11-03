@@ -1607,7 +1607,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_issue',
-          'An issue on a connected tracker, or in the project’s repository: its title, status and description. Takes its link or its key.',
+          'An issue on a connected tracker, or in the project’s repository: its title, status, assignees, labels, project, milestone, parent and the like, its description, and its latest comments. Takes its link or its key.',
           { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },
           readIssue,
         ),

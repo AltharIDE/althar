@@ -543,13 +543,13 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
         return yield* new ConnectorFailed({ product, reason: 'rejected', message: `This site has no ${wanted.priority} priority` })
       // Jira's edit fails taking the parent off one that has none, so one read as having none is left as it is.
       const parent = wanted.parent === undefined || (wanted.parent === null && issue.parent === null) ? undefined : wanted.parent
-      // Its fields are set, and its labels added and taken off, in one edit: null clears a field, none of its versions its milestone.
+      // Its fields are set, and its labels and fix version added and taken off, in one edit: null clears a field, none of its versions its milestone.
       const fields = {
         ...(wanted.title === undefined ? {} : { summary: wanted.title }),
         ...(priority === undefined ? {} : { priority: { id: priority.id } }),
         ...(wanted.description === undefined ? {} : { description: wanted.description.trim() === '' ? null : textOf(wanted.description) }),
         ...(wanted.due === undefined ? {} : { duedate: wanted.due }),
-        ...(wanted.milestone === undefined ? {} : { fixVersions: wanted.milestone === null ? [] : [{ id: wanted.milestone.id }] }),
+        ...(wanted.milestone === null ? { fixVersions: [] } : {}),
         ...(wanted.components === undefined ? {} : { components: wanted.components.map((component) => ({ id: component.id })) }),
         ...(parent === undefined ? {} : { parent: parent === null ? null : { key: parent.key } }),
         ...(wanted.type === undefined ? {} : { issuetype: { id: wanted.type.id } }),
@@ -558,11 +558,17 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
         ...(wanted.labels?.add ?? []).map((label) => ({ add: label.id })),
         ...(wanted.labels?.remove ?? []).map((label) => ({ remove: label.id })),
       ]
-      if (Object.keys(fields).length > 0 || labels.length > 0)
+      // A fix version is added beside those the issue has: an issue may be in several releases.
+      const versions = wanted.milestone == null ? [] : [{ add: { id: wanted.milestone.id } }]
+      const update = {
+        ...(labels.length === 0 ? {} : { labels }),
+        ...(versions.length === 0 ? {} : { fixVersions: versions }),
+      }
+      if (Object.keys(fields).length > 0 || Object.keys(update).length > 0)
         yield* call((root) =>
           http.json(Schema.Unknown, 'PUT', `${root}${path}`, {
             ...(Object.keys(fields).length === 0 ? {} : { fields }),
-            ...(labels.length === 0 ? {} : { update: { labels } }),
+            ...(Object.keys(update).length === 0 ? {} : { update }),
           }),
         )
       // Its one assignee, in place of whoever had it; none takes them off.

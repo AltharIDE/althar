@@ -4,6 +4,7 @@ import {
   ConnectorFailed,
   type Issue,
   type IssueChange,
+  jiraLabelOf,
   type Priority,
   type Product,
   products,
@@ -220,6 +221,12 @@ const listed = (choices: ReadonlyArray<string>) =>
   choices.length > CHOICES ? [...choices.slice(0, CHOICES), `and ${choices.length - CHOICES} more`] : choices
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** The labels a filed issue hasn't of those asked for, each as its tracker keeps it: Jira's with a hyphen for each space (“needs test”, needs-test). */
+export const labelsLeftOff = (product: Product, asked: ReadonlyArray<string>, stored: ReadonlyArray<string>) => {
+  const kept = (label: string) => (product === 'jira_cloud' || product === 'jira_dc' ? jiraLabelOf(label) : label)
+  return asked.filter((label) => !stored.some((had) => same(had, kept(label))))
+}
 
 /** A container by what was typed for it: its id, its key or its name, in any case. */
 const containerNamed = (containers: ReadonlyArray<Container>, typed: string) =>
@@ -631,7 +638,7 @@ export class IssueDrafts extends Context.Service<
               input.priority === undefined || input.priority === 'none' || !where.tracker.capabilities.changes.includes('priority')
                 ? null
                 : input.priority
-            // Asked to file at once, one waiting for the person is filed as it was drafted again.
+            // Asked to file at once, one waiting for the person is filed as this call drafts it: its body, labels and fields.
             if (waiting === undefined)
               yield* sql.withTransaction(
                 Effect.gen(function* () {
@@ -681,7 +688,13 @@ export class IssueDrafts extends Context.Service<
               yield* transition(
                 draftId,
                 (row) => row.state === 'pending',
-                () => ({ fields: JSON.stringify(read.change), labels: JSON.stringify(labels), priority, direct: 1 }),
+                () => ({
+                  body: input.body.trim(),
+                  fields: JSON.stringify(read.change),
+                  labels: JSON.stringify(labels),
+                  priority,
+                  direct: 1,
+                }),
                 'issue_draft.changed',
                 input.actorId,
                 (row) => ({ title: row.title }),
@@ -794,7 +807,7 @@ export class IssueDrafts extends Context.Service<
           const set = anything(after) ? yield* Effect.result(tracker.update(filed, after)) : undefined
           const now = set?._tag === 'Success' ? set.success : filed
           const name = products[row.product].name
-          const missing = labels.filter((label) => !now.labels.some((had) => same(had, label)))
+          const missing = labelsLeftOff(row.product, labels, now.labels)
           const leftOff = [
             ...(missing.length === 0
               ? []

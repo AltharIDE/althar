@@ -554,7 +554,7 @@ export const Issue = Schema.Struct({
   milestone: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** Linear's cycle it is in. */
   cycle: Schema.optional(Schema.NullOr(Schema.String)),
-  /** The issue it is part of: Linear's parent, Jira's parent or epic, GitHub's parent issue. */
+  /** The issue it is part of: Linear's parent, Jira's parent or epic. Not read on GitHub, whose issue says nothing of its parent; Althar sets one there, but can't say it is so already. */
   parent: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String, title: Schema.String }))),
   /** Its kind: Jira's issue type, GitHub's issue type, GitLab's (issue, incident, task). */
   type: Schema.optional(Schema.NullOr(Schema.String)),

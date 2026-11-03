@@ -709,9 +709,9 @@ What each tracker changes:
 | Assignees | One | One | Members, several | Several | Several |
 | Labels, title, description | Yes | Yes | Labels, name, description | Yes | Yes |
 | Project | Its project | No: Jira's own Move | No: its board | A Projects board | No: where it lives |
-| Milestone | Its project's milestone | A fix version | No | Its milestone | Its milestone |
+| Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | Its milestone | Its milestone |
 | Cycle | Its cycle | No: sprints are a board's | No | No | No: iterations are a paid group's |
-| Parent | Its parent | Its parent | No | Its parent issue (set, not taken out) | No: epics are a paid group's |
+| Parent | Its parent | Its parent | No | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
 | Estimate | Points | No: story points are a site's own field | No | No | Its weight |
 | Type | No: a label says | Its issue type | No | Its issue type (an organisation's) | Issue, incident, test case, task |
 | Components | No | Yes | No | No | No |
