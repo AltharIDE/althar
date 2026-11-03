@@ -57,11 +57,19 @@ export interface PlanAgent {
    * account's age and why it wasn't read again in the detail.
    */
   unread?: string
+  /**
+   * Its plan is signed in and can run, but nothing reads how much of it is
+   * left (OpenCode Go without an OpenCode Console sign-in): Connected. Said
+   * in place of a figure, with why in the detail.
+   */
+  connected?: string
+  /** A sign-in that stops it is put right from the row: a button beside it, which the peek's `onSignIn` answers. */
+  signIn?: boolean
 }
 
 /** The agent with least room that work can start on, of those with a figure: the figure that counts. */
 export const firstRunning = (agents: readonly PlanAgent[]): PlanAgent | undefined =>
-  agents.find((agent) => agent.stopped === undefined && agent.unread === undefined)
+  agents.find((agent) => agent.stopped === undefined && agent.unread === undefined && agent.connected === undefined)
 
 /** Under this share left, the gauge is in full ink. */
 export const SAY_UNDER = 10

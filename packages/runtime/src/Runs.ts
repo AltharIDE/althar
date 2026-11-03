@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { ConnectorFailed } from '@althar/connectors'
-import { type LimitCall, LimitChoice, type MessageSender } from '@althar/contracts'
+import { PLANS_AND_REVIEWS, type LimitCall, LimitChoice, type MessageSender } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -35,6 +35,7 @@ import { makeKeyedLock } from './keyedLock'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
+import { roundsNow } from './plansAndReviews'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
@@ -80,9 +81,6 @@ import { signedOutWords, summarize } from './words'
  * finish_step, the reviewer's report_review. What each reported goes into the
  * task's thread as a step result, which the person reads instead of the work.
  */
-
-/** Review rounds before a task is left ready with findings still open. */
-export const ROUNDS = 3
 
 /**
  * How long a step carried on after Althar crashed must have been at work for
@@ -177,6 +175,8 @@ export type PlanParameters = typeof PlanParameters.Type
 
 const Finding = Schema.Struct({
   severity: Schema.Literals(['blocking', 'major', 'minor', 'nit']),
+  // Asked for, but a reviewer that leaves it out still reports: its findings show by their claims.
+  title: Schema.optional(Schema.String),
   file: Schema.optional(Schema.String),
   line: Schema.optional(Schema.Int),
   claim: Schema.String,
@@ -210,6 +210,19 @@ const Finished = Schema.Struct({
   ),
 })
 const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
+/** The longest a finding's title is kept: past it, a reviewer wrote its claim there, cut at a word with an ellipsis. */
+const TITLE_LONGEST = 120
+
+/** A finding's title as kept: on one line, trimmed, null where the reviewer gave none. */
+export const titleOf = (title: string | null | undefined): string | null => {
+  const line = (title ?? '').replace(/\s+/g, ' ').trim()
+  if (line === '') return null
+  if (line.length <= TITLE_LONGEST) return line
+  const cut = line.slice(0, TITLE_LONGEST - 1)
+  const word = cut.lastIndexOf(' ')
+  return `${(word > TITLE_LONGEST / 2 ? cut.slice(0, word) : cut).trimEnd()}…`
+}
+
 const Reviewed = Schema.Struct({
   verdict: Schema.Literals(['pass', 'changes_requested']),
   summary: Schema.String,
@@ -626,7 +639,10 @@ export class Runs extends Context.Service<
         const [known] = yield* sql<{ id: string }>`
           SELECT v.id FROM workflow_versions v JOIN workflow_definitions d ON d.id = v.definition_id WHERE d.name = 'task' AND v.version = 1`
         if (known !== undefined) return known.id
-        const definition = JSON.stringify({ steps: ['implement', 'review'], review: { rounds: ROUNDS, settledBy: 'lead' } })
+        const definition = JSON.stringify({
+          steps: ['implement', 'review'],
+          review: { rounds: PLANS_AND_REVIEWS.rounds, settledBy: 'lead' },
+        })
         const definitionId = yield* newId(Ids.workflowDefinition)
         const versionId = yield* newId(Ids.workflowVersion)
         const at = yield* timestamp
@@ -1347,8 +1363,8 @@ export class Runs extends Context.Service<
       const openFindings = (run: RunRow) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string }>`
-            SELECT f.id, f.severity, f.location, f.claim FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
+          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string; title: string | null }>`
+            SELECT f.id, f.severity, f.location, f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
             JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'open' ORDER BY f.created_at`
         })
 
@@ -1360,6 +1376,7 @@ export class Runs extends Context.Service<
             return {
               id: finding.id,
               severity: finding.severity,
+              ...(finding.title === null ? {} : { title: finding.title }),
               claim: finding.claim,
               ...(location.file == null ? {} : { file: location.file }),
               ...(location.line == null ? {} : { line: location.line }),
@@ -2012,7 +2029,11 @@ export class Runs extends Context.Service<
                   projectId: task.projectId,
                   executionId,
                   revision: 1,
-                  graph: JSON.stringify({ steps: steps.filter((step) => !step.skipped), review: { rounds: ROUNDS }, round: true }),
+                  graph: JSON.stringify({
+                    steps: steps.filter((step) => !step.skipped),
+                    review: { rounds: yield* roundsNow },
+                    round: true,
+                  }),
                   cause: 'materialized',
                   createdAt: at,
                 })}`
@@ -2970,7 +2991,7 @@ export class Runs extends Context.Service<
                 projectId: plan.projectId,
                 executionId,
                 revision: 1,
-                graph: JSON.stringify({ steps: parameters.steps.filter((step) => !step.skipped), review: { rounds: ROUNDS } }),
+                graph: JSON.stringify({ steps: parameters.steps.filter((step) => !step.skipped), review: { rounds: yield* roundsNow } }),
                 cause: 'materialized',
                 createdAt: at,
               })}`
@@ -3267,8 +3288,8 @@ export class Runs extends Context.Service<
                 : 'Althar has your summary. A review starts now; wait for its findings.',
             )
           }
-          // Another round only if settling changed the code, and rounds are left.
-          if (workAfter !== workBefore && attempt.iteration + 1 < ROUNDS) {
+          // Another round only if settling changed the code, and rounds are left: as many as the person's setting says (plansAndReviews.ts).
+          if (workAfter !== workBefore && attempt.iteration + 1 < (yield* roundsNow)) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'
           }
@@ -3363,7 +3384,10 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const reviewed = yield* read(Reviewed, input)
-          const findings = reviewed.findings ?? []
+          const findings = (reviewed.findings ?? []).map(({ title, ...finding }): Finding => {
+            const line = titleOf(title)
+            return line === null ? finding : { ...finding, title: line }
+          })
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const attempt = current === undefined ? undefined : yield* running(current, ['review'])
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
@@ -3383,6 +3407,7 @@ export class Runs extends Context.Service<
                   severity: finding.severity,
                   location: JSON.stringify({ file: finding.file ?? null, line: finding.line ?? null }),
                   claim: finding.claim,
+                  title: finding.title ?? null,
                   state: 'open',
                   createdAt: yield* timestamp,
                 })}`
@@ -3395,6 +3420,8 @@ export class Runs extends Context.Service<
               const [reviewer] = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE id = ${access.sessionId}`
               yield* result(current, {
                 step: 'review',
+                // Which review this is, so its report opens its own findings, whatever ran after.
+                attemptId: attempt.id,
                 round: attempt.iteration,
                 verdict: reviewed.verdict,
                 summary: reviewed.summary,
@@ -3576,11 +3603,16 @@ export class Runs extends Context.Service<
                   type: 'object',
                   properties: {
                     severity: { type: 'string', enum: ['blocking', 'major', 'minor', 'nit'] },
-                    file: { type: 'string' },
-                    line: { type: 'integer' },
-                    claim: { type: 'string' },
+                    title: {
+                      type: 'string',
+                      description:
+                        'What is wrong, in one short line of plain words, under 80 characters: "The usage column has no header in the model browser". The person scans these before reading any claim.',
+                    },
+                    file: { type: 'string', description: "The file it is in, from the repository's root, where it is in one." },
+                    line: { type: 'integer', description: 'The line it points at in that file, as you read it.' },
+                    claim: { type: 'string', description: 'What is wrong, in full: why, and what would fix it.' },
                   },
-                  required: ['severity', 'claim'],
+                  required: ['severity', 'title', 'claim'],
                 },
               },
             },
@@ -5013,7 +5045,7 @@ export class Runs extends Context.Service<
               projectId: run.projectId,
               executionId: run.executionId,
               revision: next,
-              graph: JSON.stringify({ steps, review: { rounds: ROUNDS }, ...(round ? { round: true } : {}) }),
+              graph: JSON.stringify({ steps, review: { rounds: yield* roundsNow }, ...(round ? { round: true } : {}) }),
               cause: 'patch',
               createdAt: yield* timestamp,
             })}`

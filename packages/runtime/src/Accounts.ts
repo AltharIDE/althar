@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { adapterNode, type AgentDefinition, removeFully, signOut, unsupportedNow } from '@althar/provider-adapters'
+import { adapterNode, type AgentDefinition, agentVersion, majorOf, removeFully, signOut, unsupportedNow } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -414,7 +414,12 @@ export class Accounts extends Context.Service<
               // The home a session gets (`env`), not the folder: the usual
               // Claude account in a Flatpak signs in where its sessions read.
               const home = env(account)[definition.home.variable]
-              return home === undefined ? definition.signIn.login : `${definition.home.variable}=${quoted(home)} ${definition.signIn.login}`
+              // An older version installed runs its own line, where it differs: OpenCode 1.x's has no `--standalone`.
+              const before = definition.signIn.loginBefore
+              const version = before === undefined ? null : yield* agentVersion(definition, adapterNode())
+              const major = version === null ? null : majorOf(version)
+              const line = before !== undefined && major !== null && major < before.major ? before.line : definition.signIn.login
+              return home === undefined ? line : `${definition.home.variable}=${quoted(home)} ${line}`
             }),
           ),
       })

@@ -16,7 +16,7 @@ import {
 } from '@althar/ui'
 import type { ReactNode } from 'react'
 
-import { type NameModel, useModelNames } from '../../shared/modelNames'
+import { type NameModel, useModelNames, useProviderNames } from '../../shared/modelNames'
 import { usageLines, useUsageOpen } from '../../shared/usage'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
@@ -221,8 +221,9 @@ export function Outputs({
 }) {
   const { task } = snapshot
   const named = useModelNames()
+  const nameProvider = useProviderNames()
   // What it used of each account its agents ran on, closed until the person opens it, then open on every task (ADR-084).
-  const usage = usageLines(snapshot.usage, named)
+  const usage = usageLines(snapshot.usage, named, nameProvider)
   const [usageOpen, setUsageOpen] = useUsageOpen()
   const ready = task.phase === 'ready'
   const review = reviewOf(snapshot, named)

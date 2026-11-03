@@ -150,7 +150,8 @@ provisional.
 | `list_automations` | The project's automations on this computer: when each runs, what each run does, where it stands, and how its last run went ([ADR-061](../decisions/061-automations-start-ordinary-tasks-on-a-schedule.md)) | Read |
 | `propose_automation`, `change_automation` | An automation as the person asked for it, or a change to one: a name, the prompt each run is asked, days and a time or every hour, the lead, and what each run ends in (nothing, a draft or ready pull request, or reviews of each new pull request). Each on a card in its thread; nothing runs until the person turns it on, and a change that reaches further needs them to turn it on again, with Undo | Command |
 | `pause_automation` | Pauses one when the person says, since it only stops | Command |
-| `resume_automation`, `run_automation_now` | A small card the person presses, since both spend their plan and the coordinator reads text from outside | Command |
+| `resume_automation`, `run_automation_now` | At once in a turn the person's message started, with a line in the thread; otherwise a small card the person presses, since both spend their plan and the coordinator reads text from outside ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
+| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done and keep only for a task that isn't a change). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now. Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
@@ -364,5 +365,83 @@ That receipt is failed and permits retry after another fresh read. Every other
 A lost answer or `{ pending: true, answer }` stays uncertain. Only a read proving it done confirms it; only `absent`, positive
 proof it neither happened nor remains in flight, permits another attempt.
 A confirmed receipt repairs an interrupted completion and its chat line
-without acting again. Host-specific reads and acting tools are later parts
-of ADR-081; this foundation is shared by every host and agent.
+without acting again. This foundation is shared by every host and agent; the
+first acting tool on it is the merge, below.
+
+## Merging on the person's word
+
+`merge_pull_request` (`MergeLine.ts`) merges any of the project's pull
+requests, in any of its repositories, at the head the coordinator read and
+in a way the repository allows. Every merge is an errand kept from the
+person's message, with one step, `merge`, so "merge it once it's green" and
+"merge it" are the same call:
+
+- **The host's own queue** (GitHub's merge queue on the branch, Bitbucket
+  Cloud's, GitLab's merge trains): the step puts it there at its head, and
+  it is done once a read shows it merged. There is no slot of Althar's.
+  Bitbucket Cloud's merge call is what puts one in its queue, and takes no
+  head, so the head is read just before. A queue that sends one back for a conflict hands it to the task's lead
+  rather than putting it in again.
+- **Everywhere else, Althar's line:** one slot for each repository and
+  branch, in the order the person asked; their "merge it now" (`now`) goes
+  first and waits only for a merge already in flight. The step that holds
+  the slot is brought up to date with the branch's head, by a merge, and
+  waits for green there; then it merges, with auto-merge as its merge where
+  the host has it (GitLab, Data Center from 8.15). It holds the slot until a
+  read shows the merge landed; the next starts from the branch's new head.
+  A step whose checks fail, whose merge conflicts, or that Althar can't
+  bring up to date (a protected branch, an account that may not push), steps
+  out of line until they pass or its head or the branch moves; a conflict or
+  a refused push is said to the task's lead.
+  A merge the host refuses (a review it needs, a merge check) pauses its
+  errand, said so, and the next goes ahead. A branch is brought up to date
+  three times at most, someone else writing to the target in between, then
+  its errand pauses for the person.
+- **Althar's sweep** (every 30 seconds, and at once after a merge call) does
+  only what can be undone: it brings the slot's branch up to date by a merge,
+  the connectors' `updateBranch` that `update_branch` uses too (GitHub's
+  update-branch; elsewhere a merge in a copy of Althar's own, pushed plainly,
+  never forced; where it can't, a fork the account may not push to, a push
+  or the host's own update refused,
+  the step steps out of line and it is said, once, to the lead too; a host
+  that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
+  queue, or settling one that landed, closed or moved, it wakes the
+  coordinator with news naming the errand and step, and the coordinator's
+  turn takes it through `Errands.execute`, which reads again before it acts.
+- **Who moved a head:** the very head Althar's update made, as read back
+  after it, or one the task's lead pushed, carries the errand on; anyone
+  else's push ends it, even one on top of Althar's update, as the person
+  asked to merge what they saw.
+- **A branch it merged into** is watched for an hour after: a failed check at
+  its head is said in the chat and heard as news, "Main is red", which is how
+  a write by someone else between the last read and a merge landing shows.
+- **What it keeps:** the errands, and the line's own notes (what each step
+  did, what it said) as observations of subject `merge_line`, so a restart
+  keeps the line. What each server supports is read when first used, kept
+  for an hour, and read again once a call is refused.
+- `leave_queue`, under the project's lock, pauses a pull request's errand in
+  Althar's line, takes it out of the host's queue or train (Bitbucket
+  Cloud's too), and turns its auto-merge off: it can be undone, so it needs
+  no word. Where the host won't, it says so, with the link.
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant C as Coordinator
+  participant L as Merge line
+  participant H as Host
+  P->>C: "Merge #12 and #14 once they're green"
+  C->>L: merge_pull_request(#12, head, message)
+  L->>L: keep errand, read: first in line, green, up to date
+  L->>H: merge (or auto-merge, or enqueue)
+  C->>L: merge_pull_request(#14, head, message)
+  L-->>C: 2nd in line, behind #12
+  H-->>L: sweep reads #12 merged, main moved
+  L->>C: news: errand #12, step merge
+  C->>L: merge_pull_request(errand, step): done
+  L->>H: sweep brings #14 up to date (a merge)
+  H-->>L: green at the new head
+  L->>C: news: errand #14, step merge
+  C->>L: merge_pull_request(errand, step)
+  L->>H: merge #14 at the head that went green
+```
