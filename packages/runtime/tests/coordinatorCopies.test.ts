@@ -6,7 +6,7 @@ import { join, sep } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { freshCopy, readsOf } from '../src/coordinatorFolder'
+import { freshCopy, readsOf, refreshWithGit } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-058): each a
@@ -51,7 +51,7 @@ describe("the coordinator's copies", () => {
   it.effect('are repositories of their own: a tag or a fetch there writes only the copy, and brings what Althar fetched', () =>
     Effect.gen(function* () {
       const { person, copy } = place()
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
       // Its only remote is the person's repository: no network, and no other folder.
       assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), person)
@@ -65,7 +65,7 @@ describe("the coordinator's copies", () => {
       assert.include(git(copy, 'tag', '-l'), 'try-1')
       assert.notInclude(git(person, 'tag', '-l'), 'try-1')
       // Thrown away with the rest at the next turn.
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.notInclude(git(copy, 'tag', '-l'), 'try-1')
     }),
   )
@@ -73,13 +73,13 @@ describe("the coordinator's copies", () => {
   it.effect('make their git folder again every turn: a hook, config or ref the coordinator left is gone', () =>
     Effect.gen(function* () {
       const { person, copy } = place()
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       git(copy, 'config', 'core.fsmonitor', 'touch ../../pwned')
       git(copy, 'config', 'alias.st', '!touch ../../pwned')
       mkdirSync(join(copy, '.git', 'hooks'), { recursive: true })
       writeFileSync(join(copy, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\ntouch ../../pwned\n', { mode: 0o755 })
       writeFileSync(join(copy, 'scratch.md'), 'notes')
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.isFalse(existsSync(join(copy, '.git', 'hooks', 'post-checkout')))
       assert.throws(() => git(copy, 'config', '--local', 'core.fsmonitor'))
       assert.throws(() => git(copy, 'config', '--local', 'alias.st'))
@@ -95,21 +95,21 @@ describe("the coordinator's copies", () => {
       const { person, copy } = place()
       writeFileSync(join(person, 'work.md'), 'the person’s work, not committed')
       const head = git(person, 'rev-parse', 'HEAD')
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       // The git folder made a link to the person's: Althar's checkout and clean would run there.
       rmSync(join(copy, '.git'), { recursive: true })
       symlinkSync(join(person, '.git'), join(copy, '.git'))
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.isTrue(lstatSync(join(copy, '.git')).isDirectory())
       // A git folder that names the person's.
       rmSync(join(copy, '.git'), { recursive: true })
       writeFileSync(join(copy, '.git'), `gitdir: ${join(person, '.git')}\n`)
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.isTrue(lstatSync(join(copy, '.git')).isDirectory())
       // The copy itself made a link to the person's checkout.
       rmSync(copy, { recursive: true })
       symlinkSync(person, copy)
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.isTrue(lstatSync(copy).isDirectory())
       assert.strictEqual(readFileSync(join(person, 'work.md'), 'utf8'), 'the person’s work, not committed')
       assert.strictEqual(git(person, 'rev-parse', 'HEAD'), head)
@@ -122,7 +122,7 @@ describe("the coordinator's copies", () => {
       const { person, copy } = place()
       git(person, 'worktree', 'add', '-q', '--detach', copy, 'main')
       assert.include(git(person, 'worktree', 'list'), asGit(copy))
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.notInclude(git(person, 'worktree', 'list'), asGit(copy))
       assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
       assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
@@ -134,11 +134,11 @@ describe("the coordinator's copies", () => {
       const { home, person, copy } = place()
       const task = join(home, 'worktrees', 'meridian', 'retry')
       git(person, 'worktree', 'add', '-q', '-b', 'althar/retry', task, 'main')
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       // The coordinator's git file names the task's worktree.
       rmSync(join(copy, '.git'), { recursive: true })
       writeFileSync(join(copy, '.git'), readFileSync(join(task, '.git'), 'utf8'))
-      yield* freshCopy(person, copy, 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
       assert.include(git(person, 'worktree', 'list'), asGit(task))
       assert.strictEqual(git(task, 'branch', '--show-current'), 'althar/retry')
       assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
@@ -149,7 +149,7 @@ describe("the coordinator's copies", () => {
     Effect.gen(function* () {
       const { home, person, copy } = place()
       const mirror = join(home, 'worktrees', 'meridian', '.coordinator-mirrors', 'meridian.git')
-      yield* freshCopy(person, copy, 'main', mirror)
+      yield* freshCopy(person, copy, 'main', refreshWithGit, mirror)
       assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
       assert.strictEqual(git(mirror, 'rev-parse', '--is-bare-repository'), 'true')
       git(copy, 'fetch', '-q')
@@ -157,9 +157,70 @@ describe("the coordinator's copies", () => {
       assert.deepStrictEqual(git(copy, 'tag', '-l').split('\n'), ['v0.1.0', 'v0.2.0'])
       // A branch the person makes after shows at the next turn.
       git(person, 'branch', 'later')
-      yield* freshCopy(person, copy, 'main', mirror)
+      yield* freshCopy(person, copy, 'main', refreshWithGit, mirror)
       git(copy, 'fetch', '-q')
       assert.include(git(copy, 'branch', '--list', 'later'), 'later')
+    }),
+  )
+
+  it.effect('are the remote’s default branch as of now: a branch gone from the remote goes, and a remote of any name is fetched', () =>
+    Effect.gen(function* () {
+      const { remote, person, copy } = place()
+      // The person names their remote otherwise, and has a commit on main they haven't pushed.
+      git(person, 'remote', 'rename', 'origin', 'github')
+      git(person, 'commit', '-q', '--allow-empty', '-m', 'Not pushed')
+      const seed = join(remote, '..', 'seed')
+      git(seed, 'switch', '-q', 'main')
+      git(seed, 'commit', '-q', '--allow-empty', '-m', 'Pushed since')
+      git(seed, 'push', '-q', 'origin', 'main')
+      yield* freshCopy(person, copy, 'main', refreshWithGit)
+      git(copy, 'fetch', '-q')
+      assert.strictEqual(git(copy, 'log', '-1', '--format=%s', 'HEAD'), 'Pushed since')
+      assert.strictEqual(git(copy, 'log', '-1', '--format=%s', 'github/feature/retry'), 'Retry')
+      // A branch deleted on the remote isn't there at the next turn.
+      git(seed, 'push', '-q', 'origin', '--delete', 'feature/retry')
+      const made = yield* freshCopy(person, copy, 'main', refreshWithGit)
+      assert.isNull(made.stale)
+      git(copy, 'fetch', '-q', '--prune')
+      assert.strictEqual(git(copy, 'branch', '-r', '--list', 'github/feature/retry'), '')
+    }),
+  )
+
+  it.effect('say so where the remote couldn’t be fetched, and are its branch as last fetched, never what wasn’t pushed', () =>
+    Effect.gen(function* () {
+      const { remote, person, copy } = place()
+      const fetched = git(person, 'rev-parse', 'origin/main')
+      git(person, 'commit', '-q', '--allow-empty', '-m', 'Not pushed')
+      // The remote is gone, as offline.
+      rmSync(remote, { recursive: true, force: true })
+      const made = yield* freshCopy(person, copy, 'main', refreshWithGit)
+      assert.strictEqual(made.commit, fetched)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), fetched)
+      assert.strictEqual(made.stale?.at, 'origin/main as last fetched')
+      assert.strictEqual(made.stale?.why, "Althar couldn't fetch origin: it isn't there any more")
+      assert.isTrue(made.stale?.fetched)
+      // With no remote at all, it is the branch as this computer has it, which nothing is ahead of.
+      git(person, 'remote', 'remove', 'origin')
+      const alone = yield* freshCopy(person, copy, 'main', refreshWithGit)
+      assert.isNull(alone.stale)
+      assert.strictEqual(git(copy, 'log', '-1', '--format=%s', 'HEAD'), 'Not pushed')
+    }),
+  )
+
+  it.effect('are fetched as the refresh they are given says, so Althar’s sign-in can bring them', () =>
+    Effect.gen(function* () {
+      const { person, copy } = place()
+      const asked: Array<string> = []
+      const made = yield* freshCopy(person, copy, 'main', (repository) => {
+        asked.push(repository)
+        return Effect.succeed({ remote: 'origin', failed: [{ remote: 'origin', why: 'its sign-in has expired' }] })
+      })
+      assert.deepStrictEqual(asked, [person])
+      assert.deepStrictEqual(made.stale, {
+        why: "Althar couldn't fetch origin: its sign-in has expired",
+        at: 'origin/main as last fetched',
+        fetched: true,
+      })
     }),
   )
 

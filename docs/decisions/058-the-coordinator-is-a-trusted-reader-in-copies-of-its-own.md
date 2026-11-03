@@ -23,6 +23,23 @@
   review's lead keeps the strict list.
 - **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): a command Claude Code can't read itself, which asks, now runs in the coordinator's sandbox without the reader rules reading it; the reader rules hold only where no sandbox does.
 - **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): on the code host the coordinator no longer only reads. It does what the person's account can, through Althar's tools, with what can't be undone on their word; its copies, its sandbox with no network and its denied edit tools stay as they are, and it reads the web under the project's switch (ADR-078).
+- **Amended:** 2026-11-02: before each of the coordinator's turns Althar
+  fetches every branch of each of the repository's remotes, not `origin`
+  alone, with its own sign-in where the person connected the remote's host
+  and else as their git reaches it, as it fetches for leads (ADR-066); a
+  branch a remote no longer has goes from there too (`--prune`). The copy
+  is its remote's default branch from `origin`, else the first remote it
+  has. Where that remote couldn't be fetched, the copy is its default branch
+  as last fetched, never what the person hasn't pushed, and the coordinator
+  is told with its turn, as the person is in its thread, once until that
+  changes; a repository with no remote is this computer's branch, which
+  nothing is ahead of. The coordinator's own `fetch_from_remote` fetches the
+  project's remotes again in the middle of a turn, and the mirror after
+  them, so its copy's `git fetch` brings what was pushed since the turn
+  began. They used to be fetched with the person's git from `origin`
+  alone, and where that failed, offline, timed out or with no sign-in git
+  could use, the coordinator read their local branch as the remote's,
+  untold.
 - **Owner:** Repository maintainers
 - **Context:** The coordinator talks with the person about the project and
   reads the project's repositories in throwaway copies (ADR-004), under the
@@ -56,9 +73,10 @@
     bare mirror of the person's repository's refs, its branches, its
     remotes' branches and its tags, which Althar keeps beside the
     coordinator's folder (`.coordinator-mirrors`) and alone writes. Before
-    the turn Althar fetches the project's remote, all its branches, into the
-    person's repository, as any fetch there would, and the person's refs
-    into the mirror. So the coordinator's `git fetch` brings the remote as of
+    the turn Althar fetches the project's remotes, all their branches, into
+    the person's repository, as any fetch there would, signed in as Althar
+    where it can be (amended 2026-11-02), and the person's refs into the
+    mirror. So the coordinator's `git fetch` brings the remote as of
     the turn, reaches no network itself and never reads the person's
     checkout, and its `git tag`, its fetches
     and anything else it writes stay in the copy, thrown away with it.
@@ -134,7 +152,8 @@
   inside theirs; the risk is that of the sandbox. The person's own Claude
   Code settings don't reach the coordinator: their allow rules and
   sandbox exemptions, and their hooks, aren't loaded for it. The copies'
-  `git fetch` is as fresh as the turn, not the moment. Codex keeps its
+  `git fetch` is as fresh as the turn, not the moment, unless it asks with
+  `fetch_from_remote`. Codex keeps its
   read-only sandbox, whose commands can't write the copy, so its `git
   fetch` and `git tag` are refused when they ask to go beyond it; OpenCode
   and agents with no sandbox Althar holds get only the rules' additions.

@@ -8,7 +8,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { GitFailed, NotFound } from './errors'
-import { commitOf, git, gitWithin } from './git'
+import { commitOf, fetchRemote, git, namedRemotes } from './git'
 import { Instance } from './Instance'
 
 /*
@@ -24,11 +24,60 @@ import { Instance } from './Instance'
  * only remote is a bare mirror of that repository's refs Althar keeps beside
  * the folder, out of the coordinator's reach. So the coordinator's `git
  * fetch` and `git tag` write only the copy, and reach no network, nor the
- * person's checkout. Althar fetches the project's remote into the person's
- * repository first, and its refs into the mirror; the copy's fetch brings
- * what that has. Nothing the coordinator left in the git folder, its config,
- * hooks or refs, is ever read by Althar's own git.
+ * person's checkout. Althar fetches the project's remotes into the person's
+ * repository first, every branch of each, with its own sign-in where it has
+ * one (Fetches.ts), and its refs into the mirror; the copy's fetch brings
+ * what that has. Where a remote couldn't be fetched, the copy is its default
+ * branch as last fetched, and says so (`stale`), so the coordinator is told
+ * rather than reading old code as new. Nothing the coordinator left in the
+ * git folder, its config, hooks or refs, is ever read by Althar's own git.
  */
+
+/**
+ * What bringing a repository up to date with its remotes did: the remote its
+ * default branch is read from (origin, else the first it has; null with
+ * none), and each remote that couldn't be fetched, with why.
+ */
+export interface Refreshed {
+  readonly remote: string | null
+  readonly failed: ReadonlyArray<{ readonly remote: string; readonly why: string }>
+}
+
+/** Brings a repository up to date with its remotes: Fetches' `refresh`, or a stand-in where there's no connection to sign in with. */
+export type Refresh = (repository: string) => Effect.Effect<Refreshed>
+
+/** The remote a repository's default branch is read from: origin, else the first it has; null with none. */
+export const baseRemoteOf = (remotes: ReadonlyArray<string>) => (remotes.includes('origin') ? 'origin' : (remotes[0] ?? null))
+
+/**
+ * Brings a repository up to date with its remotes as the person's own git
+ * reaches them, with no sign-in of Althar's: every branch of each, several
+ * at once (`fetchRemote`).
+ */
+export const refreshWithGit: Refresh = (repository) =>
+  Effect.gen(function* () {
+    const remotes = (yield* namedRemotes(repository).pipe(Effect.orElseSucceed(() => []))).map((one) => one.name)
+    const outcomes = yield* Effect.forEach(
+      remotes,
+      (remote) => Effect.map(fetchRemote(repository, { url: remote, header: null }, remote), (why) => ({ remote, why })),
+      { concurrency: 4 },
+    )
+    return {
+      remote: baseRemoteOf(remotes),
+      failed: outcomes.flatMap(({ remote, why }) => (why === null ? [] : [{ remote, why }])),
+    }
+  })
+
+/**
+ * Where a copy isn't the remote's default branch as of now: why, and what it
+ * is instead, `origin/main as last fetched` or `main as this computer has it`.
+ */
+export interface Stale {
+  readonly why: string
+  readonly at: string
+  /** It is the remote's branch as last fetched, rather than this computer's own. */
+  readonly fetched: boolean
+}
 
 export interface CoordinatorFolder {
   readonly folder: string
@@ -43,6 +92,8 @@ export interface CoordinatorFolder {
     readonly root: string
     readonly within: string | null
     readonly base: string
+    /** Where it isn't the remote's default branch as of now, as when the remote couldn't be fetched: why. */
+    readonly stale: Stale | null
   }>
   /**
    * What the coordinator's commands may read, where a sandbox holds them
@@ -206,20 +257,40 @@ export const freshMirror = (repository: string, path: string) =>
 
 /**
  * A copy of `repository` at `path`, detached at its default branch as the
- * remote has it, or offline as this computer has it: made if it isn't there, its
- * git folder made again, and anything written in it since thrown away, but
- * what git ignores, such as installed packages. Its fetch comes from `from`,
- * a mirror of the repository's (`freshMirror`), or the repository itself.
+ * remote has it now, brought up to date by `refresh` first; where the remote
+ * couldn't be fetched, as last fetched, or where it never was, as this
+ * computer has it, and why (`stale`). With no remote, as this computer has
+ * it, which nothing is ahead of. Made if it isn't there, its git folder
+ * made again, and anything written in it since thrown away, but what git
+ * ignores, such as installed packages. Its fetch comes from `from`, a mirror
+ * of the repository's (`freshMirror`), or the repository itself.
  */
-export const freshCopy = (repository: string, path: string, base: string, from = repository) =>
+export const freshCopy = (repository: string, path: string, base: string, refresh: Refresh, from = repository) =>
   Effect.gen(function* () {
-    // Every branch of the remote, so the copy's `git fetch` has them all as of this turn; offline, the repository as it is.
-    const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', 'origin').pipe(
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
-    )
-    const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
-    yield* copyAt(repository, path, Option.isSome(remote) ? remote.value : yield* commitOf(repository, base), from)
+    // Every branch of each remote, so the copy's `git fetch` has them all as of this turn.
+    const refreshed = yield* refresh(repository)
+    const { remote } = refreshed
+    // With no remote, this computer's branch is all there is: nothing it could be behind.
+    if (remote === null) {
+      const commit = yield* commitOf(repository, base)
+      yield* copyAt(repository, path, commit, from)
+      return { commit, stale: null }
+    }
+    const failed = refreshed.failed.find((one) => one.remote === remote)?.why
+    const tracked = yield* commitOf(repository, `${remote}/${base}`).pipe(Effect.option)
+    const stale: Stale | null =
+      failed === undefined
+        ? Option.isSome(tracked)
+          ? null
+          : { why: `${remote} has no branch called ${base}`, at: `${base} as this computer has it`, fetched: false }
+        : {
+            why: `Althar couldn't fetch ${remote}: ${failed}`,
+            at: Option.isSome(tracked) ? `${remote}/${base} as last fetched` : `${base} as this computer has it`,
+            fetched: Option.isSome(tracked),
+          }
+    const commit = Option.isSome(tracked) ? tracked.value : yield* commitOf(repository, base)
+    yield* copyAt(repository, path, commit, from)
+    return { commit, stale }
   })
 
 /**
@@ -249,8 +320,16 @@ export const copyAt = (repository: string, path: string, commit: string, from = 
 /** Where a project's coordinator folder is, by the project's slug: its copies are in it, each by its repository's. */
 export const coordinatorFolderAt = (worktreeRoot: string, slug: string) => join(worktreeRoot, slug, '.coordinator')
 
-/** The project's coordinator folder, made if it isn't there, and each repository fresh from its default branch. */
-export const coordinatorFolder = (projectId: string) =>
+/** Where the mirror a copy fetches from is, by the project's slug and its repository's: beside the coordinator's folder, never in it. */
+export const coordinatorMirrorAt = (worktreeRoot: string, slug: string, repository: string) =>
+  join(worktreeRoot, slug, '.coordinator-mirrors', `${repository}.git`)
+
+/**
+ * The project's coordinator folder, made if it isn't there, and each
+ * repository fresh from its default branch, its remotes brought up to date
+ * by `refresh` first, several at once.
+ */
+export const coordinatorFolder = (projectId: string, refresh: Refresh) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
@@ -269,19 +348,29 @@ export const coordinatorFolder = (projectId: string) =>
     const mirrors = join(projectFolder, '.coordinator-mirrors')
     mkdirSync(folder, { recursive: true })
     mkdirSync(mirrors, { recursive: true })
-    const repositories = yield* Effect.forEach(bindings, (binding) =>
-      Effect.gen(function* () {
-        const base = binding.base ?? 'main'
-        const path = join(folder, binding.slug)
-        yield* freshCopy(binding.repository, path, base, join(mirrors, `${binding.slug}.git`))
-        return {
-          name: binding.name,
-          path: binding.within === null ? path : join(path, binding.within),
-          root: path,
-          within: binding.within,
-          base,
-        }
-      }),
+    const repositories = yield* Effect.forEach(
+      bindings,
+      (binding) =>
+        Effect.gen(function* () {
+          const base = binding.base ?? 'main'
+          const path = join(folder, binding.slug)
+          const { stale } = yield* freshCopy(
+            binding.repository,
+            path,
+            base,
+            refresh,
+            coordinatorMirrorAt(config.worktreeRoot, project.slug, binding.slug),
+          )
+          return {
+            name: binding.name,
+            path: binding.within === null ? path : join(path, binding.within),
+            root: path,
+            within: binding.within,
+            base,
+            stale,
+          }
+        }),
+      { concurrency: 4 },
     )
     const reads = readsOf({
       home: homedir(),

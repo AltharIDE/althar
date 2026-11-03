@@ -2,9 +2,22 @@ import { type CodeHost, parseLink, parseRemote, type Repository } from '@althar/
 import { Context, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
+import { baseRemoteOf, coordinatorMirrorAt, freshMirror, type Refreshed } from './coordinatorFolder'
 import { forkOf } from './forks'
-import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, namedRemotes, redactUrl, remoteHeads } from './git'
+import {
+  commitOf,
+  type FetchSource,
+  fetchRemote,
+  fetchSpecs,
+  git,
+  gitOutcome,
+  NO_SIGN_IN,
+  namedRemotes,
+  redactUrl,
+  remoteHeads,
+} from './git'
 import { Instance } from './Instance'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
@@ -22,7 +35,9 @@ import { type Tool, ToolRefused, ToolServer } from './ToolServer'
  * Run a branch (Launches.ts) fetches what it runs this way; a lead asks for
  * what its worktree lacks with fetch_from_remote, since it carries no
  * sign-in of its own; and the Run menu lists what there is to run, fetched
- * fresh as it opens.
+ * fresh as it opens. Every branch of each remote comes this way too before
+ * each of the coordinator's turns (`refresh`, ADR-058), and when it asks
+ * with its own fetch_from_remote, into the mirror its copies fetch from.
  */
 
 /** What is asked for: a remote's branch or tag by name, or a pull request by its number or link. */
@@ -110,6 +125,9 @@ const sameRepository = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a
 const hostName = (host: string) =>
   ({ 'ssh.github.com': 'github.com', 'altssh.gitlab.com': 'gitlab.com' })[host.toLowerCase()] ?? host.toLowerCase()
 
+/** What fetching needs: the store, this computer, the person's connections, the tool server, and where Althar keeps folders. */
+type Needs = SqlClient.SqlClient | Instance | Connections | ToolServer | RuntimeConfig
+
 export class Fetches extends Context.Service<
   Fetches,
   {
@@ -123,15 +141,23 @@ export class Fetches extends Context.Service<
      * listed already.
      */
     offered(projectId: string, text?: string): Effect.Effect<ReadonlyArray<Offered>, unknown>
+    /**
+     * Every branch of each of the repository's remotes, and the tags that
+     * come with them, into the repository, signed in as Althar where it can
+     * be, else as the person's git reaches it; a branch a remote no longer
+     * has goes. What it fetched, and why any remote couldn't be.
+     */
+    readonly refresh: (repository: string) => Effect.Effect<Refreshed>
   }
 >()('@althar/runtime/Fetches') {
-  static readonly layer: Layer.Layer<Fetches, never, SqlClient.SqlClient | Instance | Connections | ToolServer> = Layer.effect(
+  static readonly layer: Layer.Layer<Fetches, never, Needs> = Layer.effect(
     Fetches,
     Effect.gen(function* () {
       const connections = yield* Connections
       const instance = yield* Instance
       const toolServer = yield* ToolServer
       const sqlClient = yield* SqlClient.SqlClient
+      const config = yield* RuntimeConfig
 
       /** How to reach a remote of the repository: null where it has none by that name. */
       const reachOf = (repository: string, remote: string) =>
@@ -393,6 +419,92 @@ export class Fetches extends Context.Service<
           )
         })
 
+      /** Every branch of one remote, from the first way to it that works: null where one did, else why the last one tried didn't. */
+      const refreshRemote = (repository: string, remote: string) =>
+        Effect.gen(function* () {
+          const reach = yield* reachOf(repository, remote)
+          if (reach === null) return 'it has no URL'
+          let why: string | null = 'git gave no reason'
+          for (const source of reach.sources) {
+            why = yield* fetchRemote(repository, source, remote)
+            if (why === null) return null
+          }
+          // Connecting its host only helps where what failed was the sign-in.
+          return reach.signed === null && why === NO_SIGN_IN ? `${why}. Connect its host in Settings, and Althar fetches with its own` : why
+        })
+
+      const refresh = (repository: string): Effect.Effect<Refreshed> =>
+        Effect.gen(function* () {
+          const remotes = (yield* namedRemotes(repository).pipe(Effect.orElseSucceed(() => []))).map((one) => one.name)
+          const outcomes = yield* Effect.forEach(
+            remotes,
+            (remote) => Effect.map(refreshRemote(repository, remote), (why) => ({ remote, why })),
+            { concurrency: 4 },
+          )
+          return {
+            remote: baseRemoteOf(remotes),
+            failed: outcomes.flatMap(({ remote, why }) => (why === null ? [] : [{ remote, why }])),
+          }
+        })
+
+      /* ---- What the coordinator can ask for ---- */
+
+      const coordinatorFetchTool: Tool = {
+        name: 'fetch_from_remote',
+        description:
+          "Brings the project's remotes into your copies now: Althar fetches every branch of each of its repositories' remotes, and their tags, with its own sign-in, and then `git fetch` in your copy brings them. Your copies are brought up to date before each of your turns already; call this when you need what was pushed since your turn began, or when Althar told you it couldn't fetch a remote. It says where each repository's default branch is now. Your copy stays where it is until you fetch and check out what you want, such as `git checkout --detach origin/main`. Give repository for one of several.",
+        input: { type: 'object', properties: { repository: { type: 'string' } } },
+        call: (input, access) =>
+          Effect.gen(function* () {
+            const asked = yield* Schema.decodeUnknownEffect(Schema.Struct({ repository: Schema.optional(Schema.String) }))(input).pipe(
+              Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+            )
+            const places = yield* sqlClient<{ name: string; slug: string; base: string | null; repository: string; project: string }>`
+              SELECT b.display_name AS name, b.slug, b.default_base_ref AS base, l.path AS repository, p.slug AS project
+              FROM repository_bindings b
+              JOIN projects p ON p.id = b.project_id
+              JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+              WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
+              ORDER BY b.created_at, b.rowid`.pipe(Effect.orElseSucceed(() => []))
+            const wantedName = asked.repository?.trim().toLowerCase()
+            const chosen =
+              wantedName === undefined || wantedName === ''
+                ? places
+                : places.filter((place) => place.name.toLowerCase() === wantedName || place.slug === wantedName)
+            if (chosen.length === 0)
+              return yield* new ToolRefused({
+                message:
+                  places.length === 0
+                    ? 'The project has no repository on this computer to fetch into.'
+                    : `There's no repository called ${asked.repository} in the project. Its repositories: ${places.map((one) => one.name).join(', ')}.`,
+              })
+            const lines = yield* Effect.forEach(
+              chosen,
+              (place) =>
+                Effect.gen(function* () {
+                  const refreshed = yield* refresh(place.repository)
+                  // Into the mirror the copy fetches from, which Althar alone writes.
+                  yield* freshMirror(place.repository, coordinatorMirrorAt(config.worktreeRoot, place.project, place.slug))
+                  const base = place.base ?? 'main'
+                  const failed = refreshed.failed.map((one) => `Althar couldn't fetch ${one.remote}: ${one.why}.`)
+                  if (refreshed.remote === null) return `${place.name}: it has no remote to fetch from.`
+                  const tip = yield* commitOf(place.repository, `${refreshed.remote}/${base}`).pipe(Effect.orElseSucceed(() => null))
+                  const subject =
+                    tip === null ? '' : yield* git(place.repository, 'log', '-1', '--format=%s', tip).pipe(Effect.orElseSucceed(() => ''))
+                  const where =
+                    tip === null
+                      ? `${refreshed.remote} has no branch called ${base}.`
+                      : `${refreshed.remote}/${base} is at ${tip.slice(0, 12)}${subject === '' ? '' : ` (${subject})`}${refreshed.failed.some((one) => one.remote === refreshed.remote) ? ', as last fetched' : ''}.`
+                  return [`${place.name}: ${where}`, ...failed].join(' ')
+                }).pipe(
+                  Effect.catchTag('GitFailed', () => Effect.succeed(`${place.name}: Althar couldn't bring your copy's remote up to date.`)),
+                ),
+              { concurrency: 4 },
+            )
+            return [...lines, '`git fetch` in your copy brings what Althar fetched.'].join('\n')
+          }),
+      }
+
       /* ---- What a lead can ask for ---- */
 
       const Asked = Schema.Struct({
@@ -472,10 +584,12 @@ export class Fetches extends Context.Service<
       }
 
       yield* toolServer.serve('lead', [fetchTool])
+      yield* toolServer.serve('coordinator', [coordinatorFetchTool])
 
       return Fetches.of({
         fetch,
         offered: (projectId, text) => offered(projectId, text),
+        refresh,
       })
     }),
   )

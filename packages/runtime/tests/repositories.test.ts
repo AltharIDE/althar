@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
-import { coordinatorFolder } from '../src/coordinatorFolder'
+import { coordinatorFolder, refreshWithGit } from '../src/coordinatorFolder'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
@@ -147,7 +147,7 @@ describe('opening a folder', () => {
       mkdirSync(join(root, 'packages', 'api'), { recursive: true })
       const opened = yield* open(join(root, 'packages', 'api'))
       assert.strictEqual(opened.name, 'api')
-      const coordinator = yield* coordinatorFolder(opened.projectId)
+      const coordinator = yield* coordinatorFolder(opened.projectId, refreshWithGit)
       assert.isTrue(coordinator.repositories[0]?.path.endsWith(join('packages', 'api')))
       assert.strictEqual(coordinator.repositories[0]?.within, 'packages/api')
       const task = yield* createTask(opened.projectId)

@@ -3,7 +3,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { coordinatorFolder } from '../src/coordinatorFolder'
+import { coordinatorFolder, refreshWithGit } from '../src/coordinatorFolder'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
@@ -61,7 +61,7 @@ describe('a document named from a worktree', () => {
 describe('the coordinator’s folder', () => {
   it.live('is not made for a project that isn’t there', () =>
     Effect.gen(function* () {
-      assert.instanceOf(yield* Effect.flip(coordinatorFolder('proj_gone')), NotFound)
+      assert.instanceOf(yield* Effect.flip(coordinatorFolder('proj_gone', refreshWithGit)), NotFound)
     }).pipe(Effect.provide(runtime())),
   )
 })

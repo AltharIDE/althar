@@ -80,7 +80,11 @@ coordinator may run in copies of its own
   branch. Each is a repository of its own, whose git folder is made again
   for every turn: it borrows the person's repository's objects, and fetches
   only from a mirror of that repository's refs Althar keeps beside the
-  folder, after Althar fetched the remote there. So its `git fetch`
+  folder, after Althar fetched every branch of each remote there, with its
+  own sign-in where it has one. Where a remote couldn't be fetched, the copy
+  is its default branch as last fetched, and the coordinator is told with
+  its turn, as the person is in its thread; its `fetch_from_remote` fetches
+  them again in the middle of a turn. So its `git fetch`
   and `git tag` write only the copy, and nothing written there survives or
   reaches a task, nor is read by Althar's own git. A project with no
   repositories gets an empty folder. A reviewer reads a copy of the lead's
