@@ -264,6 +264,12 @@ export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'go
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`
 
+/** Why the checks on a change are the person's though none failed, as its card says: Althar gave up on seeing them through. */
+export const gaveUpLine = (how: string) =>
+  how === 'stuck'
+    ? 'The checks ran too long for Althar to see them through. Tell the lead what to do.'
+    : 'Althar can’t read the checks to see them through. Tell the lead what to do.'
+
 /**
  * Why the checks that fail on a change are the person's, as its card says, where they were taken from Althar's hands since they
  * failed: the person stopped or interrupted its lead, or Althar gave up on checks that ran too long or that it couldn't read.

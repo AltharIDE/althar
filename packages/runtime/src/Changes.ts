@@ -121,6 +121,7 @@ import {
   reviewForLead,
   reviewLine,
   signed,
+  gaveUpLine,
   spentLine,
   standing,
   unsettledLine,
@@ -3330,11 +3331,12 @@ export class Changes extends Context.Service<
                 outcome: string | null
                 how: string | null
                 why: string | null
+                ref: string | null
               }>`
                 SELECT kind, observed_at AS at, json_extract(payload, '$.sha') AS sha, json_extract(payload, '$.outcome') AS outcome,
-                  json_extract(payload, '$.how') AS how, json_extract(payload, '$.why') AS why
+                  json_extract(payload, '$.how') AS how, json_extract(payload, '$.why') AS why, json_extract(payload, '$.id') AS ref
                 FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
-                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed', 'pushed')
+                  AND kind IN ('checks', 'checks_running', 'taken', 'checks_handed', 'pushed', 'checks_stuck', 'checks_unreadable')
                 ORDER BY observed_at, rowid`
               const head = snapshot.headSha
               const outcome = snapshot.checks !== null && snapshot.checks.sha === head ? snapshot.checks.outcome : null
@@ -3382,6 +3384,21 @@ export class Changes extends Context.Service<
               const takenOnHead =
                 headAt !== undefined && said.some((one) => one.kind === 'taken' && one.how !== 'pushed' && one.at >= headAt)
               const goes = head !== null && !given && handed === undefined && !takenOnHead
+              // Althar gave up on its head's checks, as running too long or unreadable, and they were in its hands then: theirs, and
+              // the card says why, failed or not, unless they passed since.
+              const gaveUp =
+                head === null || outcome === 'passed'
+                  ? undefined
+                  : said.findLast(
+                      (one) =>
+                        (one.kind === 'checks_stuck' && one.ref === `stuck:${head}`) ||
+                        (one.kind === 'checks_unreadable' && one.ref === `unreadable:${head}`),
+                    )
+              const gaveUpHow =
+                gaveUp === undefined
+                  ? undefined
+                  : said.find((one) => one.kind === 'taken' && (one.how === 'stuck' || one.how === 'unreadable') && one.at >= gaveUp.at)
+                      ?.how
               return {
                 linkId: link.id,
                 failed,
@@ -3393,7 +3410,9 @@ export class Changes extends Context.Service<
                 running: open && (outcome === 'running' || appearing),
                 goes,
                 why: !failing
-                  ? null
+                  ? gaveUpHow == null
+                    ? null
+                    : gaveUpLine(gaveUpHow)
                   : handed !== undefined
                     ? handed.why
                     : given && latest === head
@@ -5004,10 +5023,9 @@ export class Changes extends Context.Service<
                 ? false
                 : yield* Effect.as(forgetUnsent(link.taskId), false)
           const says = now.conflicts === true
-          // A round waiting on the checks of its merge is under way: only its host saying it conflicts again is looked into, as one
-          // that overtakes it, and what can't be looked at here meanwhile leaves the round to go on, not the person's.
-          if (first === 'checking' && !says) return false
           // Where it can't be looked at here, that is said whatever its host says: a host saying it merges cleanly may be out of date.
+          // A round waiting on the checks of its merge is under way all the same: it goes on, not the person's. Looked at, what it
+          // merged having moved on and conflicting again overtakes it, its host silent or not.
           const couldnt = (why: string) => (first === 'checking' ? Effect.void : notSent(link.taskId, why, true, says))
           const [workspace] = yield* sql<{ path: string; binding: string; slug: string; name: string; threadId: string }>`
             SELECT w.path, b.id AS binding, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
@@ -5163,6 +5181,7 @@ export class Changes extends Context.Service<
             ))
           // Checks it can't read, or that run too long, Althar can't see through (ADR-041): the round ends, and they are the person's.
           if (all === null) {
+            yield* heard(link, 'checks_unreadable', `unreadable:${now.headSha}`, { message: 'Not readable.' })
             yield* taken(round.taskId, 'unreadable')
             return yield* Effect.as(
               endRound(round, null, { severity: 'warning', title: `Can't read the checks on what was pushed to ${where}.` }),

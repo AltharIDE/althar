@@ -8,6 +8,7 @@ import { Changes, FIX_ROUNDS, OFF_FOR_PROJECT, OFF_FOR_TASK } from '../src/Chang
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
+import { gaveUpLine } from '../src/pullRequestWords'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -108,6 +109,26 @@ describe('a conflict alone', () => {
       )
       assert.isNull(card?.conflictUnsent ?? null)
       assert.isNull(card?.handedBack ?? null)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('that comes back while the checks on the merge run is found by Althar’s own look, its host silent', () => {
+    const { working, bare } = hosted()
+    let silent = false
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? RUNNING : PASSED), undefined, {
+      says: () => (silent ? false : undefined),
+    })
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'checking')
+      // Its host hasn't worked out that the merge conflicts with main moved on again, and says it merges cleanly.
+      silent = true
+      moveHostMainOn(working, bare, 'rate limits, again\n')
+      const all = yield* until(rounds(taskId), (now) => now.length === 2)
+      assert.strictEqual(all[0]?.state, 'resolved')
+      yield* until(asked(threadId), (now) => now.length === 2)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -451,6 +472,8 @@ describe('checks on the merge that run too long', () => {
         ([one]) => one?.phase === 'ready',
       )
       assert.strictEqual(card?.change?.checks?.outcome, 'running')
+      // Its card says why it waits on the person, not only that its checks run.
+      assert.strictEqual(card?.checksBack, gaveUpLine('stuck'))
     }).pipe(Effect.provide(runtimeWith({ github }, {}, Duration.seconds(3))))
   })
 })

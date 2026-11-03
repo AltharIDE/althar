@@ -29,8 +29,9 @@
   - **A round waiting for its merge's checks doesn't hide a new conflict.**
     It is under way while the branch it merged stays as it was. Once that
     branch moved on and conflicts again, the round is over and the new
-    conflict is a round of its own, asked at once. While it waits, the card
-    is under way, on the checks running.
+    conflict is a round of its own, asked at once, found by Althar's own
+    look whether or not the host says so yet. While it waits, the card is
+    under way, on the checks running.
   - **One ask for both.** A conflict found as the checks fail, or after they
     failed while they are still the lead's (ADR-070), is asked with them:
     which failed and the ends of their logs, to fix in the one commit on top
@@ -65,7 +66,8 @@
     automatically” is off in the project's settings", beside Resolve now,
     on the board's card and on its line in Needs you. Failed checks on a
     task the person stopped say so; those Althar gave up on as running too
-    long, or couldn't read, say that instead. A task the person stopped
+    long, or couldn't read, say that instead, failed or still running. A
+    task the person stopped
     stays stopped. The card works out why from the task and the project's
     rules, not only from what Althar remembers of its last look.
 - **Alternatives considered:**
