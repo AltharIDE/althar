@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 
 import { FileArtifact, Shots } from '@althar/ui'
 
+import { ApiError } from '@althar/contracts'
+
 import { messageOf } from '../data/client'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
@@ -58,6 +60,15 @@ function DocumentCard({
   const { client } = useServices()
   // Read by which file it is, so one gone is gone, not another of the same name.
   const read = useQuery(reads(client).document(threadId, file.whole, version))
+  // One that can't be read (gone, or not in a worktree) is a plain file line, never a card with an error; only a too large one says so.
+  if (read.isError && !(read.error instanceof ApiError && /too large/.test(read.error.message)))
+    return (
+      <FileArtifact
+        path={file.shown}
+        kind={file.kind}
+        {...(openFile === undefined || file.local === null ? {} : { onOpen: () => openFile(file.local ?? '') })}
+      />
+    )
   return (
     <FileArtifact
       path={file.shown}

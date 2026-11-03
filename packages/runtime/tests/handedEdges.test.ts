@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -131,6 +131,19 @@ describe('a file a tool wrote whole', () => {
         [[resolve('/w', 'docs', 'a.md'), 'wrote']],
       )
       assert.deepStrictEqual(yield* handedByTool(place, [], { file_path: '', content: '# A\n' }, 'edit'), { pictures: [], files: [] })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is not handed back through a link inside the folder that leads out of it', () =>
+    Effect.gen(function* () {
+      const folder = mkdtempSync(join(tmpdir(), 'handed-in-'))
+      const home = mkdtempSync(join(tmpdir(), 'handed-home-'))
+      mkdirSync(join(home, 'memory'))
+      writeFileSync(join(home, 'memory', 'note.md'), '# Note\n')
+      symlinkSync(join(home, 'memory'), join(folder, 'linked'))
+      const place = placeIn(folder)
+      const through = yield* handedByTool(place, [], { file_path: join(folder, 'linked', 'note.md'), content: '# Note\n' }, 'edit')
+      assert.deepStrictEqual(through, { pictures: [], files: [] })
     }).pipe(Effect.provide(runtime())),
   )
 
