@@ -28,12 +28,15 @@ export const routed = (of: (token: string) => FakeService) => {
       account: routed((one) => one.account),
       issue: (ref) => routed((one) => one.issue(ref)),
       mine: (options) => routed((one) => one.mine(options)),
+      find: (query) => routed((one) => one.find(query)),
+      comments: (issue, limit) => routed((one) => one.comments(issue, limit)),
       comment: (issue, body) => routed((one) => one.comment(issue, body)),
       link: (issue, link) => routed((one) => one.link(issue, link)),
       start: (issue) => routed((one) => one.start(issue)),
       containers: () => routed((one) => one.containers()),
       create: (container, issue) => routed((one) => one.create(container, issue)),
       choices: (issue, field, wanted) => routed((one) => one.choices(issue, field, wanted)),
+      choicesIn: (container, field, wanted) => routed((one) => one.choicesIn(container, field, wanted)),
       update: (issue, change) => routed((one) => one.update(issue, change)),
     }
   }

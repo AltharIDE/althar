@@ -58,7 +58,6 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
-  changesIssues,
   Policies,
   type ProjectRules,
   resolvesConflicts,
@@ -120,6 +119,16 @@ const PUSHABLE_KEPT = 5 * 60_000
 const PUSHABLE_WAIT = Duration.seconds(5)
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
+/** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
+export const text = {
+  issuesAtOnce: 'From now on, file and change issues at once, without a card for me first. Keep that as a note.',
+  issuesAskFirst: 'From now on, ask me first: each issue, and each change to one, as a card for me to file or apply. Keep that as a note.',
+  leadIssuesAtOnce:
+    'The person wants issues filed and changed at once from now on: use draft_issue’s file_now and change_issue’s at_once. Each card is the record of it.',
+  leadIssuesAskFirst:
+    'The person wants to be asked first from now on: each issue, and each change to one, as a card for them to file or apply.',
+}
+
 const realpathOf = (path: string) => {
   try {
     return realpathSync(path)
@@ -441,7 +450,6 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
-        changeIssues: changesIssues(rules),
       }
     }
 
@@ -1167,6 +1175,45 @@ export const handlers = Api.toLayer(
       ApplyIssueChanges: ({ commandId, changesId }) =>
         once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, instance.personId)))),
       DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, instance.personId))),
+      PreferIssueCards: ({ commandId, threadId, atOnce }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              // Said to the coordinator as the person said it, from an issue's card: it keeps it as one of the project's notes.
+              const [thread] = yield* sql<{ projectId: string; kind: string; taskId: string | null }>`
+                SELECT project_id, kind, task_id FROM threads WHERE id = ${threadId}`
+              if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
+              const [home] = yield* sql<{ id: string }>`
+                SELECT id FROM threads WHERE project_id = ${thread.projectId} AND kind = 'coordinator' LIMIT 1`
+              if (home === undefined) return yield* new NotFound({ kind: 'coordinator thread', id: thread.projectId })
+              const body = atOnce ? text.issuesAtOnce : text.issuesAskFirst
+              yield* coordinator.say({
+                envelope: yield* envelope('thread.send', { threadId: home.id, body, disposition: 'after_current' }, commandId),
+                threadId: home.id,
+                body,
+                disposition: 'after_current',
+                sender,
+              })
+              // A task's lead, where it was said on its card, hears it now: its brief had the notes as they were.
+              if (thread.kind === 'task' && thread.taskId !== null) {
+                const [open] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${thread.taskId} AND state = 'open'`
+                if (open !== undefined)
+                  yield* sessions.send({
+                    envelope: yield* Effect.provideContext(
+                      Runtime.envelope('thread.send', { threadId, preferIssueCards: atOnce }, undefined, instance.systemId),
+                      context,
+                    ),
+                    threadId,
+                    body: atOnce ? text.leadIssuesAtOnce : text.leadIssuesAskFirst,
+                    disposition: 'after_current',
+                    quiet: true,
+                  })
+              }
+            }),
+          ),
+        ),
+      SetTaskIssuePart: ({ commandId, taskId, partOf }) => once(commandId, api(issues.setPart(taskId, partOf))),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,

@@ -312,10 +312,12 @@ export function ProjectView({
     onFile: (draftId) => void model.fileIssueDraft(draftId),
     onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
   const changesActions: ChangesActions = {
     onApply: (changesId) => void model.applyIssueChanges(changesId),
     onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+    onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
   }
 
   // The agent what the person says goes to, and whether it takes images.

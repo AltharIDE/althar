@@ -906,7 +906,7 @@ CREATE TABLE external_links (
   polled_at TEXT CHECK (polled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), part_of INTEGER NOT NULL DEFAULT 0 CHECK (part_of IN (0, 1)),
   UNIQUE (task_id, kind, product, external_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   UNIQUE (id, project_id)
@@ -996,7 +996,7 @@ CREATE TABLE issue_drafts (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')), fields TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fields)), direct INTEGER NOT NULL DEFAULT 0 CHECK (direct IN (0, 1)), left_off TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(left_off)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'filed') = (issue_url IS NOT NULL AND issue_ref IS NOT NULL AND issue_key IS NOT NULL)),
