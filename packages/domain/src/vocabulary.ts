@@ -47,6 +47,13 @@ export type RunAttemptState = typeof RunAttemptState.Type
 export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed'])
 export type WorkspaceState = typeof WorkspaceState.Type
 
+/**
+ * Where a task works (ADR-086): a worktree of its own, or its repository's own checkout on this device, where the person works,
+ * held by one task at a time. Local on screen. A project's default for new tasks, a plan's choice, and each workspace's kind.
+ */
+export const WorksIn = Schema.Literals(['worktree', 'checkout'])
+export type WorksIn = typeof WorksIn.Type
+
 export const ExecutionState = Schema.Literals(['running', 'succeeded', 'failed', 'cancelled'])
 export type ExecutionState = typeof ExecutionState.Type
 
