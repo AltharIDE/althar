@@ -8,6 +8,7 @@
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
   [ADR-078](078-project-leads-can-read-the-web.md)
+- **Amended:** 2026-11-03 ([ADR-086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)): stopping, holding, restarting and settling a task all go on the person's word, not only discarding, and ask on a card otherwise.
 - **Owner:** Repository maintainers
 - **Context:** A separate Claude Code session, with `gh` signed in, gets the
   person's changes into main and releases them (DEV-180):

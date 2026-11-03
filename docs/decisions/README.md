@@ -91,3 +91,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [082](082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md) | A feature built for one code host, tracker or agent ships for every one that can have it, with Althar standing in or saying why |
 | [083](083-a-welcome-on-first-launch.md) | A welcome on first launch: a short tour, then setup in steps, and a new project asks for its code host and a tracker |
 | [085](085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md) | A fork's branches go upstream by a choice of the project's, offered once on what its host says; remotes are never rewritten, and open pull requests stay where they are |
+| [086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md) | The coordinator stops, holds, restarts and settles a task when the person's message in that turn asks, with a line in both threads; any other turn asks on a card, and discarding deletes nothing |
