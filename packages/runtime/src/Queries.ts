@@ -2359,7 +2359,7 @@ export class Queries extends Context.Service<
           // A plain task with no branch yet has nothing of its own in git to size.
           const said =
             (card.phase === 'ready' || atWork) && card.branch !== null
-              ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' })
+              ? yield* gitOf(row.id, { changed: card.change === null || card.change.state === 'closed', here: card.phase === 'ready' })
               : null
           const changed =
             said !== null && card.change === null
@@ -2369,8 +2369,18 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
+          // A change ready with nothing on its branch and no pull request open or merged: nothing to accept.
+          const nothingBuilt =
+            card.phase === 'ready' &&
+            card.kind === 'change' &&
+            card.unshipped == null &&
+            (card.change === null || card.change.state === 'closed') &&
+            (said === null || (said.commits === 0 && said.files.length === 0)) &&
+            // What Done would settle: the same reading, from git, so the card never offers what Done refuses.
+            (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(row.id)).pipe(Effect.orElseSucceed(() => false)))
           const read = {
             ...card,
+            ...(nothingBuilt ? { nothingBuilt } : {}),
             state: row.state,
             createdAt: row.createdAt,
             settledAt: row.settledAt,
@@ -2895,6 +2905,16 @@ export class Queries extends Context.Service<
               settledAt: head.settledAt,
               ...links,
               unshipped: card?.unshipped ?? null,
+              // As the board reads it: a ready change whose branch holds nothing and whose pull request, if any, closed.
+              ...(card?.phase === 'ready' &&
+              card.kind === 'change' &&
+              card.unshipped == null &&
+              (card.change === null || card.change.state === 'closed') &&
+              said.commits === 0 &&
+              said.files.length === 0 &&
+              (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(head.taskId)).pipe(Effect.orElseSucceed(() => false)))
+                ? { nothingBuilt: true }
+                : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
               followUp: card?.followUp === true,
               files: said.files,

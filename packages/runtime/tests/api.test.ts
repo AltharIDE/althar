@@ -1891,7 +1891,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Retry',
-          description: '[lead:finish]',
+          description: '[lead:commit] [lead:make-change] [lead:finish]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
         const both = yield* until(
@@ -1915,7 +1915,7 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Retry', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })

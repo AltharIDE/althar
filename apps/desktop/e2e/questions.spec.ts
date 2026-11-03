@@ -28,8 +28,8 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // A task whose lead asks first.
-    await startTask(page, 'Cache the rates', '[lead:ask] [lead:finish]')
+    // A task whose lead asks first, and commits something, so that it is ready to accept and not a change that built nothing.
+    await startTask(page, 'Cache the rates', '[lead:ask] [lead:commit] [lead:finish]')
 
     // On the home, the question waits on the person, calm: what it asks, why, and Answer. Its options are where it is answered.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()

@@ -1831,6 +1831,8 @@ export const TaskCard = Schema.Struct({
   earlier: Schema.optional(Schema.Array(ChangeSummary)),
   /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+  /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
+  nothingBuilt: Schema.optional(Schema.Boolean),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
@@ -2816,6 +2818,8 @@ export const ThreadSnapshot = Schema.Struct({
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
+    nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
     /** It runs a round of work after its plan. */

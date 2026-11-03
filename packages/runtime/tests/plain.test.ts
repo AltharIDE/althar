@@ -857,7 +857,22 @@ describe('making a quick task a change', () => {
       assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
-      // A change now, Done doesn't settle it: it waits to be accepted.
+      // A change now, but it built nothing: there is nothing to accept, so Done settles it as it is, with no pull request opened or merged.
+      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      const [settled] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
+      assert.strictEqual(settled?.state, 'done')
+      const [links] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM external_links WHERE task_id = ${task.id} AND kind = 'change'`
+      assert.strictEqual(links?.n, 0)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('does not settle a change with commits on its branch as Done: it waits to be accepted', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const place = yield* opened
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
       assert.isFalse(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
       const [still] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
       assert.strictEqual(still?.state, 'open')
