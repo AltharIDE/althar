@@ -46,6 +46,9 @@ const PLACES_KEPT = Duration.minutes(5)
 /** How long a repository's description is kept: what it allows doesn't change by the minute. */
 const REPOSITORY_KEPT = Duration.hours(1)
 
+/** How long a head with no checks at all is read again, for a check that starts late. */
+const EMPTY_FOR = Duration.minutes(30)
+
 /** How many open pull requests a repository's list is read for. A list this long may hold more, so none missing from it is taken as gone. */
 const OPEN_LISTED = 100
 
@@ -92,7 +95,10 @@ export type FollowedNews =
  * head moved since its checks were read, or whose checks still run (every
  * few minutes); 2 for one whose checks failed, at its unchanged head, for a
  * day after: each time the list is read, so a rerun without a push still
- * comes as news. Null for the rest: checks that passed, or that it can't see.
+ * comes as news; and, for half an hour after a head turned out to have no
+ * checks at all, at each list, in case one starts late. Null for the rest:
+ * checks that passed, or that the head has none. `ease` slows the reads of
+ * running checks as the host's allowance falls.
  */
 export const dueRank = (input: {
   readonly row: Pick<Row, 'headSha' | 'checksSha' | 'checksOutcome' | 'failedAt'>
@@ -100,11 +106,23 @@ export const dueRank = (input: {
   readonly now: number
   readonly polledAt: number | undefined
   readonly every: number
+  readonly ease?: number
+  /** When this head's checks were first found to be none, where they were. */
+  readonly emptySince?: number | undefined
 }): 0 | 1 | 2 | null => {
   const { row, now, polledAt } = input
   if (input.awaitedDue !== null) return input.awaitedDue ? 0 : null
+  // Read and found empty, the head is recorded as read: it isn't read again for want of that.
   if (row.headSha !== null && row.checksSha !== row.headSha) return 1
-  if (row.checksOutcome === 'running') return polledAt === undefined || now - polledAt >= Duration.toMillis(RUNNING_EVERY) ? 1 : null
+  if (row.checksOutcome === 'running')
+    return polledAt === undefined || now - polledAt >= Duration.toMillis(RUNNING_EVERY) * (input.ease ?? 1) ? 1 : null
+  if (
+    row.checksOutcome === null &&
+    input.emptySince !== undefined &&
+    now - input.emptySince < Duration.toMillis(EMPTY_FOR) &&
+    (polledAt === undefined || now - polledAt >= input.every)
+  )
+    return 2
   if (
     row.checksOutcome === 'failed' &&
     row.failedAt !== null &&
@@ -136,6 +154,10 @@ export const makeFollowing = (options: {
   /** Where a repository, or a whole connection, is left alone until: a host that asked to wait, or failed. */
   const leftUntil = new Map<string, number>()
   const checkedAt = new Map<string, number>()
+  /** Heads whose checks were read and were none, and since when. */
+  const emptySince = new Map<string, { readonly sha: string; readonly at: number }>()
+  /** Which project's repositories go first in a turn, so a project that spends the fifth doesn't always take it. */
+  let turn = 0
   const newsAt = new Map<string, number>()
   const repositories = new Map<string, { readonly at: number; readonly repository: Repository }>()
   const placesKept = new Map<string, { readonly at: number; readonly places: ReadonlyArray<Place> }>()
@@ -257,8 +279,17 @@ export const makeFollowing = (options: {
       checkedAt.set(row.id, now)
       const sum = checksOf(sha, ran)
       const reading = new Date(now).toISOString()
+      if (sum.outcome !== 'none') emptySince.delete(row.id)
       if (sum.outcome === 'none') {
-        yield* change('followed_pulls', row.id, { checksReadAt: reading }).pipe(Effect.asVoid)
+        if (emptySince.get(row.id)?.sha !== sha) emptySince.set(row.id, { sha, at: now })
+        // The head is read, and there is nothing: what stood for the head before it isn't this one's, and a late start is a first result.
+        yield* change('followed_pulls', row.id, {
+          checksSha: sha,
+          checksOutcome: null,
+          failedAt: null,
+          baseline: 0,
+          checksReadAt: reading,
+        }).pipe(Effect.asVoid)
         return
       }
       if (sum.outcome === 'running') {
@@ -299,6 +330,7 @@ export const makeFollowing = (options: {
     now: number,
     taskUrls: ReadonlySet<string>,
     errandsFor: (row: Row) => ReadonlyArray<string>,
+    room: () => boolean,
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -354,6 +386,8 @@ export const makeFollowing = (options: {
         const present = new Set(listed.map((one) => one.number))
         for (const row of known) {
           if (row.state !== 'open' || present.has(row.number)) continue
+          // Out of room, the rest wait for the next list: they are still open as last seen, and still missing from it.
+          if (!room()) break
           const seen = yield* measured(place, now, place.host.change(repository, row.number))
           if (seen.state === 'open') continue
           yield* update(row, { state: seen.state }, place, { kind: seen.state === 'merged' ? 'merged' : 'closed' }, errandsFor(row))
@@ -365,7 +399,8 @@ export const makeFollowing = (options: {
   const round = (
     projectId: string,
     place: Place,
-    places: ReadonlyArray<Place>,
+    shared: number,
+    left: number,
     waited: ReadonlyArray<{ errandId: string; texts: ReadonlyArray<string> }>,
     taskUrls: ReadonlySet<string>,
     now: number,
@@ -376,17 +411,20 @@ export const makeFollowing = (options: {
       const key = `${place.connectionId}|${where}`
       const allowance = (): Allowance | undefined => place.host.allowance?.()
       const product = place.host.product
-      const room = () => easing(allowance()) !== Infinity && spending.room(place.connectionId, product, allowance(), now) > 0
-      if ((leftUntil.get(place.connectionId) ?? 0) > now || (leftUntil.get(key) ?? 0) > now || !room()) return
+      const overall = () => easing(allowance(), now) !== Infinity && spending.room(place.connectionId, product, allowance(), now) > 0
+      if ((leftUntil.get(place.connectionId) ?? 0) > now || (leftUntil.get(key) ?? 0) > now || !overall()) return
+      // The room left is shared out among the repositories of the connection still to be read this turn, so none takes it all
+      // (one an errand waits on may take what the cap leaves).
+      const startedWith = spending.spentIn(place.connectionId, now)
+      const fair = Math.max(1, Math.ceil(spending.room(place.connectionId, product, allowance(), now) / Math.max(left, 1)))
+      const room = (urgent = false) => overall() && (urgent || spending.spentIn(place.connectionId, now) - startedWith < fair)
       const errandsFor = (row: { url: string; repository: string; number: number }) =>
         waited.filter((one) => one.texts.some((text) => namesPull(text, row))).map((one) => one.errandId)
-      const startedWith = spending.spentIn(place.connectionId, now)
       const repository = yield* repositoryOf(place, now)
-      const shared = places.filter((other) => other.connectionId === place.connectionId).length
-      const every = listEvery({ product, allowance: allowance(), cost: costed.get(key) ?? 1, shared })
+      const every = listEvery({ product, allowance: allowance(), cost: costed.get(key) ?? 1, shared, now })
       if (now - (listedAt.get(key) ?? -Infinity) >= every) {
         listedAt.set(key, now)
-        yield* list(projectId, place, repository, now, taskUrls, errandsFor)
+        yield* list(projectId, place, repository, now, taskUrls, errandsFor, () => room())
       }
       const open = yield* sql<Row>`
         SELECT id, project_id, connection_id, repository, number, url, state, head_sha, from_fork, baseline, checks_sha, checks_outcome,
@@ -407,12 +445,17 @@ export const makeFollowing = (options: {
             now,
             polledAt: polled,
             every,
+            ease: easing(allowance(), now),
+            emptySince: (() => {
+              const empty = emptySince.get(row.id)
+              return empty !== undefined && empty.sha === row.headSha ? empty.at : undefined
+            })(),
           })
           return rank === null ? [] : [{ row, errands, awaited, rank }]
         })
         .sort((a, b) => a.rank - b.rank)
       for (const one of due) {
-        if (!room()) break
+        if (!room(one.rank === 0)) break
         yield* read(one.row, place, repository, one.errands, one.awaited, now)
       }
       costed.set(key, Math.max(1, spending.spentIn(place.connectionId, now) - startedWith))
@@ -430,10 +473,16 @@ export const makeFollowing = (options: {
       ),
     )
 
-  /** One listening turn's share: what is due across every project not archived. */
+  /** One listening turn's share: what is due across every project not archived, the connections' fifths shared among them all. */
   const tick: Effect.Effect<void, unknown, FollowStore> = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const now = yield* Clock.currentTimeMillis
+    const entries: Array<{
+      projectId: string
+      place: Place
+      waited: ReadonlyArray<{ errandId: string; texts: ReadonlyArray<string> }>
+      taskUrls: ReadonlySet<string>
+    }> = []
     for (const project of yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`) {
       const places = yield* placesFor(project.id, now)
       if (places.length === 0) continue
@@ -441,7 +490,26 @@ export const makeFollowing = (options: {
       const tasks = yield* sql<{ url: string }>`
         SELECT url FROM external_links WHERE project_id = ${project.id} AND kind = 'change' AND listening = 1`
       const taskUrls = new Set(tasks.map((one) => one.url.toLowerCase()))
-      for (const place of places) yield* round(project.id, place, places, waited, taskUrls, now)
+      for (const place of places) entries.push({ projectId: project.id, place, waited, taskUrls })
+    }
+    // A connection's fifth is one, whichever projects' repositories it is spent on.
+    const shared = new Map<string, number>()
+    for (const entry of entries) shared.set(entry.place.connectionId, (shared.get(entry.place.connectionId) ?? 0) + 1)
+    const first = entries.length === 0 ? 0 : turn++ % entries.length
+    const ordered = [...entries.slice(first), ...entries.slice(0, first)]
+    const left = new Map(shared)
+    for (const entry of ordered) {
+      const connectionId = entry.place.connectionId
+      yield* round(
+        entry.projectId,
+        entry.place,
+        shared.get(connectionId) ?? 1,
+        left.get(connectionId) ?? 1,
+        entry.waited,
+        entry.taskUrls,
+        now,
+      )
+      left.set(connectionId, (left.get(connectionId) ?? 1) - 1)
     }
     // What isn't open any more is forgotten here.
     if (listedAt.size > 1000) listedAt.clear()

@@ -158,7 +158,7 @@ describe('following every open pull request, for news', () => {
     }).pipe(Effect.provide(quiet(github)))
   })
 
-  it.live('hears a rerun that fails again at the same head, and a pull request opened and merged after Althar looked', () => {
+  it.live('hears a rerun that fails again once it has been seen running, and a pull request opened and merged after Althar looked', () => {
     let state: State = 'passed'
     const github = makeFakeService({ checksFor: () => [{ name: 'build', state }] })
     github.addRepository(['meridian', 'api'])
@@ -214,7 +214,11 @@ describe('following every open pull request, for news', () => {
   })
 
   /** The host as it counts: what it says of its allowance, and what each request cost. */
-  const counting = (github: FakeService, says: () => { limit: number; remaining: number }, cost: (call: string) => number) => {
+  const counting = (
+    github: FakeService,
+    says: () => { limit: number; remaining: number; resetAt?: string },
+    cost: (call: string) => number,
+  ) => {
     const allowance = () => ({ counted: github.calls.reduce((sum, call) => sum + cost(call), 0), ...says() })
     return new Proxy(github, {
       get: (target, key, receiver) => (key === 'allowance' ? allowance : Reflect.get(target, key, receiver)),
@@ -266,9 +270,10 @@ describe('following every open pull request, for news', () => {
     const fake = makeFakeService({ checksFor: () => [{ name: 'build', state: 'failed' }] })
     many(fake, 3)
     let remaining = 5_000
+    let resetAt: string | undefined
     const github = counting(
       fake,
-      () => ({ limit: 5_000, remaining }),
+      () => ({ limit: 5_000, remaining, ...(resetAt === undefined ? {} : { resetAt }) }),
       () => 1,
     )
     return Effect.gen(function* () {
@@ -279,9 +284,18 @@ describe('following every open pull request, for news', () => {
       const following = follower()
       yield* following.tick
       assert.strictEqual(fake.calls.length, setup)
-      // Plenty left again: the list, and the checks of three.
-      remaining = 4_000
+      // Still nothing before the host's reset, though nothing else has touched it meanwhile.
+      resetAt = new Date(Date.now() + 60_000).toISOString()
       yield* following.tick
+      assert.strictEqual(fake.calls.length, setup)
+      // Past the reset, what it said is out of date: the allowance has renewed, and the next request finds out how much.
+      resetAt = new Date(Date.now() - 1_000).toISOString()
+      yield* following.tick
+      assert.isAbove(fake.calls.length, setup)
+      // Plenty left: the list, and the checks of three.
+      resetAt = undefined
+      remaining = 4_000
+      yield* follower().tick
       assert.isAbove(fake.calls.length, setup)
     }).pipe(Effect.provide(quiet(github)))
   })
@@ -302,6 +316,105 @@ describe('following every open pull request, for news', () => {
       yield* following.tick
       assert.isAbove(fake.calls.length - setup, 10)
       assert.strictEqual(following.spending.spentIn(connectionId, Date.now()), 0)
+    }).pipe(Effect.provide(quiet(github)))
+  })
+
+  it.live('reads a head with no checks once, not every turn, and hears the checks that come with a new head', () => {
+    // No checks at all: the fake answers none until `setChecks` gives some (which also moves the head).
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Docs', author: 'stranger', member: false, headSha: HEAD })
+    return Effect.gen(function* () {
+      yield* project(github)
+      const read = () => github.calls.filter((call) => call === 'checks').length
+      const following = follower()
+      for (let i = 0; i < 5; i++) {
+        yield* following.tick
+        yield* pause
+      }
+      assert.strictEqual(read(), 1)
+      assert.deepStrictEqual(yield* heard, [])
+      // A push brings a head with checks: the next list sees the head move, and the checks are read and heard.
+      github.setChecks(1, [{ name: 'build', state: 'passed' }])
+      yield* follower().tick
+      assert.strictEqual(read(), 2)
+      assert.deepStrictEqual(
+        (yield* heard).map((one) => [one['kind'], one['outcome'], one['sha']]),
+        [['checks', 'passed', 'head-1']],
+      )
+    }).pipe(Effect.provide(quiet(github)))
+  })
+
+  it.live('leaves a pull request that has a task to its task: it is not followed twice', () => {
+    const github = makeFakeService({ checksFor: () => [{ name: 'build', state: 'failed' }] })
+    github.addRepository(['meridian', 'api'])
+    const pull = github.addPullRequest({ path: ['meridian', 'api'], title: 'Mine', author: 'dana', member: true, headSha: HEAD })
+    return Effect.gen(function* () {
+      const { projectId, connectionId } = yield* project(github)
+      const sql = yield* SqlClient.SqlClient
+      const created = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Mine' }),
+        projectId: projectId as never,
+        title: 'Mine',
+      })
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'1'.repeat(32)}`,
+        projectId,
+        taskId: created.taskId,
+        connectionId,
+        product: 'github',
+        kind: 'change',
+        externalId: String(pull.number),
+        ref: `meridian/api#${pull.number}`,
+        key: `meridian/api#${pull.number}`,
+        url: pull.url,
+        listening: 1,
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      const following = follower()
+      yield* following.tick
+      yield* pause
+      yield* following.tick
+      assert.deepStrictEqual(yield* sql`SELECT id FROM followed_pulls`, [])
+      assert.notInclude(github.calls, 'checks')
+    }).pipe(Effect.provide(quiet(github)))
+  })
+
+  it.live('shares a connection’s fifth among its projects, so the first cannot take it all', () => {
+    const fake = makeFakeService({ checksFor: () => [{ name: 'build', state: 'failed' }] })
+    many(fake, 30)
+    fake.addRepository(['meridian', 'web'])
+    for (let i = 1; i <= 3; i++)
+      fake.addPullRequest({
+        path: ['meridian', 'web'],
+        title: `Web ${i}`,
+        author: 'stranger',
+        member: false,
+        headSha: (100 + i).toString(16).padStart(40, '0'),
+      })
+    // 50 an hour is 10 for following, for both projects together.
+    const github = counting(
+      fake,
+      () => ({ limit: 50, remaining: 50 }),
+      () => 1,
+    )
+    return Effect.gen(function* () {
+      yield* project(github)
+      const second = yield* (yield* Projects).open({
+        envelope: yield* Runtime.envelope('project.open', {}),
+        path: hosted(['meridian', 'web']).working,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const setup = fake.calls.length
+      const following = follower()
+      yield* following.tick
+      const [read] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM followed_pulls WHERE project_id = ${second.projectId} AND checks_outcome IS NOT NULL`
+      // The second project's three were read, though the first has thirty waiting for the same ten requests.
+      assert.strictEqual(read?.n, 3)
+      assert.isAtMost(fake.calls.length - setup, 10)
     }).pipe(Effect.provide(quiet(github)))
   })
 })

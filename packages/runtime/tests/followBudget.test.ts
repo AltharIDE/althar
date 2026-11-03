@@ -33,20 +33,27 @@ describe('what following may ask of a host', () => {
   })
 
   it('backs off as the allowance falls, and stops in the last of it', () => {
-    const left = (remaining: number) => easing({ counted: 0, limit: 5_000, remaining })
+    const left = (remaining: number) => easing({ counted: 0, limit: 5_000, remaining }, 0)
     assert.deepStrictEqual([5_000, 2_500, 2_499, 1_500, 750, 250, 249, 100].map(left), [1, 1, 2, 2, 4, 8, Infinity, Infinity])
     // Nothing to back off from without headers.
-    assert.strictEqual(easing(undefined), 1)
-    assert.strictEqual(easing({ counted: 40 }), 1)
+    assert.strictEqual(easing(undefined, 0), 1)
+    assert.strictEqual(easing({ counted: 40 }, 0), 1)
+  })
+
+  it('takes what the host said before its reset as out of date after it', () => {
+    const spent = { counted: 0, limit: 5_000, remaining: 100, resetAt: new Date(HOUR).toISOString() }
+    assert.strictEqual(easing(spent, HOUR - 1), Infinity)
+    assert.strictEqual(easing(spent, HOUR), 1)
+    assert.strictEqual(listEvery({ product: 'github', allowance: spent, cost: 3, shared: 1, now: HOUR + 1 }), LIST_EVERY)
   })
 
   it('reads the open list every five minutes, and slower when the pace would not fit the cap', () => {
-    const base = { product: 'github' as const, allowance: undefined, shared: 1 }
+    const base = { product: 'github' as const, allowance: undefined, shared: 1, now: 0 }
     assert.strictEqual(listEvery({ ...base, cost: 3 }), LIST_EVERY)
     // 30 checks reads and a list in one round of a repository, 1,000 an hour: 31 requests fit 32 times an hour, not 12.
     assert.strictEqual(listEvery({ ...base, cost: 31 }), LIST_EVERY)
     // Bitbucket Cloud: 200 an hour for following; 30 pull requests are 31 requests a round, so a round every 9.3 minutes.
-    const bitbucket = listEvery({ product: 'bitbucket_cloud', allowance: undefined, cost: 31, shared: 1 })
+    const bitbucket = listEvery({ product: 'bitbucket_cloud', allowance: undefined, cost: 31, shared: 1, now: 0 })
     assert.isAbove(bitbucket, LIST_EVERY)
     assert.closeTo(bitbucket, (HOUR * 31) / 200, 1)
     // Several repositories share a connection's cap.
@@ -81,6 +88,22 @@ describe('which followed pull requests are read', () => {
     assert.isNull(at({ row: failed, now: 32 * HOUR, polledAt: 32 * HOUR - 60_000 }))
     // Failed 25 hours ago: left until the person next asks.
     assert.isNull(at({ row: { ...failed, failedAt: new Date(0).toISOString() }, now: 25 * HOUR, polledAt: 25 * HOUR - 6 * 60_000 }))
+  })
+
+  it('reads one whose head has no checks again for half an hour only, for a check that starts late', () => {
+    const none = { ...row, checksOutcome: null }
+    const since = 10 * HOUR - 10 * 60_000
+    assert.strictEqual(at({ row: none, emptySince: since }), 2)
+    // Read a minute ago, or found empty over half an hour ago, or at a restart that remembers nothing: not read.
+    assert.isNull(at({ row: none, emptySince: since, polledAt: 10 * HOUR - 60_000 }))
+    assert.isNull(at({ row: none, emptySince: 10 * HOUR - 31 * 60_000 }))
+    assert.isNull(at({ row: none }))
+  })
+
+  it('reads running checks less often as the host’s allowance falls', () => {
+    const running = { ...row, checksOutcome: 'running' as const }
+    assert.strictEqual(at({ row: running, polledAt: 10 * HOUR - 3 * 60_000 }), 1)
+    assert.isNull(at({ row: running, polledAt: 10 * HOUR - 3 * 60_000, ease: 4 }))
   })
 
   it('reads one an errand waits on as a task’s own, ahead of the rest', () => {

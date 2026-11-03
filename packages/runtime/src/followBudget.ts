@@ -31,7 +31,7 @@ const FALLBACK = 1_000
 export const allowedAnHour = (product: Product, allowance: Allowance | undefined): number => {
   const limit = allowance?.limit
   if (limit === undefined || limit <= 0) return ALLOWED[product] ?? FALLBACK
-  // GitLab counts by the minute.
+  // GitLab's header is a per-minute figure, scaled to a minute whatever period its administrator set.
   return product === 'gitlab' ? limit * 60 : limit
 }
 
@@ -42,10 +42,13 @@ export const capOf = (product: Product, allowance: Allowance | undefined): numbe
  * How many times slower following goes as the host's allowance falls, by
  * the share it says is left: 1 while half is, then 2, 4 and 8, and none at
  * all (`Infinity`) in the last 5%, until it renews. Without headers there is
- * nothing to back off from, and the cap alone holds.
+ * nothing to back off from, and the cap alone holds. What was said before
+ * the host's reset is stale after it: the allowance has renewed, and the next
+ * request finds out how much is left.
  */
-export const easing = (allowance: Allowance | undefined): number => {
+export const easing = (allowance: Allowance | undefined, now: number): number => {
   if (allowance?.limit === undefined || allowance.remaining === undefined || allowance.limit <= 0) return 1
+  if (allowance.resetAt !== undefined && Date.parse(allowance.resetAt) <= now) return 1
   const left = allowance.remaining / allowance.limit
   return left >= 0.5 ? 1 : left >= 0.3 ? 2 : left >= 0.15 ? 4 : left >= 0.05 ? 8 : Infinity
 }
@@ -85,18 +88,19 @@ export const LIST_EVERY = 5 * 60_000
  * grown to fit the cap when reading it and the checks it leads to cost more
  * than the cap lets in an hour at that pace, and by how much the host's
  * allowance has fallen. `cost` is what the last round of reading the
- * repository took, `shared` how many repositories share the connection's cap.
+ * repository took, `shared` how many repositories, in every project, share the connection's cap.
  */
 export const listEvery = (input: {
   readonly product: Product
   readonly allowance: Allowance | undefined
   readonly cost: number
   readonly shared: number
+  readonly now: number
 }): number => {
   const cap = Math.max(capOf(input.product, input.allowance), 1)
   // A round at this pace uses `cost` of the cap's share for this repository; the pace is slow enough that all of them fit.
   const fitted = (HOUR * Math.max(input.cost, 1) * Math.max(input.shared, 1)) / cap
-  return Math.max(LIST_EVERY, fitted) * easing(input.allowance)
+  return Math.max(LIST_EVERY, fitted) * easing(input.allowance, input.now)
 }
 
 /** How long a failed run's checks are read again at its unchanged head: a day. */
