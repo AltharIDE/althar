@@ -232,6 +232,35 @@ describe('the coordinator’s merge line', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  it.live(
+    'someone else writing to the branch while it holds the slot: brought up to date again three times, then it waits for the person',
+    () => {
+      const { service, pull } = host()
+      const { working } = hosted(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const access = yield* opened(working)
+        const number = pull('Retry refunds')
+        service.writeTo('main')
+        const message = yield* turn(access, 'person')
+        assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /behind main at other-1/)
+        for (let round = 1; round <= 4; round++) {
+          yield* sweep(access)
+          assert.strictEqual(service.updated.length, round)
+          service.writeTo('main')
+        }
+        yield* sweep(access)
+        assert.strictEqual(service.updated.length, 4)
+        assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'paused')
+        assert.isTrue(
+          (yield* lines(access)).some((title) =>
+            /brought up to date 4 times, and main moved on each time: someone else keeps writing/.test(title),
+          ),
+        )
+        assert.deepStrictEqual(service.merged, [])
+      }).pipe(Effect.provide(layer(service)))
+    },
+  )
+
   it.live('a restart keeps the line', () => {
     const { service, checks, pull } = host()
     const { working } = hosted(['meridian', 'api'])

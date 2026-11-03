@@ -484,6 +484,32 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('merges in the way asked, reads a branch’s head and whether a pull request has it; no auto-merge, and no queue from here', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull({ draft: false }) }],
+        ['GET', `${ACE}/refs/branches/master`, { json: { ...master, target: { hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' } } }],
+        ['POST', `${PR}/merge`, { json: pull({ state: 'MERGED' }) }],
+        [
+          'GET',
+          `${ACE}/merge-base/7f9d4e6279c8..1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b`,
+          { json: { hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' } },
+        ],
+        ['GET', `${ACE}/merge-base/7f9d4e6279c8..newer`, { json: { hash: '0000aaaa' } }],
+      ])
+      const seen = yield* host.change(ace, 552)
+      yield* host.merge(ace, { ...seen, headSha: null }, { method: 'squash' })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { merge_strategy: 'squash' })
+      assert.strictEqual(yield* host.branchHead(ace, 'master'), '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b')
+      assert.isTrue(yield* host.contains(ace, seen, '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'))
+      assert.isFalse(yield* host.contains(ace, seen, 'newer'))
+      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: null, autoMerge: false, server: null })
+      assert.strictEqual((yield* Effect.flip(host.merge(ace, seen, { auto: true }))).reason, 'rejected')
+      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /only on its site/)
+      assert.match((yield* Effect.flip(host.leaveQueue(ace, seen))).message, /only on its site/)
+    }),
+  )
+
   it.effect('won’t merge a head it hasn’t seen, and says why Bitbucket won’t', () =>
     Effect.gen(function* () {
       const moved = cloud([['GET', PR, { json: pull({ source: { branch: { name: 'x' }, commit: { hash: '0123456789ab' } } }) }]])
@@ -1351,6 +1377,82 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
     }),
   )
+
+  it.effect('turns auto-merge on from 8.15, in the way asked, reads it back, and turns it off', () =>
+    Effect.gen(function* () {
+      let on = false
+      const { host, sent } = center([
+        whoami('jcitizen'),
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/settings/pull-requests`, settings({ id: 'no-ff', enabled: true })],
+        [
+          'POST',
+          `${PULL}/auto-merge`,
+          () => {
+            on = true
+            return { json: { autoMergeEnabled: true } }
+          },
+        ],
+        ['GET', `${PULL}/auto-merge`, () => (on ? { json: { autoMergeEnabled: true } } : { status: 404, json: { errors: [] } })],
+        [
+          'DELETE',
+          `${PULL}/auto-merge`,
+          () => {
+            on = false
+            return { status: 204 }
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.mergeWays(prj, 'master'), {
+        queue: null,
+        autoMerge: true,
+        server: 'Bitbucket Data Center 9.4.2',
+      })
+      const seen = yield* host.change(prj, 101)
+      assert.isFalse((yield* host.change(prj, 101, { queue: true })).autoMerge ?? true)
+      assert.deepInclude(yield* host.merge(prj, seen, { auto: true, method: 'squash' }), { state: 'open', autoMerge: true })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'POST')?.body, { strategyId: 'squash' })
+      assert.isTrue((yield* host.change(prj, 101, { queue: true })).autoMerge)
+      assert.isFalse((yield* host.leaveQueue(prj, seen)).autoMerge)
+      assert.isTrue(sent.some((request) => request.method === 'DELETE'))
+      // An older server has none: said so, and nothing is asked of it.
+      const older = center([
+        ['GET', `${DC}/application-properties`, { json: { version: '8.9.4', buildNumber: '8009004', displayName: 'Bitbucket' } }],
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/settings/pull-requests`, settings()],
+      ])
+      assert.isFalse((yield* older.host.mergeWays(prj, 'master')).autoMerge)
+      assert.strictEqual((yield* Effect.flip(older.host.merge(prj, seen, { auto: true }))).reason, 'rejected')
+      assert.isFalse(older.sent.some((request) => request.url.endsWith('/auto-merge')))
+    }),
+  )
+
+  it.effect('reads a branch’s head, and whether a pull request has a commit, by the commits between', () =>
+    Effect.gen(function* () {
+      const { host } = center([
+        [
+          'GET',
+          `${MY}/branches?filterText=release%2F1.0&limit=100`,
+          { json: page([ref('release/1.0-rc', 'cafe'), ref('release/1.0', 'beef')]) },
+        ],
+        ['GET', PULL, { json: pr({ draft: false }) }],
+        ['GET', `${MY}/commits?since=babecafebabecafebabecafebabecafebabecafe&until=beef&limit=1`, { json: page([]) }],
+        ['GET', `${MY}/commits?since=babecafebabecafebabecafebabecafebabecafe&until=newer&limit=1`, { json: page([{ id: 'newer' }]) }],
+      ])
+      assert.strictEqual(yield* host.branchHead(prj, 'release/1.0'), 'beef')
+      const seen = yield* host.change(prj, 101)
+      assert.isTrue(yield* host.contains(prj, seen, 'beef'))
+      assert.isFalse(yield* host.contains(prj, seen, 'newer'))
+      assert.strictEqual((yield* Effect.flip(host.branchHead(prj, 'gone'))).reason, 'not_found')
+    }),
+  )
+
+  it('compares versions part by part', () => {
+    assert.isTrue(dc.atLeast('8.15.0', [8, 15]))
+    assert.isTrue(dc.atLeast('9.0', [8, 15]))
+    assert.isFalse(dc.atLeast('8.9.12', [8, 15]))
+    assert.isFalse(dc.atLeast('eight', [8, 15]))
+  })
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {
