@@ -18,6 +18,7 @@ import {
   modKey,
   DictationTray,
   Issue,
+  IssuePart,
   LinkButton,
   type ModelInfo,
   TaskFace,
@@ -1067,6 +1068,14 @@ export function TaskView({
                       : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
                     {...(issue.container === null ? {} : { meta: issue.container })}
                   />
+                  {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
+                  {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
+                    <IssuePart
+                      id={issue.key}
+                      partOf={snapshot.task.issuePartOf === true}
+                      onChange={(partOf) => void model.setIssuePart(partOf)}
+                    />
+                  )}
                 </div>
               )}
               {snapshot.earlier && (
@@ -1109,6 +1118,7 @@ export function TaskView({
                         onFile: (draftId) => void model.fileIssueDraft(draftId),
                         onChange: model.changeIssueDraft,
                         onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                        onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
                       }}
                     />
                   )}
@@ -1119,6 +1129,7 @@ export function TaskView({
                       actions={{
                         onApply: (changesId) => void model.applyIssueChanges(changesId),
                         onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                        onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
                       }}
                     />
                   )}

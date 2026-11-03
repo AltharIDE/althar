@@ -51,10 +51,12 @@ describe('a diff’s two sides', () => {
 describe('a diff in its file’s colours', () => {
   it('colours a line inside a comment that opened before the change as comment, removed and added alike', async () => {
     render(<Diff lines={COMMENT_DIFF} path="src/charges/limit.ts" />)
+    // Each line is coloured as the highlighter reaches it, so each waits for its own colour rather than reading all of
+    // them the moment the first one has it.
     await waitFor(() => expect(screen.getByText(/Twenty a day/)).toHaveStyle({ color: comment }))
-    expect(screen.getByText(/A partner's own limit/)).toHaveStyle({ color: comment })
+    await waitFor(() => expect(screen.getByText(/A partner's own limit/)).toHaveStyle({ color: comment }))
     // and the lines of a template string as string, though the change cuts it
-    expect(screen.getByText(/refunds every/)).toHaveStyle({ color: string })
+    await waitFor(() => expect(screen.getByText(/refunds every/)).toHaveStyle({ color: string }))
   })
 
   it('marks the changed words over their colours, a mark holding whole pieces of tokens', async () => {
