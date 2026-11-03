@@ -41,11 +41,15 @@ export const WithPriority: Story = {
 
 /** With every field its tracker has that it is filed with: its project, milestone, assignee and due date, beside its priority and labels. */
 export const WithItsFields: Story = {
-  args: { priority: 'High', details: ['Project: 0.7.0', 'Milestone: Beta', 'Assignee: Sam Rivera', 'Due: 30 Nov'] },
+  args: {
+    priority: 'High',
+    details: ['Project: 0.7.0', 'Milestone: Beta', 'Assignee: Sam Rivera', 'Due: 2026-11-30'],
+    onAlwaysAtOnce: fn(),
+  },
   play: async ({ canvasElement }) => {
     await expect(
       within(canvasElement).getByText(
-        'Priority: High · Project: 0.7.0 · Milestone: Beta · Assignee: Sam Rivera · Due: 30 Nov · Labels: refunds, webhooks, bug',
+        'Priority: High · Project: 0.7.0 · Milestone: Beta · Assignee: Sam Rivera · Due: 2026-11-30 · Labels: refunds, webhooks, bug',
       ),
     ).toBeInTheDocument()
   },

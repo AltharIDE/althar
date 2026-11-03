@@ -40,6 +40,7 @@ export const Pending: Story = {
 /** Every field a tracker has: a milestone, a parent, people added and taken off, a due date and a new description. */
 export const EveryField: Story = {
   args: {
+    onAlwaysAtOnce: fn(),
     issues: [
       {
         mark: Brand.Linear,
