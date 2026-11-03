@@ -311,8 +311,13 @@ describe('coordinator permission judgments', () => {
     Effect.gen(function* () {
       const { context, sql } = yield* setup
       assert.strictEqual((yield* judgedAlone(context, request())).decision, 'allow')
-      const [process] = yield* sql<{ state: string; pid: number; processGroupId: number }>`
-      SELECT state, pid, process_group_id FROM processes WHERE purpose = 'agent' AND provider_session_id IS NULL`
+      // The judge's process is closed as the judgment is answered, and Windows takes a moment to have it gone: wait for
+      // the state it ends in rather than read it the instant the decision is back.
+      const [process] = yield* until(
+        sql<{ state: string; pid: number; processGroupId: number }>`
+          SELECT state, pid, process_group_id FROM processes WHERE purpose = 'agent' AND provider_session_id IS NULL`,
+        (rows) => rows[0]?.state === 'exited',
+      )
       assert.strictEqual(process?.state, 'exited')
       assert.isAbove(process?.pid ?? 0, 0)
       assert.strictEqual(process?.pid, process?.processGroupId)

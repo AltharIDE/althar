@@ -1,4 +1,17 @@
-import { type Container, ConnectorFailed, type Issue, type Priority, type Product, products, type Tracker } from '@althar/connectors'
+import {
+  type ChosenField,
+  type Container,
+  ConnectorFailed,
+  type Issue,
+  type IssueChange,
+  jiraLabelOf,
+  type Priority,
+  type Product,
+  products,
+  splitForCreate,
+  type Tracker,
+} from '@althar/connectors'
+import type { IssueChangeLine } from '@althar/contracts'
 import { type ActorId, Ids, type IssueDraftState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -8,6 +21,8 @@ import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { linesOf } from './issueChangeWords'
+import { anything, readFields, type Wanted } from './issueFields'
 import { projectRepository } from './Issues'
 import { projectTracker } from './projectTracker'
 import { change, fact, timestamp } from './records'
@@ -19,8 +34,14 @@ import { ToolRefused } from './ToolServer'
  * Issues the coordinator, or a task's lead, drafts on the person's connected
  * trackers (docs/architecture/06, "Drafting issues"). A draft is a card in
  * the thread of whoever drafted it: the tracker, where it goes there, its
- * title, body and labels. Nothing reaches the tracker until the person files
- * it from the card, which they may change first; or they discard it. There is
+ * title, body and labels, and what else it is filed with (its project,
+ * milestone, assignee and every other field its tracker has, read against
+ * it as it is drafted, DEV-182). Nothing reaches the tracker until the
+ * person files it from the card, which they may change first; or they
+ * discard it; or its agent files it at once, where the person's note says
+ * to or they just asked (`direct`), and the card is its receipt. What the
+ * tracker can't take as it files an issue is set right after; what it left
+ * off, a label it hasn't or a field it refused, the card says. There is
  * no countdown: leaving a draft alone files nothing. A draft that couldn't be
  * filed says why, and can be filed again. A lead is told what became of its
  * draft once the person files or discards it; the coordinator hears it as
@@ -54,7 +75,16 @@ export interface DraftCard {
   readonly error: string | null
   /** The issue once filed: its key, as the tracker shows it, and its link. */
   readonly issue: { readonly key: string; readonly url: string } | null
+  /** What else it is filed with, in the tracker's words. */
+  readonly fields: ReadonlyArray<IssueChangeLine>
+  /** Filed at once by its agent, as the person prefers, rather than from its card. */
+  readonly direct: boolean
+  /** What its tracker left off once filed, a line each. */
+  readonly leftOff: ReadonlyArray<string>
 }
+
+/** A draft as its tool hears of it: its card, and what of what was asked was left off as it was drafted, and why. */
+export type Drafted = DraftCard & { readonly left: ReadonlyArray<string> }
 
 /**
  * Where a draft should go isn't clear from what was asked: no tracker is
@@ -90,14 +120,6 @@ export class DraftUntitled extends Schema.TaggedError<DraftUntitled>()('DraftUnt
 
 /** How long a list of choices may be, said to the coordinator. */
 const CHOICES = 20
-
-/**
- * Whether a lead's draft waits for the person to file it from its card. For
- * now every lead's does; where the person lets leads file on their own, this is
- * the one place that changes (`draft_issue` in Coordinator.ts files the draft
- * itself when it is false).
- */
-export const leadsNeedTheCard: boolean = true
 
 /**
  * Why a draft can't be made, as the tool's refusal, in words its agent can act
@@ -158,9 +180,17 @@ interface Row {
   readonly error: string | null
   readonly issueKey: string | null
   readonly issueUrl: string | null
+  /** What else it is filed with, by the tracker's own ids: an `IssueChange`, as JSON. */
+  readonly fields: string
+  readonly direct: number
+  readonly leftOff: string
 }
 
 const Labels = Schema.fromJsonString(Schema.Array(Schema.String))
+
+/** Whether a tracker files an issue with one assignee or several, for how a draft's people read. */
+const assigneesOf = (product: Product): 'one' | 'many' =>
+  product === 'linear' || product === 'jira_cloud' || product === 'jira_dc' ? 'one' : 'many'
 
 /** A draft's card, from its row. */
 export const cardOf = (row: Row): DraftCard => ({
@@ -175,6 +205,9 @@ export const cardOf = (row: Row): DraftCard => ({
   state: row.state,
   error: row.error,
   issue: row.issueKey === null || row.issueUrl === null ? null : { key: row.issueKey, url: row.issueUrl },
+  fields: linesOf({ change: JSON.parse(row.fields) as IssueChange, assignees: assigneesOf(row.product) }),
+  direct: row.direct === 1,
+  leftOff: Schema.decodeUnknownSync(Labels)(row.leftOff),
 })
 
 /** Labels as a person means them: trimmed, without blanks, each once. */
@@ -188,6 +221,12 @@ const listed = (choices: ReadonlyArray<string>) =>
   choices.length > CHOICES ? [...choices.slice(0, CHOICES), `and ${choices.length - CHOICES} more`] : choices
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** The labels a filed issue hasn't of those asked for, each as its tracker keeps it: Jira's with a hyphen for each space (“needs test”, needs-test). */
+export const labelsLeftOff = (product: Product, asked: ReadonlyArray<string>, stored: ReadonlyArray<string>) => {
+  const kept = (label: string) => (product === 'jira_cloud' || product === 'jira_dc' ? jiraLabelOf(label) : label)
+  return asked.filter((label) => !stored.some((had) => same(had, kept(label))))
+}
 
 /** A container by what was typed for it: its id, its key or its name, in any case. */
 const containerNamed = (containers: ReadonlyArray<Container>, typed: string) =>
@@ -258,10 +297,14 @@ export class IssueDrafts extends Context.Service<
       readonly labels: ReadonlyArray<string>
       /** Its priority; left out, or on a tracker without priorities, it has none, and is filed at the tracker's default. */
       readonly priority?: Priority
+      /** What else it is filed with, by the tracker's names: read against it now, what it can't take left off and said. */
+      readonly fields?: Wanted
+      /** Filed at once rather than waiting on the person's card: as their note says, or they just asked. */
+      readonly direct?: boolean
       /** The task whose lead drafts it: where its own issue came from is where an unnamed draft goes. */
       readonly taskId?: string
       readonly actorId: ActorId
-    }): Effect.Effect<DraftCard, unknown>
+    }): Effect.Effect<Drafted, unknown>
     /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. A priority left out stays; null takes it off. */
     change(
       draftId: string,
@@ -293,7 +336,7 @@ export class IssueDrafts extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
             SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, priority,
-              state, error, issue_key, issue_url
+              state, error, issue_key, issue_url, fields, direct, left_off
             FROM issue_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'issue draft', id: draftId }) : row
         })
@@ -521,6 +564,51 @@ export class IssueDrafts extends Context.Service<
             : { ...chosen, container: found }
         })
 
+      /**
+       * What else a draft is filed with, read against where it goes: its
+       * fields by the tracker's own ids, and what was left off and why. A
+       * label is left off here where the tracker makes none it hasn't (Linear,
+       * Trello), rather than dropped without a word as it files.
+       */
+      const fieldsFor = (
+        where: { readonly tracker: Tracker; readonly product: Product; readonly label: string; readonly container: Container },
+        input: {
+          readonly fields?: Wanted
+          readonly labels: ReadonlyArray<string>
+        },
+      ) =>
+        Effect.gen(function* () {
+          const at = {
+            tracker: where.tracker,
+            product: where.product,
+            name: products[where.product].name,
+            ...(where.product === 'github' || where.product === 'gitlab' ? { repository: where.container.id } : {}),
+            choices: (field: ChosenField, typed?: string) => where.tracker.choicesIn(where.container.id, field, typed),
+          }
+          const read = input.fields === undefined ? { change: {}, left: [], already: [] } : yield* readFields(at, input.fields)
+          const labels = labelsOf(input.labels)
+          if (labels.length === 0 || !(where.product === 'linear' || where.product === 'trello')) return { ...read, labels }
+          const known = yield* Effect.orElseSucceed(at.choices('labels'), () => undefined)
+          if (known === undefined) return { ...read, labels }
+          const has = (label: string) => known.some((choice) => same(choice.name, label))
+          const missing = labels.filter((label) => !has(label))
+          return {
+            ...read,
+            labels: labels.filter(has),
+            left: [
+              ...read.left,
+              ...(missing.length === 0
+                ? []
+                : [
+                    `${missing.map((label) => `“${label}”`).join(', ')}: ${at.name} makes no label it hasn’t. It has: ${known
+                      .slice(0, CHOICES)
+                      .map((choice) => choice.name)
+                      .join(', ')}`,
+                  ]),
+            ],
+          }
+        })
+
       const draft: IssueDrafts['Service']['draft'] = (input) =>
         provide(
           Effect.gen(function* () {
@@ -541,48 +629,78 @@ export class IssueDrafts extends Context.Service<
               SELECT id FROM issue_drafts
               WHERE thread_id = ${input.threadId} AND state = 'pending' AND lower(title) = ${title.toLowerCase()}
                 AND connection_id = ${where.connectionId} AND container = ${where.container.id}`
-            if (waiting !== undefined) return cardOf(yield* load(waiting.id))
-            const draftId = yield* newId(Ids.issueDraft)
-            const labels = labelsOf(input.labels)
+            if (waiting !== undefined && input.direct !== true) return { ...cardOf(yield* load(waiting.id)), left: [] }
+            const read = yield* fieldsFor(where, input)
+            const draftId = waiting?.id ?? (yield* newId(Ids.issueDraft))
+            const labels = read.labels
             // A tracker without priorities files it at its own default: none is kept to show.
             const priority =
               input.priority === undefined || input.priority === 'none' || !where.tracker.capabilities.changes.includes('priority')
                 ? null
                 : input.priority
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                const at = yield* timestamp
-                yield* sql`INSERT INTO issue_drafts ${sql.insert({
-                  id: draftId,
-                  projectId: input.projectId,
-                  threadId: input.threadId,
-                  connectionId: where.connectionId,
-                  product: where.product,
-                  trackerName: where.label,
-                  container: where.container.id,
-                  containerName: where.container.name,
-                  title,
+            // Asked to file at once, one waiting for the person is filed as this call drafts it: its body, labels and fields.
+            if (waiting === undefined)
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const at = yield* timestamp
+                  yield* sql`INSERT INTO issue_drafts ${sql.insert({
+                    id: draftId,
+                    projectId: input.projectId,
+                    threadId: input.threadId,
+                    connectionId: where.connectionId,
+                    product: where.product,
+                    trackerName: where.label,
+                    container: where.container.id,
+                    containerName: where.container.name,
+                    title,
+                    body: input.body.trim(),
+                    labels: JSON.stringify(labels),
+                    priority,
+                    fields: JSON.stringify(read.change),
+                    direct: input.direct === true ? 1 : 0,
+                    state: 'pending',
+                    draftedByActorId: input.actorId,
+                    createdAt: at,
+                    updatedAt: at,
+                  })}`
+                  yield* fact({
+                    projectId: input.projectId,
+                    aggregateType: 'issue_draft',
+                    aggregateId: draftId,
+                    revision: 1,
+                    type: 'issue_draft.drafted',
+                    payload: {
+                      product: where.product,
+                      tracker: where.label,
+                      container: where.container.name,
+                      title,
+                      labels,
+                      priority,
+                      ...(anything(read.change) ? { fields: Object.keys(read.change) } : {}),
+                      ...(input.direct === true ? { direct: true } : {}),
+                    },
+                    actorId: input.actorId,
+                  })
+                  yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'issue_draft', cardOf(yield* load(draftId)))
+                }),
+              )
+            else
+              yield* transition(
+                draftId,
+                (row) => row.state === 'pending',
+                () => ({
                   body: input.body.trim(),
+                  fields: JSON.stringify(read.change),
                   labels: JSON.stringify(labels),
                   priority,
-                  state: 'pending',
-                  draftedByActorId: input.actorId,
-                  createdAt: at,
-                  updatedAt: at,
-                })}`
-                yield* fact({
-                  projectId: input.projectId,
-                  aggregateType: 'issue_draft',
-                  aggregateId: draftId,
-                  revision: 1,
-                  type: 'issue_draft.drafted',
-                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels, priority },
-                  actorId: input.actorId,
-                })
-                yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'issue_draft', cardOf(yield* load(draftId)))
-              }),
-            )
-            return cardOf(yield* load(draftId))
+                  direct: 1,
+                }),
+                'issue_draft.changed',
+                input.actorId,
+                (row) => ({ title: row.title }),
+              )
+            const card = input.direct === true ? yield* file(draftId, input.actorId) : cardOf(yield* load(draftId))
+            return { ...card, left: read.left }
           }),
         )
 
@@ -667,6 +785,47 @@ export class IssueDrafts extends Context.Service<
           })
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a lead what became of its issue draft', cause)))
 
+      /**
+       * Files a draft on its tracker: with what `create` takes as it files,
+       * then the rest set by `update` right after, as a Jira status by its
+       * workflow. Once the tracker has taken it, it is filed: what it then
+       * left off, a field it refused or a label it hasn't, is said, never a
+       * reason to file it again.
+       */
+      const fileOn = (tracker: Tracker, row: Row) =>
+        Effect.gen(function* () {
+          const fields = JSON.parse(row.fields) as IssueChange
+          const { onCreate, after } = splitForCreate(tracker.capabilities, fields)
+          const labels = Schema.decodeUnknownSync(Labels)(row.labels)
+          const filed = yield* tracker.create(row.container, {
+            title: row.title,
+            body: row.body,
+            labels,
+            ...(row.priority === null ? {} : { priority: row.priority }),
+            ...(anything(onCreate) ? { fields: onCreate } : {}),
+          })
+          const set = anything(after) ? yield* Effect.result(tracker.update(filed, after)) : undefined
+          const now = set?._tag === 'Success' ? set.success : filed
+          const name = products[row.product].name
+          const missing = labelsLeftOff(row.product, labels, now.labels)
+          const leftOff = [
+            ...(missing.length === 0
+              ? []
+              : [
+                  `${missing.length === 1 ? 'Label' : 'Labels'} ${missing.map((label) => `“${label}”`).join(', ')}: ${name} left ${missing.length === 1 ? 'it' : 'them'} off.`,
+                ]),
+            ...(set?._tag === 'Failure'
+              ? [
+                  `${linesOf({ change: after, assignees: tracker.capabilities.assignees })
+                    .map((line) => line.field)
+                    .join(', ')} not set: ${set.failure.message === '' ? `${name} refused it` : set.failure.message}`,
+                ]
+              : []),
+          ]
+          if (set?._tag === 'Failure') yield* Effect.logWarning('A filed issue’s other fields could not be set', set.failure)
+          return { issue: now, leftOff }
+        })
+
       const file: IssueDrafts['Service']['file'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
@@ -675,18 +834,13 @@ export class IssueDrafts extends Context.Service<
             const row = marked.row
             const tracker = row.trackerName
             const made = yield* connections.adapters(row.connectionId).pipe(
-              Effect.flatMap((adapters): Effect.Effect<Issue, unknown> =>
+              Effect.flatMap((adapters): Effect.Effect<{ readonly issue: Issue; readonly leftOff: ReadonlyArray<string> }, unknown> =>
                 adapters.tracker === undefined
                   ? Effect.fail(new NotFound({ kind: 'connection', id: row.connectionId }))
                   : // Wanting its sign-in again, the tracker isn't asked: it would refuse.
                     adapters.info.state !== 'ready'
                     ? Effect.fail(new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: '' }))
-                    : adapters.tracker.create(row.container, {
-                        title: row.title,
-                        body: row.body,
-                        labels: Schema.decodeUnknownSync(Labels)(row.labels),
-                        ...(row.priority === null ? {} : { priority: row.priority }),
-                      }),
+                    : fileOn(adapters.tracker, row),
               ),
               Effect.result,
             )
@@ -697,9 +851,10 @@ export class IssueDrafts extends Context.Service<
                 made._tag === 'Success'
                   ? {
                       state: 'filed',
-                      issueRef: made.success.ref,
-                      issueKey: made.success.key,
-                      issueUrl: made.success.url,
+                      issueRef: made.success.issue.ref,
+                      issueKey: made.success.issue.key,
+                      issueUrl: made.success.issue.url,
+                      leftOff: JSON.stringify(made.success.leftOff),
                       decidedAt: at,
                     }
                   : { state: uncertain(made.failure) ? 'uncertain' : 'failed', error: failureWords(made.failure, tracker) },
@@ -708,10 +863,12 @@ export class IssueDrafts extends Context.Service<
               (now) => (now.state === 'filed' ? { key: now.issueKey, url: now.issueUrl } : { error: now.error }),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('An issue draft could not be filed', made.failure)
-            if (ended.changed && ended.row.state === 'filed') {
+            // Filed at once by its lead, it heard so from its tool already; filed by the person, it hears it here.
+            if (ended.changed && ended.row.state === 'filed' && (ended.row.direct === 0 || actorId === instance.personId)) {
+              const leftOff = Schema.decodeUnknownSync(Labels)(ended.row.leftOff)
               yield* tellLead(
                 ended.row,
-                `The person filed your issue “${ended.row.title}” on ${tracker}, in ${ended.row.containerName}, as ${ended.row.issueKey ?? ''}: ${ended.row.issueUrl ?? ''}. Refer to it by that key and link.`,
+                `The person filed your issue “${ended.row.title}” on ${tracker}, in ${ended.row.containerName}, as ${ended.row.issueKey ?? ''}: ${ended.row.issueUrl ?? ''}. Refer to it by that key and link.${leftOff.length === 0 ? '' : ` ${leftOff.join(' ')}`}`,
               )
             }
             return cardOf(ended.row)

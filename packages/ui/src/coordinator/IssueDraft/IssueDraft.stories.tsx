@@ -39,6 +39,31 @@ export const WithPriority: Story = {
   },
 }
 
+/** With every field its tracker has that it is filed with: its project, milestone, assignee and due date, beside its priority and labels. */
+export const WithItsFields: Story = {
+  args: {
+    priority: 'High',
+    details: ['Project: 0.7.0', 'Milestone: Beta', 'Assignee: Sam Rivera', 'Due: 2026-11-30'],
+    onAlwaysAtOnce: fn(),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(
+        'Priority: High · Project: 0.7.0 · Milestone: Beta · Assignee: Sam Rivera · Due: 2026-11-30 · Labels: refunds, webhooks, bug',
+      ),
+    ).toBeInTheDocument()
+  },
+}
+
+/** Always file at once files this one, and has every later issue filed at once, without a card. */
+export const AlwaysFileAtOnce: Story = {
+  args: { onAlwaysAtOnce: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always file at once' }))
+    await expect(args.onAlwaysAtOnce).toHaveBeenCalled()
+  },
+}
+
 /** Any other tracker, with no labels. */
 export const PendingOnJira: Story = { args: DRAFT_JIRA }
 
@@ -100,6 +125,31 @@ export const Filed: Story = {
     await expect(link).toHaveAttribute('href', FILED_LINEAR.href)
     await expect(link).toHaveAttribute('target', '_blank')
     await expect(within(canvasElement).queryByRole('button')).not.toBeInTheDocument()
+  },
+}
+
+/** Filed at once, as you prefer: its line is the record, and says it can ask first next time. */
+export const FiledAtOnce: Story = {
+  args: { state: IssueDraftState.Filed, issue: FILED_LINEAR, direct: true, onAlwaysAsk: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Always ask first' }))
+    await expect(args.onAlwaysAsk).toHaveBeenCalled()
+  },
+}
+
+/** Filed, with what its tracker left off said under it. */
+export const FiledWithSomethingLeftOff: Story = {
+  args: {
+    state: IssueDraftState.Filed,
+    issue: FILED_LINEAR,
+    direct: true,
+    onAlwaysAsk: fn(),
+    leftOff: ['Label “nonesuch”: Linear left it off.', 'cycle not set: Linear refused it.'],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText('Left off: Label “nonesuch”: Linear left it off. cycle not set: Linear refused it.'),
+    ).toBeInTheDocument()
   },
 }
 
