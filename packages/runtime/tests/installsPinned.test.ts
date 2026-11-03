@@ -122,17 +122,19 @@ describe('where an agent’s command is', () => {
     execFileSync('tar', ['-czf', file, '-C', dir, 'release'])
     const bytes = readFileSync(file)
     const fetch = async (url: string) =>
-      url.endsWith('/releases/latest')
-        ? Response.json({
-            tag_name: 'v1.18.35',
-            assets: [
-              {
-                name: 'opencode-linux-x64.tar.gz',
-                browser_download_url: 'https://github.example/download',
-                digest: `sha256:${sum(bytes)}`,
-              },
-            ],
-          })
+      url.includes('/releases?')
+        ? Response.json([
+            {
+              tag_name: 'v2.2.5',
+              assets: [
+                {
+                  name: 'opencode-linux-x64.tar.gz',
+                  browser_download_url: 'https://github.example/download',
+                  digest: `sha256:${sum(bytes)}`,
+                },
+              ],
+            },
+          ])
         : new Response(new Uint8Array(bytes))
     const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
     const layer = Installs.layer({ root, platform: 'linux', arch: 'x64', musl: false, fetch, search: { env: { PATH: '' }, dirs: [] } })

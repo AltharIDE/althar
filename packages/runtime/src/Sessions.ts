@@ -108,7 +108,7 @@ import { holding, portFor, portsBelow } from './ports'
 import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
-import { agentSaid, summarize } from './words'
+import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -375,8 +375,15 @@ const accountOf = (input: { readonly accountId?: string }) => (input.accountId =
 
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
 
-/** Why a session's brief is written: a start, another agent taking over, or the same one started afresh to keep its context small. */
-type Why = { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined } | { readonly kind: 'handover' }
+/**
+ * Why a session's brief is written: a start, another agent taking over, or
+ * the same one started afresh to keep its context small, or `lost`, because
+ * the agent no longer had its session.
+ */
+type Why =
+  | { readonly kind: 'start' }
+  | { readonly kind: 'takeover'; readonly from: string | undefined }
+  | { readonly kind: 'handover'; readonly lost?: boolean }
 
 /** What a new session's first turn starts with, and what it asks for with nothing waiting; `byPerson`, where the person started it. */
 interface Brief {
@@ -1638,6 +1645,10 @@ export class Sessions extends Context.Service<
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
           // The agent refused the prompt: nothing was delivered, so the input goes back in the queue.
           const refused = errorClass === 'turn_in_progress'
+          // The agent no longer has the session, as Claude Code's adapter drops one whose process died: nothing was delivered,
+          // so the input goes back in the queue, for a fresh session briefed from Althar's records (`handOver`). A compaction
+          // isn't wanted there.
+          const lost = errorClass === 'session_lost'
           // Out of usage, or its service out of reach (ADR-060): nothing more goes to it until what carries the work on says so.
           const held = errorClass === 'usage_limit' || errorClass === 'transient'
           const state = errorClass !== undefined ? 'failed' : ended?.stopReason === 'cancelled' ? 'interrupted' : 'completed'
@@ -1661,7 +1672,13 @@ export class Sessions extends Context.Service<
               })
               // Refused, nothing was delivered. Out of usage, or its service out of reach, what the person said waits for the
               // agent that carries on; Althar's own prompts are given again by what carries the work on.
-              const back = refused ? inputs : held ? inputs.filter((input) => input.author === 'person') : []
+              const back = refused
+                ? inputs
+                : lost
+                  ? inputs.filter((input) => input.body !== COMPACT)
+                  : held
+                    ? inputs.filter((input) => input.author === 'person')
+                    : []
               for (const input of back) {
                 const inputRevision = yield* change('user_inputs', input.id, { state: 'queued' })
                 yield* fact({
@@ -1688,7 +1705,8 @@ export class Sessions extends Context.Service<
           // thrown, or on the prompt's response, as Claude Code and Codex end a turn on a lost connection (ADR-060).
           // A usage limit is said by what carries the work on, as a step's lost connection is; a refused prompt is tried again.
           const failed = (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed') || ended?.failure !== undefined
-          const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator')
+          // A lost session is said where it is started afresh, or where it can't be.
+          const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator') || lost
           if (failed && !saidElsewhere && !refused)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
@@ -1741,8 +1759,13 @@ export class Sessions extends Context.Service<
             ...(errorClass === undefined || typeof said !== 'string' || said === '' ? {} : { failure: said }),
             ...(ended === undefined ? {} : { stopReason: ended.stopReason }),
           })
+          // Lost, it takes no more turns: a fresh session takes what waits.
+          if (lost) {
+            running.handover = 'under_way'
+            yield* Effect.forkIn(run(handOver(running, typeof said === 'string' ? said : '')), sessionsScope)
+          }
           // Out of usage, or out of reach, nothing more goes to it until what carries the work on says so.
-          return !refused && !held
+          return !refused && !held && !lost
         })
 
       /** A usage limit belongs to the account the session runs on (docs/architecture/03, ADR-012), not the agent. */
@@ -2942,7 +2965,7 @@ export class Sessions extends Context.Service<
                 ? 'You are working on a task across several repositories, each in a git worktree of its own. Althar keeps its record and answers your permission requests.'
                 : 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
               : why.kind === 'handover'
-                ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
+                ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...(why.kind === 'start' && standing?.state === 'done'
@@ -3207,18 +3230,28 @@ export class Sessions extends Context.Service<
        * for the new one. The new session is started before the old one stops,
        * so a handover that fails leaves the old one carrying on, its agent
        * compacting its context itself as before.
+       *
+       * `lost`, what the agent said when it no longer had the session, as
+       * Claude Code's adapter drops one whose process died: it can't carry
+       * on, so it is handed over whatever its context, and a handover that
+       * fails, or a reviewer's, which isn't handed over, stops it, so Try again
+       * starts a fresh one.
        */
-      const handOver = (previous: Running): Effect.Effect<void, never, Store> =>
+      const handOver = (previous: Running, lost?: string): Effect.Effect<void, never, Store> =>
         exclusive(
           previous.thread.threadId,
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             // Stopped or switched while it waited: nothing is left to hand over.
-            if (previous.thread.role === 'reviewer' || threads.get(previous.thread.threadId) !== previous || previous.stopping) return
+            if (threads.get(previous.thread.threadId) !== previous || previous.stopping) return
+            if (previous.thread.role === 'reviewer') {
+              if (lost !== undefined) yield* cannotCarryOn(previous, lost)
+              return
+            }
             // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
             // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
-            if (thread.role === 'task' && [...previous.background.values()].some((left) => left.ended === null)) {
+            if (lost === undefined && thread.role === 'task' && [...previous.background.values()].some((left) => left.ended === null)) {
               previous.handover = 'none'
               return yield* Queue.offer(previous.wake, undefined)
             }
@@ -3230,10 +3263,13 @@ export class Sessions extends Context.Service<
             const brief =
               thread.role === 'coordinator'
                 ? yield* handoverBrief(thread)
-                : { text: yield* briefFor(thread, { kind: 'handover' }), open: null }
+                : { text: yield* briefFor(thread, { kind: 'handover', ...(lost === undefined ? {} : { lost: true }) }), open: null }
             // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
-            // worth its thread of thought: the old one carries on as it is.
-            if (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context))) {
+            // worth its thread of thought: the old one carries on as it is. A lost one can't.
+            if (
+              lost === undefined &&
+              (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context)))
+            ) {
               yield* Effect.logWarning(
                 `The ${thread.role === 'task' ? 'lead' : 'coordinator'} is left to compact by itself: its brief would fill a fresh session`,
               )
@@ -3247,7 +3283,12 @@ export class Sessions extends Context.Service<
               addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: brief.open === null ? `Started ${previous.entry.definition.name} afresh.` : 'Started a fresh session.',
+                title:
+                  lost !== undefined
+                    ? startedAfreshWords(previous.entry.definition.name)
+                    : brief.open === null
+                      ? `Started ${previous.entry.definition.name} afresh.`
+                      : 'Started a fresh session.',
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {
@@ -3262,15 +3303,36 @@ export class Sessions extends Context.Service<
           Effect.catchCause((cause) =>
             Effect.andThen(
               Effect.logWarning('Could not hand a session to a fresh one', cause),
-              // It carries on as it is, with what waited for it.
               Effect.suspend(() => {
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
+                // Lost, it can't carry on: it stops, and the person is told.
+                if (lost !== undefined) return exclusive(previous.thread.threadId, cannotCarryOn(previous, lost))
+                // It carries on as it is, with what waited for it.
                 previous.handover = 'left'
                 return Queue.offer(previous.wake, undefined)
               }),
             ),
           ),
         )
+
+      /**
+       * A lost session that isn't started afresh: the turn's failure, said
+       * plainly with the agent's own words under it, and the session
+       * stopped, so Try again starts a fresh one rather than send to it again.
+       */
+      const cannotCarryOn = (previous: Running, said: string) =>
+        Effect.gen(function* () {
+          const { thread } = previous
+          const name = previous.entry.definition.name
+          yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId: previous.sessionId }, 'notice', {
+            source: 'agent',
+            severity: 'error',
+            title: lostWords(name),
+            ...(said === '' ? {} : { description: said }),
+            failure: 'session_lost',
+          })
+          yield* stopRunning(previous, { state: 'completed' })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not stop a lost session', cause)))
 
       // Quitting stops every session the way `stop` does: the turn ends, the process stops, and both are recorded.
       yield* Effect.addFinalizer(() =>

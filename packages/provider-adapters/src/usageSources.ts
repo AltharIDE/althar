@@ -454,6 +454,40 @@ export const openCodeCredentials = (output: string): ReadonlyArray<OpenCodeCrede
   return found
 }
 
+/** The providers `opencode auth list --format json` lists with a connection, as it names them (`OpenCode Go`); none for another shape. */
+export const openCodeProviders = (
+  output: string,
+): ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }> => {
+  const first = output.indexOf('[')
+  const last = output.lastIndexOf(']')
+  if (first < 0 || last <= first) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(output.slice(first, last + 1))
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed.flatMap((entry) => {
+    const provider = record(entry)
+    if (provider === null || typeof provider.id !== 'string' || !Array.isArray(provider.connections) || provider.connections.length === 0)
+      return []
+    const connections = provider.connections
+      .map((one) => {
+        const id = record(one)?.id
+        return typeof id === 'string' ? id : ''
+      })
+      .sort()
+    return [
+      {
+        id: provider.id,
+        name: typeof provider.name === 'string' && provider.name !== '' ? provider.name : provider.id,
+        connections: connections.join(','),
+      },
+    ]
+  })
+}
+
 /** What an OpenCode credential comes to: the pair that covers it, or why none does. A gap is a fault, never quiet. */
 export type CredentialResolution =
   | { readonly kind: 'covered'; readonly pair: UsagePair }

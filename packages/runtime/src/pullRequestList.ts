@@ -170,7 +170,7 @@ export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
             `${binding.name}: it isn’t on a code host Althar is connected to, so its pull requests can’t be listed. The person connects its host in Settings.`,
           ]
         const fork =
-          binding.path === null || binding.changeTarget !== 'upstream'
+          binding.path === null || (binding.changeTarget !== 'upstream' && binding.changeTarget !== 'upstream_branch')
             ? null
             : yield* namedRemotes(binding.path).pipe(
                 Effect.map(forkOf),

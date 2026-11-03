@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
+import { openCodeProviders } from './usageSources'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -157,6 +158,8 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
+    /** Run when `status` read nothing (an older version that rejects its flags); read the same way. */
+    readonly statusFallback?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -165,6 +168,15 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /**
+     * For an agent that reaches several providers, each with a sign-in of its
+     * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
+     * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
+     */
+    readonly providers?: {
+      readonly read: (output: string) => ReadonlyArray<{ readonly id: string; readonly name: string; readonly connections: string }>
+      readonly of: (model: string) => string | undefined
+    }
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
     /**
@@ -421,6 +433,8 @@ export type AgentDownload = GitHubDownload | PinnedDownload
 export interface GitHubDownload {
   /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
   readonly repository: string
+  /** Only releases whose tag starts so, such as `v2.`: the newest of them, where its latest release is on another line. */
+  readonly line?: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
@@ -1041,14 +1055,36 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     options: { mode: 'mode', model: 'model', effort: 'effort', ownEffort: 'default' },
     signIn: {
-      status: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
+      status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
+      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead.
+      statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
+        const first = output.indexOf('[')
+        const last = output.lastIndexOf(']')
+        if (first >= 0 && last > first) {
+          try {
+            const parsed: unknown = JSON.parse(output.slice(first, last + 1))
+            if (Array.isArray(parsed))
+              return parsed.some(
+                (one) =>
+                  Array.isArray((one as { connections?: unknown } | null)?.connections) &&
+                  (one as { connections: unknown[] }).connections.length > 0,
+              )
+                ? true
+                : undefined
+          } catch {
+            // Not the JSON: 1.x's count line, below.
+          }
+        }
         const count = /(\d+)\s+credentials?/i.exec(output)?.[1]
         return count !== undefined && Number(count) > 0 ? true : undefined
       },
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
+      // A model is `provider/model`, and each provider has its own key or sign-in: one can be refused while the rest work.
+      providers: { read: openCodeProviders, of: (model) => (model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined) },
       login: 'opencode auth login',
       // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
       credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
@@ -1081,12 +1117,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         }),
       }
     },
-    /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
+    /*
+     * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.
+     * Its 2.x is what Althar runs (`--standalone` above), and GitHub's latest is still 1.x, which also can't open a
+     * data folder 2.x has migrated: the newest 2.x it is. Seen 2 November 2026, v2.2.5 beside v1.19.5.
+     */
     cli: {
       name: 'opencode',
       guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
+        line: 'v2.',
         assets: {
           'darwin-arm64': 'opencode-darwin-arm64.zip',
           'darwin-x64': 'opencode-darwin-x64.zip',

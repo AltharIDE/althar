@@ -1,21 +1,19 @@
-/* The agents not on this computer, quieter than those on it: a tile each, two to a line where there is room. */
+/* The agents not on this computer, quieter than those on it: a tile each, two to a line where there is room, their marks in the column of the rows above. */
 .away {
   container-type: inline-size;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
 }
 .title {
-  margin: 0 0 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--t-2);
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-3);
 }
 .tiles {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 20px;
+  column-gap: 32px;
   margin: 0;
-  padding: 0;
+  padding: 0 16px;
   list-style: none;
 }
 @container (max-width: 420px) {
@@ -27,14 +25,14 @@
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 12px;
   min-height: 38px;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 .mark {
   display: flex;
   justify-content: center;
-  color: var(--t-3);
+  color: var(--t-2);
 }
 .name {
   overflow: hidden;

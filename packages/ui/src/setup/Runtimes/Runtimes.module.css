@@ -4,17 +4,21 @@
   flex-direction: column;
   gap: 8px;
 }
+/* One group, ruled between its rows, its marks in the column the agents not here line up under. */
 .list {
   margin: 0;
-  padding: 0;
+  padding: 0 16px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--line);
   list-style: none;
 }
 .row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px;
-  padding: 13px 0;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 58px;
+  padding: 10px 0;
   border-top: 1px solid var(--line);
 }
 .row:first-child {
@@ -23,13 +27,14 @@
 .mark {
   display: flex;
   justify-content: center;
-  padding-top: 1px;
+  align-self: start;
+  padding-top: 2px;
   color: var(--t-1);
 }
 .body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .name {
@@ -44,7 +49,7 @@
   min-width: 0;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--t-2);
+  color: var(--t-3);
 }
 .calls {
   color: var(--signal);
@@ -66,12 +71,12 @@
 }
 .add {
   align-self: flex-start;
-  margin-left: 26px;
+  margin-left: 44px;
 }
 
 @container (max-width: 440px) {
   .row {
-    grid-template-columns: 20px minmax(0, 1fr);
+    grid-template-columns: 16px minmax(0, 1fr);
   }
   .actions {
     grid-column: 2;

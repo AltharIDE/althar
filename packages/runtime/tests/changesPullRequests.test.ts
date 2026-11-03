@@ -136,10 +136,9 @@ describe('a pull request, by the person and the lead', () => {
           github.mergeByHand(1)
           yield* changes.refresh(taskId)
           yield* changes.refresh(taskId)
-          yield* Effect.sleep('200 millis')
+          // The listener settles the merge after the news it read, so the task being done says none of it woke the lead.
+          yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`, (rows) => rows[0]?.state === 'done')
           assert.lengthOf(yield* turns(threadId), before)
-          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`
-          assert.strictEqual(task?.state, 'done')
           return
         }
         let expected = 'Please rename the retry.'

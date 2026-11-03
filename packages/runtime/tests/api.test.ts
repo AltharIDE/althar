@@ -1562,7 +1562,14 @@ describe('a project’s menu, through the API', () => {
           ],
         )
         const docs = again[2]
-        assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
+        // GitHub isn't connected, so whether the person can push to the repository it was forked from isn't known, and nothing is offered.
+        assert.deepStrictEqual(docs?.fork, {
+          fork: 'you/refund-docs',
+          upstream: 'meridian/refund-docs',
+          target: 'fork',
+          canPush: null,
+          offer: false,
+        })
         // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
         assert.deepStrictEqual(docs?.host, {
           product: 'github',
@@ -1689,6 +1696,72 @@ describe('a project’s menu, through the API', () => {
           "That project isn't there any more.",
         )
         assert.notStrictEqual((yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })).id, project.id)
+      }),
+    ),
+  )
+})
+
+describe('a fork’s branches upstream, through the API', () => {
+  /** A fork of meridian/api, with GitHub connected, whose pull requests open on meridian/api from the fork's branches. */
+  const forkOpened = (can: boolean, target: 'upstream' | 'fork' = 'upstream') =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'api'])
+      github.addRepository(['meridian', 'api'])
+      github.letPush(['meridian', 'api'], can)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ api: [`origin=${HOST}/you/api.git`, `upstream=${HOST}/meridian/api.git`] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'api')) })
+      const [repository] = yield* client.GetRepositories({ projectId: project.id })
+      const repositoryId = repository?.id ?? ''
+      yield* client.SetRepository({ commandId: commandId(), projectId: project.id, repositoryId, changeTarget: target })
+      const fork = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one?.fork)
+      return { client, github, projectId: project.id, repositoryId, fork }
+    })
+
+  it.live('says plainly the person can’t push there yet, offers nothing, and keeps its branches on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, repositoryId, fork } = yield* forkOpened(false)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: false, offer: false })
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.message, "You can't push to the repository it was forked from yet. Its owners can give you access.")
+        assert.deepInclude(yield* fork, { target: 'upstream' })
+      }),
+    ),
+  )
+
+  it.live('offers the same to one whose pull requests open on the fork', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fork } = yield* forkOpened(true, 'fork')
+        assert.deepInclude(yield* fork, { target: 'fork', canPush: true, offer: true })
+      }),
+    ),
+  )
+
+  it.live('offers once to push upstream when the host says the person can, and not again after not now or a choice', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, github, projectId, repositoryId, fork } = yield* forkOpened(true)
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: true })
+        // Not now: the offer goes, and where the work goes stays.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, notNow: true })
+        assert.deepInclude(yield* fork, { target: 'upstream', canPush: true, offer: false })
+        // Still a choice in its settings: its branches go upstream, and back to the fork, with no offer after.
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' })
+        assert.deepInclude(yield* fork, { target: 'upstream_branch', offer: false })
+        yield* client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream' })
+        assert.deepInclude(yield* fork, { target: 'upstream', offer: false })
+        // The host is asked again as it is chosen: access taken away since, it isn't.
+        github.letPush(['meridian', 'api'], false)
+        const refused = yield* Effect.flip(
+          client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
+        )
+        assert.strictEqual(refused.reason, 'ProjectRefused')
       }),
     ),
   )
@@ -2516,6 +2589,14 @@ describe('words', () => {
     )
     assert.strictEqual(said(new CantMerge({ taskId: 't', why: 'moved', detail: 'web’s main' })), 'web’s main moved meanwhile. Merge again.')
     assert.strictEqual(said({ _tag: 'NoChangeToOpen', why: 'something new' }), "The task's work isn't done yet.")
+    // A pull request with nowhere to push to says so, and no branch is made for it.
+    assert.deepStrictEqual(
+      (['fork_gone', 'unplaced'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'PR #1' }))),
+      [
+        'PR #1’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.',
+        'The host doesn’t say where PR #1’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.',
+      ],
+    )
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
       (['behind', 'denied', 'moved', 'never'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
@@ -2566,6 +2647,17 @@ describe('words', () => {
       'The agent stopped: out of memory.',
     )
     assert.strictEqual(agentSaid(new AgentExited({ code: 1, signal: null, stderr: '' })), 'The agent stopped.')
+    // OpenCode 1.x on a data folder OpenCode 2 has moved on, as 1.18.31 said it: what's wrong and the way out, never the bare SQLite error.
+    assert.strictEqual(
+      agentSaid(
+        new AgentExited({
+          code: 1,
+          signal: null,
+          stderr: '\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nno such column: project_id\n',
+        }),
+      ),
+      'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.',
+    )
     const failed = (failure: AgentRequestFailed['failure'], resetsAt?: string) =>
       agentSaid(
         new AgentRequestFailed({
@@ -2579,6 +2671,8 @@ describe('words', () => {
     assert.strictEqual(failed('usage_limit'), "The agent's usage limit is reached.")
     assert.strictEqual(failed('usage_limit', '15:00'), "The agent's usage limit is reached until 15:00.")
     assert.strictEqual(failed('context_full'), "The agent's context is full.")
+    // Claude Code's "Resource not found", for a session its adapter had dropped: what happened, never the bare words.
+    assert.strictEqual(failed('session_lost'), 'The agent had lost this conversation.')
     assert.strictEqual(failed('unknown'), 'Something odd.')
     assert.strictEqual(
       agentSaid(new OptionUnavailable({ configId: 'model', value: 'huge', available: [] })),
@@ -2639,6 +2733,12 @@ describe('steps that need the person', () => {
     for (const why of ['no_report', 'session_ended', 'restarted', 'transient', 'signed_out']) assert.strictEqual(stuckOf({ why }).why, why)
     // A service that kept failing keeps its name, for the call to say whose.
     assert.strictEqual(stuckOf({ why: 'transient', service: 'Anthropic' }).service, 'Anthropic')
+    // A sign-in one provider within the agent refused keeps the model and the provider, for the call to name them.
+    assert.deepInclude(stuckOf({ why: 'signed_out', model: 'opencode-go/deepseek-v4.1-flash', provider: 'opencode-go' }), {
+      model: 'opencode-go/deepseek-v4.1-flash',
+      provider: 'opencode-go',
+    })
+    assert.notProperty(stuckOf({ why: 'signed_out' }), 'provider')
     assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
     assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })

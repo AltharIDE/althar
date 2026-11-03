@@ -40,16 +40,26 @@ const archive = (version = '9.9.9') => {
 
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
-/** GitHub as far as a download asks it: the latest release, and its file. */
-const github = (bytes: Buffer, { digest = `sha256:${sha(bytes)}` as string | null, tag = 'v1.18.35', asset = ASSET } = {}) => {
+/** Whether a download asks GitHub which releases there are, rather than for a file. */
+const listing = (url: string) => url.includes('/releases?')
+
+/**
+ * GitHub as far as a download asks it: OpenCode's releases, newest first, and
+ * the file. A newer 1.x and a 2.x prerelease come before the release it takes,
+ * as 1.x is still GitHub's latest.
+ */
+const github = (bytes: Buffer, { digest = `sha256:${sha(bytes)}` as string | null, tag = 'v2.2.5', asset = ASSET } = {}) => {
   const asked: Array<string> = []
   const fetch = async (url: string) => {
     asked.push(url)
-    if (url.endsWith('/releases/latest'))
-      return Response.json({
-        tag_name: tag,
-        assets: [{ name: asset, browser_download_url: 'https://github.example/download', ...(digest === null ? {} : { digest }) }],
-      })
+    const assets = [{ name: asset, browser_download_url: 'https://github.example/download', ...(digest === null ? {} : { digest }) }]
+    if (listing(url))
+      return Response.json([
+        { tag_name: 'v1.99.0', assets },
+        { tag_name: 'v2.99.0-beta.1', prerelease: true, assets },
+        { tag_name: 'process-daemon-v0.4.0', assets },
+        { tag_name: tag, assets },
+      ])
     return new Response(new Uint8Array(bytes))
   }
   return { fetch, asked }
@@ -63,7 +73,7 @@ const using = (options: Partial<InstallsOptions>) => {
 
 describe('downloading an agent', () => {
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
-  it.skipIf(windows)('keeps its latest release, checked, and runs it where the person has none', async () => {
+  it.skipIf(windows)('keeps its newest 2.x release, checked, and runs it where the person has none', async () => {
     const { fetch, asked } = github(archive())
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
@@ -76,8 +86,9 @@ describe('downloading an agent', () => {
     )
     const done = await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     assert.isTrue(Exit.isSuccess(done))
-    assert.strictEqual(asked[0], 'https://api.github.com/repos/anomalyco/opencode/releases/latest')
-    assert.strictEqual(readlinkSync(join(root, 'opencode', 'current')), 'v1.18.35')
+    // Not GitHub's latest, which is still 1.x: that can't open a data folder 2.x has moved on.
+    assert.strictEqual(asked[0], 'https://api.github.com/repos/anomalyco/opencode/releases?per_page=30')
+    assert.strictEqual(readlinkSync(join(root, 'opencode', 'current')), 'v2.2.5')
     assert.strictEqual(execFileSync(join(root, 'opencode', 'current', 'opencode'), { encoding: 'utf8' }).trim(), '9.9.9')
     const after = await run(Effect.map(Installs, (installs) => installs.locate(opencode)))
     assert.deepStrictEqual(Exit.isSuccess(after) ? after.value : null, {
@@ -88,10 +99,10 @@ describe('downloading an agent', () => {
 
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
   it.skipIf(windows)('replaces the version before, leaving nothing of the download behind', async () => {
-    const first = github(archive('1.0.0'), { tag: 'v1.0.0' })
+    const first = github(archive('2.0.0'), { tag: 'v2.0.0' })
     const { root, run } = using({ fetch: first.fetch })
     await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
-    const second = github(archive('2.0.0'), { tag: 'v2.0.0' })
+    const second = github(archive('2.1.0'), { tag: 'v2.1.0' })
     const again = Installs.layer({
       root,
       platform: 'linux',
@@ -106,7 +117,7 @@ describe('downloading an agent', () => {
         again,
       ),
     )
-    assert.deepStrictEqual(readdirSync(join(root, 'opencode')).toSorted(), ['current', 'v2.0.0'])
+    assert.deepStrictEqual(readdirSync(join(root, 'opencode')).toSorted(), ['current', 'v2.1.0'])
   })
 
   it('keeps nothing that isn’t exactly the release’s file, or that its release gives no digest for', async () => {
@@ -213,11 +224,12 @@ describe('downloading an agent', () => {
     expect(await said(async () => Promise.reject(new Error('offline')))).toContain("GitHub couldn't be reached")
     expect(await said(async () => new Response('', { status: 403 }))).toContain("GitHub didn't say where")
     expect(await said(async () => new Response('not json'))).toContain("couldn't be read")
-    expect(await said(async () => Response.json({ tag_name: '../../x', assets: [] }))).toContain('has no download for this computer')
-    expect(await said(async (url) => (url.endsWith('/latest') ? good(url) : new Response('', { status: 404 })))).toContain(
+    expect(await said(async () => Response.json([{ tag_name: 'v2.../../x', assets: [] }]))).toContain('has no download for this computer')
+    expect(await said(async () => Response.json([{ tag_name: 'v1.99.0', assets: [] }]))).toContain('has no download for this computer')
+    expect(await said(async (url) => (listing(url) ? good(url) : new Response('', { status: 404 })))).toContain(
       "OpenCode couldn't be downloaded",
     )
-    expect(await said(async (url) => (url.endsWith('/latest') ? good(url) : Promise.reject(new Error('reset'))))).toContain(
+    expect(await said(async (url) => (listing(url) ? good(url) : Promise.reject(new Error('reset'))))).toContain(
       "OpenCode couldn't be downloaded",
     )
     // An archive without the command, and one whose command won't run here.
@@ -241,7 +253,7 @@ describe('downloading an agent', () => {
     // A second download while the first runs is refused; the first finishes.
     let release: () => void = () => {}
     const slow = async (url: string) => {
-      if (!url.endsWith('/latest')) await new Promise<void>((resolve) => (release = resolve))
+      if (!listing(url)) await new Promise<void>((resolve) => (release = resolve))
       return good(url)
     }
     const once = using({ fetch: slow })

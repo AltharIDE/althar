@@ -179,7 +179,7 @@ function Row({ r, t, onSignIn, onCancel, onCheck, onHelp, onInstall }: RowProps)
   const { line, note, actions, calls } = parts(r, t, { onSignIn, onCancel, onCheck, onHelp, onInstall })
   return (
     <li className={s.row}>
-      <span className={s.mark}>{r.brand ? <BrandMark brand={r.brand} size={18} /> : <Icon name="plug" size={16} />}</span>
+      <span className={s.mark}>{r.brand ? <BrandMark brand={r.brand} size={16} /> : <Icon name="plug" size={15} />}</span>
       <span className={s.body}>
         <span className={s.name}>{r.name}</span>
         <span className={cx(s.line, calls && s.calls)}>{line}</span>

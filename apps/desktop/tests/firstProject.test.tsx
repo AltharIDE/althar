@@ -40,7 +40,7 @@ const first = (reading: FolderReading, more: Parameters<typeof fakeClient>[0] = 
 /** Adds the folder, clears the name the project would take, and makes it. */
 const makeUnnamed = async () => {
   await toTheProject()
-  await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+  await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
   await screen.findByRole('list', { name: 'Repositories for the project' })
   await userEvent.clear(screen.getByRole('textbox', { name: 'Project name' }))
   await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
@@ -53,7 +53,7 @@ describe('the first screen', () => {
       status: vi.fn(() => new Promise<never>(() => undefined)),
     })
     withServices(<Start />, client, fakeHost())
-    expect(await screen.findByRole('heading', { name: 'Tell the coordinator what you want' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Work happens in projects' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
     expect(screen.getByLabelText('Asking the agents').getAttribute('aria-busy')).toBe('true')
     expect(window.localStorage.getItem('althar.toured')).toBe('1')
@@ -91,7 +91,7 @@ describe('the first project, refused', () => {
       .mockResolvedValue({ id: 'p1' })
     const { onProject } = first({ kind: 'repository', name: 'meridian', repositories: [found('meridian')], project: null }, { openProject })
     await toTheProject()
-    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
     const list = await screen.findByRole('list', { name: 'Repositories for the project' })
     expect(within(list).getByRole('checkbox', { name: /meridian/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))

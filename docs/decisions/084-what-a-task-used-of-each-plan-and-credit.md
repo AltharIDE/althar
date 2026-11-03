@@ -46,6 +46,6 @@
     One session that neither said nor has a price leaves the account's
     dollars a dash, wherever it falls among the others.
 - **Consequences:** A reading that fails leaves the usage out of the
-  snapshot, never the thread. Tasks that ran before migration 0055 have no
+  snapshot, never the thread. Tasks that ran before migration 0056 have no
   readings of a week, so their share shows as a dash. A plan whose week Althar
   can't read shows a dash the same way.
