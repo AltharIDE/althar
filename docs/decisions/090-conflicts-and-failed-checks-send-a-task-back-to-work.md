@@ -56,8 +56,9 @@
     conflicts before Althar has looked again (the same poll, or after a
     restart): where the lead is to be asked, the card is under way, on
     resolving a conflict, not offering Resolve. Not where the branch here
-    merged cleanly as Althar last looked though the host said it conflicts:
-    nothing goes to the lead then.
+    merged cleanly as Althar last looked though the host said it conflicts,
+    nor on a pull request Althar no longer listens to: nothing goes to the
+    lead then.
   - **Waiting on the person always says why.** Turned off, a conflict the
     host reports says "“Resolve conflicts automatically” is off for this
     task" (as its menu names it) or "“Resolve merge conflicts

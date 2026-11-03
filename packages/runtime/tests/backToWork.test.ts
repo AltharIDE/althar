@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Deferred, Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes, FIX_ROUNDS, OFF_FOR_PROJECT, OFF_FOR_TASK } from '../src/Changes'
@@ -113,12 +113,24 @@ describe('a conflict alone', () => {
 
   it.live('its host says before Althar has asked anything is on its way to the lead, or says why not', () => {
     const { working, bare } = hosted()
-    const github = hostOf(bare)
+    let held = false
+    const gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(bare, undefined, undefined, {
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
+    })
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
-      // The host says it conflicts, and no round has started: Althar hasn't looked since, as just after it launched.
-      yield* sql`UPDATE external_links SET listening = 0, snapshot = json_set(snapshot, '$.conflicts', json('true'))
+      // Its next read of the pull request held, as the first poll after a restart not yet come: listened to all the same.
+      const reads = () => github.calls.filter((method) => method === 'change').length
+      const before = reads()
+      held = true
+      yield* until(
+        Effect.sync(() => [reads()]),
+        ([now]) => (now ?? 0) > before,
+      )
+      // The host said it conflicts as Althar last read it, and no round has started.
+      yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.conflicts', json('true'))
         WHERE task_id = ${taskId} AND kind = 'change'`
       assert.lengthOf(yield* rounds(taskId), 0)
       assert.deepStrictEqual(yield* (yield* Changes).conflictStanding(taskId), { state: 'due' })
@@ -131,6 +143,38 @@ describe('a conflict alone', () => {
       const off = yield* cardOf(projectId)
       assert.strictEqual(off?.phase, 'ready')
       assert.strictEqual(off?.conflictUnsent, OFF_FOR_PROJECT)
+      // On again, but a pull request Althar stopped following will never be looked at: nothing is on its way.
+      yield* (yield* Policies).set(projectId as never, { resolveConflicts: true }, (yield* Instance).personId)
+      yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${taskId} AND kind = 'change'`
+      assert.isNull(yield* (yield* Changes).conflictStanding(taskId))
+      assert.strictEqual((yield* cardOf(projectId))?.phase, 'ready')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('its host says, where the branch here merges cleanly, isn’t on its way to the lead', () => {
+    const { working, bare } = hosted()
+    let stale = false
+    const github = hostOf(bare, undefined, undefined, { says: () => (stale ? true : undefined) })
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      // The host says it conflicts, out of date: main hasn't moved, and the branch here merges with it cleanly.
+      stale = true
+      yield* until(
+        Effect.map(cardOf(projectId), (one) => [one]),
+        ([one]) => one?.change?.conflicts === true,
+      )
+      yield* until(
+        Effect.map((yield* Changes).conflictStanding(taskId), (one) => [one]),
+        ([one]) => one === null,
+      )
+      yield* Effect.sleep('800 millis')
+      // Looked at again and again, it stays waiting on nothing: no round, no ask, no card on its way back.
+      assert.isNull(yield* (yield* Changes).conflictStanding(taskId))
+      assert.lengthOf(yield* rounds(taskId), 0)
+      assert.lengthOf(yield* asked(threadId), 0)
+      const card = yield* cardOf(projectId)
+      assert.strictEqual(card?.phase, 'ready')
+      assert.isNull(card?.conflictUnsent ?? null)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

@@ -199,6 +199,12 @@ export const hostOf = (
   checks: (sha: string) => Checks | undefined = () => undefined,
   /** Each time the host says the pull request conflicts. */
   conflicting: () => void = () => {},
+  more: {
+    /** What the host's calls wait for, by method, as `makeFakeService` takes it. */
+    readonly waitsFor?: (method: string) => Effect.Effect<void>
+    /** What the host says of conflicts instead of working it out, as a host out of date does. */
+    readonly says?: () => boolean | undefined
+  } = {},
 ) => {
   const tip = () => {
     const branch = taskBranch(bare)
@@ -212,6 +218,8 @@ export const hostOf = (
     pushUrl: () => bare,
     headOf: tip,
     conflictsOf: () => {
+      const said = more.says?.()
+      if (said !== undefined) return said
       const branch = taskBranch(bare)
       if (branch === null || tip() === null) return undefined
       const conflicts = conflictsIn(bare, 'main', branch)
@@ -219,6 +227,7 @@ export const hostOf = (
       return conflicts
     },
     checksFor: (_, sha) => checks(sha),
+    ...(more.waitsFor === undefined ? {} : { waitsFor: more.waitsFor }),
   })
   github.addRepository(['meridian', 'api'])
   return github

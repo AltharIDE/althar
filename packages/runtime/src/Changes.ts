@@ -949,9 +949,9 @@ export class Changes extends Context.Service<
        */
       const unsent = new Map<string, { readonly why: string; readonly checked: boolean }>()
       /*
-       * Tasks whose branch here merged cleanly with what its pull request goes into, last Althar looked: at which head, and
-       * whether its host said then that it conflicts. Said so, and merging cleanly all the same, nothing goes to its lead while its
-       * head is the same, so its card isn't on its way back to work (`dueOf`).
+       * Pull requests, by their link, whose branch here merged cleanly with what they go into, last Althar looked: at which head,
+       * and whether the host said then that they conflict. Said so, and merging cleanly all the same, nothing goes to the lead
+       * while the head is the same, so the task's card isn't on its way back to work (`dueOf`).
        */
       const cleanHere = new Map<string, { readonly head: string | null; readonly hostSaid: boolean }>()
       /* Where each repository's default branch was when last fetched to look for conflicts, and when, by binding and ref. */
@@ -4495,17 +4495,20 @@ export class Changes extends Context.Service<
        * the person a button for it without saying why, whether or not Althar
        * has looked at it since it launched. Not where its branch here merged
        * cleanly, its host saying it conflicts all the same, as Althar last
-       * looked at its head: nothing goes to the lead then.
+       * looked at its head: nothing goes to the lead then. Nor on a pull
+       * request Althar no longer listens to.
        */
       const dueOf = (taskId: string): Effect.Effect<ConflictStanding | null, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [open] = yield* sql<{ url: string; head: string | null }>`
-            SELECT url, json_extract(snapshot, '$.headSha') AS head FROM external_links WHERE task_id = ${taskId} AND kind = 'change'
+          // Only one Althar still listens to: one it no longer follows will never be looked at, so nothing would come of it.
+          const [open] = yield* sql<{ id: string; url: string; head: string | null }>`
+            SELECT id, url, json_extract(snapshot, '$.headSha') AS head FROM external_links WHERE task_id = ${taskId} AND kind = 'change'
+              AND listening = 1 AND connection_id IS NOT NULL
               AND json_extract(snapshot, '$.state') = 'open' AND json_extract(snapshot, '$.conflicts') = 1
             ORDER BY created_at DESC LIMIT 1`
           if (open === undefined) return null
-          const clean = cleanHere.get(taskId)
+          const clean = cleanHere.get(open.id)
           if (clean?.hostSaid === true && clean.head === open.head) return null
           const asked = yield* askable(taskId, open.url)
           if (asked === 'off' || asked === 'handed') return null
@@ -5037,12 +5040,12 @@ export class Changes extends Context.Service<
             )
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
           if (merged.code === 0) {
-            const was = cleanHere.get(link.taskId)
-            cleanHere.set(link.taskId, { head: now.headSha, hostSaid: says })
+            const was = cleanHere.get(link.id)
+            cleanHere.set(link.id, { head: now.headSha, hostSaid: says })
             if (was?.head !== now.headSha || was.hostSaid !== says) yield* touchTask(link.taskId)
             return yield* Effect.as(forgetUnsent(link.taskId), false)
           }
-          cleanHere.delete(link.taskId)
+          cleanHere.delete(link.id)
           // 1 is git's word for a merge that conflicts; anything else, one it couldn't work out.
           if (merged.code !== 1) return yield* Effect.as(couldnt(`Git couldn’t merge ${now.target} with the branch here.`), false)
           if (!(yield* sayingWhy(link.taskId, yield* askable(link.taskId, seen.url, { force: how.force, targets: [target] })))) return false
