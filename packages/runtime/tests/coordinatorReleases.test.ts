@@ -319,7 +319,7 @@ describe('another repository’s release steps', () => {
       )
       writeFileSync(join(working, '.github', 'workflows', 'lint.yml'), 'on: pull_request\njobs:\n  lint: {}\n')
       execFileSync('git', ['add', '-A'], { cwd: working })
-      execFileSync('git', ['commit', '-qm', 'Ship on a tag'], { cwd: working })
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-qm', 'Ship on a tag'], { cwd: working })
       // Each turn's copy is fresh from the default branch.
       yield* coordinatorFolder(coordinator.projectId)
       const steps = yield* callTool(coordinator, 'read_release_steps', {})
