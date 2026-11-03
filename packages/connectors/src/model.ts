@@ -283,11 +283,6 @@ export interface ChangeWords {
 export interface MergeWays {
   /** GitHub's or Bitbucket Cloud's merge queue on the branch, or GitLab's merge trains on the project; null where it has none. */
   readonly queue: 'merge_queue' | 'merge_train' | null
-  /**
-   * The queue takes changes only from the host's own site: Bitbucket Cloud's,
-   * whose API reads and leaves it but can't add to it. `enqueue` refuses.
-   */
-  readonly addedOnSite?: boolean
   /** The host merges a change itself once its checks pass, as Althar asks: GitLab's, and Data Center's from 8.15. */
   readonly autoMerge: boolean
   /** What the server said it is, where that decided the above: GitLab's version and tier, Data Center's version. */
@@ -407,6 +402,8 @@ export interface CodeHost {
    * Puts a change in its target's merge queue or merge train at its head
    * (`headSha`): a push since is refused. Comes back open and `queued`; the
    * host merges it later. Refused, as `rejected`, where `mergeWays` says none.
+   * Bitbucket Cloud takes no head: its merge, on a branch with a queue in use,
+   * puts it in instead, so the head is checked just before.
    */
   enqueue(repository: Repository, change: ChangeRequest, how?: MergeHow): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
@@ -428,6 +425,12 @@ export interface CodeHost {
    * (runtime `branchUpdate.ts`), until ADR-081's task 6 brings `update_branch`.
    */
   updateBranch?(repository: Repository, change: ChangeRequest): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * Whether a change's head now is the merge `updateBranch` made from the
+   * head `from`, a merge whose first parent is it: for an update that hadn't
+   * landed when it was read back. Present where `updateBranch` is.
+   */
+  madeFrom?(repository: Repository, change: ChangeRequest, from: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Closes a change without merging it, because the person said to: never
    * on an agent's word. Read back as the host has it after; one already

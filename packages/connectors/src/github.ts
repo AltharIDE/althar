@@ -574,6 +574,16 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
     })
+  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
+  const madeFrom = (repository: Repository, sha: string, from: string) =>
+    Effect.map(
+      http.json(
+        Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
+        'GET',
+        `${repo(repository)}/commits/${encodeURIComponent(sha)}`,
+      ),
+      (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
+    )
   const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
@@ -907,15 +917,11 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           if (read > 0) yield* Effect.sleep(Duration.seconds(1))
           const head = (yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)).head.sha
           if (head === change.headSha) continue
-          const made = yield* http.json(
-            Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
-            'GET',
-            `${repo(repository)}/commits/${encodeURIComponent(head)}`,
-          )
-          return made.parents.length === 2 && made.parents[0]?.sha === change.headSha ? head : null
+          return (yield* madeFrom(repository, head, change.headSha)) ? head : null
         }
         return null
       }),
+    madeFrom: (repository, change, from) => (change.headSha === null ? Effect.succeed(false) : madeFrom(repository, change.headSha, from)),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

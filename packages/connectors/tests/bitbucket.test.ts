@@ -505,16 +505,16 @@ describe('Bitbucket Cloud as a code host', () => {
       assert.isFalse(yield* host.contains(ace, seen, 'newer'))
       assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: null, autoMerge: false, server: null })
       assert.strictEqual((yield* Effect.flip(host.merge(ace, seen, { auto: true }))).reason, 'rejected')
-      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /only from its site/)
+      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /no merge queue/)
       // In no queue, it is left as it is.
       assert.isFalse((yield* host.leaveQueue(ace, seen)).queued ?? true)
       assert.isFalse(sent.some((request) => request.method === 'DELETE'))
     }),
   )
 
-  it.effect('reads the merge queue on a branch and whether a pull request is in it, and takes it out; entered only on its site', () =>
+  it.effect('reads the merge queue on a branch and whether a pull request is in it, puts it in by its merge, and takes it out', () =>
     Effect.gen(function* () {
-      let queued = true
+      let queued = false
       const QUEUES = `${ACE}/merge-queues`
       const { host, sent } = cloud([
         ['GET', PR, { json: pull({ draft: false }) }],
@@ -530,7 +530,17 @@ describe('Bitbucket Cloud as a code host', () => {
             },
           },
         ],
-        ['GET', `${QUEUES}?target_branch=develop`, { json: { values: [] } }],
+        ['GET', `${QUEUES}?target_branch=develop`, { json: { values: [{ uuid: '{q2}', name: 'Dev', state: 'PAUSED' }] } }],
+        ['GET', `${QUEUES}?target_branch=release`, { status: 403, json: { type: 'error', error: { message: 'Forbidden' } } }],
+        ['GET', `${ACE}/refs/branches/master`, { json: { name: 'master' } }],
+        [
+          'POST',
+          `${PR}/merge`,
+          () => {
+            queued = true
+            return { status: 202, json: { task_id: 't1' } }
+          },
+        ],
         ['GET', `${QUEUES}/%7Bq1%7D/queue/552`, () => (queued ? { json: { status: 'QUEUED', rank: 1 } } : { status: 404, json: {} })],
         [
           'DELETE',
@@ -541,18 +551,18 @@ describe('Bitbucket Cloud as a code host', () => {
           },
         ],
       ])
-      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), {
-        queue: 'merge_queue',
-        addedOnSite: true,
-        autoMerge: false,
-        server: null,
-      })
-      // An INACTIVE queue, or none, doesn't require queueing.
+      assert.deepStrictEqual(yield* host.mergeWays(ace, 'master'), { queue: 'merge_queue', autoMerge: false, server: null })
+      // Only an ACTIVE queue takes pull requests; a paused one, or a workspace that won't say, is none.
       assert.strictEqual((yield* host.mergeWays(ace, 'develop')).queue, null)
+      assert.strictEqual((yield* host.mergeWays(ace, 'release')).queue, null)
       const seen = yield* host.change(ace, 552, { queue: true })
-      assert.isTrue(seen.queued)
+      assert.isFalse(seen.queued)
       assert.isUndefined((yield* host.change(ace, 552)).queued)
-      assert.match((yield* Effect.flip(host.enqueue(ace, seen))).message, /Add to merge queue/)
+      // At a head it hasn't seen, nothing is sent.
+      assert.deepInclude(yield* Effect.flip(host.enqueue(ace, { ...seen, headSha: 'a-head-nobody-saw' })), { status: 409 })
+      assert.isFalse(sent.some((request) => request.method === 'POST'))
+      assert.deepInclude(yield* host.enqueue(ace, seen), { state: 'open', queued: true })
+      assert.strictEqual(sent.filter((request) => request.method === 'POST').length, 1)
       assert.isFalse((yield* host.leaveQueue(ace, seen)).queued)
       assert.strictEqual(sent.filter((request) => request.method === 'DELETE').length, 1)
       assert.isFalse((yield* host.change(ace, 552, { queue: true })).queued)

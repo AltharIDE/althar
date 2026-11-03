@@ -144,13 +144,9 @@ export const mergeContract = (subject: MergeSubject) =>
         const stale = yield* Effect.flip(host.merge(repository, { ...change, headSha: 'a-head-nobody-saw' }))
         assert.strictEqual(stale.reason, 'rejected', 'a head that moved is refused')
         const method = repository.merges.at(-1)
-        if (ways.queue !== null && ways.addedOnSite === true) {
-          // Entered only on the host's site: refused here, and one not in it is left as it is.
-          assert.strictEqual((yield* Effect.flip(host.enqueue(repository, change))).reason, 'rejected')
-          assert.notStrictEqual((yield* host.leaveQueue(repository, change)).queued, true)
-          return
-        }
         if (ways.queue !== null) {
+          const late = yield* Effect.flip(host.enqueue(repository, { ...change, headSha: 'a-head-nobody-saw' }))
+          assert.strictEqual(late.reason, 'rejected', 'queued only at the head it was given')
           const queued = yield* host.enqueue(repository, change)
           assert.deepInclude(queued, { state: 'open', queued: true })
           const out = yield* host.leaveQueue(repository, queued)

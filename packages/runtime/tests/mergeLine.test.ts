@@ -1,9 +1,10 @@
-import { mkdtempSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { CheckState } from '@althar/connectors'
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { type FakeService, type FakeServiceOptions, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
@@ -30,9 +31,8 @@ import { callTool, fakeConnectors, HOST, hosted, runtime } from './support'
 
 /** A fake host whose pull requests' checks, and its branches', a test sets by commit: passed unless said. */
 const host = (
-  options: {
+  options: Pick<FakeServiceOptions, 'conflictsOf' | 'pushUrl' | 'headOf'> & {
     readonly product?: 'github' | 'gitlab' | 'bitbucket_cloud' | 'bitbucket_dc'
-    readonly conflictsOf?: (number: number) => boolean | undefined
   } = {},
 ) => {
   const checks = new Map<string, CheckState>()
@@ -127,6 +127,46 @@ const layer = (service: FakeService, database = ':memory:', keychain?: Map<strin
       ...(keychain === undefined ? {} : { keychain }),
     },
   )
+
+/** A bare repository standing in for the host's, with main and a pull request's branch, `feature`; main moved on after it. */
+const gitRemote = () => {
+  const top = mkdtempSync(join(tmpdir(), 'althar-merge-line-'))
+  const env = {
+    PATH: process.env.PATH,
+    HOME: top,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'You',
+    GIT_AUTHOR_EMAIL: 'you@meridian.dev',
+    GIT_COMMITTER_NAME: 'You',
+    GIT_COMMITTER_EMAIL: 'you@meridian.dev',
+  }
+  const git = (cwd: string, ...args: ReadonlyArray<string>) => execFileSync('git', args, { cwd, encoding: 'utf8', env }).trim()
+  const bare = join(top, 'remote.git')
+  const clone = join(top, 'clone')
+  const commit = (file: string) => {
+    writeFileSync(join(clone, file), `${file}\n`)
+    git(clone, 'add', file)
+    git(clone, 'commit', '-q', '-m', `Change ${file}`)
+    return git(clone, 'rev-parse', 'HEAD')
+  }
+  git(top, 'init', '-q', '--bare', '-b', 'main', bare)
+  git(top, 'clone', '-q', bare, clone)
+  commit('README.md')
+  git(clone, 'push', '-q', 'origin', 'HEAD:main')
+  git(clone, 'switch', '-q', '-c', 'feature')
+  const head = commit('retry.ts')
+  git(clone, 'push', '-q', 'origin', 'feature')
+  git(clone, 'switch', '-q', 'main')
+  const tip = commit('refunds.ts')
+  git(clone, 'push', '-q', 'origin', 'main')
+  return {
+    bare,
+    head,
+    tip,
+    headOf: (branch: string) => git(bare, 'rev-parse', branch),
+    parentsOf: (sha: string) => git(bare, 'rev-list', '--parents', '-n', '1', sha).split(' ').slice(1),
+  }
+}
 
 describe('the coordinator’s merge line', () => {
   it.live('two errands, the first merge held pending: the second waits, then starts again from the new head', () => {
@@ -451,7 +491,7 @@ describe('the coordinator merging through the host’s own queue', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
-  it.live('Bitbucket Cloud’s merge queue: once green, the person adds it on its site; leave_queue takes it out through the API', () => {
+  it.live('Bitbucket Cloud’s merge queue takes it by its merge, at the head read just before; leave_queue takes it out', () => {
     const { service, pull } = host({ product: 'bitbucket_cloud' })
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -459,34 +499,88 @@ describe('the coordinator merging through the host’s own queue', () => {
       service.mergeQueue()
       const number = pull('Retry refunds')
       const message = yield* turn(access, 'person')
-      assert.match(
-        yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }),
-        /takes it only from Bitbucket’s site: the person adds it with Add to merge queue on https:\/\/\S+\/pull\/1\./,
-      )
-      yield* sweep(access)
-      assert.match((yield* news(access)).at(-1) ?? '', /Add to merge queue/)
-      assert.deepStrictEqual(service.merged, [])
-      service.enqueueByHand(number)
+      assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /merge queue/)
+      assert.deepInclude(service.merged.at(-1), { number, how: 'queue', head: `head-${number}` })
       assert.match(yield* callTool(access, 'leave_queue', { pull_request: `#${number}` }), /Took PR #1 out of main’s merge queue/)
       assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'paused')
     }).pipe(Effect.provide(layer(service)))
   })
 
-  it.live('GitLab, behind main: Althar merges main in from here, and where it can’t push, asks for the merge in a line', () => {
+  it.live('GitHub’s update-branch read back before it landed: a later read finds the head it made, and the errand goes on', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      service.readBackLater()
+      const number = pull('Retry refunds')
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      assert.deepStrictEqual(service.updated, [number])
+      yield* sweep(access)
+      const errand = (yield* errandsOf(access)).get(number)?.id ?? ''
+      assert.strictEqual((yield* errandsOf(access)).get(number)?.state, 'open')
+      assert.match(yield* takeStep(access, errand), /Merged PR #1/)
+      assert.deepInclude(service.merged.at(-1), { number, head: `head-${number}+other-1` })
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('GitLab, behind main: Althar merges main in from here, pushes it plainly, and merges at the head it made', () => {
+    const remote = gitRemote()
+    const { service } = host({
+      product: 'gitlab',
+      pushUrl: () => remote.bare,
+      headOf: () => remote.headOf('feature'),
+    })
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = service.addPullRequest({
+        path: ['meridian', 'api'],
+        title: 'Retry refunds',
+        author: 'you',
+        source: 'feature',
+        headSha: remote.head,
+      }).number
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${number}`, head: remote.head, message }), /behind main at other-1/)
+      yield* sweep(access)
+      // A merge of main's tip into the branch, never a rebase, pushed there plainly.
+      const made = remote.headOf('feature')
+      assert.deepStrictEqual(remote.parentsOf(made), [remote.head, remote.tip])
+      service.upToDate(number)
+      yield* sweep(access)
+      const errand = (yield* errandsOf(access)).get(number)?.id ?? ''
+      assert.include((yield* news(access)).at(-1), `errand "${errand}"`)
+      // GitLab's auto-merge is the line's merge, at the head Althar made.
+      assert.match(yield* takeStep(access, errand), /Auto-merge is on for MR !1/)
+      assert.deepInclude(service.merged.at(-1), { number, how: 'auto', head: made })
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('GitLab, behind main, where Althar can’t push: it steps out of line, said to its lead once, and the next goes ahead', () => {
     const { service, pull } = host({ product: 'gitlab' })
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
       const access = yield* opened(working)
-      const number = pull('Retry refunds')
+      const first = pull('Retry refunds')
       service.writeTo('main')
+      const second = pull('Cap retries')
       const message = yield* turn(access, 'person')
-      assert.match(yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message }), /behind main at other-1/)
+      assert.match(yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message }), /behind main at other-1/)
       yield* sweep(access)
+      yield* sweep(access)
+      const said = (yield* news(access)).filter((body) => body.includes('can’t merge it in'))
+      assert.strictEqual(said.length, 1)
       assert.match(
-        (yield* news(access)).at(-1) ?? '',
+        said[0] ?? '',
         /MR !1 must have main’s other-1 merged in before it merges, and Althar can’t merge it in: GitLab gives Althar no way to push to it\. .*message_lead/,
       )
-      assert.deepStrictEqual(service.merged, [])
+      // Out of line, it holds no slot: the next, up to date, merges at once.
+      assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Auto-merge is on for MR !2/)
+      assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'open')
     }).pipe(Effect.provide(layer(service)))
   })
 

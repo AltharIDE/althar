@@ -1,7 +1,9 @@
 import type { ChangeRequest, PushTarget } from '@althar/connectors'
 import { Effect } from 'effect'
 
+import type { GitFailed } from './errors'
 import { commitOf, fetchRefs, git, gitOutcome, PUSHED, pushTo } from './git'
+import { pushFailureOf } from './pushFailure'
 
 /*
  * Bringing a pull request's branch up to date with its target where the
@@ -26,10 +28,34 @@ export type BranchUpdate =
   | { readonly kind: 'moved' }
   /** The merge conflicts, in these files. */
   | { readonly kind: 'conflicts'; readonly files: ReadonlyArray<string> }
-  /** Althar can't from here, and why, in a few words. */
-  | { readonly kind: 'cannot'; readonly reason: string }
+  /** Althar can't from here, and why, in a few words; `passing` where it may next time, as a host that didn't answer. */
+  | { readonly kind: 'cannot'; readonly reason: string; readonly passing?: boolean }
 
-const cannot = (reason: string): BranchUpdate => ({ kind: 'cannot', reason })
+const cannot = (reason: string, passing = false): BranchUpdate => ({ kind: 'cannot', reason, ...(passing ? { passing } : {}) })
+
+/** Why git's push was refused, in a few words: only one behind is the branch having moved. */
+const refusedPush = (failed: GitFailed): BranchUpdate => {
+  const why = pushFailureOf(failed)
+  const said = why?.said === undefined || why.said === '' ? '' : `: ${why.said}`
+  switch (why?.why) {
+    case 'behind':
+      return { kind: 'moved' }
+    case 'protected':
+      return cannot(`its branch is protected${said}`)
+    case 'forbidden':
+      return cannot(`the account Althar pushes with may not push to it${said}`)
+    case 'denied':
+      return cannot('git couldn’t sign in to push to it')
+    case 'refused':
+      return cannot(`the host refused the push${said}`)
+    case 'no_push_address':
+      return cannot('the repository here has no address to push to')
+    case 'unreachable':
+      return cannot('the host couldn’t be reached', true)
+    default:
+      return cannot('git couldn’t push it', true)
+  }
+}
 
 /** Merges `change`'s target into its branch in the repository at `root`, and pushes it to `target`, at the head read. */
 export const mergeTargetIn = (root: string, target: PushTarget, change: ChangeRequest) =>
@@ -41,7 +67,7 @@ export const mergeTargetIn = (root: string, target: PushTarget, change: ChangeRe
       { from: `refs/heads/${change.source}`, into: `${refs}/head` },
       { from: `refs/heads/${change.target}`, into: `${refs}/target` },
     ])
-    if (!fetched) return cannot('its branches couldn’t be fetched')
+    if (!fetched) return cannot('its branches couldn’t be fetched', true)
     const head = yield* commitOf(root, `${refs}/head`)
     if (head !== change.headSha) return { kind: 'moved' } satisfies BranchUpdate
     const tip = yield* commitOf(root, `${refs}/target`)
@@ -52,11 +78,10 @@ export const mergeTargetIn = (root: string, target: PushTarget, change: ChangeRe
     if (merged.code !== 0 || tree === undefined || tree === '') return cannot('git couldn’t merge it here')
     const made = yield* git(root, 'commit-tree', tree, '-p', head, '-p', tip, '-m', `Merge branch '${change.target}' into ${change.source}`)
     // Plainly: a push someone made since the fetch isn't a fast-forward from here, and is refused.
-    const pushed = yield* pushTo(root, target, `merge-line/${change.number}`, made, undefined, change.source).pipe(
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
+    return yield* pushTo(root, target, `merge-line/${change.number}`, made, undefined, change.source).pipe(
+      Effect.as({ kind: 'pushed', head: made } satisfies BranchUpdate),
+      Effect.catchTag('GitFailed', (failed) => Effect.succeed(refusedPush(failed))),
     )
-    return pushed ? ({ kind: 'pushed', head: made } satisfies BranchUpdate) : ({ kind: 'moved' } satisfies BranchUpdate)
   }).pipe(
     // The refs it fetched into and pushed from go: nothing of it is left in the person's repository.
     Effect.ensuring(
@@ -69,5 +94,5 @@ export const mergeTargetIn = (root: string, target: PushTarget, change: ChangeRe
         (ref) => Effect.ignore(git(root, 'update-ref', '-d', ref)),
       ),
     ),
-    Effect.catchTag('GitFailed', () => Effect.succeed(cannot('git couldn’t merge it here'))),
+    Effect.catchTag('GitFailed', () => Effect.succeed(cannot('git couldn’t merge it here', true))),
   )

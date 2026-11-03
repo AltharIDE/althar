@@ -215,6 +215,9 @@ describe('GitHub as a code host', () => {
         ['GET', `${REPO}/commits/theirs`, { json: { parents: [{ sha: 'made' }] } }],
       ])
       assert.isNull(yield* pushed.host.updateBranch!(repository, open))
+      // Read again later, for an update that hadn't landed: the merge it made from the head it had, and no other.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc'))
+      assert.isFalse(yield* pushed.host.madeFrom!(repository, { ...open, headSha: 'theirs' }, 'abc'))
       // Up to date already, it is left as it is.
       const current = github([
         ['PUT', `${REPO}/pulls/12/update-branch`, { status: 422, json: { message: 'There are no new commits on the base branch.' } }],

@@ -368,12 +368,11 @@ in a way the repository allows. Every merge is an errand kept from the
 person's message, with one step, `merge`, so "merge it once it's green" and
 "merge it" are the same call:
 
-- **The host's own queue** (GitHub's merge queue on the branch, GitLab's
-  merge trains): the step puts it there at its head, and it is done once a
-  read shows it merged. There is no slot of Althar's. Bitbucket Cloud's
-  queue takes a pull request only from its site: once it is green the
-  coordinator hears so, with the link, and tells the person to add it there.
-  A queue that sends one back for a conflict hands it to the task's lead
+- **The host's own queue** (GitHub's merge queue on the branch, Bitbucket
+  Cloud's, GitLab's merge trains): the step puts it there at its head, and
+  it is done once a read shows it merged. There is no slot of Althar's.
+  Bitbucket Cloud's merge call is what puts one in its queue, and takes no
+  head, so the head is read just before. A queue that sends one back for a conflict hands it to the task's lead
   rather than putting it in again.
 - **Everywhere else, Althar's line:** one slot for each repository and
   branch, in the order the person asked; their "merge it now" (`now`) goes
@@ -382,8 +381,10 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   waits for green there; then it merges, with auto-merge as its merge where
   the host has it (GitLab, Data Center from 8.15). It holds the slot until a
   read shows the merge landed; the next starts from the branch's new head.
-  A step whose checks fail, or whose merge conflicts, steps out of line
-  until they pass or its head moves; a conflict is said to the task's lead.
+  A step whose checks fail, whose merge conflicts, or that Althar can't
+  bring up to date (a protected branch, an account that may not push), steps
+  out of line until they pass or its head or the branch moves; a conflict or
+  a refused push is said to the task's lead.
   A merge the host refuses (a review it needs, a merge check) pauses its
   errand, said so, and the next goes ahead. A branch is brought up to date
   three times at most, someone else writing to the target in between, then
@@ -393,7 +394,8 @@ person's message, with one step, `merge`, so "merge it once it's green" and
   (GitHub's update-branch; elsewhere Althar's own, made in the project's
   repository on this computer and pushed plainly, never forced, by
   `branchUpdate.ts` until ADR-081's task 6 brings `update_branch`; where it
-  can't, a fork or no way to push, it asks in a line). For each step that can't be undone, a merge or a
+  can't, a fork, no way to push or a push refused, the step steps out of
+  line and it is said, once). For each step that can't be undone, a merge or a
   queue, or settling one that landed, closed or moved, it wakes the
   coordinator with news naming the errand and step, and the coordinator's
   turn takes it through `Errands.execute`, which reads again before it acts.

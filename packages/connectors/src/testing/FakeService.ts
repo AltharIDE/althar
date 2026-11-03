@@ -181,6 +181,8 @@ export interface FakeControls {
   catchUp(): void
   /** Merges are taken but left open, as Bitbucket answers one that takes long, until `mergeByHand` lands it. */
   landLater(): void
+  /** GitHub's update-branch lands after its read-back, which so says null, as GitHub's does on a host under load. */
+  readBackLater(): void
   /**
    * Target branches merge through a merge queue, as GitHub's can: a merge
    * puts a change in it, open and queued, until `mergeByHand` lands it or
@@ -198,6 +200,8 @@ export interface FakeControls {
   branchHeadOf(branch: string, path?: ReadonlyArray<string>): string
   /** Someone pushes to a change's branch: its new head. */
   pushTo(number: number): string
+  /** The change's branch has its target's head now, as once a merge of it was pushed there from outside the fake. */
+  upToDate(number: number): void
   /** Every merge Althar asked for, in order: plain, auto-merge turned on, or into the queue or train, in the way asked and at the head it named. */
   readonly merged: ReadonlyArray<{
     readonly number: number
@@ -318,6 +322,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let lagged: ReadonlyArray<ChangeRequest> | null = null
   /** Whether a merge is taken but not landed yet. */
   let landsLater = false
+  let readsBackLater = false
   /** Whether merges go through a merge queue; the changes in it, and why the queue last took each out. */
   let queues = false
   const inQueue = new Set<number>()
@@ -571,11 +576,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           autoMerging.add(change.number)
           return Effect.succeed({ ...changeNumbered(change.number), autoMerge: true })
         }
-        if (queues && product === 'bitbucket_cloud')
-          return Effect.fail(
-            new ConnectorFailed({ product, reason: 'rejected', message: 'This branch merges only through its merge queue' }),
-          )
-        if (queues && product === 'github') {
+        // As GitHub's and Bitbucket Cloud's, a merge on a branch with a queue puts it in the queue.
+        if (queues && (product === 'github' || product === 'bitbucket_cloud')) {
           mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
           inQueue.add(change.number)
           return Effect.succeed({ ...changeNumbered(change.number), queued: true })
@@ -593,7 +595,6 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               : queues && product === 'gitlab'
                 ? 'merge_train'
                 : null,
-          ...(queues && product === 'bitbucket_cloud' ? { addedOnSite: true } : {}),
           autoMerge: autoMerges,
           server:
             product === 'gitlab' ? 'GitLab 18.5 (the fake)' : product === 'bitbucket_dc' ? 'Bitbucket Data Center 9.4 (the fake)' : null,
@@ -601,7 +602,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       ),
     enqueue: (_repository, change) =>
       Effect.andThen(called('enqueue'), () => {
-        if (!queues || (product !== 'github' && product !== 'gitlab'))
+        if (!queues || product === 'bitbucket_dc')
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'There is no merge queue here' }))
         const now = changeNumbered(change.number)
         if (now.state !== 'open' || now.draft)
@@ -644,8 +645,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
               updates.push(change.number)
               const made = `${now.headSha ?? 'head'}+${target}`
               update(change.number, { headSha: made })
-              return Effect.succeed(made)
+              return Effect.succeed(readsBackLater ? null : made)
             }),
+          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
+            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
         }
       : {}),
     closeChange: (_repository, change) =>
@@ -1041,6 +1044,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     lagReads: () => void (lagged = [...changes]),
     catchUp: () => void (lagged = null),
     landLater: () => void (landsLater = true),
+    readBackLater: () => void (readsBackLater = true),
     mergeQueue: () => void (queues = true),
     enqueueByHand: (number) => void inQueue.add(number),
     dequeue: (number, why) => {
@@ -1054,6 +1058,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       return head
     },
     branchHeadOf: (branch, path) => historyOf(repositoryAt(path).id, branch).at(-1) ?? `${branch}-0`,
+    upToDate: (number) => {
+      const change = changeNumbered(number)
+      upTo.set(number, historyOf(repositoryOf.get(number) ?? '', change.target).at(-1) ?? '')
+    },
     pushTo: (number) => {
       const head = `${changeNumbered(number).headSha ?? 'head'}+push-${(writes += 1)}`
       update(number, { headSha: head })

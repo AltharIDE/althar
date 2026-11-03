@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -99,6 +99,20 @@ describe('Althar’s own merge of the target into a pull request’s branch', ()
     Effect.gen(function* () {
       const { remote, here, head, target } = repositories(true)
       assert.deepStrictEqual(yield* mergeTargetIn(here, target, change(head)), { kind: 'conflicts', files: ['README.md'] })
+      assert.strictEqual(run(remote, 'rev-parse', 'refs/heads/feature'), head)
+    }),
+  )
+
+  it.effect('a push the host refuses is said with its reason, not read as the branch having moved', () =>
+    Effect.gen(function* () {
+      const { remote, here, head, target } = repositories()
+      const hook = join(remote, 'hooks', 'pre-receive')
+      writeFileSync(hook, '#!/bin/sh\necho "feature is protected: merges only" >&2\nexit 1\n')
+      chmodSync(hook, 0o755)
+      const done = yield* mergeTargetIn(here, target, change(head))
+      assert.strictEqual(done.kind, 'cannot')
+      assert.match(done.kind === 'cannot' ? done.reason : '', /^the host refused the push: feature is protected/)
+      assert.notStrictEqual(done.kind === 'cannot' ? done.passing : undefined, true)
       assert.strictEqual(run(remote, 'rev-parse', 'refs/heads/feature'), head)
     }),
   )
