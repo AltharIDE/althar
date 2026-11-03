@@ -53,14 +53,14 @@ describe('a week’s share', () => {
     assert.strictEqual(tookOf([week(0, 90, THU), week(10 * MINUTE, 2, '2026-11-16T11:00:00.000Z')], [turn(0, 10 * MINUTE, 500)]), 2)
   })
 
-  it('counts a week that started again mid-task: the old week’s rise, then all the new one says', () => {
+  it('counts a week that started again mid-task as all the new one says, never more than the week now says', () => {
     const readings = [
       week(0, 80),
       week(10 * MINUTE, 85),
       week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z'),
       week(30 * MINUTE, 6, '2026-11-16T11:00:00.000Z'),
     ]
-    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 5 + 3 + 3)
+    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 6)
   })
 
   it('takes a week whose reset time wavers by moments for the same week', () => {
@@ -86,16 +86,32 @@ describe('a week’s share', () => {
     assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 1)
   })
 
-  it('starts a week again where a reset time is unknown only when its use went down', () => {
-    const readings = [week(0, 40, null), week(10 * MINUTE, 42, null), week(20 * MINUTE, 1, null)]
-    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 3)
+  it('starts a week again where a reset time is unknown only when its use fell by more than rounding', () => {
+    const readings = [week(0, 40, null), week(10 * MINUTE, 42, null), week(20 * MINUTE, 1, null), week(30 * MINUTE, 4, null)]
+    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 4)
   })
 
-  it('never puts on a task more than the week rose over its readings, nor more than the week now says', () => {
-    const readings = [week(0, 19), week(60 * MINUTE, 22), week(120 * MINUTE, 25)]
-    const took = tookOf(readings, [turn(0, 120 * MINUTE, 500), turn(30 * MINUTE, 90 * MINUTE, 1, false)]) ?? 0
-    assert.isAtMost(took, 25 - 19)
-    assert.isAtMost(took, 25)
+  it('takes a one-point dip with a reset time unknown, on either side, for the same week', () => {
+    const readings = [week(0, 23), week(MINUTE, 24, null), week(2 * MINUTE, 23), week(3 * MINUTE, 24, null), week(4 * MINUTE, 23, null)]
+    assert.strictEqual(tookOf(readings, [turn(0, 4 * MINUTE, 500)]), 1)
+  })
+
+  it('starts a new week once when its first reading has no reset time and a later one has', () => {
+    const readings = [week(0, 80), week(10 * MINUTE, 2, null), week(20 * MINUTE, 5, '2026-11-16T11:00:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 5)
+  })
+
+  it('takes a reset time that shifts by hours, as a rolling window’s would, for the same week', () => {
+    const readings = [week(0, 30), week(10 * MINUTE, 31, '2026-11-09T14:00:00.000Z'), week(20 * MINUTE, 32, '2026-11-09T18:30:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 2)
+  })
+
+  it('never puts on a task more than the week now says', () => {
+    // The old week's 10 points and the new week's 3 were all this task's, but the week it's read against says 3.
+    const readings = [week(0, 80), week(10 * MINUTE, 90), week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 3)
+    // Within a week too, where the last reading rounded down.
+    assert.strictEqual(tookOf([week(0, 0), week(MINUTE, 10), week(2 * MINUTE, 9)], [turn(0, 2 * MINUTE, 500)]), 9)
   })
 
   it('counts of readings far apart only the part the task ran in', () => {
@@ -242,6 +258,34 @@ describe('a task’s usage', () => {
       const [line] = (yield* Effect.orDie(queries.thread(created.threadId))).usage ?? []
       assert.deepInclude(line, { paidBy: 'plan', spent: null, estimated: true })
       assert.closeTo(line?.took ?? 0, 2.5, 1e-9)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says a share of its week no more than the week rose, where the reset time read wavers by milliseconds', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+      yield* ended(created.threadId, 1)
+      yield* say(created.threadId, scenarios.hello)
+      yield* ended(created.threadId, 2)
+      const [span] = yield* sql<{ accountId: string; from: string; to: string }>`
+        SELECT s.account_id, min(coalesce(d.delivered_at, d.requested_at)) AS "from", max(d.ended_at) AS "to"
+        FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id WHERE d.thread_id = ${created.threadId}`
+      const at = (time: string, by: number) => new Date(Date.parse(time) + by).toISOString()
+      const from = Date.parse(span!.from)
+      const between = (part: number) => at(span!.from, (Date.parse(span!.to) - from) * part)
+      // As the person's store kept it on 3 November 2026: the two sources' resets a few milliseconds apart.
+      yield* sql`INSERT INTO plan_usage_weeks ${sql.insert([
+        { accountId: span!.accountId, usedPercent: 23, resetsAt: '2026-11-09T11:00:00.000Z', observedAt: at(span!.from, -1000) },
+        { accountId: span!.accountId, usedPercent: 24, resetsAt: '2026-11-09T11:00:00.023Z', observedAt: between(0.3) },
+        { accountId: span!.accountId, usedPercent: 23, resetsAt: '2026-11-09T11:00:00.000Z', observedAt: between(0.6) },
+        { accountId: span!.accountId, usedPercent: 24, resetsAt: '2026-11-09T10:59:59.867Z', observedAt: at(span!.to, 1000) },
+      ])}`
+      const [line] = (yield* Effect.orDie(queries.thread(created.threadId))).usage ?? []
+      assert.closeTo(line?.took ?? 0, 1, 1e-9)
     }).pipe(Effect.provide(withQueries())),
   )
 

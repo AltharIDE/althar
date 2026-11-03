@@ -63,56 +63,58 @@ const covered = (turns: ReadonlyArray<TurnSpan>, from: number, to: number) => {
 }
 
 /**
- * How far a week's reset time may wander between readings and still be the same
- * week. The plan's sources give it to the millisecond, and not always the same
- * millisecond (11:00:00.000, 11:00:00.023, 10:59:59.867), nor the same rounding
- * of its use (24 then 23 a minute later).
+ * How far a week's reset time must move on for a new week. The plan's sources give
+ * it to the millisecond, and not always the same millisecond (11:00:00.000,
+ * 11:00:00.023, 10:59:59.867), and a window recomputed as it rolls may shift it
+ * by hours; a new week moves it on by days.
  */
-export const RESET_SLACK = 10 * 60_000
+export const NEW_WEEK = 24 * 60 * 60_000
 
 /**
- * Whether a week started again between two readings: its reset time moved on
- * past the slack; with either reset time unknown, its use went down.
+ * How far a week's use must drop, where its reset time is unknown, for a new week.
+ * The sources round its use differently (24 then 23 a minute later).
  */
-export const startedAgain = (before: WeekReading, after: WeekReading) => {
-  const was = before.resetsAt === null ? Number.NaN : Date.parse(before.resetsAt)
-  const is = after.resetsAt === null ? Number.NaN : Date.parse(after.resetsAt)
-  if (Number.isNaN(was) || Number.isNaN(is)) return after.usedPercent < before.usedPercent
-  return is - was > RESET_SLACK
-}
+export const NEW_WEEK_DROP = 5
+
+const resetOf = (reading: WeekReading) => (reading.resetsAt === null ? Number.NaN : Date.parse(reading.resetsAt))
 
 /**
  * The points of a week the turns asked about took: each rise between two
  * readings, shared among the turns that ran then by their tokens (by their time
  * where none said any). Within a week only a rise past its highest reading yet
- * counts, so a reading that dips and climbs back adds nothing; a week that
- * started again rose by all the later reading says. Never more than the week
- * rose over the readings, which within a week is no more than it now says.
- * Null with no reading at all.
+ * counts, so a reading that dips and climbs back adds nothing. A week started
+ * again when its reset time moved on by a day or more, or, where that's unknown,
+ * its use dropped by more than rounding; it then rose by all the later reading
+ * says. Never more than the week says at the last reading: a task can't have
+ * taken more of the week than all of it used. Null with no reading at all.
  */
 export const tookOf = (all: ReadonlyArray<WeekReading>, turns: ReadonlyArray<TurnSpan>): number | null => {
   if (all.length === 0) return null
   // A week only moves on: a reading whose reset is well before one already read is another window's, and is left out.
   let latest = Number.NEGATIVE_INFINITY
   const readings = all.filter((reading) => {
-    const resets = reading.resetsAt === null ? Number.NaN : Date.parse(reading.resetsAt)
+    const resets = resetOf(reading)
     if (Number.isNaN(resets)) return true
-    if (resets < latest - RESET_SLACK) return false
+    if (resets < latest - NEW_WEEK) return false
     latest = Math.max(latest, resets)
     return true
   })
   let took = 0
-  let rose = 0
   let highest = readings[0]!.usedPercent
+  let weekResets = resetOf(readings[0]!)
   for (let at = 1; at < readings.length; at++) {
     const before = readings[at - 1]!
     const after = readings[at]!
-    if (startedAgain(before, after)) highest = 0
+    const resets = resetOf(after)
+    const startedAgain =
+      Number.isNaN(resets) || Number.isNaN(weekResets)
+        ? after.usedPercent < before.usedPercent - NEW_WEEK_DROP
+        : resets - weekResets >= NEW_WEEK
+    // The new week's reset is the first one read in it, so a known one after an unknown one doesn't start it twice.
+    if (startedAgain || Number.isNaN(weekResets)) weekResets = resets
+    if (startedAgain) highest = 0
     const rise = after.usedPercent - highest
-    if (rise > 0) {
-      highest = after.usedPercent
-      rose += rise
-    }
+    if (rise > 0) highest = after.usedPercent
     const stretch = after.at - before.at
     if (rise <= 0 || stretch <= 0) continue
     let ours = 0
@@ -135,7 +137,7 @@ export const tookOf = (all: ReadonlyArray<WeekReading>, turns: ReadonlyArray<Tur
     const counted = stretch <= LONG_STRETCH ? 1 : Math.min(1, covered(turns, before.at, after.at) / stretch)
     took += rise * share * counted
   }
-  return Math.min(took, rose)
+  return Math.min(took, readings.at(-1)!.usedPercent)
 }
 
 /** The readings that bound the turns: the last at or before the first began, to the first at or after the last ended. */
