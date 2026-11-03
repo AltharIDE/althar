@@ -1,5 +1,6 @@
 import { errandLines } from './Errands'
 import type { MessageSender } from '@althar/contracts'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
@@ -2123,6 +2124,8 @@ export class Sessions extends Context.Service<
                   sessionId,
                   taskBranch: thread.branch,
                   defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
+                  // Only the task's own repositories: a scratch one in its temp folder is the lead's to do with as it likes.
+                  repositories: [thread.cwd, ...thread.repositories.map((repository) => repository.worktree)],
                   count: SIGNED_OUT_GIT_CONFIG,
                 })
               : {}
@@ -2171,6 +2174,8 @@ export class Sessions extends Context.Service<
                         ...(repository.baseRef.startsWith('upstream/') ? [repository.baseRef.slice('upstream/'.length)] : []),
                       ]),
                       taskBranch: thread.branch,
+                      // Its git stops what can't be undone whatever runs it, so a Never of only that needn't read the rest (rules.ts).
+                      ...(guardHolds ? { guarded: true } : {}),
                     },
                   }
                 : {
@@ -2315,6 +2320,16 @@ export class Sessions extends Context.Service<
           const temp = connection.process?.temp
           if (temp !== undefined && held.rules.role === 'task')
             held = { ...held, rules: { ...held.rules, context: { ...held.rules.context, temp } } }
+          // Where its agent records where its shell is, the rules read a relative path from there, not from where it started.
+          if (definition.shellFolder !== undefined && held.rules.role === 'task')
+            held = {
+              ...held,
+              shell: definition.shellFolder(
+                accounts.env(account)[definition.home.variable] ?? definition.home.usual(process.env, homedir()),
+                cwdOf(thread),
+                agent.sessionId,
+              ),
+            }
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext: held, upFront }
         })
 

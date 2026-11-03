@@ -1,4 +1,4 @@
-# ADR-089: Run opens its list, and runs where it is picked
+# ADR-090: Run opens its list, and runs where it is picked
 
 - **Status:** Accepted
 - **Date:** 2026-11-03

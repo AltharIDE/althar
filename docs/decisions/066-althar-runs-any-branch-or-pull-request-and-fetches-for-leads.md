@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Amended:** 2026-11-03: a branch or pull request is picked beside Run, as a place to run on, and fetched as something runs there
-  ([ADR-089](089-run-opens-its-list-and-runs-where-it-is-picked.md)).
+  ([ADR-090](090-run-opens-its-list-and-runs-where-it-is-picked.md)).
 - **Owner:** Repository maintainers
 - **Context:** A person asked their coordinator to "start the app's feature
   branch that adds a services directory (not pulled yet)". `run_project`

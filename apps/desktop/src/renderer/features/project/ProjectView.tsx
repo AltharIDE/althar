@@ -493,7 +493,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, where it is picked to (ADR-089).
+      // What the project runs, with no agent, where it is picked to (ADR-090).
       {...(coordinator === null
         ? {}
         : {

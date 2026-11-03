@@ -10,7 +10,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './RunPlace.module.css'
 
 /*
- * Where the project's Run runs (ADR-089), beside it, as a branch switcher is:
+ * Where the project's Run runs (ADR-090), beside it, as a branch switcher is:
  * the default branch, a task's worktree, or a pull request or branch the
  * remote has, which Althar fetches as it runs (ADR-066). Picked, it stays
  * until another is. It opens on a field: what the remote has is asked as it

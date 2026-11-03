@@ -607,6 +607,12 @@ export class Changes extends Context.Service<
      * each on a new branch (ADR-034), and refuses where there is none.
      */
     publish(input: PublishInput): Effect.Effect<Published, unknown>
+    /**
+     * Whether its lead built nothing: it has a branch, with no commits on it, nothing uncommitted but evidence, and no pull
+     * request open or merged (one closed with nothing left counts); false where a branch can't be read. Such a change has
+     * nothing to open or merge, so it settles as Done, and no pull request is opened for it.
+     */
+    nothingBuilt(taskId: string): Effect.Effect<boolean, unknown>
     /** The task's repositories whose last pull request merged or closed with commits after it: what a next pull request would have. */
     unshipped(taskId: string, options?: { readonly kept?: boolean }): Effect.Effect<ReadonlyArray<Unshipped>, unknown>
     /**
@@ -4047,6 +4053,29 @@ export class Changes extends Context.Service<
           return found
         })
 
+      const nothingBuiltOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const links = yield* sql<{ state: string | null }>`
+            SELECT json_extract(snapshot, '$.state') AS state FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
+          if (links.some((link) => link.state !== 'closed')) return false
+          const worktrees = yield* sql<{ path: string; baseCommit: string | null; baseRef: string | null }>`
+            SELECT w.path, w.base_commit, w.base_ref FROM workspaces w
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'`
+          // No branch of its own to read, or one whose folder is gone (deleted, or on a volume not mounted): not known to be empty.
+          if (worktrees.length === 0) return false
+          const pictures = yield* evidencePaths(taskId)
+          for (const worktree of worktrees) {
+            if (!existsSync(worktree.path)) return false
+            const base = worktree.baseCommit ?? worktree.baseRef
+            // Where git can't say what it started from, it isn't known to be empty.
+            if (base === null) return false
+            if ((yield* commitsAhead(worktree.path, base)) > 0) return false
+            if ((yield* uncommittedFiles(worktree.path)).some((file) => !pictures(worktree.path, file))) return false
+          }
+          return true
+        })
+
       /**
        * A task is done once each of its repositories is merged: its pull
        * request merged, or, where it has none, its branch in its default branch
@@ -6172,13 +6201,15 @@ export class Changes extends Context.Service<
           )
           const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
           const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+          // Commits from elsewhere come in as the default branch does: fetched by Althar, merged, never rebased over.
+          const bringIn = `Call fetch_from_remote with pull_request ${now.number}, merge what it says it got into your branch (never rebase, nor force a push), then call push_to_pull_request again.`
           if (ahead.kind === 'behind')
             return yield* new ToolRefused({
-              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. Tell the person.`,
+              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. ${bringIn}`,
             })
           if (ahead.kind === 'unknown')
             return yield* new ToolRefused({
-              message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. Tell the person.`,
+              message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. ${bringIn}`,
             })
           if (ahead.kind === 'rewritten')
             return yield* new ToolRefused({
@@ -6473,6 +6504,7 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
+        nothingBuilt: (taskId) => provide(nothingBuiltOf(taskId)),
         unshipped: (taskId, options) => provide(unshippedOf(taskId, options?.kept === true)),
         inHands: (taskId) => provide(handsOf(taskId)),
         fixing: (taskId) =>

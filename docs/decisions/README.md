@@ -95,4 +95,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md) | The coordinator stops, holds, restarts and settles a task when the person's message in that turn asks, with a line in both threads; any other turn asks on a card, and discarding deletes nothing |
 | [087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) | A lead starts helpers on any agent, each in a copy of its own, and hears each one's result as a new turn (proposed) |
 | [088](088-plan-countdown-review-rounds-and-new-project-defaults-are-settings.md) | The plan countdown, review rounds and new-project defaults are settings, read where they apply and seeding a project's first rules |
-| [089](089-run-opens-its-list-and-runs-where-it-is-picked.md) | Run opens its list, and runs where it is picked |
+| [089](089-the-asks-and-refusals-left-are-what-can-t-be-undone.md) | The asks and refusals left once the sandbox is the boundary are what can't be undone: a crossing goes unread, a line is read from the shell's folder, and tearing down or publishing asks |
+| [090](090-run-opens-its-list-and-runs-where-it-is-picked.md) | Run opens its list, and runs where it is picked |

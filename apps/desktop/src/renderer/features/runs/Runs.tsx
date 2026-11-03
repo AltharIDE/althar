@@ -25,7 +25,7 @@ import { ago, running } from '../../shared/time'
 import { type RunsModel, useRuns } from './useRuns'
 
 /*
- * What a project runs, from the top of its screen or a task's bar (ADR-089):
+ * What a project runs, from the top of its screen or a task's bar (ADR-090):
  * the Run button, which only opens its list, each line started and stopped
  * there. In a task, what runs is the task's, in its worktree. On the project,
  * where it runs is picked beside it, as a branch is, and stays picked: the
