@@ -4,7 +4,9 @@
   color: var(--t-2);
 }
 
+/* The title reads as part of the question: its size and colour, a link only on hover. */
 .title {
-  font-weight: 600;
+  font: inherit;
+  font-weight: 650;
   color: inherit;
 }
