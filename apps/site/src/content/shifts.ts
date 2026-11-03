@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters, and on 3 November with OpenAI cancelling the ChatGPT Pro $200 cut and announcing a shared ChatGPT and Codex allowance; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -55,6 +55,18 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'chatgpt-pro-cut-cancelled',
+    date: '2026-10-29',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'OpenAI cancels the ChatGPT Pro $200 usage cut',
+    what: 'The halving planned for 30 October is off, so Pro $200 keeps its Work and Codex allowance. Pro $100 and Pro $500 got twice theirs. Plus is unchanged.',
+    source: {
+      name: 'Mixed',
+      url: 'https://mixed-news.com/en/chatgpt-pro-200-canceled-cut-codex-work-usage-increase/',
+    },
+  },
   {
     id: 'claude-api-sampling-removed',
     date: '2026-10-21',
@@ -284,18 +296,6 @@ export const SHIFTS: readonly Shift[] = [
     },
   },
   {
-    id: 'claude-code-agents-md',
-    date: '2026-09-18',
-    kind: ShiftKind.Tools,
-    who: 'Anthropic',
-    title: 'Claude Code reads AGENTS.md',
-    what: 'Claude Code now reads AGENTS.md in projects that have no CLAUDE.md.',
-    source: {
-      name: 'Enterprise DNA',
-      url: 'https://enterprisedna.co/resources/ai-pulse/ai-pulse-2026-09-19-claude-code-adopts-agents-md-standard/',
-    },
-  },
-  {
     id: 'claude-code-weekly-limits',
     date: '2026-09-14',
     kind: ShiftKind.Limits,
@@ -400,19 +400,6 @@ export const SHIFTS: readonly Shift[] = [
  */
 export const UPCOMING: readonly Upcoming[] = [
   {
-    id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-30',
-    announced: '2026-09-29',
-    kind: ShiftKind.Limits,
-    who: 'OpenAI',
-    title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
-    source: {
-      name: 'Engadget',
-      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
-    },
-  },
-  {
     id: 'usage-policy-takes-effect',
     date: '2026-11-12',
     announced: '2026-10-09',
@@ -467,6 +454,19 @@ export const UPCOMING: readonly Upcoming[] = [
     title: 'Evals, reusable prompts and Agent Builder shut down',
     what: 'Existing evals turn read-only on 31 October. OpenAI points to Promptfoo for evals and the Agents SDK for Agent Builder.',
     source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'chatgpt-codex-shared-allowance',
+    date: '2026-12-01',
+    announced: '2026-11-02',
+    kind: ShiftKind.Limits,
+    who: 'OpenAI',
+    title: 'ChatGPT and Codex will share one usage allowance',
+    what: 'From December on Plus, Pro and Business, chat and Codex draw from one token-counted pool. Instant chat is excluded. OpenAI hasn’t published the sizes or the exact day.',
+    source: {
+      name: 'Notebookcheck',
+      url: 'https://www.notebookcheck.net/ChatGPT-and-Codex-will-share-one-usage-limit-starting-in-December.1440897.0.html',
+    },
   },
   {
     id: 'gemini-4-argon-price-doubles',
