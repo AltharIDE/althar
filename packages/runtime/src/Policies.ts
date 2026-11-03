@@ -1,5 +1,5 @@
 import { commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
-import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -97,6 +97,12 @@ export const ProjectRules = Schema.Struct({
    * nothing, its migration having kept it as such a note.
    */
   moveIssues: Schema.optional(Schema.Boolean),
+  /**
+   * Where new tasks start (ADR-091): in a worktree of their own, or Local, in
+   * each repository's own checkout here, one task at a time. The coordinator
+   * chooses per task. A worktree without it.
+   */
+  worksIn: Schema.optional(WorksIn),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -189,6 +195,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
+
+/** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */
+export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true

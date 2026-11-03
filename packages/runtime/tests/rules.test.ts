@@ -1466,6 +1466,22 @@ describe('what could lose work or a secret (DEV-69)', () => {
     assert.strictEqual(verdictOf('git push --force origin main', { mode: 'allow', never: ['force-push'] }), 'deny')
   })
 
+  it('asks with everything allowed before git throws away what isn’t committed in a Local task’s folder, the person’s own checkout (ADR-091)', () => {
+    const allow = { mode: 'allow' as const }
+    const local = { ...rules(allow), shared: [worktree] }
+    const discarding = ['git reset --hard', 'git stash', 'git clean -fd', 'git checkout -- .', 'git restore src/app.ts']
+    for (const command of discarding) assert.deepInclude(run(command, local), { verdict: 'ask', held: false }, command)
+    assert.strictEqual(
+      reasonOf(run('git stash', local)),
+      `\`git stash\` in your checkout asks even with everything allowed: it could throw away your own uncommitted work: ${worktree}`,
+    )
+    // In a worktree of its own, nothing of the person's is there to lose.
+    for (const command of discarding) assert.strictEqual(run(command, rules(allow)).verdict, 'allow', command)
+    // What keeps its work goes ahead in the checkout as anywhere.
+    for (const command of ['git add src/app.ts', 'git commit -m Fix', 'git status', 'git diff', 'git switch althar/retry'])
+      assert.strictEqual(run(command, local).verdict, 'allow', command)
+  })
+
   it('lets through with everything allowed what can be got back: the stash, what git keeps to recover work, a .env outside', () => {
     for (const command of undoable) assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
     // Read as a file too, not only in a command.

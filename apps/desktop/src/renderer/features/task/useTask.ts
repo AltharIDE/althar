@@ -3,6 +3,7 @@ import { doing, type Doing } from './actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  type CheckoutAnswer,
   ApiError,
   type AgentStatus,
   type AlwaysScope,
@@ -153,6 +154,8 @@ export interface TaskModel {
   /** Answers a step that needs the person. */
   /** Whether it went through: a stuck step whose answer didn't is answerable again. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
+  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
+  readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -640,6 +643,7 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return through
     },
+    answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
