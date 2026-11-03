@@ -94,6 +94,12 @@ export const shortWhereLine = (conflicts: ReadonlyArray<Conflict>) =>
     ? `${conflicts[0].branch} in ${named(conflicts[0].files)}`
     : conflicts.map((one) => `${one.name}’s ${one.branch} in ${named(one.files)}`).join('; ')
 
+/** Checks that failed on a pull request as it was when a round began, its lead's to fix with the merge: which, and the ends of their logs where Althar read them. */
+export interface FailedChecks {
+  readonly failing: ReadonlyArray<string>
+  readonly logs: ReadonlyArray<string>
+}
+
 /**
  * What the lead is asked. Merging here, the note the person sends with
  * "Ask the lead to resolve it" (the desktop's TaskView), in the same words;
@@ -101,13 +107,16 @@ export const shortWhereLine = (conflicts: ReadonlyArray<Conflict>) =>
  * pushes the merge. Either way, to commit the merge before anything slow and
  * before it ends its turn, and what to do when it can't. Asked once more
  * where all that was left was to commit the merge (`uncommitted`), it is
- * told so, rather than asked to resolve it again.
+ * told so, rather than asked to resolve it again. Where the pull request's
+ * checks had failed too (`failed`), the lead is asked to fix them in the
+ * same go, in the one commit on top of the merge Althar pushes with it.
  */
 export const noteFor = (
   conflicts: ReadonlyArray<Conflict>,
   place: Place,
   failure: string | null,
   uncommitted: ReadonlyArray<Conflict> = [],
+  failed: FailedChecks | null = null,
 ) => {
   const [only] = conflicts
   const asked =
@@ -144,7 +153,7 @@ export const noteFor = (
       .filter((part) => part !== '')
       .join(' ')
   }
-  return [
+  const asking = [
     ...(failure === null ? [] : [`The conflict isn't resolved yet: ${failure} Try once more.`]),
     asked,
     merge,
@@ -155,6 +164,13 @@ export const noteFor = (
   ]
     .filter((part) => part !== '')
     .join(' ')
+  if (failed === null || failed.failing.length === 0 || place.change === null) return asking
+  return [
+    asking,
+    `${place.change}'s checks failed too: ${failed.failing.join(', ')}.`,
+    ...failed.logs,
+    `Once the merge is committed, work out what broke them. Where this change broke them, fix it in that one follow-up commit on top of the merge, with whatever the full tests find. Where one fails the same way on ${only?.branch ?? 'the default branch'}'s latest commit (read_default_branch_checks shows its checks), or failed by chance, change nothing for it and say so. Read more with read_checks (tail, search, full log file, annotations and artifacts).`,
+  ].join('\n\n')
 }
 
 /**

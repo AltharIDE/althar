@@ -190,8 +190,8 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
-/** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
-export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
+/** Whether a revision's rules have the lead resolve a conflict on its own: they do unless the person turned it off. */
+export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts !== false
 
 /** Whether a revision's rules push a lead's commits on their own (ADR-072): they do unless the person turned it off. */
 export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits ?? true

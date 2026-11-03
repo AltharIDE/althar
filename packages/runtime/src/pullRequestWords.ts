@@ -264,6 +264,9 @@ export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'go
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`
 
+/** Why the checks that fail on a change are the person's, as its card says, where they stopped its lead since they failed. */
+export const stoppedLine = (failing: ReadonlyArray<string>) => `${failingWords(failing)}, and you stopped the lead. Tell it what to do.`
+
 /** Checks that still fail: the one by its name, or how many. */
 const failingWords = (failing: ReadonlyArray<string>) =>
   failing.length === 1 ? `${failing[0]} still fails` : `${failing.length === 0 ? 'Checks' : `${failing.length} checks`} still fail`

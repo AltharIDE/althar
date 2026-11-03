@@ -54,13 +54,13 @@ export const moveMainOn = (root: string, text = 'rate limits\n') => {
   git(root, 'commit', '-q', '-m', 'Limit rates')
 }
 
-/** Opens the repository as a project, with the rule on or not, and asks its coordinator for a change. */
+/** Opens the repository as a project, with the rule on, as it is unless the person turns it off, or off, and asks its coordinator for a change. */
 export const ask = (working: string, body: string, resolveConflicts: boolean) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
-    if (resolveConflicts) yield* (yield* Policies).set(project.projectId, { resolveConflicts: true }, (yield* Instance).personId)
+    if (!resolveConflicts) yield* (yield* Policies).set(project.projectId, { resolveConflicts: false }, (yield* Instance).personId)
     const threadId = yield* coordinator.thread(project.projectId)
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     return project.projectId
@@ -152,6 +152,15 @@ export const holdsMain = (bare: string, sha: string) => {
     return false
   }
 }
+/** Whether a commit the host has holds the fix the lead made on top of a merge, with it (`[lead:resolve-fix]`). */
+export const holdsTestsFix = (bare: string, sha: string) => {
+  try {
+    git(bare, 'cat-file', '-e', `${sha}:tests.txt`)
+    return true
+  } catch {
+    return false
+  }
+}
 /** Whether a commit the host has holds the lead's fix for its checks. */
 export const holdsFix = (bare: string, sha: string) => {
   try {
@@ -159,6 +168,15 @@ export const holdsFix = (bare: string, sha: string) => {
     return true
   } catch {
     return false
+  }
+}
+
+/** The task's branch where the host has it: the one branch of Althar's there, whatever the task is called. */
+const taskBranch = (bare: string) => {
+  try {
+    return git(bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/althar/').split('\n')[0] || null
+  } catch {
+    return null
   }
 }
 
@@ -173,8 +191,9 @@ export const hostOf = (
   conflicting: () => void = () => {},
 ) => {
   const tip = () => {
+    const branch = taskBranch(bare)
     try {
-      return git(bare, 'rev-parse', 'althar/add-a-retry')
+      return branch === null ? null : git(bare, 'rev-parse', branch)
     } catch {
       return null
     }
@@ -183,8 +202,9 @@ export const hostOf = (
     pushUrl: () => bare,
     headOf: tip,
     conflictsOf: () => {
-      if (tip() === null) return undefined
-      const conflicts = conflictsIn(bare, 'main', 'althar/add-a-retry')
+      const branch = taskBranch(bare)
+      if (branch === null || tip() === null) return undefined
+      const conflicts = conflictsIn(bare, 'main', branch)
       if (conflicts) conflicting()
       return conflicts
     },

@@ -2907,11 +2907,13 @@ export class Sessions extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const [plan] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'plan' ORDER BY sequence DESC LIMIT 1`
-          // Whether the task, or else its project, has its lead resolve conflicts on its own: then Althar pushes that merge (ADR-030).
+          // Whether the task, or else its project, has its lead resolve conflicts on its own, as they do unless the person turned it
+          // off: then Althar pushes that merge (ADR-030).
           const [resolves] = yield* sql<{ resolves: number | null }>`
             SELECT coalesce(
               (SELECT resolve_conflicts FROM tasks WHERE id = ${thread.taskId}),
-              (SELECT json_extract(rules, '$.resolveConflicts') FROM policies WHERE project_id = ${thread.projectId} ORDER BY revision DESC LIMIT 1)
+              (SELECT json_extract(rules, '$.resolveConflicts') FROM policies WHERE project_id = ${thread.projectId} ORDER BY revision DESC LIMIT 1),
+              1
             ) AS resolves`
           const entries =
             plan === undefined

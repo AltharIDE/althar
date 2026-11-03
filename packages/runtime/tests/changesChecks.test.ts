@@ -560,8 +560,9 @@ describe('a change whose checks Althar sees through', () => {
         }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' AND json_extract(payload, '$.id') LIKE '%:again'`,
         (heard) => heard.length > 0,
       )
-      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      assert.isNull(stopped?.checksBack ?? null)
+      // The person's, and its card says why, not only that they fail (ADR-090).
+      const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.checksBack != null)
+      assert.strictEqual(stopped?.checksBack, 'test still fails, and you stopped the lead. Tell it what to do.')
       yield* Effect.sleep('500 millis')
       assert.lengthOf(yield* sessionsOf, before)
       assert.strictEqual((yield* cards(projectId))[0]?.phase, 'ready')
