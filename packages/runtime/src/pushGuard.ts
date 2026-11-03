@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { type RemoveFailed, removeFully } from '@althar/provider-adapters'
 import { Effect } from 'effect'
@@ -30,6 +30,14 @@ import type { GitRun } from './rules'
  *
  * What it stops it names on a line of its own (`STOPPED`), which Althar
  * reads on the failed call to count it as a refusal (`guardStopIn`).
+ *
+ * It reads only the task's own repositories, by their git folder, which
+ * every worktree of one shares, and a push to one of their remotes from
+ * anywhere: a scratch repository a lead makes in its temp folder is its own
+ * to push to main or delete branches in. Nor does it
+ * stop what loses no commit: deleting or moving a branch whose commits are
+ * still on another branch, a remote's or a tag, as after `git branch -d`,
+ * which git refuses for work that isn't merged.
  *
  * It holds against a mistake, not an agent set on getting past it: one that
  * changes its environment or git's config gets past it, as one outside its
@@ -112,11 +120,11 @@ export const guardStopIn = (printed: string): 'default-branch' | 'force-push' | 
     | undefined
 
 /**
- * The guard: a push of the default branch, of a branch over commits it
- * doesn't have, or deleting a branch that isn't the task's; a branch that
- * isn't the task's deleted or moved so it loses commits here. Tags and
- * remotes' branches go as before. A fresh pass lets through the git it
- * names, once: the run that first spends it.
+ * The guard, in the task's repositories: a push of the default branch, of a
+ * branch over commits it doesn't have, or deleting a branch that isn't the
+ * task's; a branch that isn't the task's deleted or moved so it loses
+ * commits here. Tags and remotes' branches go as before. A fresh pass lets
+ * through the git it names, once: the run that first spends it.
  */
 const GUARD = `#!/bin/sh
 # Althar's guard (ADR-071): stops what can't be undone from a task, at git itself.
@@ -129,6 +137,15 @@ tab=$(printf '\t')
 task=\${ALTHAR_TASK_BRANCH:-}
 defaults=" \${ALTHAR_DEFAULT_BRANCHES:-} "
 how='${HOW.replaceAll("'", "'\\''")}'
+# Only the task's own repositories, by the git folder their worktrees share, and pushes to their remotes from anywhere; where
+# git can't say which repository this is, it is guarded.
+listed() { [ -n "$2" ] && printf '%s\\n' "$2" | grep -Fqx -e "$1"; }
+if [ -n "\${ALTHAR_GUARD_REPOSITORIES:-}" ]; then
+  common=$(git rev-parse --git-common-dir 2>/dev/null) && common=$(cd "$common" && pwd -P) || common=
+  if [ -n "$common" ] && ! listed "$common" "$ALTHAR_GUARD_REPOSITORIES"; then
+    [ "$hook" = pre-push ] && listed "$2" "\${ALTHAR_GUARD_REMOTES:-}" || exit 0
+  fi
+fi
 # Whether the person allowed this git: a fresh pass names its repository, its URL and its words, and no other git has spent it.
 passes() {
   [ -n "$pass" ] && [ -n "$git" ] && [ -f "$pass" ] && [ -n "$(find "$pass" -mmin -2 2>/dev/null)" ] || return 1
@@ -145,6 +162,12 @@ stop() {
   exit 1
 }
 zero() { case "$1" in *[!0]*) return 1 ;; esac; return 0; }
+# Whether commit $1 would be lost once branch $2 no longer points at it: none of its commits is on another ref, nor in $3.
+loses() {
+  zero "$1" && return 0
+  left=$(git rev-list -n 1 "$1" --not $3 --exclude="$2" --all 2>/dev/null) || return 0
+  [ -n "$left" ]
+}
 case "$hook" in
   pre-push)
     remote=$1
@@ -172,9 +195,16 @@ case "$hook" in
       case "$ref" in refs/heads/*) ;; *) continue ;; esac
       branch=\${ref#refs/heads/}
       [ "$branch" = "$task" ] && continue
-      if zero "$new"; then stop delete-branch "deleting the branch $branch can't be undone from the task: it isn't this task's."; fi
-      zero "$old" && continue
+      # Git hands most changes over without what they replace (\`branch -d\`, \`branch -f\`): the branch points at it until this commits.
+      zero "$old" && old=$(git rev-parse -q --verify "$ref^{commit}" 2>/dev/null)
+      # A branch made new replaces nothing.
+      [ -n "$old" ] || continue
+      if zero "$new"; then
+        loses "$old" "$ref" && stop delete-branch "deleting the branch $branch can't be undone from the task: it isn't this task's, and its commits are on no other branch."
+        continue
+      fi
       git merge-base --is-ancestor "$old" "$new" 2>/dev/null ||
+        ! loses "$old" "$ref" "$new" ||
         stop force-push "moving $branch so it loses commits can't be undone from the task: it isn't this task's branch."
     done
     ;;
@@ -219,19 +249,54 @@ const passOf = (sessionId: string, at: Guard) => join(at.passes, sessionId.repla
  */
 export const guardHolds = process.platform !== 'win32'
 
+/** What git says in a repository, or none where it fails. */
+const gitSays = (repository: string, ...args: Array<string>): string | undefined => {
+  try {
+    return execFileSync('git', ['-C', repository, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    }).trim()
+  } catch {
+    return undefined
+  }
+}
+
+/** The git folder a repository's worktrees share, as the hook finds it from any of them; none where git can't say. */
+const commonDirOf = (repository: string): string | undefined => {
+  const said = gitSays(repository, 'rev-parse', '--git-common-dir')
+  if (said === undefined) return undefined
+  try {
+    return realpathSync(resolve(repository, said))
+  } catch {
+    return undefined
+  }
+}
+
+/** Where a repository's remotes fetch and push, as its config has them, which is what git hands `pre-push`. */
+const remotesOf = (repository: string): ReadonlyArray<string> =>
+  (gitSays(repository, 'config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$') ?? '').split('\n').flatMap((line) => {
+    const url = line.slice(line.indexOf(' ') + 1)
+    return line.includes(' ') && url !== '' ? [url] : []
+  })
+
 /**
  * What a lead's environment adds so its git runs Althar's hooks: git's
  * config by the environment, after the `count` entries already there
- * (`withoutSignIns`'), and what the guard reads.
+ * (`withoutSignIns`'), and what the guard reads. With `repositories`, the
+ * task's worktrees, it reads only theirs; with none it can find, every one.
  */
 export const guardEnv = (input: {
   readonly sessionId: string
   readonly taskBranch: string | null
   readonly defaultBranches: ReadonlyArray<string>
+  readonly repositories?: ReadonlyArray<string>
   readonly count: number
   readonly at?: Guard
 }): Readonly<Record<string, string>> => {
   const at = input.at ?? guard()
+  const guarded = [...new Set((input.repositories ?? []).flatMap((repository) => commonDirOf(repository) ?? []))]
+  const remotes = [...new Set((input.repositories ?? []).flatMap(remotesOf))]
   return {
     GIT_CONFIG_COUNT: String(input.count + 1),
     [`GIT_CONFIG_KEY_${input.count}`]: 'core.hooksPath',
@@ -239,6 +304,7 @@ export const guardEnv = (input: {
     ALTHAR_TASK_BRANCH: input.taskBranch ?? '',
     ALTHAR_DEFAULT_BRANCHES: [...new Set(input.defaultBranches)].join(' '),
     ALTHAR_GUARD_PASS: passOf(input.sessionId, at),
+    ...(guarded.length === 0 ? {} : { ALTHAR_GUARD_REPOSITORIES: guarded.join('\n'), ALTHAR_GUARD_REMOTES: remotes.join('\n') }),
   }
 }
 
