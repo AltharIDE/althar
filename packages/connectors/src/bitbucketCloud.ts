@@ -2,6 +2,7 @@ import { Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
+import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
 import { makeHttp } from './http'
@@ -441,6 +442,15 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       return found.filter(({ said }) => cursor === null || iso(said.date) >= cursor)
     })
 
+  const pushTarget = (repository: Repository) =>
+    Effect.map(options.credential, (credential) => ({
+      url: `${web}/${repository.path.join('/')}.git`,
+      // An API token signs git in as Bitbucket's own user for it; an access token, or OAuth's, as `x-token-auth`.
+      header: `Authorization: Basic ${Buffer.from(
+        `${credential.kind === 'basic' ? 'x-bitbucket-api-token-auth' : 'x-token-auth'}:${credential.token}`,
+      ).toString('base64')}`,
+    }))
+
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
@@ -577,6 +587,18 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           ),
         )
       }),
+    updateBranch: (repository, change, ask) =>
+      updateInCopy({
+        product,
+        words: { noun: 'pull request', short: 'PR', prefix: '#' },
+        repository,
+        change,
+        expectedHead: ask.expectedHead,
+        read: Effect.map(http.json(PullAnswer, 'GET', pull(repository, change.number)), (answer) => changeOf(repository, answer)),
+        fork: (path) => Effect.succeed({ ...repository, path }),
+        pushTarget,
+        ...(options.merge === undefined ? {} : { merge: options.merge }),
+      }),
     checks: (repository, sha) =>
       Effect.map(http.cached(Statuses, `${repo(repository.path)}/commit/${encodeURIComponent(sha)}/statuses?pagelen=100`), (statuses) =>
         statuses.values.map((status): Check => {
@@ -666,14 +688,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
     // Reviews of a change Althar didn't open are GitHub's alone, for now.
     changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    pushTarget: (repository) =>
-      Effect.map(options.credential, (credential) => ({
-        url: `${web}/${repository.path.join('/')}.git`,
-        // An API token signs git in as Bitbucket's own user for it; an access token, or OAuth's, as `x-token-auth`.
-        header: `Authorization: Basic ${Buffer.from(
-          `${credential.kind === 'basic' ? 'x-bitbucket-api-token-auth' : 'x-token-auth'}:${credential.token}`,
-        ).toString('base64')}`,
-      })),
+    pushTarget,
   }
 }
 
