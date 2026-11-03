@@ -20,6 +20,7 @@ export {
   type RemoteRef,
 } from './links'
 export * from './model'
+export * from './releases'
 export { addressOf, available, classicTokenPage, hostedOf, type ProductInfo, products, type TokenMade } from './products'
 export { identify, type Identified } from './servers'
 export * from './signIn'
