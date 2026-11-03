@@ -9,12 +9,15 @@ import {
   type EndpointRead,
   majorOf,
   noReadingOf,
+  OPENCODE_GO,
   openCodeCannotList,
   planPairOf,
   readAgentUsage,
   readOpenCodeCredentials,
+  readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsageAccount,
+  usagePairs,
   usageReader,
   type UsageRead,
   type UsageSource,
@@ -45,7 +48,10 @@ import { SignIns } from './SignIns'
  * - Kimi Code and Grok Build: their providers' usage endpoints, with the
  *   account's own sign-in.
  * - OpenCode: its own listing of the account's sign-ins tells plan from key
- *   per provider; no plan's provider is read, and each says why.
+ *   per provider. OpenCode Go, a plan with limits, is read from OpenCode's
+ *   own server in the account's home, through its OpenCode Console sign-in;
+ *   without one it is shown connected, unread. No other plan's provider is
+ *   read, and each says why.
  * - The others report no usage anyone can read, and say so calmly
  *   (`usageSources.ts`). Their limits are still recognised when they hit.
  * - An API key has no plan window, and says so.
@@ -77,6 +83,8 @@ export interface PlanUsageOptions {
   readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
+  /** How OpenCode's own server is asked for an account's OpenCode Go limits. */
+  readonly readGoUsage?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
   /** How often accounts are read on their own while the runtime runs: five minutes. Zero turns it off. */
   readonly every?: Duration.Duration
   /** How long a reading is kept before another is taken: a minute. */
@@ -188,6 +196,10 @@ export class PlanUsage extends Context.Service<
           options.readCredentials ??
           ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
             readOpenCodeCredentials(agent, { node: adapterNode(), home }))
+        const readGoUsage =
+          options.readGoUsage ??
+          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
+            readOpenCodeGoUsage(agent, { node: adapterNode(), home, now: nowAsDate }))
         const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
         const readEndpoint = options.readEndpoint ?? usageReader.read
         const versions = new Map<string, string | undefined>()
@@ -477,6 +489,43 @@ export class PlanUsage extends Context.Service<
               const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
               for (const { provider, pays } of listed.credentials)
                 providers[provider] = providers[provider] === undefined || providers[provider] === pays ? pays : 'unknown'
+              // OpenCode Go is the account's plan where it has Go's key, or its OpenCode Console sign-in reads Go's limits.
+              const go = listed.credentials.some((credential) => credential.provider === 'opencode-go')
+              const asked =
+                go || listed.credentials.some((credential) => credential.provider === 'opencode')
+                  ? yield* Effect.promise(() => readGoUsage(definition, env))
+                  : ({ kind: 'none' } as const)
+              // Go refused its key lately, or OpenCode says it needs signing in, and nothing has put it right since: its models
+              // need it signed in again first, though its key may be gone from the listing.
+              const refused = ((yield* signIns.providers(account, check)) ?? []).some(
+                (row) => row.id === 'opencode-go' && row.refusedAt !== null,
+              )
+              if (go || refused || asked.kind === 'usage') {
+                const again = refused ? { kind: 'sign_in_again' as const, message: `${OPENCODE_GO} needs signing in again.` } : null
+                const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const, providers }
+                if (asked.kind === 'usage')
+                  return yield* keep(account.id, {
+                    ...onGo,
+                    source: asked.usage.source,
+                    windows: dated(asked.usage.windows, asked.usage.observedAt),
+                    observedAt: asked.usage.observedAt,
+                    fault: again,
+                  })
+                if (asked.kind === 'failed') {
+                  const failed = fault('unreachable', asked.message)
+                  // Never read before: why is all there is to show, as for one connected and unread.
+                  const why = failed.windows.length === 0 ? { noReading: asked.message } : {}
+                  return yield* keep(account.id, { ...failed, ...onGo, ...why, fault: again ?? failed.fault })
+                }
+                // Connected, its usage unread: OpenCode reads it only through a Console sign-in.
+                const pair = usagePairs.find((one) => one.agent === 'opencode' && one.provider === 'opencode-go')
+                return yield* keep(account.id, {
+                  ...key,
+                  ...onGo,
+                  fault: again,
+                  noReading: (pair === undefined ? null : noReadingOf(pair)) ?? `${OPENCODE_GO}’s usage can’t be read.`,
+                })
+              }
               // A key needs nothing. A plan says why it has no reading, or that its sign-in isn't one Althar knows.
               let unknown: string | undefined
               let unread: string | undefined

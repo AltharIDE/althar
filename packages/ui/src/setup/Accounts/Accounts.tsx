@@ -49,8 +49,19 @@ export interface AccountEntry {
   who?: string
   /** The plan that pays for it, when the agent says: Claude Max. */
   plan?: string
-  /** For an agent with a sign-in for each provider it reaches (OpenCode): the one that refused work lately, though the account is signed in. */
-  refused?: string
+  /**
+   * For an agent with a sign-in for each provider it reaches (OpenCode): those to say, each with how it is paid for, and
+   * whether it refused work lately though the account is signed in. Said in place of the account's one word.
+   */
+  providers?: readonly AccountProvider[]
+}
+
+/** A provider within an agent, with a sign-in of its own: OpenCode Go on a plan, OpenCode Zen per use. */
+export interface AccountProvider {
+  name: string
+  paid?: 'plan' | 'key'
+  /** It refused work lately: its sign-in needs doing again. */
+  refused?: boolean
 }
 
 /** A folder an account switcher keeps one of the agent's accounts in, not added yet. */
@@ -85,6 +96,8 @@ export interface AccountsText {
   signInAgain: string
   /** A provider within the agent that refused its sign-in, as the button that signs it in. */
   providerSignIn: (provider: string) => string
+  /** The same, where no sign-in can start from here. */
+  providerOut: (provider: string) => string
   more: (name: string) => string
   rename: string
   up: string
@@ -110,6 +123,7 @@ export const accountsText: AccountsText = {
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
   providerSignIn: (provider) => `${provider}: sign in again`,
+  providerOut: (provider) => `${provider}: signed out`,
   more: (name) => `More for ${name}`,
   rename: 'Rename',
   up: 'Move up',
@@ -222,11 +236,28 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
   const end = ((): ReactNode => {
     switch (state.kind) {
       case 'ready':
-        if (account.refused !== undefined && onSignIn && !busy)
+        if (account.providers !== undefined && account.providers.length > 0)
           return (
-            <ActionButton tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
-              {t.providerSignIn(account.refused)}
-            </ActionButton>
+            <span className={s.providers}>
+              {account.providers.map((provider) =>
+                provider.refused === true ? (
+                  onSignIn && !busy ? (
+                    <ActionButton key={provider.name} tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+                      {t.providerSignIn(provider.name)}
+                    </ActionButton>
+                  ) : (
+                    <span key={provider.name} className={s.signedOut}>
+                      {t.providerOut(provider.name)}
+                    </span>
+                  )
+                ) : (
+                  <span key={provider.name} className={s.provider}>
+                    {provider.name}
+                    {provider.paid !== undefined && <span>{provider.paid === 'plan' ? t.plan : t.key}</span>}
+                  </span>
+                ),
+              )}
+            </span>
           )
         return account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null)
       case 'out':

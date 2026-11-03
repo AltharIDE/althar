@@ -391,7 +391,7 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
       assert.isUndefined(zen?.why)
       // Go's week was never read: no figure, and why.
       assert.deepInclude(go, { paidBy: 'plan', took: null, spent: null, models: ['opencode-go/glm-5.3'], tokens: 50_000 })
-      assert.include(go?.why ?? '', 'OpenCode Go')
+      assert.include(go?.why ?? '', 'Go’s usage')
       // Half of Codex's three points, as Codex's own turn had as many tokens.
       assert.deepInclude(chatGpt, { paidBy: 'plan', spent: null, estimated: true, models: ['openai/gpt-6-sol'] })
       assert.closeTo(chatGpt?.took ?? 0, 1.5, 1e-9)

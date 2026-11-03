@@ -38,11 +38,13 @@ export type PlanGaugeProps = RootProps<
     open?: boolean
     defaultOpen?: boolean
     onOpenChange?: (open: boolean) => void
+    /** Puts right the sign-in that stops an agent, by its id (`PlanPeek`). */
+    onSignIn?: (agentId: string) => void
     text?: Partial<PlanGaugeText>
   }
 >
 
-export function PlanGauge({ agents, headingLevel, open, defaultOpen, onOpenChange, text, className, ...rest }: PlanGaugeProps) {
+export function PlanGauge({ agents, headingLevel, open, defaultOpen, onOpenChange, onSignIn, text, className, ...rest }: PlanGaugeProps) {
   const t = { ...planGaugeText, ...text }
   const [shown, setShown] = useControlled(open, defaultOpen ?? false, onOpenChange)
   const first = firstRunning(agents)
@@ -69,7 +71,7 @@ export function PlanGauge({ agents, headingLevel, open, defaultOpen, onOpenChang
           </button>
         }
       >
-        <PlanPeek agents={agents} headingLevel={headingLevel} text={t} />
+        <PlanPeek agents={agents} headingLevel={headingLevel} text={t} {...(onSignIn === undefined ? {} : { onSignIn })} />
       </Popover>
     </span>
   )

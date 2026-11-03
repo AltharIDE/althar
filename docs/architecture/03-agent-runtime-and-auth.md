@@ -476,8 +476,12 @@ in two layers:
      home; ChatGPT's `wham/usage` where it can't answer.
    - Kimi Code and Grok Build: their providers' usage URLs.
    - OpenCode: plan or key is told per provider from its own
-     `opencode auth list --standalone --format json` (2.x; 1.x can't say);
-     its plan sign-ins are kept in its own database, and not read.
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say).
+     OpenCode Go, a plan with limits, is read from OpenCode's own
+     `opencode api --standalone experimental.usage.limits` in the account's
+     home, through its OpenCode Console sign-in; Althar reads the answer,
+     never the sign-in. With Go's key alone it is connected, unread. Its
+     other plan sign-ins are kept in its own database, and not read.
    - Copilot, Junie, Mistral Vibe, Qwen Code and Antigravity give their usage
      to no other app; each says why, calmly, rather than as a fault.
 

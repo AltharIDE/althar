@@ -324,6 +324,30 @@ export class Limits extends Context.Service<
           return list.toSorted((a, b) => (rooms.get(b.id) ?? 0) - (rooms.get(a.id) ?? 0))
         })
 
+      /**
+       * For a model through a provider with a sign-in of its own (OpenCode Go): the accounts that list it working first, then
+       * those that don't list it, then those it refused lately, each in the order given. A fresh Go key in a new account is
+       * used before an old account's refused one, though the old has the room reading.
+       */
+      const byProvider = (agentId: string, list: ReadonlyArray<Account>, model?: string) =>
+        Effect.gen(function* () {
+          if (list.length < 2) return list
+          const standing = new Map<string, number>()
+          for (const account of list) standing.set(account.id, yield* providerStanding(account, model))
+          return list.toSorted((a, b) => (standing.get(a.id) ?? 1) - (standing.get(b.id) ?? 1))
+        })
+      /** How the model's provider stands on the account: 0 listed and working, 1 not listed or no provider of its own, 2 refused lately. */
+      const providerStanding = (account: Account, model?: string) =>
+        Effect.gen(function* () {
+          const through =
+            model === undefined
+              ? undefined
+              : agents.list.find((entry) => entry.definition.id === account.agentId)?.definition.signIn.providers?.of(model)
+          if (through === undefined) return 1
+          const row = ((yield* signIns.providers(account, yield* signIns.account(account))) ?? []).find((one) => one.id === through)
+          return row === undefined ? 1 : row.refusedAt === null ? 0 : 2
+        })
+
       /** Whether the project moves work through an agent's accounts (ADR-012); without a project, as if it did. */
       const rotating = (projectId?: string) =>
         projectId === undefined
@@ -443,10 +467,18 @@ export class Limits extends Context.Service<
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`
               const own = list.find((account) => account.id === last?.accountId)
-              if (own !== undefined && (yield* runs(own)) && !nearly(yield* roomOf(own, input.model))) return own
+              // Not where the model's provider refused it lately (OpenCode Go's expired key): another account may have it working.
+              if (
+                own !== undefined &&
+                (yield* runs(own)) &&
+                !nearly(yield* roomOf(own, input.model)) &&
+                (yield* providerStanding(own, input.model)) < 2
+              )
+                return own
             }
             // Where it rotates, the one with the most room; where it doesn't, the first, in the person's order.
-            for (const account of rotate ? yield* byRoom(list, input.model) : list) if (yield* runs(account)) return account
+            const ordered = rotate ? yield* byRoom(list, input.model) : list
+            for (const account of yield* byProvider(input.agentId, ordered, input.model)) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
