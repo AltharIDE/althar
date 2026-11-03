@@ -26,7 +26,8 @@ import { fakeAgents, runtime, task, turns, until } from './support'
 
 const MINUTE = 60_000
 const turn = (from: number, to: number, tokens: number, ours = true): TurnSpan => ({ from, to, tokens, ours })
-const week = (at: number, usedPercent: number, resetsAt: string | null = 'Thu') => ({ at, usedPercent, resetsAt })
+const THU = '2026-11-09T11:00:00.000Z'
+const week = (at: number, usedPercent: number, resetsAt: string | null = THU) => ({ at, usedPercent, resetsAt })
 
 describe('a week’s share', () => {
   it('is the rise between two readings while only the task ran', () => {
@@ -49,7 +50,52 @@ describe('a week’s share', () => {
   })
 
   it('counts all a week says once it started again', () => {
-    assert.strictEqual(tookOf([week(0, 90, 'Mon'), week(10 * MINUTE, 2, 'next Mon')], [turn(0, 10 * MINUTE, 500)]), 2)
+    assert.strictEqual(tookOf([week(0, 90, THU), week(10 * MINUTE, 2, '2026-11-16T11:00:00.000Z')], [turn(0, 10 * MINUTE, 500)]), 2)
+  })
+
+  it('counts a week that started again mid-task: the old week’s rise, then all the new one says', () => {
+    const readings = [
+      week(0, 80),
+      week(10 * MINUTE, 85),
+      week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z'),
+      week(30 * MINUTE, 6, '2026-11-16T11:00:00.000Z'),
+    ]
+    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 5 + 3 + 3)
+  })
+
+  it('takes a week whose reset time wavers by moments for the same week', () => {
+    // As kept on 3 November 2026: the same Thursday reset, read to the millisecond from two sources.
+    const readings = [
+      week(0, 23),
+      week(20 * MINUTE, 24, '2026-11-09T11:00:00.023Z'),
+      week(23 * MINUTE, 23),
+      week(25 * MINUTE, 24),
+      week(30 * MINUTE, 25, '2026-11-09T10:59:59.867Z'),
+      week(31 * MINUTE, 24),
+      week(32 * MINUTE, 25),
+    ]
+    assert.strictEqual(tookOf(readings, [turn(0, 32 * MINUTE, 500)]), 2)
+  })
+
+  it('counts nothing for a reading that dips and climbs back', () => {
+    assert.strictEqual(tookOf([week(0, 24), week(MINUTE, 23), week(2 * MINUTE, 24)], [turn(0, 2 * MINUTE, 500)]), 0)
+  })
+
+  it('leaves out a reading whose reset went back, another window’s, such as a model’s own week', () => {
+    const readings = [week(0, 25), week(10 * MINUTE, 60, '2026-11-06T09:00:00.000Z'), week(20 * MINUTE, 26)]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 1)
+  })
+
+  it('starts a week again where a reset time is unknown only when its use went down', () => {
+    const readings = [week(0, 40, null), week(10 * MINUTE, 42, null), week(20 * MINUTE, 1, null)]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 3)
+  })
+
+  it('never puts on a task more than the week rose over its readings, nor more than the week now says', () => {
+    const readings = [week(0, 19), week(60 * MINUTE, 22), week(120 * MINUTE, 25)]
+    const took = tookOf(readings, [turn(0, 120 * MINUTE, 500), turn(30 * MINUTE, 90 * MINUTE, 1, false)]) ?? 0
+    assert.isAtMost(took, 25 - 19)
+    assert.isAtMost(took, 25)
   })
 
   it('counts of readings far apart only the part the task ran in', () => {
@@ -220,10 +266,17 @@ describe('a task’s usage', () => {
       // Still the same: the latest reading moves up, and no row is added for it.
       const quiet = yield* hear(30, 2)
       assert.isAbove(Date.parse(quiet[1]!.observedAt), Date.parse(second))
-      const rows = yield* hear(31, 3)
+      yield* hear(31, 3)
+      // A reading of only a model's week, or of the week with extra usage, is another window: none of it is kept.
+      yield* Effect.sleep('5 millis')
+      yield* usage.heard(accountId, 'claude-code', [
+        { kind: 'weekly', label: 'Opus', model: 'opus', usedPercent: 70, resetsAt: '2026-11-04T00:00:00.000Z' },
+        { kind: 'weekly', label: 'With extra usage', usedPercent: 50, resetsAt: '2026-11-06T00:00:00.000Z' },
+      ])
+      const rows = yield* hear(32, 4)
       assert.deepStrictEqual(
         rows.map((row) => row.usedPercent),
-        [30, 30, 31],
+        [30, 30, 31, 32],
       )
       assert.deepStrictEqual(yield* usage.paidBy(accountId), { paidBy: 'plan', plan: null })
     }).pipe(Effect.provide(runtime())),
