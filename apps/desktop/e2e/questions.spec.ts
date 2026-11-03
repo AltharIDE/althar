@@ -78,7 +78,7 @@ test('asks the person a question on the home, keeps it across a restart, and car
       .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
-    await expect(page.getByText('told=Which database should the cache use? SQLite')).toBeVisible()
+    await expect(page.getByText('told=Which database should the cache use? SQLite', { exact: true })).toBeVisible()
   } finally {
     await electronApp.close()
   }

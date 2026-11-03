@@ -255,6 +255,9 @@ export const planTask = (page: Page, title: string, lead = '[lead:finish]') => s
 /** Starts a task: asks the coordinator for it, and starts its plan at once rather than waiting out the countdown. */
 export const startTask = async (page: Page, title: string, lead = '[lead:finish]') => {
   await planTask(page, title, lead)
+  // Wait for this task's plan to be on show before pressing its Start now: before it is, the last one is another plan's,
+  // and pressing that starts nothing of this task's while leaving it to count down.
+  await expect(shown(page, `Task ${title}`).last()).toBeVisible()
   // The newest plan is the last in the conversation; any before it have started.
   await page.getByRole('button', { name: 'Start now' }).last().click()
 }

@@ -153,7 +153,7 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
  * flashing in the queue.
  */
 export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean): boolean =>
-  session === null ? !sending : session.turnRunning
+  !sending && (session === null || session.turnRunning)
 
 /**
  * Whether what waits after the agent's last reply is being read now, with

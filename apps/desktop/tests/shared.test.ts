@@ -230,6 +230,8 @@ describe('the composer queue', () => {
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+    // What the person just sent goes straight to the thread though a turn runs, rather than flash in the queue.
+    expect(queueShown({ turnRunning: true }, true)).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {

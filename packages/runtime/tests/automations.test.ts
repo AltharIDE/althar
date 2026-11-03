@@ -854,6 +854,12 @@ describe('automations', () => {
       const lastTurn = sql<{ state: string }>`
         SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
       yield* until(lastTurn, (turns) => turns[0]?.state === 'delivered')
+      // The composer's Stop is there once the turn runs, not merely once it was delivered: a delivered turn that hasn't
+      // started has nothing to interrupt yet, and the Stop would do nothing.
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(threadId)),
+        (busy) => busy,
+      )
       // The composer's Stop: its turn ends, and its session waits for what the person says next.
       yield* (yield* Sessions).interrupt(threadId)
       yield* until(lastTurn, (turns) => turns[0]?.state === 'interrupted')
