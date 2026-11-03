@@ -175,6 +175,8 @@ export type PlanParameters = typeof PlanParameters.Type
 
 const Finding = Schema.Struct({
   severity: Schema.Literals(['blocking', 'major', 'minor', 'nit']),
+  // Asked for, but a reviewer that leaves it out still reports: its findings show by their claims.
+  title: Schema.optional(Schema.String),
   file: Schema.optional(Schema.String),
   line: Schema.optional(Schema.Int),
   claim: Schema.String,
@@ -208,6 +210,19 @@ const Finished = Schema.Struct({
   ),
 })
 const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
+/** The longest a finding's title is kept: past it, a reviewer wrote its claim there, cut at a word with an ellipsis. */
+const TITLE_LONGEST = 120
+
+/** A finding's title as kept: on one line, trimmed, null where the reviewer gave none. */
+export const titleOf = (title: string | null | undefined): string | null => {
+  const line = (title ?? '').replace(/\s+/g, ' ').trim()
+  if (line === '') return null
+  if (line.length <= TITLE_LONGEST) return line
+  const cut = line.slice(0, TITLE_LONGEST - 1)
+  const word = cut.lastIndexOf(' ')
+  return `${(word > TITLE_LONGEST / 2 ? cut.slice(0, word) : cut).trimEnd()}…`
+}
+
 const Reviewed = Schema.Struct({
   verdict: Schema.Literals(['pass', 'changes_requested']),
   summary: Schema.String,
@@ -1320,8 +1335,8 @@ export class Runs extends Context.Service<
       const openFindings = (run: RunRow) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string }>`
-            SELECT f.id, f.severity, f.location, f.claim FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
+          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string; title: string | null }>`
+            SELECT f.id, f.severity, f.location, f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
             JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'open' ORDER BY f.created_at`
         })
 
@@ -1333,6 +1348,7 @@ export class Runs extends Context.Service<
             return {
               id: finding.id,
               severity: finding.severity,
+              ...(finding.title === null ? {} : { title: finding.title }),
               claim: finding.claim,
               ...(location.file == null ? {} : { file: location.file }),
               ...(location.line == null ? {} : { line: location.line }),
@@ -3317,7 +3333,10 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const reviewed = yield* read(Reviewed, input)
-          const findings = reviewed.findings ?? []
+          const findings = (reviewed.findings ?? []).map(({ title, ...finding }): Finding => {
+            const line = titleOf(title)
+            return line === null ? finding : { ...finding, title: line }
+          })
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const attempt = current === undefined ? undefined : yield* running(current, ['review'])
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
@@ -3337,6 +3356,7 @@ export class Runs extends Context.Service<
                   severity: finding.severity,
                   location: JSON.stringify({ file: finding.file ?? null, line: finding.line ?? null }),
                   claim: finding.claim,
+                  title: finding.title ?? null,
                   state: 'open',
                   createdAt: yield* timestamp,
                 })}`
@@ -3530,11 +3550,16 @@ export class Runs extends Context.Service<
                   type: 'object',
                   properties: {
                     severity: { type: 'string', enum: ['blocking', 'major', 'minor', 'nit'] },
-                    file: { type: 'string' },
-                    line: { type: 'integer' },
-                    claim: { type: 'string' },
+                    title: {
+                      type: 'string',
+                      description:
+                        'What is wrong, in one short line of plain words, under 80 characters: "The usage column has no header in the model browser". The person scans these before reading any claim.',
+                    },
+                    file: { type: 'string', description: "The file it is in, from the repository's root, where it is in one." },
+                    line: { type: 'integer', description: 'The line it points at in that file, as you read it.' },
+                    claim: { type: 'string', description: 'What is wrong, in full: why, and what would fix it.' },
                   },
-                  required: ['severity', 'claim'],
+                  required: ['severity', 'title', 'claim'],
                 },
               },
             },
