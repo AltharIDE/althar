@@ -455,6 +455,15 @@ const begun = (spot: Spot) =>
     return Option.isSome(tip) && tip.value !== spot.baseCommit
   })
 
+/** Whether any task holds a checkout here, or is taking one: what the checkouts are looked at again for, every few seconds (Runs). */
+export const checkoutsHeld = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const instance = yield* Instance
+  const [one] = yield* sql<{ id: string }>`
+    SELECT id FROM workspaces WHERE device_id = ${instance.deviceId} AND kind = 'checkout' AND returned_at IS NULL LIMIT 1`
+  return one !== undefined
+})
+
 /** Checkouts settled tasks still hold, a removed project's tasks too, to give back: as they settle, or whose changes kept them on their task's branch. */
 export const settledHolding = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

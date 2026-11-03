@@ -51,7 +51,6 @@ const abandon = async (page: Page) => {
 }
 
 test('works Local: asks before it takes the checkout, waits for it, and gives it back', async () => {
-  test.setTimeout(240_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)

@@ -41,7 +41,7 @@ import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
-import { type CheckoutConsent, type CheckoutSeen, giveBackSpot, place, settledHolding, type Spot } from './local'
+import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
@@ -3133,6 +3133,9 @@ export class Runs extends Context.Service<
        * What waits on a checkout, looked at: each checkout a settled task
        * still holds, given back where it can be now; then each first step held
        * for one, with nothing asked of the person, placed again, oldest first.
+       * True while any of them is left, or any task holds a checkout here:
+       * what is looked at again in a few seconds, as the person commits or a
+       * task settles.
        */
       const lookAtCheckouts = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -3154,6 +3157,7 @@ export class Runs extends Context.Service<
           yield* lookAgain(row).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not place a task waiting for its checkout', cause)),
           )
+        return held.length > 0 || (yield* checkoutsHeld)
       })
 
       /** Where a task's plan and run say it works: as the person's answer moved it. Inside the caller's transaction. */
@@ -3234,7 +3238,12 @@ export class Runs extends Context.Service<
         provide(
           keptGoing(
             'Runs.checkouts',
-            Effect.forever(Effect.andThen(lookAtCheckouts, Effect.raceFirst(Queue.take(checkoutWakes), Effect.sleep(checkoutsEvery)))),
+            // With no task Local here, nothing to look at until one is.
+            Effect.forever(
+              Effect.flatMap(lookAtCheckouts, (waits) =>
+                waits ? Effect.raceFirst(Queue.take(checkoutWakes), Effect.sleep(checkoutsEvery)) : Queue.take(checkoutWakes),
+              ),
+            ),
           ),
         ),
       )
@@ -3354,8 +3363,10 @@ export class Runs extends Context.Service<
        */
       const startFirst = (current: RunRow, attemptId: string) =>
         Effect.gen(function* () {
-          // Where it works first: Local, its checkouts taken, or held for them.
-          if (!(yield* placeFirst(current, attemptId))) return false
+          // Where it works first: Local, its checkouts taken, or held for them, which are looked at from now on.
+          const placed = yield* placeFirst(current, attemptId)
+          if (worksInOf(current) === 'checkout') yield* Queue.offer(checkoutWakes, undefined)
+          if (!placed) return false
           // The plan's lead nearly out, where the project waits or asks: held or asked before it starts.
           const { implement: lead } = yield* stepsOf(current)
           if (lead !== undefined && (yield* heldLow(current, 'implement', attemptId, 0, lead))) return true

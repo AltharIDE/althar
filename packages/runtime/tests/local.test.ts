@@ -463,13 +463,11 @@ describe('a Local plan', () => {
       const sessions = yield* Sessions
       const projectId = yield* opened(root)
       const first = yield* started(projectId, 'Dark mode [lead:slowly]')
-      const turn = (running: boolean) =>
-        until(
-          Effect.map(sessions.running(first.threadId), (one) => Option.exists(one, (on) => on.turnRunning === running)),
-          (seen) => seen,
-          running ? 'its lead is in its turn' : 'its lead’s turn ends',
-        )
-      yield* turn(true)
+      yield* until(
+        Effect.map(sessions.running(first.threadId), (one) => Option.exists(one, (on) => on.turnRunning)),
+        (seen) => seen,
+        'its lead is in its turn',
+      )
       const second = yield* started(projectId, 'Fix the login')
       assert.strictEqual(second.outcome, 'waiting')
       const held = (yield* spotOf(first.taskId)).branch
