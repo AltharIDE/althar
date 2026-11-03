@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useMemo, useState } from 'react'
+import { Fragment, memo, type ReactNode, useMemo, useState } from 'react'
 
 import { DiffLineKind, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -17,6 +17,14 @@ export type DiffLine =
   | { kind: DiffLineKind.Context; old: number; new: number; text: string }
   | { kind: DiffLineKind.Added; new: number; text: string; changed?: readonly string[] }
   | { kind: DiffLineKind.Removed; old: number; text: string; changed?: readonly string[] }
+
+/** Something said about a line of the new file, shown under it: a review's finding, there. */
+export interface DiffNote {
+  readonly key: string
+  /** The line of the new file it is about, from 1. */
+  readonly line: number
+  readonly node: ReactNode
+}
 
 export interface DiffText {
   /** The group's name, when no label is given. */
@@ -50,6 +58,8 @@ export type DiffProps = RootProps<
      * Without it, every line shows, hunk headers and all.
      */
     fold?: number
+    /** Notes under the lines they are about, those lines kept out of the folds. */
+    notes?: readonly DiffNote[]
     text?: Partial<DiffText>
   }
 >
@@ -100,7 +110,7 @@ const hunkOf = (text: string) => {
  * that faces a change. A hunk header that opens the whole file goes; one
  * after lines skipped, in a diff too long to read whole, marks the gap.
  */
-const folded = (lines: readonly DiffLine[], keep: number, opened: ReadonlySet<number>): readonly Row[] => {
+const folded = (lines: readonly DiffLine[], keep: number, opened: ReadonlySet<number>, kept: ReadonlySet<number>): readonly Row[] => {
   const rows: Row[] = []
   let i = 0
   while (i < lines.length) {
@@ -112,13 +122,14 @@ const folded = (lines: readonly DiffLine[], keep: number, opened: ReadonlySet<nu
       i += 1
       continue
     }
-    if (line.kind !== DiffLineKind.Context) {
+    // A changed line, or one a note is about, shows with the lines beside it.
+    if (line.kind !== DiffLineKind.Context || kept.has(i)) {
       rows.push({ line, at: i })
       i += 1
       continue
     }
     let end = i
-    while (lines[end]?.kind === DiffLineKind.Context) end += 1
+    while (lines[end]?.kind === DiffLineKind.Context && !kept.has(end)) end += 1
     const before = i === 0 || lines.slice(0, i).every((one) => one.kind === DiffLineKind.Hunk) ? 0 : keep
     const after = end >= lines.length ? 0 : keep
     const hidden = end - i - before - after
@@ -130,6 +141,23 @@ const folded = (lines: readonly DiffLine[], keep: number, opened: ReadonlySet<nu
     i = end
   }
   return rows
+}
+
+/**
+ * Which of the lines a note about the new file's `line` goes under: that
+ * line, or where it isn't among them (taken out, or in a stretch a diff read
+ * in hunks skips), the last line before it; the first line, with none.
+ */
+export const noteAt = (lines: readonly DiffLine[], line: number): number => {
+  let before = -1
+  for (const [at, one] of lines.entries()) {
+    if (one.kind !== DiffLineKind.Context && one.kind !== DiffLineKind.Added) continue
+    if (one.new === line) return at
+    if (one.new < line) before = at
+  }
+  if (before >= 0) return before
+  const first = lines.findIndex((one) => one.kind !== DiffLineKind.Hunk)
+  return Math.max(0, first)
 }
 
 /**
@@ -200,13 +228,23 @@ const Line = memo(function Line({
 })
 
 /** The file's own lines in their colours, with the changed words inside a line marked more strongly, so the eye lands on what moved. */
-export function Diff({ lines, label, path, oldNumbers = false, fold, text, className, ...rest }: DiffProps) {
+export function Diff({ lines, label, path, oldNumbers = false, fold, notes, text, className, ...rest }: DiffProps) {
   // the same words while the text given is, so the lines needn't be drawn again for them
   const t = useMemo(() => ({ ...diffText, ...text }), [text])
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
+  // The notes by the line they go under, in the order given.
+  const under = useMemo(() => {
+    const placed = new Map<number, DiffNote[]>()
+    for (const note of notes ?? []) {
+      const at = noteAt(lines, note.line)
+      placed.set(at, [...(placed.get(at) ?? []), note])
+    }
+    return placed
+  }, [lines, notes])
+  const kept = useMemo(() => new Set(under.keys()), [under])
   const rows: readonly Row[] = useMemo(
-    () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened)),
-    [lines, fold, opened],
+    () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened, kept)),
+    [lines, fold, opened, kept],
   )
   const sides = useMemo(() => (path === undefined ? null : sidesOf(lines)), [lines, path])
   const old = useTokens(sides === null || sides.old === '' ? null : sides.old, path ?? '')
@@ -236,7 +274,20 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, text, class
           )
         const { line, at } = row
         const tokens = sides === null || line.kind === DiffLineKind.Hunk ? undefined : tokensOf(line, at, sides, old, next)
-        return <Line key={at} line={line} tokens={tokens} oldNumbers={oldNumbers} t={t} />
+        const said = under.get(at)
+        const drawn = <Line key={at} line={line} tokens={tokens} oldNumbers={oldNumbers} t={t} />
+        return said === undefined ? (
+          drawn
+        ) : (
+          <Fragment key={at}>
+            {drawn}
+            {said.map((note) => (
+              <div key={note.key} className={s.under}>
+                {note.node}
+              </div>
+            ))}
+          </Fragment>
+        )
       })}
     </div>
   )

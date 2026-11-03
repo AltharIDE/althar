@@ -35,6 +35,7 @@ import {
   type DomMessagePort,
   domPort,
   type FileDiff,
+  type TaskFindings,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
@@ -153,8 +154,10 @@ export interface Client {
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
-  /** One file a task changed, as a diff from its base to its worktree. */
-  readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
+  /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
+  readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
+  /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
+  readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -648,7 +651,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
-    getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
+    getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(

@@ -33,6 +33,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
   'setup/TaskFolders/TaskFolders.tsx':
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
+  'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
+  'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
