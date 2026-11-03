@@ -43,6 +43,7 @@ import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { Errands } from './Errands'
+import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
@@ -135,7 +136,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
   const automating = Automations.layer.pipe(Layer.provideMerge(signing))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
-  return Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating))
+  // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
+  return MergeLine.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating)),
+    ),
+  )
 }
 
 export { envelope } from './envelope'
