@@ -39,11 +39,17 @@ const placeOf = (thread: Locator) =>
     return { name: Math.round(name.getBoundingClientRect().top - from), first: Math.round(first.getBoundingClientRect().top - from) }
   })
 
+/** An article's place and size, as the DOM has it: not null where a re-render moves it between the read and the shot. */
+const boxOf = (article: Locator) =>
+  article.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    return { x: box.x, y: box.y, width: box.width, height: box.height }
+  })
+
 /** The person's last message and what follows it, at 1×. */
 const shoot = async (page: Page, thread: Locator, name: string) => {
-  const from = await thread.getByRole('article', { name: /^You/ }).last().boundingBox()
-  const to = await thread.getByRole('article').last().boundingBox()
-  if (from === null || to === null) throw new Error('Nothing to shoot')
+  const from = await boxOf(thread.getByRole('article', { name: /^You/ }).last())
+  const to = await boxOf(thread.getByRole('article').last())
   const x = Math.min(from.x, to.x) - 20
   const right = Math.max(from.x + from.width, to.x + to.width) + 20
   const clip = { x, y: from.y - 16, width: right - x, height: to.y + to.height + 20 - (from.y - 16) }
