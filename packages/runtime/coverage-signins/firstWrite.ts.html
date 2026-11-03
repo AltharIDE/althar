@@ -1,0 +1,691 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for firstWrite.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="prettify.css" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="index.html">All files</a> firstWrite.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">27.27% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>24/88</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">6.52% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>3/46</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">24.13% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>7/29</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">28.16% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>20/71</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">49x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+&nbsp;
+import type { ProjectId } from '@althar/domain'
+import { Effect } from 'effect'
+import { SqlClient } from 'effect/sql'
+&nbsp;
+import { touchCard } from './cards'
+import { evidencePaths } from './evidence'
+import { branchExists, commitsAhead, git, uncommittedFiles } from './git'
+import { Instance } from './Instance'
+import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
+import { addItem } from './threads'
+&nbsp;
+/*
+ * A quick task's worktree (DEV-96, ADR-035). What the coordinator starts
+ * with `start_task`, a question, a quick look, a prototype or a release run
+ * from this Mac, starts in a worktree with no branch: detached at the commit
+ * it starts from, set up as any task's is, its branch's name planned as any
+ * task's is. What its lead throws away (prototypes, notes, screenshots) goes
+ * in its scratch folder, which git ignores. Where its lead first changes the
+ * repository itself, with new commits or changes not committed that aren't
+ * evidence it handed, Althar makes the task's branch right there, with that
+ * work on it, so nothing is lost on a detached head: as the lead's turn ends,
+ * or as it calls finish_step. That keeps the work safe, and nothing more: the
+ * branch stays on this Mac, and the task is still plain. Only the person
+ * makes it a change, by asking its lead (make_it_a_change), which makes its
+ * branch then where it has none. The lead keeps its session and its folder.
+ */
+&nbsp;
+/** Where a worktree keeps what its lead throws away: prototypes, notes, screenshots. */
+export const scratchOf = (worktree: string) =&gt; join(worktree, '.althar', 'scratch')
+&nbsp;
+/**
+ * Makes a worktree's scratch folder, which git ignores: a `.gitignore` in it
+ * ignores everything there, itself too, so no tracked file changes and
+ * neither do the repository's own settings. Nothing, where it can't be made:
+ * what the lead writes there then counts as anywhere else does.
+ */
+export const <span class="fstat-no" title="function not covered" >makeScratch = (w</span>orktree: string) =&gt;
+<span class="cstat-no" title="statement not covered" >  Effect.ignore(</span>
+    Effect.<span class="fstat-no" title="function not covered" >try(() =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >      mkdirSync(scratchOf(worktree), { recursive: true })</span>
+<span class="cstat-no" title="statement not covered" >      writeFileSync(join(scratchOf(worktree), '.gitignore'), '*\n')</span>
+    }),
+  )
+&nbsp;
+/** A task's worktree here with no branch yet. */
+interface Unbranched {
+  readonly id: string
+  readonly projectId: ProjectId
+  readonly threadId: string
+  readonly path: string
+  readonly branch: string
+  readonly baseCommit: string | null
+  readonly state: string
+}
+&nbsp;
+/** The task's own worktrees here that have no branch yet, the project's first first: never a review's copy, which only reads. */
+const unbranchedOf = (taskId: string) =&gt;
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    return yield* sql&lt;Unbranched&gt;`
+      SELECT w.id, w.project_id, t.id AS thread_id, w.path, w.branch, w.base_commit, w.state
+      FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+      JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
+      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NULL
+      ORDER BY b.created_at, b.rowid`
+  })
+&nbsp;
+/** Whether a task has no branch yet: a plain task whose lead hasn't changed the repository. */
+export const unbranched = (taskId: string) =&gt; Effect.map(unbranchedOf(taskId), (rows) =&gt; rows.length &gt; 0)
+&nbsp;
+/** Whether a worktree with no branch has work of its own: commits after where it started, or changes not committed that aren't evidence. */
+const <span class="fstat-no" title="function not covered" >wroteIn = (w</span>orktree: Unbranched, evidence: (worktree: string, file: string) =&gt; boolean) =&gt;
+<span class="cstat-no" title="statement not covered" >  Effect.gen(<span class="fstat-no" title="function not covered" >function* () {</span></span>
+<span class="cstat-no" title="statement not covered" >    if (worktree.baseCommit !== null &amp;&amp; (yield* commitsAhead(worktree.path, worktree.baseCommit)) &gt; 0) <span class="cstat-no" title="statement not covered" >return true</span></span>
+<span class="cstat-no" title="statement not covered" >    return (yield* uncommittedFiles(worktree.path)).<span class="fstat-no" title="function not covered" >some((f</span>ile) =&gt; <span class="cstat-no" title="statement not covered" >!evidence(worktree.path, file))</span></span>
+  }).pipe(Effect.<span class="fstat-no" title="function not covered" >orElseSucceed(() =&gt; <span class="cstat-no" title="statement not covered" >f</span>alse)</span>)
+&nbsp;
+/** Where a task's work is, by its branch, or each, where its repositories' differ: "on its branch althar/x". */
+export const <span class="fstat-no" title="function not covered" >branchedWords = (n</span>ames: ReadonlyArray&lt;string&gt;) =&gt; {
+  const distinct = <span class="cstat-no" title="statement not covered" >[...new Set(names)]</span>
+<span class="cstat-no" title="statement not covered" >  return distinct.length === 1 ? `on its branch ${distinct[0] ?? ''}` : `on ${distinct.length} branches`</span>
+}
+&nbsp;
+/** Whether one of the task's worktrees it writes in has its branch here: its work is on a branch already. */
+const <span class="fstat-no" title="function not covered" >changing = (t</span>askId: string) =&gt;
+<span class="cstat-no" title="statement not covered" >  Effect.gen(<span class="fstat-no" title="function not covered" >function* () {</span></span>
+    const sql = <span class="cstat-no" title="statement not covered" >yield* SqlClient.SqlClient</span>
+    const instance = <span class="cstat-no" title="statement not covered" >yield* Instance</span>
+    const [one] = <span class="cstat-no" title="statement not covered" >yield* sql&lt;{ id: string }&gt;`</span>
+      SELECT id FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write'
+        AND branched_at IS NOT NULL LIMIT 1`
+<span class="cstat-no" title="statement not covered" >    return one !== undefined</span>
+  })
+&nbsp;
+/** Repositories by the names the person knows them by: two at most; more, as a count. */
+export const <span class="fstat-no" title="function not covered" >repositoriesWords = (n</span>ames: ReadonlyArray&lt;string&gt;) =&gt;
+<span class="cstat-no" title="statement not covered" >  names.length &lt;= 2 ? names.join(' and ') : `${names.length} repositories`</span>
+&nbsp;
+/** Worktrees' repositories in words, the project's first first. */
+const <span class="fstat-no" title="function not covered" >repositoriesOf = (i</span>ds: ReadonlyArray&lt;string&gt;) =&gt;
+<span class="cstat-no" title="statement not covered" >  Effect.gen(<span class="fstat-no" title="function not covered" >function* () {</span></span>
+    const sql = <span class="cstat-no" title="statement not covered" >yield* SqlClient.SqlClient</span>
+    const names = <span class="cstat-no" title="statement not covered" >yield* sql&lt;{ name: string }&gt;`</span>
+      SELECT b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+      WHERE w.id IN ${sql.in(ids)} ORDER BY b.created_at, b.rowid`
+<span class="cstat-no" title="statement not covered" >    return repositoriesWords(names.<span class="fstat-no" title="function not covered" >map((o</span>ne) =&gt; <span class="cstat-no" title="statement not covered" >one.name)</span>)</span>
+  })
+&nbsp;
+/**
+ * Makes a quick task's branch where its lead first changed the repository:
+ * in each of its worktrees with none yet, the first free of its planned name,
+ * `-2`, `-3`…, switched to where the worktree is, so commits made on the
+ * detached head and changes not committed are on it. Recorded, said in its
+ * thread, found by it, and its card read again; the task stays as it was,
+ * plain, and the branch on this Mac. Nothing where it has a branch already or
+ * wrote nothing; `handed` are pictures its lead hands as evidence now, which
+ * aren't work. Once one of its worktrees has its branch, the rest get theirs
+ * whatever they hold: one git couldn't switch is tried again at each later
+ * check, its thread told the first time, and again once it has its branch.
+ * `made`, as the task is made a change (make_it_a_change): each gets its
+ * branch whatever it holds, and its thread is told by the caller, with the
+ * rest of what changed. The branches made as the task first gets one, or as
+ * it is made a change; none as one it had already gets another. The caller
+ * holds the task's lock, so this never runs beside publishing it.
+ */
+export const branchOnFirstWrite = (
+  taskId: string,
+  handed: ReadonlyArray&lt;{ readonly worktree: string; readonly file: string }&gt; = [],
+  made = false,
+) =&gt;
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const open = (yield* unbranchedOf(taskId)).<span class="fstat-no" title="function not covered" >filter((w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >worktree.state === 'ready' &amp;&amp; existsSync(worktree.path))</span>
+    <span class="missing-if-branch" title="else path not taken" >E</span>if (open.length === 0) return []
+    const already = <span class="cstat-no" title="statement not covered" >yield* changing(taskId)</span>
+<span class="cstat-no" title="statement not covered" >    if (!already &amp;&amp; !made) {</span>
+      const before = <span class="cstat-no" title="statement not covered" >yield* evidencePaths(taskId)</span>
+      const <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >evidence = (w</span>orktree: string, file: string) =&gt;</span>
+<span class="cstat-no" title="statement not covered" >        before(worktree, file) || handed.<span class="fstat-no" title="function not covered" >some((p</span>icture) =&gt; <span class="cstat-no" title="statement not covered" >picture.worktree === worktree &amp;&amp; picture.file === file)</span></span>
+      const wrote = <span class="cstat-no" title="statement not covered" >yield* Effect.forEach(<span class="fstat-no" title="function not covered" >open, (w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >wroteIn(worktree, evidence))</span></span>
+<span class="cstat-no" title="statement not covered" >      if (!wrote.includes(true)) <span class="cstat-no" title="statement not covered" >return []</span></span>
+    }
+    // Each one now, so all of the task's work is safe; one git can't switch stays as it is, to be tried again at the next check.
+    const branched: Array&lt;Unbranched &amp; { readonly name: string }&gt; = <span class="cstat-no" title="statement not covered" >[]</span>
+    const missed: Array&lt;Unbranched&gt; = <span class="cstat-no" title="statement not covered" >[]</span>
+<span class="cstat-no" title="statement not covered" >    for (const worktree of open) {</span>
+      let name = <span class="cstat-no" title="statement not covered" >worktree.branch</span>
+<span class="cstat-no" title="statement not covered" >      for (let n = <span class="cstat-no" title="statement not covered" >2; y</span>ield* branchExists(worktree.path, name); n += 1) <span class="cstat-no" title="statement not covered" >name = `${worktree.branch}-${n}`</span></span>
+      const switched = <span class="cstat-no" title="statement not covered" >yield* Effect.exit(git(worktree.path, 'switch', '--quiet', '--create', name))</span>
+<span class="cstat-no" title="statement not covered" >      if (switched._tag === 'Success') <span class="cstat-no" title="statement not covered" >branched.push({ ...worktree, name })</span></span>
+      else {
+<span class="cstat-no" title="statement not covered" >        missed.push(worktree)</span>
+<span class="cstat-no" title="statement not covered" >        yield* Effect.logWarning('Could not make a quick task’s branch', switched.cause)</span>
+      }
+    }
+    const [first] = <span class="cstat-no" title="statement not covered" >branched</span>
+<span class="cstat-no" title="statement not covered" >    if (first === undefined) <span class="cstat-no" title="statement not covered" >return []</span></span>
+    const distinct = <span class="cstat-no" title="statement not covered" >[...new Set(branched.<span class="fstat-no" title="function not covered" >map((w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >worktree.name)</span>)]</span>
+    const own = <span class="cstat-no" title="statement not covered" >branchedWords(distinct)</span>
+    const title = <span class="cstat-no" title="statement not covered" >made</span>
+      ? null
+      : already
+        ? `This task’s work is ${own} in ${yield* repositoriesOf(branched.<span class="fstat-no" title="function not covered" >map((w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >worktree.id)</span>)} too now.`
+        : missed.length === 0
+          ? `This task’s work is ${own}.`
+          : `This task’s work is ${own}. Couldn’t branch in ${yield* repositoriesOf(missed.<span class="fstat-no" title="function not covered" >map((w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >worktree.id)</span>)} yet.`
+    yield* sql.withTransaction(
+      Effect.gen(<span class="fstat-no" title="function not covered" >function* () {</span>
+        const at = <span class="cstat-no" title="statement not covered" >yield* timestamp</span>
+<span class="cstat-no" title="statement not covered" >        for (const worktree of branched) {</span>
+          const revision = <span class="cstat-no" title="statement not covered" >yield* change('workspaces', worktree.id, { branchedAt: at, branch: worktree.name })</span>
+<span class="cstat-no" title="statement not covered" >          yield* fact({</span>
+            projectId: worktree.projectId,
+            aggregateType: 'workspace',
+            aggregateId: worktree.id,
+            revision,
+            type: 'workspace.branched',
+            // `later`: the task's work was on a branch already; `made`: as the task was made a change.
+            payload: { from: null, to: worktree.name, ...(already ? { later: true } : {}), ...(made ? { made: true } : {}) },
+            actorId: instance.systemId,
+          })
+        }
+        // Althar's own housekeeping, kept with the lead's work.
+<span class="cstat-no" title="statement not covered" >        if (title !== null)</span>
+<span class="cstat-no" title="statement not covered" >          yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', {</span>
+            source: 'runtime',
+            severity: 'info',
+            title,
+            role: 'aside',
+          })
+<span class="cstat-no" title="statement not covered" >        yield* indexTask(taskId)</span>
+      }),
+    )
+<span class="cstat-no" title="statement not covered" >    yield* touchCard(taskId)</span>
+<span class="cstat-no" title="statement not covered" >    return already &amp;&amp; !made ? [] : branched.<span class="fstat-no" title="function not covered" >map((w</span>orktree) =&gt; <span class="cstat-no" title="statement not covered" >worktree.name)</span></span>
+  })
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-11-03T02:44:01.713Z
+            </div>
+        <script src="prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="sorter.js"></script>
+        <script src="block-navigation.js"></script>
+    </body>
+</html>
+    

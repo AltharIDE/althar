@@ -189,7 +189,7 @@ export const queuedOf = (
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting && !isSending(item.id)
           ? [
               {
                 id: item.id,

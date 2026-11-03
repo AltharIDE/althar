@@ -37,9 +37,12 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
 
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    // Its server has a place before the next task is asked for: a task started before that would take the place itself
-    // and leave only two waiting, whatever the test then counted.
-    await expect(page.getByRole('button', { name: /^Keeping a place/ })).toBeVisible()
+    // Its server is running before the next task is asked for: a task started before that would take the place itself
+    // and leave only two waiting, whatever the test then counted. The place holder shows only over a task that waits,
+    // so the task's own thread says the server is up, as its running command does.
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await expect(page.getByRole('button', { name: /^Running npm run dev/ })).toBeVisible()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
     // Each waits before the next is asked for, so a plan left counting down is caught where it happens rather than as a
     // row in the wrong place later.
     await startTask(page, 'Add a retry', '[lead:wait]')

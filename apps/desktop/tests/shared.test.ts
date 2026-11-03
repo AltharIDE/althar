@@ -4,7 +4,17 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf, inLineWords, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
-import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
+import {
+  isSending,
+  mergeItems,
+  newestReads,
+  queuedOf,
+  queueShown,
+  readingNow,
+  sending,
+  unsent,
+  waiting,
+} from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
@@ -225,6 +235,17 @@ describe('what the person sends', () => {
 })
 
 describe('the composer queue', () => {
+  it('leaves what the person is sending out of the queue, while what waited before it is there', () => {
+    const onItsWay = sending([{ ...items.you('Add a retry'), sequence: 4 }], {
+      text: 'Retry',
+      queued: true,
+      interrupting: false,
+    })
+    expect(queuedOf(onItsWay.items, true)).toEqual([])
+    const waited = { ...items.you('Also this'), id: 'i5', sequence: 5, input: { state: 'queued' as const, interrupting: false } }
+    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Also this'])
+  })
+
   it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
     expect(queueShown({ turnRunning: true }, false)).toBe(true)
     expect(queueShown({ turnRunning: false }, false)).toBe(false)

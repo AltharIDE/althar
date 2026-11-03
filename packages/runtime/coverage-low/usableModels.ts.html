@@ -1,0 +1,787 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for usableModels.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="prettify.css" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="index.html">All files</a> usableModels.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">57.57% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>57/99</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">39.62% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>42/106</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">42.85% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>9/21</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">63.75% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>51/80</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line medium'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">19x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { isAgentDefault, knownModelName } from '@althar/contracts'
+import { Effect, Option } from 'effect'
+&nbsp;
+import { Agents } from './Config'
+import { Installs, isInstalled } from './Installs'
+import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
+import { type ModelFact, ModelFacts } from './ModelFacts'
+import { Models } from './Models'
+import { SignIns } from './SignIns'
+&nbsp;
+/*
+ * The models the coordinator can give work to (ADR-015): every model of
+ * every agent that is signed in and not out of usage, but the ones the
+ * person switched off, each once, however many agents offer it. An agent is
+ * only a route to a model: a step names the model, and Althar takes it the
+ * best way, on a plan with room before one nearly out, and a plan before a
+ * key. Each way says how much room its plan has, as last read, so the
+ * coordinator can pick with that in mind.
+ */
+&nbsp;
+/** One way to a model: the agent that runs it, its id for it there, whether a plan pays, and how hard it can think there. */
+export interface Route {
+  readonly agentId: string
+  readonly agentName: string
+  readonly model: string
+  readonly plan: boolean
+  /** Its efforts there, in the agent's ids and names; empty where it has no such choice, or it isn't known. */
+  readonly efforts: ReadonlyArray&lt;{ readonly id: string; readonly name: string }&gt;
+  /** The effort it starts at by itself, the person's default aside; null where it isn't known. */
+  readonly effort: string | null
+  /** The person's default effort for it there; null where they set none. */
+  readonly defaultEffort: string | null
+  /** How much room the plan it runs on has for it, its tightest window as last read; null where none is read, or it is a key. */
+  readonly room: Room | null
+  /**
+   * Where the agent reaches it through a provider whose sign-in refused work lately (OpenCode Go): that provider, as the agent names
+   * it. The same model through another provider the person is signed in to is the way to take instead.
+   */
+  readonly refusedProvider?: string
+}
+&nbsp;
+export interface UsableModel {
+  /** As people know it: Claude Sonnet 5.5, GPT-6 Astra. */
+  readonly name: string
+  /** Who makes it, where known: Anthropic, OpenAI. */
+  readonly maker: string | null
+  readonly fact: ModelFact | null
+  /** The ways to it, the best first. */
+  readonly routes: ReadonlyArray&lt;Route&gt;
+}
+&nbsp;
+/** Makers by the first part of the list's ids. */
+const MAKERS: Readonly&lt;Record&lt;string, string&gt;&gt; = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  google: 'Google',
+  'z-ai': 'Z.ai',
+  deepseek: 'DeepSeek',
+  'x-ai': 'xAI',
+  moonshotai: 'Moonshot',
+  qwen: 'Alibaba',
+  mistralai: 'Mistral',
+  minimax: 'MiniMax',
+  'meta-llama': 'Meta',
+}
+&nbsp;
+/** An agent's own maker, for a model the list doesn't know. */
+const AGENT_MAKERS: Readonly&lt;Record&lt;string, string&gt;&gt; = { 'claude-code': 'Anthropic', codex: 'OpenAI' }
+&nbsp;
+const makerOf = (fact: ModelFact | null, agentId: string): string | null =&gt; {
+  <span class="missing-if-branch" title="else path not taken" >E</span>if (fact === null) return AGENT_MAKERS[agentId] ?? null
+  const prefix = <span class="cstat-no" title="statement not covered" >fact.slug.slice(0, fact.slug.indexOf('/'))</span>
+<span class="cstat-no" title="statement not covered" >  return MAKERS[prefix] ?? (prefix === '' ? null : `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)}`)</span>
+}
+&nbsp;
+/** The models usable now, by maker, the highest scoring first in each. */
+export const usableModels = (projectId?: string) =&gt;
+  Effect.gen(function* () {
+    const agents = yield* Agents
+    const models = yield* Models
+    const facts = yield* ModelFacts
+    const signIns = yield* SignIns
+    const installs = yield* Installs
+    const limits = yield* Limits
+    const catalog = yield* models.catalog
+    const byKey = new Map&lt;string, { name: string; maker: string | null; fact: ModelFact | null; routes: Route[] }&gt;()
+    // Per account, the providers within its agent that refused work lately, by id: read once for all its models.
+    const refusing = new Map&lt;string, ReadonlyMap&lt;string, string&gt;&gt;()
+    for (const entry of agents.list) {
+      const agent = { id: entry.definition.id, name: entry.definition.name }
+      <span class="missing-if-branch" title="if path not taken" >I</span>if (!isInstalled(installs, entry.definition) || (yield* signIns.of(agent.id)) === 'signed_out') <span class="cstat-no" title="statement not covered" >continue</span>
+      <span class="missing-if-branch" title="if path not taken" >I</span>if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.<span class="fstat-no" title="function not covered" >orElseSucceed(() =&gt; <span class="cstat-no" title="statement not covered" >O</span>ption.none())</span>))) <span class="cstat-no" title="statement not covered" >continue</span>
+      const offered = catalog.find((one) =&gt; one.agentId === agent.id)
+      <span class="missing-if-branch" title="if path not taken" >I</span>if (offered === undefined) <span class="cstat-no" title="statement not covered" >continue</span>
+      for (const model of offered.models) {
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (isAgentDefault(model) || offered.blocked.includes(model.id)) <span class="cstat-no" title="statement not covered" >continue</span>
+        const name = knownModelName(agent, model)
+        // A model's own window (Opus's weekly) counts beside the plan's, by its id or its name.
+        const named = `${model.id} ${name}`
+        // The account work on it would start on, of those the project allows: none signed in, and the agent is no way to it there.
+        const starts = yield* limits
+          .pick({ agentId: agent.id, model: named, ...(projectId === undefined ? {} : { projectId }) })
+          .pipe(Effect.option)
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (Option.isNone(starts)) <span class="cstat-no" title="statement not covered" >continue</span>
+        const account = yield* signIns.account(starts.value)
+        if (account.status === 'signed_out') continue
+        // A plan pays where that account is on one, not just any signed in.
+        const plan = account.paidBy === 'plan'
+        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, named)) : <span class="branch-1 cbranch-no" title="branch not covered" >null</span>
+        // An agent with a sign-in for each provider it reaches (OpenCode): this model may go through one that refused it lately.
+        const through = entry.definition.signIn.providers?.of(model.id)
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (through !== undefined &amp;&amp; <span class="branch-1 cbranch-no" title="branch not covered" >!refusing.has(starts.value.id)) {</span>
+          const <span class="cstat-no" title="statement not covered" >rows = (yield* signIns.providers(starts.value, account)) ?? []</span>
+<span class="cstat-no" title="statement not covered" >          refusing.set(starts.value.id, new Map(rows.<span class="fstat-no" title="function not covered" >flatMap((r</span>ow) =&gt; (<span class="cstat-no" title="statement not covered" >row.refusedAt === null ? [] : [[row.id, row.name] as const]))</span>))</span>
+        }
+        const refusedProvider = through === undefined ? undefined : <span class="branch-1 cbranch-no" title="branch not covered" >refusing.get(starts.value.id)?.get(through)</span>
+        const fact = facts.of(agent, model)
+        const key = fact?.slug ?? name.toLowerCase()
+        const route: Route = {
+          agentId: agent.id,
+          agentName: agent.name,
+          model: model.id,
+          plan,
+          efforts: model.efforts,
+          effort: model.effort,
+          defaultEffort: offered.defaults.<span class="fstat-no" title="function not covered" >find((c</span>hosen) =&gt; <span class="cstat-no" title="statement not covered" >chosen.model === model.id)</span>?.effort ?? null,
+          room,
+          ...(refusedProvider === undefined ? {} : <span class="branch-1 cbranch-no" title="branch not covered" >{ refusedProvider }),</span>
+        }
+        const found = byKey.get(key)
+        if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id), fact, routes: [route] })
+        else found.routes.push(route)
+      }
+    }
+    const usable: UsableModel[] = [...byKey.values()].map((model) =&gt; ({
+      ...model,
+      routes: bestFirst(model.routes),
+    }))
+    return usable.toSorted(
+      (a, b) =&gt;
+        (a.maker ?? '~').localeCompare(b.maker ?? '~') ||
+        (b.fact?.intelligence ?? -1) - (a.fact?.intelligence ?? -1) ||
+        a.name.localeCompare(b.name),
+    )
+  })
+&nbsp;
+/** The ways to a model, the best first: a provider that refused its sign-in last, then a plan with room before one nearly out, a plan before a key; else in the agents' order. */
+export const bestFirst = (routes: ReadonlyArray&lt;Route&gt;): ReadonlyArray&lt;Route&gt; =&gt;
+  routes.toSorted(
+    (a, b) =&gt;
+      Number(a.refusedProvider !== undefined) - Number(b.refusedProvider !== undefined) ||
+      Number(b.plan) - Number(a.plan) ||
+      Number(nearlyOut(a)) - Number(nearlyOut(b)),
+  )
+&nbsp;
+const nearlyOut = (route: Route) =&gt; route.room !== null &amp;&amp; <span class="branch-1 cbranch-no" title="branch not covered" >route.room.leftPercent &lt; NEARLY_OUT</span>
+&nbsp;
+const <span class="fstat-no" title="function not covered" >score = (v</span>alue: number | null) =&gt; (<span class="cstat-no" title="statement not covered" >value === null ? 'unknown' : String(value))</span>
+&nbsp;
+/**
+ * A model's efforts the way it goes, as the coordinator reads them: the ids
+ * a step's effort takes, the one it starts at by itself, and the person's
+ * default where they set one it offers.
+ */
+const <span class="fstat-no" title="function not covered" >effortWords = (r</span>oute: Route | undefined): string =&gt; {
+<span class="cstat-no" title="statement not covered" >  if (route === undefined || route.efforts.length === 0) <span class="cstat-no" title="statement not covered" >return 'no effort to set'</span></span>
+  const preferred = <span class="cstat-no" title="statement not covered" >route.efforts.<span class="fstat-no" title="function not covered" >some((l</span>evel) =&gt; <span class="cstat-no" title="statement not covered" >level.id === route.defaultEffort)</span> ? route.defaultEffort : null</span>
+  const starts = <span class="cstat-no" title="statement not covered" >[</span>
+    ...(route.effort === null ? [] : [`its own: ${route.effort}`]),
+    ...(preferred === null ? [] : [`the person's default: ${preferred}`]),
+  ]
+<span class="cstat-no" title="statement not covered" >  return `effort ${route.efforts.<span class="fstat-no" title="function not covered" >map((l</span>evel) =&gt; <span class="cstat-no" title="statement not covered" >level.id)</span>.join(', ')}${starts.length === 0 ? '' : ` (${starts.join('; ')})`}`</span>
+}
+&nbsp;
+/**
+ * The models as the coordinator reads them: by maker, each with its scores,
+ * how it is paid for, and its efforts. `use` says what names one, for a
+ * task's lead making its task a change.
+ */
+export const <span class="fstat-no" title="function not covered" >describeModels = (</span>
+  usable: ReadonlyArray&lt;UsableModel&gt;,
+  /** The time they are read at, which says whether a reset is today. */
+  now: number,
+  use = <span class="branch-0 cbranch-no" title="branch not covered" >"propose_plan's lead and review and start_task's lead",</span>
+): string =&gt; {
+<span class="cstat-no" title="statement not covered" >  if (usable.length === 0)</span>
+<span class="cstat-no" title="statement not covered" >    return 'No model can be used now: no agent is signed in, every one is out of usage, or the person switched them all off.'</span>
+  const lines: string[] = <span class="cstat-no" title="statement not covered" >[</span>
+    `The models you can give work to now, by who makes them. Name one as it is written here, for ${use}, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.`,
+    `Where a plan's usage is read, each says how much of its tightest limit is left and until when. A step on a plan with under ${NEARLY_OUT}% left goes elsewhere or waits, as the project's rule for usage limits says, so give work to one with room where you can.`,
+  ]
+  let maker: string | null | undefined
+<span class="cstat-no" title="statement not covered" >  for (const model of usable) {</span>
+<span class="cstat-no" title="statement not covered" >    if (model.maker !== maker) {</span>
+<span class="cstat-no" title="statement not covered" >      maker = model.maker</span>
+<span class="cstat-no" title="statement not covered" >      lines.push('', model.maker ?? 'Others')</span>
+    }
+    const fact = <span class="cstat-no" title="statement not covered" >model.fact</span>
+    const scores =
+<span class="cstat-no" title="statement not covered" >      fact === null</span>
+        ? 'no scores known'
+        : `intelligence ${score(fact.intelligence)}, coding ${score(fact.coding)}, agentic ${score(fact.agentic)}`
+    const best = <span class="cstat-no" title="statement not covered" >model.routes[0]</span>
+    const paid =
+<span class="cstat-no" title="statement not covered" >      best?.plan === true</span>
+        ? best.room === null
+          ? 'on a plan'
+          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room, now)}`
+        : fact?.price == null
+          ? 'per use'
+          : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`
+    // Only through a provider that refused its sign-in: the person has to sign in to it again before work on this goes through.
+    const signIn = <span class="cstat-no" title="statement not covered" >best?.refusedProvider === undefined ? '' : `; needs ${best.refusedProvider} signed in again first`</span>
+<span class="cstat-no" title="statement not covered" >    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}${signIn}`)</span>
+  }
+<span class="cstat-no" title="statement not covered" >  return lines.join('\n')</span>
+}
+&nbsp;
+/**
+ * The way to the model a plan names: as list_models writes it, or by an
+ * agent's own id for it; on the agent named, where it is one of the ways.
+ * Null where no usable model goes by that name.
+ */
+export const <span class="fstat-no" title="function not covered" >routeTo = (u</span>sable: ReadonlyArray&lt;UsableModel&gt;, asked: string, agentId?: string): Route | null =&gt; {
+  const wanted = <span class="cstat-no" title="statement not covered" >asked.trim().toLowerCase()</span>
+  const model = <span class="cstat-no" title="statement not covered" >usable.<span class="fstat-no" title="function not covered" >find(</span></span>
+    (one) =&gt;
+<span class="cstat-no" title="statement not covered" >      one.name.toLowerCase() === wanted ||</span>
+      one.fact?.slug.toLowerCase() === wanted ||
+      one.routes.<span class="fstat-no" title="function not covered" >some((r</span>oute) =&gt; <span class="cstat-no" title="statement not covered" >route.model.toLowerCase() === wanted &amp;&amp; (agentId === undefined || route.agentId === agentId))</span>,
+  )
+<span class="cstat-no" title="statement not covered" >  if (model === undefined) <span class="cstat-no" title="statement not covered" >return null</span></span>
+<span class="cstat-no" title="statement not covered" >  return model.routes.<span class="fstat-no" title="function not covered" >find((r</span>oute) =&gt; <span class="cstat-no" title="statement not covered" >route.agentId === agentId)</span> ?? model.routes[0] ?? null</span>
+}
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-11-03T02:40:07.643Z
+            </div>
+        <script src="prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="sorter.js"></script>
+        <script src="block-navigation.js"></script>
+    </body>
+</html>
+    

@@ -256,8 +256,9 @@ export const planTask = (page: Page, title: string, lead = '[lead:finish]') => s
 export const startTask = async (page: Page, title: string, lead = '[lead:finish]') => {
   await planTask(page, title, lead)
   // Wait for this task's plan to be on show before pressing its Start now: before it is, the last one is another plan's,
-  // and pressing that starts nothing of this task's while leaving it to count down.
-  await expect(shown(page, `Task ${title}`).last()).toBeVisible()
+  // and pressing that starts nothing of this task's while leaving it to count down. Its title is exactly the task's; what
+  // the person said carries the markers too, so isn't.
+  await expect(shown(page, title, { exact: true }).last()).toBeVisible()
   // The newest plan is the last in the conversation; any before it have started.
   await page.getByRole('button', { name: 'Start now' }).last().click()
 }

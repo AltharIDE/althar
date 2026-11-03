@@ -3416,7 +3416,11 @@ export class Sessions extends Context.Service<
             // Asked to stop before the prompt has reached the agent, there is nothing to cancel yet: the agent would take
             // the stop for the turn before this one, or lose it, while its prompt goes on. Wait until it has the prompt.
             const sent = running.promptSent
-            return (sent === null ? Effect.void : Deferred.await(sent)).pipe(Effect.andThen(Effect.ignore(running.agent.interrupt)))
+            return (sent === null ? Effect.void : Deferred.await(sent)).pipe(
+              // A stop never waits longer than a turn's start would: a prompt that never went out has nothing to cancel.
+              Effect.timeoutOption(Duration.seconds(5)),
+              Effect.andThen(Effect.ignore(running.agent.interrupt)),
+            )
           }),
         stop: (threadId) =>
           exclusive(

@@ -60,6 +60,12 @@ export const useHome = (): HomeModel => {
   )
   useEffect(() => readHeadsAhead(client, cache, board), [client, cache, board])
 
+  // Kept hidden while the person is elsewhere (KeptScreens, React's Activity), the home hears nothing, and what it kept may
+  // be older than the work that changed meanwhile. Shown again, it is opened: read it anew, so it shows the work as it is.
+  useEffect(() => {
+    void cache.invalidateQueries({ queryKey: keys.home })
+  }, [cache])
+
   return {
     ...actions,
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),
