@@ -532,6 +532,8 @@ export type ConflictStanding =
   | { readonly state: 'resolving'; readonly checks: boolean }
   /** Waiting on the checks of the merge it pushed: under way, the lead asked again should they fail. */
   | { readonly state: 'checking' }
+  /** Its pull request conflicts and goes to its lead as Althar next looks at it: on its way back to work, not the person's. */
+  | { readonly state: 'due' }
   | { readonly state: 'handed_back'; readonly why: string }
   /** It conflicts, and its lead wasn't asked to resolve it: why, for its card, with Resolve now beside it. */
   | { readonly state: 'unsent'; readonly why: string }
@@ -818,8 +820,9 @@ export class Changes extends Context.Service<
      * failed on what Althar pushed rather than the conflict), or handed back
      * to the person, saying why, for as long as the task's branches are as
      * the lead left them; or conflicting, and not asked of its lead, saying
-     * why (`unsent`). Null otherwise, such as while Althar waits for the
-     * checks on what it pushed.
+     * why (`unsent`); waiting on the checks of the merge it pushed
+     * (`checking`); or conflicting, as its host last said, and about to be
+     * asked of its lead (`due`). Null otherwise.
      */
     conflictStanding(taskId: string): Effect.Effect<ConflictStanding | null>
     /**
@@ -943,6 +946,12 @@ export class Changes extends Context.Service<
        * says so until it is, or conflicts no more.
        */
       const unsent = new Map<string, { readonly why: string; readonly checked: boolean }>()
+      /*
+       * Tasks whose branch here merged cleanly with what its pull request goes into, last Althar looked: at which head, and
+       * whether its host said then that it conflicts. Said so, and merging cleanly all the same, nothing goes to its lead while its
+       * head is the same, so its card isn't on its way back to work (`dueOf`).
+       */
+      const cleanHere = new Map<string, { readonly head: string | null; readonly hostSaid: boolean }>()
       /* Where each repository's default branch was when last fetched to look for conflicts, and when, by binding and ref. */
       const fetchedAt = new Map<string, { readonly at: number; readonly tip: string }>()
       /* How often a default branch is fetched at most to look for conflicts with what goes into it: a few listening turns. */
@@ -4458,7 +4467,40 @@ export class Changes extends Context.Service<
           if (said !== undefined) return { state: said.checked ? 'unsent' : 'unchecked', why: said.why }
           // Waiting on the checks of the merge it pushed: under way, as checks Althar sees through are.
           if (round?.state === 'checking') return { state: 'checking' }
-          if (round === undefined) return null
+          const handed = round === undefined ? null : yield* handedBackOf(round)
+          if (handed !== null) return handed
+          return yield* dueOf(taskId)
+        })
+
+      /**
+       * Its open pull request conflicts, as its host last said, and no round
+       * is under way or handed back: whether its lead is about to be asked
+       * (`due`), as `askable` decides it, or why not, so its card never offers
+       * the person a button for it without saying why, whether or not Althar
+       * has looked at it since it launched. Not where its branch here merged
+       * cleanly, its host saying it conflicts all the same, as Althar last
+       * looked at its head: nothing goes to the lead then.
+       */
+      const dueOf = (taskId: string): Effect.Effect<ConflictStanding | null, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [open] = yield* sql<{ url: string; head: string | null }>`
+            SELECT url, json_extract(snapshot, '$.headSha') AS head FROM external_links WHERE task_id = ${taskId} AND kind = 'change'
+              AND json_extract(snapshot, '$.state') = 'open' AND json_extract(snapshot, '$.conflicts') = 1
+            ORDER BY created_at DESC LIMIT 1`
+          if (open === undefined) return null
+          const clean = cleanHere.get(taskId)
+          if (clean?.hostSaid === true && clean.head === open.head) return null
+          const asked = yield* askable(taskId, open.url)
+          if (asked === 'off' || asked === 'handed') return null
+          if (typeof asked === 'object' && asked.shown) return { state: 'unsent', why: asked.why }
+          return { state: 'due' }
+        })
+
+      /** A round the lead couldn't see through, still the person's while the branches are as the lead left them. */
+      const handedBackOf = (round: RoundRow): Effect.Effect<ConflictStanding | null, unknown, Store> =>
+        Effect.gen(function* () {
+          const taskId = round.taskId
           if (round.state !== 'failed' || round.ended === null || round.failure === null) return null
           // Still the person's while the branches are as the lead left them, as `askable` reads it.
           const conflicts = yield* decodeConflicts(round.conflicts)
@@ -4975,7 +5017,13 @@ export class Changes extends Context.Service<
               false,
             )
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
-          if (merged.code === 0) return yield* Effect.as(forgetUnsent(link.taskId), false)
+          if (merged.code === 0) {
+            const was = cleanHere.get(link.taskId)
+            cleanHere.set(link.taskId, { head: now.headSha, hostSaid: says })
+            if (was?.head !== now.headSha || was.hostSaid !== says) yield* touchTask(link.taskId)
+            return yield* Effect.as(forgetUnsent(link.taskId), false)
+          }
+          cleanHere.delete(link.taskId)
           // 1 is git's word for a merge that conflicts; anything else, one it couldn't work out.
           if (merged.code !== 1) return yield* Effect.as(couldnt(`Git couldn’t merge ${now.target} with the branch here.`), false)
           if (!(yield* sayingWhy(link.taskId, yield* askable(link.taskId, seen.url, { force: how.force, targets: [target] })))) return false

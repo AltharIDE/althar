@@ -15,8 +15,13 @@
   conflict and the four checks that had already failed, others still
   running, put the card in front of the person. The quick task it started
   as wasn't the cause: the task said nothing of conflicts, so it went by
-  the project's rules (on), and its pull request was listened to. The person
-  expects either reason to put a task back to work on its own.
+  the project's rules (on), and its pull request was listened to. The task
+  did go back to work, at 21:13:50, but because the coordinator passed the
+  person's ask on by hand; Althar's own ask, for the merge's failed checks
+  only, came 47 seconds later, once the slowest check ended, and the
+  conflict was never asked. The person expects either reason to put a task
+  back to work on its own, and the card never to offer a button while it
+  is about to.
 - **Decision:**
   - **On unless the person turns it off.** "Resolve merge conflicts
     automatically" is on for a project whose rules don't say. A project or
@@ -44,11 +49,18 @@
     keeps failing as main keeps moving doesn't go round again. A round that
     gives up hands the checks to the person, so the same failure heard again
     wakes no one, and the card says why.
+  - **About to go back is under way.** The host says the pull request
+    conflicts before Althar has looked again (the same poll, or after a
+    restart): where the lead is to be asked, the card is under way, on
+    resolving a conflict, not offering Resolve. Not where the branch here
+    merged cleanly as Althar last looked though the host said it conflicts:
+    nothing goes to the lead then.
   - **Waiting on the person always says why.** Turned off, a conflict the
     host reports says "“Resolve merge conflicts automatically” is off for
     this task" or "… in the project's settings", beside Resolve now. Failed
     checks on a task the person stopped say so. A task the person stopped
-    stays stopped.
+    stays stopped. The card works out why from the task and the project's
+    rules, not only from what Althar remembers of its last look.
 - **Alternatives considered:**
   - **Keep it off by default** and say on the card that it is off. The
     person said both reasons should send the task back by themselves, so

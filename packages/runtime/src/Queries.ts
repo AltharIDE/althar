@@ -2007,6 +2007,8 @@ export class Queries extends Context.Service<
           const resolving = round?.state === 'resolving' ? round : undefined
           // Waiting on the checks of the merge a round pushed: under way, the lead asked again should they fail.
           const roundChecks = round?.state === 'checking'
+          // Conflicting, and about to go to its lead as Althar next looks at it: on its way back to work, not the person's.
+          const due = round?.state === 'due'
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
           const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
@@ -2086,7 +2088,7 @@ export class Queries extends Context.Service<
             // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
             // conflict round whose merge they fail on handed them back, its lead not told again.
             const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
-            if (task.runState === 'succeeded') return checksRun || withLead || roundChecks || goes !== null ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return checksRun || withLead || roundChecks || due || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
@@ -2226,13 +2228,15 @@ export class Queries extends Context.Service<
                   ? resolving.checks
                     ? 'checks'
                     : 'conflict'
-                  : roundChecks && !busy
-                    ? 'checks_running'
-                    : seeing || fixing?.open === true
-                      ? busy || !checksRun
-                        ? 'checks'
-                        : 'checks_running'
-                      : goes),
+                  : due
+                    ? 'conflict'
+                    : roundChecks && !busy
+                      ? 'checks_running'
+                      : seeing || fixing?.open === true
+                        ? busy || !checksRun
+                          ? 'checks'
+                          : 'checks_running'
+                        : goes),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),

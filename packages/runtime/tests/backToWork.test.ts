@@ -89,7 +89,6 @@ describe('a conflict alone', () => {
       const all = yield* until(rounds(taskId), (now) => now.length === 2)
       assert.strictEqual(all[0]?.state, 'resolved')
       yield* until(asked(threadId), (now) => now.length === 2)
-      yield* until(rounds(taskId), (now) => now[1]?.state === 'checking')
       // Under way again, never left in Needs you with a button and no word.
       const [card] = yield* until(
         Effect.map(cardOf(projectId), (one) => [one]),
@@ -97,6 +96,29 @@ describe('a conflict alone', () => {
       )
       assert.isNull(card?.conflictUnsent ?? null)
       assert.isNull(card?.handedBack ?? null)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('its host says before Althar has asked anything is on its way to the lead, or says why not', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
+      // The host says it conflicts, and no round has started: Althar hasn't looked since, as just after it launched.
+      yield* sql`UPDATE external_links SET listening = 0, snapshot = json_set(snapshot, '$.conflicts', json('true'))
+        WHERE task_id = ${taskId} AND kind = 'change'`
+      assert.lengthOf(yield* rounds(taskId), 0)
+      assert.deepStrictEqual(yield* (yield* Changes).conflictStanding(taskId), { state: 'due' })
+      const card = yield* cardOf(projectId)
+      assert.strictEqual(card?.change?.conflicts, true)
+      assert.strictEqual(card?.phase, 'running')
+      assert.strictEqual(card?.step, 'conflict')
+      // Turned off, it waits for the person, and the card says why, with nothing Althar remembers from looking.
+      yield* (yield* Policies).set(projectId as never, { resolveConflicts: false }, (yield* Instance).personId)
+      const off = yield* cardOf(projectId)
+      assert.strictEqual(off?.phase, 'ready')
+      assert.strictEqual(off?.conflictUnsent, OFF_FOR_PROJECT)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
